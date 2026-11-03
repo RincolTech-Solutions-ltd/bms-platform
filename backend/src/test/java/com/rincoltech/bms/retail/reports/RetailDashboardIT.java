@@ -99,7 +99,7 @@ class RetailDashboardIT extends IntegrationTest {
         assertThat(stock.get("value_at_cost_minor").asLong()).isEqualTo(31_100);
         assertThat(stock.get("out_of_stock").asInt()).isEqualTo(1);
         assertThat(stock.get("low_stock").asInt()).isEqualTo(3);
-        assertThat(stock.get("low_stock_threshold").asString()).isEqualTo("5.000");
+        assertThat(stock.get("low_stock_threshold").asString()).isEqualTo("10.000");
 
         JsonNode hq = shop(r, t.headOffice());
         assertThat(hq.get("today_sales_minor").asLong()).isEqualTo(2_100);

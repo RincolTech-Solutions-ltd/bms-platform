@@ -162,7 +162,7 @@ const PRODUCTS: MockProduct[] = [
 }));
 
 /** The server's level filter: out is zero or less, low is at or below 5 (so it includes out). */
-const atLevel = (qty: number, level?: 'out' | 'low'): boolean => level === undefined || qty <= (level === 'out' ? 0 : 5);
+const atLevel = (qty: number, level?: 'out' | 'low'): boolean => level === undefined || qty <= (level === 'out' ? 0 : 10);
 const toMilli = (text: string): number => Math.round(Number(text) * 1000);
 /** A quantity without trailing zeros: 10.000 is 10. */
 const plainQty = (q: string): string => (q.includes('.') ? q.replace(/0+$/, '').replace(/\.$/, '') : q);

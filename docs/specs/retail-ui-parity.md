@@ -27,7 +27,7 @@ yet), **out of scope** (with the reason). Screens are under `frontend/src/areas/
 |---|---|---|---|
 | Product catalogue (quantity and selling price, no cost for sales staff) | Stock (`stock`): item, category, quantity, price, cost only with `retail.profit.read`; search by name, code or category; category filter | done | Nothing |
 | Product categories (with related products) | Stock category filter and the by-category table on Stock value | done | Managing categories is on the Categories screen (see Catalogue management) |
-| Low stock items | Stock tab "Low stock" (out of stock included): at or below the item's own minimum at that branch, or for every branch, where one is set; else the fixed level of 5 (issue #412, ADR-057; `LowStockRule`, issue #490) | done | Nothing. The AppSheet app had no per-product reorder level; a minimum is set per item and branch |
+| Low stock items | Stock tab "Low stock" (out of stock included): at or below the item's own minimum at that branch, or for every branch, where one is set; else the fixed level of 10, the old app's rule (issue #830; issue #412, ADR-057; `LowStockRule`, issue #490) | done | Nothing. The AppSheet app had no per-product reorder level; a minimum is set per item and branch |
 | Out of stock items | Stock tab "Out of stock" (zero or less) | done | Nothing |
 | Stock per shop and across shops | Stock with the Branch box on one branch, or All branches (a column per branch, a total, the negative flag per cell; on a phone the total with a per-branch breakdown) | done | Nothing |
 | Stock-take | Stock-take (`stocktake`) | done | Nothing |
