@@ -241,6 +241,55 @@ class RetailCashbookExpensesIT extends IntegrationTest {
                 .isEqualTo(HttpStatus.FORBIDDEN);
     }
 
+    // ADR-118 (issue #802). JUSTIFICATION-A3: new integration tests the issue asks for, not new mechanism.
+    @Test
+    void aShopUserAddsAnItemInPlaceRecordsWithItAndADuplicateNameIsReused() {
+        String items = "/expense-categories/" + rent + "/items";
+        Map<String, Object> fuel = Map.of("name", "Generator fuel", "reuse_existing", true);
+        ResponseEntity<JsonNode> added = cb.post(items, fuel, CASHBOOK_SALES);
+        assertThat(added.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        UUID item = RetailTestSupport.id(added);
+        assertThat(added.getBody().get("requires_explanation").asBoolean()).isFalse();
+        assertThat(cb.expense(hq, rent, item, 7_000, null).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        ResponseEntity<JsonNode> again =
+                cb.post(items, Map.of("name", " generator FUEL ", "reuse_existing", true), CASHBOOK_SALES);
+        assertThat(again.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(RetailTestSupport.id(again)).isEqualTo(item);
+        assertThat(cb.auditPayloads("retail.expense_item.created")).hasSize(3);
+        // Without reuse_existing the name is still taken, as in set-up.
+        assertThat(cb.post(items, Map.of("name", "Generator fuel"), CASHBOOK_SALES)
+                        .getBody()
+                        .get("code")
+                        .asString())
+                .isEqualTo("duplicate_item");
+
+        // The explanation flag and a switched off category stay with the owner.
+        assertThat(cb.post(items, Map.of("name", "Water", "requires_explanation", true), CASHBOOK_SALES)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        int version = categoryVersion(cb.get("/expense-categories", CASHBOOK_SALES).getBody(), other);
+        cb.patch("/expense-categories/" + other, Map.of("active", false), CASHBOOK_ADMIN, version);
+        assertThat(cb.post("/expense-categories/" + other + "/items", fuel, CASHBOOK_SALES)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+    }
+
+    @Test
+    void aSwitchedOffItemIsNotPickedAgainAndAUserWithoutExpenseRecordCannotAdd() {
+        String items = "/expense-categories/" + rent + "/items";
+        cb.patch(items + "/" + rentItem, Map.of("active", false), CASHBOOK_ADMIN, 1);
+        ResponseEntity<JsonNode> refused =
+                cb.post(items, Map.of("name", "Shop rent", "reuse_existing", true), CASHBOOK_SALES);
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(refused.getBody().get("code").asString()).isEqualTo("item_switched_off");
+
+        ResponseEntity<JsonNode> noRecord =
+                cb.post(items, Map.of("name", "Water"), "retail.cashbook.read,retail.till.close");
+        assertThat(noRecord.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(noRecord.getBody().get("code").asString()).isEqualTo("permission_denied");
+    }
+
     @Test
     void aReplayedKeyPostsOnceAndAMissingKeyIsRefused() {
         Map<String, Object> body =

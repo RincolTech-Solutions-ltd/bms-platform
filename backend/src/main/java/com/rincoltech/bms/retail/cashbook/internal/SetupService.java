@@ -127,10 +127,32 @@ class SetupService {
         return view(repo.category(id, false).orElseThrow(), items);
     }
 
+    /** The item a create answers with, and whether it is new (201) or an existing one picked again (200). */
+    record AddedItem(ExpenseItem item, boolean created) {}
+
+    // ADR-118: whoever records expenses may add an item in place; an inactive category and the explanation flag stay
+    // with retail.expense.manage. With reuse_existing an active item of the same name is picked, a switched off one refused.
+    // JUSTIFICATION-A3: the permission split and the reuse rule are the issue's two rules, inside the one create.
     @Transactional
-    ExpenseItem createItem(UUID categoryId, ItemRequest r) {
+    AddedItem createItem(UUID categoryId, ItemRequest r) {
         CategoryRow c = repo.category(categoryId, true).orElseThrow(ApiException::notFound);
+        boolean manager = CurrentPrincipal.require().hasPermission(CashbookSupport.EXPENSE_MANAGE);
+        if (!manager && !c.active()) {
+            throw ApiException.rule("category_inactive", "This category is switched off. Pick another one.");
+        }
+        if (!manager && Boolean.TRUE.equals(r.requiresExplanation())) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "permission_denied", "Permission denied",
+                    "Asking for an explanation on an item needs permission to manage expenses.");
+        }
         String name = r.name().trim();
+        var same = Boolean.TRUE.equals(r.reuseExisting()) ? repo.itemNamed(c.id(), name) : java.util.Optional.<ItemRow>empty();
+        if (same.isPresent() && same.get().active()) {
+            return new AddedItem(view(same.get()), false);
+        }
+        if (same.isPresent()) {
+            throw duplicate("item_switched_off",
+                    "This category has an item with that name that the owner switched off. Ask the owner to switch it on again.");
+        }
         if (repo.itemNameTaken(c.id(), name, null)) {
             throw duplicate("duplicate_item", "This category has an item with that name already.");
         }
@@ -143,7 +165,7 @@ class SetupService {
                 id,
                 null,
                 Map.of("category_id", c.id().toString(), "name", name, "requires_explanation", explain)));
-        return view(repo.item(id, false).orElseThrow());
+        return new AddedItem(view(repo.item(id, false).orElseThrow()), true);
     }
 
     @Transactional
