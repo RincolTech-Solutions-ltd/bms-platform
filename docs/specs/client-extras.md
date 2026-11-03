@@ -742,6 +742,7 @@ Built in slice #231 (no migration). Where the build sharpens the text above:
 | Spam or abuse of the SMS-triggering endpoints (payment links, receipts) | Permission checks, one link per intent, per tenant daily cap on SMS (setting) and an alert at 80 percent |
 | Message content leaks personal data | Templates reviewed: no name, no balance in reminders; recipient masked everywhere; parameters cleared after sending |
 | Number reused by another person | Opt-out matches on member plus hash, not on the number alone |
+| A payment link texted to a number that asked for no texts | Accepted by design (issue #772): the link text (4.13) checks the opt-out of the member of the loan or savings account, not the number typed on the payment, which may be a relative's or a neighbour's phone. A member who opted out is never texted; a payer who is not a member has no opt-out to check. Staff type the number with the payer present, the text is once per intent and the per member and per business limits of 4.13 apply |
 | API key theft | Environment only, rotation runbook, alert on provider 401 |
 | Sender id spoofing or unapproved id | The approved flag; the provider rejects unregistered ids |
 | Cross-tenant leakage through the platform outbox | The tenant id is set from the bound tenant, the delivery log has row-level security, isolation tests on both |
