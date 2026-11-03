@@ -52,7 +52,7 @@ class ImportRunServiceTest {
     @Test
     void aProbeWhoseReadStallsCountsTheClaimLostWithinItsNetworkTimeout() {
         // JUSTIFICATION-A3: the stalled read test issue #792 asks for; without the network timeout the read never ends.
-        FakeClaimConnection claim = new FakeClaimConnection(true, 0);
+        FakeClaimConnection claim = new FakeClaimConnection(Read.STALLS, 0);
 
         String reason = assertTimeoutPreemptively(
                 Duration.ofSeconds(5), () -> ImportRunService.probeClaim(claim.connection(), KEY, 200));
@@ -65,12 +65,41 @@ class ImportRunServiceTest {
 
     @Test
     void aProbeThatAnswersPutsThePreviousNetworkTimeoutBack() {
-        FakeClaimConnection claim = new FakeClaimConnection(false, 30_000);
+        FakeClaimConnection claim = new FakeClaimConnection(Read.HOLDS, 30_000);
 
         String reason = ImportRunService.probeClaim(claim.connection(), KEY, 200);
 
         assertThat(reason).as("the claim is still held").isNull();
         assertThat(claim.timeouts).containsExactly(200, 30_000);
+    }
+
+    @Test
+    void aProbeRefusedOnAnOpenConnectionPutsThePreviousNetworkTimeoutBack() {
+        // JUSTIFICATION-A3: the restore paths the review of #801 asks to cover, a refused probe and a failed restore.
+        FakeClaimConnection claim = new FakeClaimConnection(Read.REFUSED, 30_000);
+
+        String reason = ImportRunService.probeClaim(claim.connection(), KEY, 200);
+
+        assertThat(reason).isEqualTo("claim_connection_lost");
+        assertThat(claim.timeouts).containsExactly(200, 30_000);
+    }
+
+    @Test
+    void aProbeThatAnswersButCannotPutTheTimeoutBackCountsTheClaimLost() {
+        FakeClaimConnection claim = new FakeClaimConnection(Read.HOLDS_THEN_DROPS, 30_000);
+
+        String reason = ImportRunService.probeClaim(claim.connection(), KEY, 200);
+
+        assertThat(reason).as("the session that answered is gone").isEqualTo("claim_connection_lost");
+        assertThat(claim.timeouts).containsExactly(200);
+    }
+
+    /** What the fabricated socket does with the probe's read. */
+    private enum Read {
+        STALLS,
+        HOLDS,
+        REFUSED,
+        HOLDS_THEN_DROPS
     }
 
     /**
@@ -80,12 +109,12 @@ class ImportRunServiceTest {
     private static final class FakeClaimConnection {
 
         final List<Integer> timeouts = new CopyOnWriteArrayList<>();
-        private final boolean stalled;
+        private final Read read;
         private volatile int networkTimeout;
         private volatile boolean closed;
 
-        FakeClaimConnection(boolean stalled, int networkTimeout) {
-            this.stalled = stalled;
+        FakeClaimConnection(Read read, int networkTimeout) {
+            this.read = read;
             this.networkTimeout = networkTimeout;
         }
 
@@ -116,11 +145,17 @@ class ImportRunServiceTest {
         }
 
         private ResultSet read() throws InterruptedException, SQLException {
-            if (stalled) {
+            if (read == Read.STALLS) {
                 Thread.sleep(networkTimeout == 0 ? 60_000 : networkTimeout);
                 closed = true;
                 throw new SQLException(
                         "fabricated read timed out", "08006", new SocketTimeoutException("Read timed out"));
+            }
+            if (read == Read.REFUSED) {
+                throw new SQLException("fabricated relation refused", "42P01");
+            }
+            if (read == Read.HOLDS_THEN_DROPS) {
+                closed = true;
             }
             return proxy(ResultSet.class, (p, method, args) -> switch (method.getName()) {
                 case "next", "getBoolean" -> true;

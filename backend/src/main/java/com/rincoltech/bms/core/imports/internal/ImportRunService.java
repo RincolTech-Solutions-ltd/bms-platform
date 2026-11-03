@@ -438,8 +438,9 @@ class ImportRunService implements ImportRuns {
     // JUSTIFICATION-A3: the probe body moved out of LoopClaim, static so issue #792's stalled read test can reach it.
     /**
      * The probe of {@link LoopClaim#lostReason()}: every read on the connection is bounded by {@code timeoutMillis}
-     * through its network timeout, and the previous network timeout is put back afterwards. A read that times out ends
-     * the connection, so the claim counts as {@code claim_connection_lost} and there is nothing left to restore.
+     * through its network timeout, and the previous network timeout is put back afterwards, on every path. A timeout
+     * that cannot be put back means the connection is closed or broken (a read that times out ends it), so the claim
+     * counts as {@code claim_connection_lost} whatever the probe read.
      */
     static String probeClaim(Connection connection, String key, int timeoutMillis) {
         int previous;
@@ -449,20 +450,24 @@ class ImportRunService implements ImportRuns {
         } catch (SQLException e) {
             return "claim_connection_lost";
         }
+        String reason;
+        boolean restored = false;
         try (PreparedStatement probe = connection.prepareStatement(CLAIM_HELD)) {
             probe.setString(1, key);
             try (ResultSet rs = probe.executeQuery()) {
-                return rs.next() && rs.getBoolean(1) ? null : "claim_not_held";
+                reason = rs.next() && rs.getBoolean(1) ? null : "claim_not_held";
             }
         } catch (SQLException e) {
-            return "claim_connection_lost";
+            reason = "claim_connection_lost";
         } finally {
             try {
                 connection.setNetworkTimeout(Runnable::run, previous);
+                restored = true;
             } catch (SQLException e) {
-                // The probe timed out and the driver closed the connection: the close of the claim discards it.
+                // Closed or broken: the session and its loop key may be gone; the close of the claim discards it.
             }
         }
+        return restored ? reason : "claim_connection_lost";
     }
 
     private CommitOutcome writeBatches(UUID runId, BatchWriter writer, LoopClaim claim) {
