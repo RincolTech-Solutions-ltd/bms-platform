@@ -209,15 +209,44 @@ class RetailStockCorrectionIT extends IntegrationTest {
     }
 
     @Test
-    void anItemBelowZeroCanBeCorrectedToNone() {
+    void anItemBelowZeroCanBeCorrectedToZero() {
         // Issue #804: the form sends the quantity it showed, -1 here, and the correction must not refuse it.
         api.importedBalance(hq, product, "-1");
         assertThat(stockAt(hq)).isEqualByComparingTo("-1");
-        ResponseEntity<JsonNode> done = correct(hq, "0", "miscount", null);
+        // The quantity the form showed is still compared exactly: another figure is a stale form.
+        Map<String, Object> stale = request(hq, "0", "miscount", null);
+        stale.put("expected_qty", "-2");
+        ResponseEntity<JsonNode> moved = correct(stale, ADMIN, "*", key());
+        assertThat(moved.getStatusCode()).as("%s", moved.getBody()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(code(moved)).isEqualTo("stock_moved");
+
+        Map<String, Object> sent = request(hq, "0", "miscount", null);
+        sent.put("expected_qty", "-1");
+        ResponseEntity<JsonNode> done = correct(sent, ADMIN, "*", key());
         assertThat(done.getStatusCode()).as("%s", done.getBody()).isEqualTo(HttpStatus.CREATED);
         assertThat(done.getBody().get("old_qty").asString()).isEqualTo("-1.000");
         assertThat(done.getBody().get("new_qty").asString()).isEqualTo("0.000");
         assertThat(stockAt(hq)).isEqualByComparingTo("0");
+        // One adjustment of plus one at the branch's average, and the books follow: the imported balance carried no
+        // value, so inventory goes from none to one piece at its cost.
+        assertThat(scalar("""
+                                SELECT count(*) FROM retail_stock_movements
+                                 WHERE tenant_id = ? AND kind = 'adjustment' AND source_type = 'retail.stock_correction'
+                                   AND qty = 1 AND unit_cost_minor = 1000
+                                """, t.tenantId())).isEqualTo(1);
+        assertThat(account("inventory")).isEqualTo(1_000);
+
+        // From below zero to a positive count, with the shown quantity written with three decimals.
+        api.importedBalance(br2, product, "-1");
+        Map<String, Object> up = request(br2, "2", "miscount", null);
+        up.put("expected_qty", "-1.000");
+        ResponseEntity<JsonNode> raised = correct(up, ADMIN, "*", key());
+        assertThat(raised.getStatusCode()).as("%s", raised.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(stockAt(br2)).isEqualByComparingTo("2");
+        assertThat(scalar("""
+                                SELECT count(*) FROM retail_stock_movements
+                                 WHERE tenant_id = ? AND branch_id = ? AND kind = 'adjustment' AND qty = 3
+                                """, t.tenantId(), br2)).isEqualTo(1);
     }
 
     @Test
