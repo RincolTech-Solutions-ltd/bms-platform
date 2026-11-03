@@ -42,6 +42,7 @@ const SCREENS: { screen: string; ready: string; main?: string; secondary?: strin
   { screen: 'savings', ready: '.action-bar .rt-primary', main: '.action-bar .rt-primary' },
   { screen: 'setup', ready: 'main fieldset label', main: '.action-bar .rt-primary' },
   { screen: 'labels', ready: '.action-bar .rt-primary', main: '.action-bar .rt-primary' },
+  { screen: 'sheet', ready: '.sheet-actions button' },
 ];
 
 type Target = { name: string; x: number; y: number; width: number; height: number; group: number; pinned: boolean };
@@ -56,7 +57,8 @@ async function open(screen: string, ready: string, size: { width: number; height
 }
 
 /**
- * Every target of the screen a person can tap: its buttons, links drawn as buttons, rows, choice rows and the bottom tabs.
+ * Every target of the screen a person can tap: the staff top bar, the page's buttons, links drawn as buttons, rows and choice
+ * rows, an open sheet, and the bottom tabs (what a sheet hides from a screen reader is left out, as it cannot be tapped).
  * `group` numbers the one control a target is a part of (a Segmented, a Stepper, the rows of one list, the tabs), whose parts
  * touch by design, and is -1 for a target of its own. `pinned` marks a target in a stuck or fixed bar: it is measured where it is
  * drawn on the screen, the others where they are on the page.
@@ -68,7 +70,7 @@ async function targets(page: Page): Promise<Target[]> {
       for (let box: Element | null = el; box; box = box.parentElement) if (/^(sticky|fixed)$/.test(getComputedStyle(box).position)) return true;
       return false;
     };
-    return [...document.querySelectorAll<HTMLElement>('main :is(button, a.btn, a.list-row, [role="button"], label:has(> input[type="radio"], > input[type="checkbox"])), .tab-bar :is(a, button)')]
+    return [...document.querySelectorAll<HTMLElement>(':is(main, .staff-bar, .sheet-panel) :is(button, a.btn, a.list-row, [role="button"], label:has(> input[type="radio"], > input[type="checkbox"])), .tab-bar :is(a, button)')]
       .filter((el) => {
         const r = el.getBoundingClientRect();
         return r.width > 0 && r.height > 0 && !el.closest('details:not([open]) > :not(summary), [aria-hidden="true"], .visually-hidden');
@@ -115,6 +117,18 @@ describe.each(SCREENS)('the buttons of $screen (#825)', ({ screen, ready, main, 
       }),
     );
     expect(inset.filter((d) => d < GAP - 0.5)).toEqual([]);
+    // What is seen matches the Tab order: the buttons of an ActionBar or a sheet stand one under the other in the order of the
+    // page, each the full width of the bar.
+    const stacks = await page.locator('.action-bar, .sheet-actions').evaluateAll((all) => all.map((bar) => {
+      const cs = getComputedStyle(bar);
+      const inner = bar.getBoundingClientRect().width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      const boxes = [...bar.querySelectorAll(':scope > :is(button, a)')].map((c) => c.getBoundingClientRect());
+      return { inner, tops: boxes.map((b) => b.top), widths: boxes.map((b) => b.width) };
+    }));
+    for (const s of stacks) {
+      expect(s.tops).toEqual([...s.tops].sort((a, b) => a - b));
+      expect(s.widths.filter((w) => w < s.inner - 1)).toEqual([]);
+    }
     if (main) {
       const action = page.locator(main).first();
       const box = await action.boundingBox();
@@ -155,9 +169,7 @@ describe.each(SCREENS)('the buttons of $screen (#825)', ({ screen, ready, main, 
         const form = el.closest<HTMLElement>('form, .action-bar')?.parentElement?.closest<HTMLElement>('form') ?? el.closest<HTMLElement>('form') ?? (el.closest('main') as HTMLElement);
         const box = form.getBoundingClientRect();
         const r = el.getBoundingClientRect();
-        // In a bar of more than one button the main action leads the group, which stands at the right (checked below).
-        const last = !el.parentElement?.matches('.action-bar') || el.parentElement.querySelector(':scope > :is(button, a):last-of-type') === el;
-        return { width: r.width, height: r.height, right: last ? r.right : box.right - parseFloat(getComputedStyle(form).paddingRight), formRight: box.right - parseFloat(getComputedStyle(form).paddingRight), scroll: el.scrollWidth - el.clientWidth };
+        return { width: r.width, height: r.height, right: r.right, formRight: box.right - parseFloat(getComputedStyle(form).paddingRight), scroll: el.scrollWidth - el.clientWidth };
       });
       expect(placed.width).toBeGreaterThanOrEqual(MIN_WIDE - 0.5);
       expect(placed.width).toBeLessThanOrEqual(MAX + 0.5);
@@ -174,10 +186,10 @@ describe.each(SCREENS)('the buttons of $screen (#825)', ({ screen, ready, main, 
       expect(under.width).toBeLessThanOrEqual(MAX + 0.5);
       expect(Math.abs(under.formRight - under.right), 'the secondary action stands under the main one, at the right').toBeLessThanOrEqual(1);
     }
-    // What is seen matches the Tab order: the controls of a bar run left to right in the order of the page, side by side, the
-    // last at the bar's right.
-    const bars = await page.locator('.action-bar').evaluateAll((all) => all.map((bar) => ({
-      right: bar.getBoundingClientRect().right,
+    // What is seen matches the Tab order: the buttons of an ActionBar or a sheet run left to right in the order of the page, side
+    // by side, the last at the right of the bar.
+    const bars = await page.locator('.action-bar, .sheet-actions').evaluateAll((all) => all.map((bar) => ({
+      right: bar.getBoundingClientRect().right - parseFloat(getComputedStyle(bar).paddingRight),
       boxes: [...bar.querySelectorAll(':scope > :is(button, a)')].map((c) => ({ left: c.getBoundingClientRect().left, right: c.getBoundingClientRect().right })),
     })));
     for (const bar of bars) {

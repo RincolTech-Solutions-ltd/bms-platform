@@ -31,8 +31,7 @@
 }
 
 /* Below 430px the bar's controls sit closer, so the branch name keeps its room (issue #605); each is still a 48px target, Ask
-   and the sync indicator exactly 48px wide. From 412px two targets stand --tap-gap apart (issue #825); below 412px they
-   touch (issue #631), because 8px gaps there would cut the business and branch names under the minimum of #605. */
+   and the sync indicator exactly 48px wide, and two targets stand --tap-gap apart (issue #825). */
 @media (max-width: 429px) {
   .staff-bar-top {
     gap: var(--tap-gap);
@@ -44,9 +43,16 @@
   }
 }
 
+/* Below 412px six targets 8px apart leave the names too little room (issue #825), so the bar takes two lines in the order of the
+   page: the menu and the names on the first, the sync, Refresh, Search, Ask and account buttons at the right of the second. */
 @media (max-width: 411px) {
   .staff-bar-top {
-    gap: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .staff-bar-top > .top-title {
+    flex-basis: calc(100% - var(--tap) - var(--tap-gap));
   }
 }
 

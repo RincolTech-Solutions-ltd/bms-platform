@@ -51,8 +51,10 @@ back to what opened it.
     screen's main action is full width in the stuck `ActionBar`. On a laptop (from 1024px) a button is as wide as its label,
     never wider than `--button-max` (320px), the main action at least `--button-min-wide` (160px) and at the right of its form,
     any other block button at its start, still 48px tall for a touch laptop (issue #825). The ActionBar and a sheet's buttons
-    stand together at the right in the order of the page, so what is seen matches the Tab order. The staff top bar keeps 8px
-    between its targets from 412px; below 412px they touch, so the business and branch names keep the minimum of #605.
+    stand together at the right in the order of the page, never reversed, so what is seen matches the Tab order; where the main
+    action must stand at the far right it comes last in the markup. The staff top bar keeps 8px between its targets at every
+    width; below 412px it takes two lines in the order of the page (the menu and the names, then the icon buttons at the
+    right), so the business and branch names keep the minimum of #605.
     `layout/buttons.layout.test.ts` measures the daily screens at 412 by 900 and 1366 by 800, and the design guard lists every
     class named as a tap target (`.btn-*`, `.chip`, `.pill`, `*-btn`, `*-button`, `*-chip`, `*-pill`, `*-clear`, `*-close`,
     `*-toggle`).

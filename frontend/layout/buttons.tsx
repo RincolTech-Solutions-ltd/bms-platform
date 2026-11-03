@@ -14,14 +14,17 @@ import { SavingsForm } from '../src/areas/staff/retail/savings';
 import { ShopSetupPage } from '../src/areas/staff/retail/shop-setup';
 import { StockTable } from '../src/areas/staff/retail/stock';
 import { Gate } from '../src/areas/staff/retail/ui';
+import { StaffBar } from '../src/areas/staff/route';
 import { MoneyPage } from '../src/areas/staff/tab-pages';
+import { Sheet } from '../src/app/ui/Sheet';
+import { TourProvider } from '../src/tour/host';
 import { StaffTabBar } from '../src/areas/staff/tabs';
 import '../src/app/theme.css';
 import '../src/app/ui/index.css';
 import { layoutRouter } from './router';
 
 // The page buttons.layout.test.ts lays out in a real browser (issue #825): one daily screen of an owner, chosen by ?screen= (sell,
-// stock, buy, money, expenses, savings, setup, and labels for a bar of two buttons), inside the staff layout with the bottom tabs, under the app's own stylesheets, so
+// stock, buy, money, expenses, savings, setup, labels for a bar of two buttons, sheet for an open Sheet), under the staff top bar, the staff layout with the bottom tabs, under the app's own stylesheets, so
 // the test can measure every button on a phone and on a laptop. The lists are in the query cache, so nothing is fetched. Every
 // name and figure is invented.
 
@@ -57,8 +60,17 @@ const SCREENS: Record<string, { path: string; body: ReactNode }> = {
   expenses: { path: '/staff/retail/expenses', body: <Gate screen="expenses" title="Expenses"><ExpenseForm branchId={branch} /></Gate> },
   savings: { path: '/staff/retail/savings', body: <Gate screen="savings" title="Savings"><SavingsForm branchId={branch} /></Gate> },
   setup: { path: '/staff/retail/catalogue/set-up', body: <ShopSetupPage /> },
-  // Not a daily screen: the one ActionBar with two buttons, Make the labels and Print.
+  // Not a daily screen: the one ActionBar with two buttons, Print and Make the labels.
   labels: { path: '/staff/retail/catalogue/labels', body: <LabelsPage /> },
+  // A confirmation in the kit's Sheet, its primary button first as Sheet asks.
+  sheet: {
+    path: '/staff/retail/stock',
+    body: (
+      <Sheet open onClose={() => undefined} title="Remove this item?" actions={<><button type="button" className="btn-danger">Remove</button><button type="button">Keep it</button></>}>
+        <p>Test LED bulb 9W screw leaves this sale.</p>
+      </Sheet>
+    ),
+  },
 };
 const shown = SCREENS[screen] ?? (SCREENS.sell as { path: string; body: ReactNode });
 
@@ -66,12 +78,17 @@ createRoot(document.getElementById('root') as HTMLElement).render(
   <RouterContextProvider router={layoutRouter(shown.path)}>
     <QueryClientProvider client={client}>
       <StaffContext.Provider value={{ me, branch }}>
-        <div className="app-shell"><div className="app-content"><div className="nav-layout">
+        <TourProvider me={me} saveProgress={false}>
+        <div className="app-shell">
+          <StaffBar me={me} branch={branch} onBranch={() => undefined} onSignOut={() => undefined} />
+          <div className="app-content"><div className="nav-layout">
           <div className="nav-layout-main">
             <main data-screen={screen}>{shown.body}</main>
           </div>
           <StaffTabBar me={me} />
-        </div></div></div>
+          </div></div>
+        </div>
+        </TourProvider>
       </StaffContext.Provider>
     </QueryClientProvider>
   </RouterContextProvider>,
