@@ -251,12 +251,13 @@ class SavingsService {
         List<Transaction> rows = repo.transactions(id, before, size + 1);
         boolean more = rows.size() > size;
         List<Transaction> items = more ? rows.subList(0, size) : rows;
-        // Issue #314: the payment code staff match a member's text message against, on deposits a gateway payment
-        // booked.
-        Map<UUID, String> codes = collections.confirmationCodesOf(items.stream()
-                .filter(t -> "gateway".equals(t.paymentMethodKey()) && "deposit".equals(t.txnType()))
-                .map(Transaction::id)
-                .toList());
+        // Issue #314: the payment code staff match a member's text message against. Asked for every row of the page (at
+        // most
+        // 200 ids, one query): only a transaction a gateway payment booked is linked from an intent, so no method key
+        // or
+        // type is filtered on here and a renamed key cannot hide a code.
+        Map<UUID, String> codes = collections.confirmationCodesOf(
+                items.stream().map(Transaction::id).toList());
         return new TransactionPage(
                 items.stream().map(t -> t.withPaymentCode(codes.get(t.id()))).toList(),
                 more ? Cursor.encode(String.valueOf(items.getLast().seq())) : null);

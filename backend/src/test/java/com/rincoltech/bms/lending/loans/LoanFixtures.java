@@ -37,6 +37,31 @@ public abstract class LoanFixtures extends IntegrationTest {
         adminPerms = permissionsOf("tenant_admin");
     }
 
+    // JUSTIFICATION-A3: both gateway test classes check one answer for every form of a payer's number (issue #314
+    // review).
+    /**
+     * Asserts that no form of the payer's number is in {@code body}: E.164 with and without the plus, the national form, the
+     * subscriber digits, any number ending in its last three digits, and any mask (asterisks, X or # standing for digits).
+     * Ids, times, receipt numbers and payment codes are taken out first, since a random id or a time can hold any three digits.
+     * No field name may speak of a phone, a payer or an msisdn.
+     */
+    protected static void assertNoPayerNumber(JsonNode body, String payerE164) {
+        String subscriber = payerE164.substring(4);
+        String text = body.toString()
+                .replaceAll("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", "<id>")
+                .replaceAll("\\d{4}-\\d{2}-\\d{2}(T[0-9:.]+Z?)?", "<time>")
+                .replaceAll("RC-[A-Z0-9]+-\\d+", "<receipt>")
+                .replaceAll("CONF-[A-Z0-9-]+", "<code>");
+        org.assertj.core.api.Assertions.assertThat(text)
+                .doesNotContain(payerE164)
+                .doesNotContain(payerE164.substring(1))
+                .doesNotContain("0" + subscriber)
+                .doesNotContain(subscriber)
+                .doesNotContainPattern("\\d*" + payerE164.substring(payerE164.length() - 3) + "(?!\\d)")
+                .doesNotContainPattern("[*Xx#]{2,}[\\s*Xx#]*\\d{2,4}")
+                .doesNotContainPattern("(?i)\"[a-z_]*(phone|payer|msisdn)[a-z_]*\"\\s*:");
+    }
+
     protected static String permissionsOf(String role) {
         return TestDatabase.owner()
                 .sql("SELECT string_agg(permission_key, ',') FROM role_permissions WHERE role_key = ?")

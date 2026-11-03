@@ -62,6 +62,9 @@ class UnallocatedReceiptsIT extends LoanFixtures {
 
     static final String PURPOSE = "lending.loan_repayment";
     static final String SAVINGS = "lending.savings_deposit";
+    /** The payer's number a savings or other intent here is made with, as staff type it. */
+    static final String PAYER = "0700000224";
+
     static final String ACCOUNTS = "/api/v1/lending/savings-accounts";
     static final String UNALLOCATED = "/api/v1/payments/unallocated";
     static final Instant NOW = Instant.parse("2026-10-16T06:00:00Z");
@@ -392,7 +395,7 @@ class UnallocatedReceiptsIT extends LoanFixtures {
         ResponseEntity<JsonNode> r = call(
                 HttpMethod.POST,
                 "/api/v1/payments/intents",
-                Map.of("purpose", purpose, "subject_id", subject, "amount_minor", amount, "payer_phone", "0700000224"),
+                Map.of("purpose", purpose, "subject_id", subject, "amount_minor", amount, "payer_phone", PAYER),
                 "key-" + UUID.randomUUID());
         assertThat(r.getStatusCode().value()).as("%s", r.getBody()).isEqualTo(201);
         return r.getBody();
@@ -760,7 +763,12 @@ class UnallocatedReceiptsIT extends LoanFixtures {
         JsonNode intent = intentFor(account, SAVINGS, 50_000);
         tick(Duration.ofMinutes(31));
         assertThat(row(intent).get("status")).isEqualTo("expired");
-        // The account is frozen by the time the member pays, so the money cannot book and is held in the queue.
+        // Expiry alone does not hold the money: a late payment onto an active account books at once, flagged late
+        // (SavingsDepositByGatewayIT.aPaymentCompletedAfterTheOrderExpiredStillBooksAndIsFlaggedLate). What holds it
+        // here is
+        // the account being frozen by the time the member pays: book() refuses it with account_frozen, one of the
+        // allow-listed
+        // refusals that become an unallocated receipt (ADR-035 decision 36). The refusal code is asserted below.
         TestDatabase.owner()
                 .sql("UPDATE lending_savings_accounts SET status = 'frozen' WHERE id = ?")
                 .param(UUID.fromString(account))
@@ -768,6 +776,7 @@ class UnallocatedReceiptsIT extends LoanFixtures {
         pay(intent, 50_000, "CONF-314-LATE");
         tick(Duration.ofMinutes(15));
         assertThat(row(intent).get("status")).isEqualTo("booked_unallocated");
+        assertThat(row(intent).get("refusal_code")).isEqualTo("account_frozen");
         assertThat(row(intent).get("booked_subject_txn_id")).isNull();
         UUID receipt = TestDatabase.owner()
                 .sql("SELECT id FROM unallocated_receipts WHERE intent_id = ?")
@@ -795,11 +804,13 @@ class UnallocatedReceiptsIT extends LoanFixtures {
         assertThat(items.get(0).get("txn_type").asString()).isEqualTo("deposit");
         assertThat(items.get(0).get("payment_method_key").asString()).isEqualTo("gateway");
         assertThat(items.get(0).get("payment_code").asString()).isEqualTo("CONF-314-LATE");
+        // The one payer number the system holds for this payment is the one the intent was made with (PAYER): pay()
+        // reports
+        // none, the provider's status answer has no payer field (PaymentGateway.StatusResult) and the receipt keeps
+        // none (V123).
         String phone = (String) row(intent).get("payer_phone_e164");
-        assertThat(phone).isEqualTo("+256700000224");
-        assertThat(list.getBody().toString())
-                .doesNotContain(phone.substring(4))
-                .doesNotContain("*" + phone.substring(phone.length() - 4));
+        assertThat(phone).isEqualTo("+256" + PAYER.substring(1));
+        assertNoPayerNumber(list.getBody(), phone);
     }
 
     @Test

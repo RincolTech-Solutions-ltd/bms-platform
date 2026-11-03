@@ -65,6 +65,9 @@ import tools.jackson.databind.JsonNode;
 class SavingsDepositByGatewayIT extends LoanFixtures {
 
     static final String PURPOSE = "lending.savings_deposit";
+    /** The payer's number every intent here is made with, as staff type it. */
+    static final String PAYER = "0700000219";
+
     static final String ACCOUNTS = "/api/v1/lending/savings-accounts";
     static final Instant NOW = Instant.parse("2026-10-16T06:00:00Z");
     static final LocalDate TODAY = LocalDate.of(2026, 10, 16);
@@ -208,7 +211,7 @@ class SavingsDepositByGatewayIT extends LoanFixtures {
         return call(
                 HttpMethod.POST,
                 "/api/v1/payments/intents",
-                Map.of("purpose", PURPOSE, "subject_id", account, "amount_minor", amount, "payer_phone", "0700000219"),
+                Map.of("purpose", PURPOSE, "subject_id", account, "amount_minor", amount, "payer_phone", PAYER),
                 "key-" + UUID.randomUUID());
     }
 
@@ -266,7 +269,7 @@ class SavingsDepositByGatewayIT extends LoanFixtures {
                 HttpMethod.POST,
                 ACCOUNTS + "/" + account + "/deposits",
                 h,
-                Map.of("amount_minor", amount, "payment_method_key", "cash", "external_reference", "TEST-CASH-219"));
+                Map.of("amount_minor", amount, "payment_method_key", "cash", "external_reference", "TEST-CASH-REF"));
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
         return r.getBody();
     }
@@ -744,13 +747,14 @@ class SavingsDepositByGatewayIT extends LoanFixtures {
         assertThat(items.get(0).get("payment_code").asString()).isEqualTo("CONF-314-0001");
         assertThat(items.get(1).get("payment_method_key").asString()).isEqualTo("cash");
         assertThat(items.get(1).get("payment_code").isNull()).isTrue();
-        // Only the code: the payer's number this intent was made with appears nowhere, in full or masked.
+        // Only the code. The one payer number the system ever holds for this payment is the one the intent was made
+        // with
+        // (PAYER, stored as E.164): pay() reports none, the provider's status answer has no payer field
+        // (PaymentGateway.StatusResult; Pesapal's payment_account is not read) and unallocated_receipts keeps none
+        // (V123).
         String phone = (String) row(intent).get("payer_phone_e164");
-        assertThat(phone).isEqualTo("+256700000219");
-        assertThat(r.getBody().toString())
-                .doesNotContain(phone.substring(4))
-                .doesNotContain("*" + phone.substring(phone.length() - 4))
-                .doesNotContain("payer_phone");
+        assertThat(phone).isEqualTo("+256" + PAYER.substring(1));
+        assertNoPayerNumber(r.getBody(), phone);
 
         // A caller who may not read the account (another branch, or no savings read at all) gets no code.
         ResponseEntity<JsonNode> otherBranch = send(
