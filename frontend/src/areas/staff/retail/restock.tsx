@@ -192,8 +192,9 @@ export function RestockForm({ onSaved, draftName, initial, again = false, replac
   const setLines = (f: (ls: RestockLine[]) => RestockLine[]) => setDraft((d) => ({ ...d, lines: f(d.lines) }));
   const suppliers = useQuery({ queryKey: ['retail', 'suppliers'], queryFn: () => retail.listSuppliers() });
 
-  // toast-exempt: success screen, the purchase saved screen replaces the form of a new purchase; an edited delivery goes back to Past purchases and its toast says Delivery updated (issue #830)
+  // success-screen: the purchase saved screen that replaces the form; an edited delivery goes back to Past purchases (issue #830)
   const save = useMutation({
+    meta: { success: ({ saved }: { saved: Purchase }) => (replaces ? 'Delivery updated' : saved?.purchase_no ? `Purchase ${saved.purchase_no} saved` : 'Purchase saved') },
     mutationFn: async () => {
       const supplierName = (suppliers.data ?? []).find((x) => x.id === supplierId)?.name ?? '';
       const before = Object.fromEntries(lines.map((l) => [l.product.id ?? '', { sell: l.product.sell_minor, cost: l.product.cost_minor }]));
@@ -210,7 +211,6 @@ export function RestockForm({ onSaved, draftName, initial, again = false, replac
       onSaved?.(saved, context);
     },
     onError: (e) => { if (replaces && listIsStale(e)) void queryClient.invalidateQueries({ queryKey: ['retail'] }); },
-    meta: { success: () => (replaces ? 'Delivery updated' : null) },
   });
 
   const unitsOn = capabilityOn(me, 'retail', UNITS);

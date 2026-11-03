@@ -370,7 +370,7 @@ of the screens under it; the Catalogue home lists only those it may use (a sales
   as it stands now. A file with a problem row adds nothing. Adding again skips everything already there. The cost
   price column is accepted only with `retail.profit.read`.
 - **Messages.** Every save shows a green on-screen message (`Success`, `role="status"`) and a toast above the
-  bottom bar (`useToast` in `ui.tsx`, six seconds, hidden from assistive technology since the on-screen message
+  bottom bar (`useToast` in `ui.tsx`, four seconds, hidden from assistive technology since the on-screen message
   carries the same words). There was no toast helper in the app before this (only the `.toast` style), so
   `useToast` is the first and the other retail screens do not use it yet. Refusals use the existing `Problem` alert
   with the server's plain message.
@@ -1484,6 +1484,24 @@ The owner, 29 Oct 2026: "On mobile I can't easily find items and categories. It 
   it then reads as All and its stored key is removed.
 - **On a phone** the Items list follows the search, Quick add and Add an item; the sizes and colours ways to add come after it.
 - **Layout check.** `layout/phone-find.layout.test.ts` at 360, 390 and 412px, at both font scales.
+
+## The item page (issue #813, FR-RET-85, ADR-121)
+
+The owner checks that stock tallies by opening one item, as the old app allowed.
+
+- **Where.** `/staff/retail/items/$productId` (`item-page.tsx`), named by the item in the breadcrumbs; tour `page-item`. Open
+  the item, a full size ghost button (`ItemPageLink`), sits on each item of My stock (the phone card, the table, every shop's
+  table and cards), on each item of Items and on each line of a sale opened from the sales lists, for whoever may read stock.
+- **Top.** The item code and category, then In stock: a card per shop with its quantity in tabular figures (below zero
+  flagged in words), a closed shop only while it still holds the item, and All shops with the sum when there are two or more.
+  The owner sees the average buying price per shop under it.
+- **Movements.** "Every movement, newest first": a card per movement with what it was in plain words (Delivery, Sale, Moved
+  in, Moved out, Used in the shop, Damaged, Count, Correction, Customer brought back, Sale cancelled, Delivery cancelled), the
+  day and the shop, In or Out with the quantity, and In stock after. The owner also sees its value at buying price and, on a
+  sale, the profit. The Shop choice (two shops or more) and the PeriodPicker (every day to start with) narrow the list; the
+  balances stay those of the whole history. Show older movements loads the next page.
+- **Offline.** Both reads are kept like My stock (ADR-116), so an item opened before shows offline.
+- **Layout check.** `layout/item-page.layout.test.ts` at 412px, at both font scales, the owner's page and a seller's.
 
 ## Add it in place (issue #688, FR-UXN-12)
 

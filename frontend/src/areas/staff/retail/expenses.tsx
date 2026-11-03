@@ -45,11 +45,12 @@ export function ExpenseForm({ branchId, onSaved, onWaiting, replaces, onCancel }
   const items = itemsOf(list, draft.categoryId);
   const explain = needsExplanation(list, draft.categoryId, draft.itemId);
   const plan = planExpense({ branchId, ...draft }, list);
-  // The Saved panel replaces the form of a new expense; an edited one says "Expense updated" (issue #830).
+  // success-screen: the Saved panel replaces the form; one that waits for approval says so on the form instead; an edited one (issue #830) closes its form
   const save = useMutation({
     // Edit (issue #830): one call voids the old expense and saves this one naming it, in one transaction on the server, so any
     // refusal (an amount that would wait for an administrator, an item switched off) leaves the old expense as it was.
     mutationFn: async (): Promise<Expense | ApprovalWaiting> => (replaces?.id ? retail.replaceExpense(replaces.id, plan.request, key) : retail.createExpense(plan.request, key)),
+    meta: { success: (saved: Expense) => (isWaiting(saved) ? null : replaces ? 'Expense updated' : 'Expense saved') },
     onSuccess: (saved) => {
       finish();
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
@@ -57,7 +58,6 @@ export function ExpenseForm({ branchId, onSaved, onWaiting, replaces, onCancel }
       if (isWaiting(saved)) onWaiting?.(saved.amount_minor ?? 0);
       else onSaved?.(saved);
     },
-    meta: { success: (saved: object) => (replaces && !isWaiting(saved) ? 'Expense updated' : null) },
   });
   const update = (patch: Partial<ExpenseDraft>) => setDraft((d) => ({ ...d, ...patch }));
   // ADR-118 (issue #802): whoever records expenses adds a missing item in place, the same way as a new beneficiary.

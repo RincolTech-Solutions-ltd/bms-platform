@@ -31,7 +31,7 @@ import { CategoryPicker } from './category-picker';
 import { CategoryChips, FindBar, ItemRow, NoItem, onlyMatch, useChosenChip, useFindTerm } from './phone-find';
 import { RowList } from '../../../app/ui/ListRow';
 import { ScreenToast } from './toast';
-import { Gate, Problem, money, useBranchView, useIsPhone, useProfitAccess, useToast } from './ui';
+import { Gate, ItemPageLink, Problem, money, useBranchView, useIsPhone, useProfitAccess, useToast } from './ui';
 import { WORDS } from '../../../app/glossary';
 import { Hint } from '../../../app/ui/Hint';
 
@@ -268,7 +268,7 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
     },
     onSettled: () => { sending.current = false; },
   });
-  // toast-exempt: a look for items with the same name that saves nothing; the save it hands on to says it
+  // toast-exempt: saves nothing: a look for items with the same name that saves nothing; the save it hands on to says it
   const check = useMutation({
     mutationFn: () => retail.similarProducts({ description: description.trim(), unitId, ...(product ? { excludeId: product.id } : {}) }),
     onSuccess: (found) => {
@@ -569,7 +569,7 @@ export function ProductList({ onEdit, onPrice, onAdd, added }: { onEdit: (id: st
     : listed;
   const canPrice = (me.permissions ?? []).includes(PRICE);
   const g = useCategoryGroups({ screen: 'items', items, categoryOf: (p) => p.category, resetKey: [query, categoryId, activeFilter].join('|'), searching: query !== '', pending: page.isPlaceholderData });
-  const card = (p: Product) => <ProductCard key={p.id} product={p} showCost={profit} canPrice={canPrice} onEdit={() => onEdit(p.id ?? '')} onPrice={() => onPrice(p.id ?? '')} extra={<ScreenLink screen="stock" to="/staff/retail/stock" label={`See the stock of ${p.description}`}>Stock</ScreenLink>} />;
+  const card = (p: Product) => <ProductCard key={p.id} product={p} showCost={profit} canPrice={canPrice} onEdit={() => onEdit(p.id ?? '')} onPrice={() => onPrice(p.id ?? '')} extra={<><ScreenLink screen="stock" to="/staff/retail/stock" label={`See the stock of ${p.description}`}>Stock</ScreenLink> <ItemPageLink productId={p.id} name={p.description} /></>} />;
   const chosenName = (categories.data ?? []).find((c) => c.id === categoryId)?.name;
   const sizes = (
     <>
