@@ -69,6 +69,16 @@ describe('the hostname check on the Activate form (#155)', () => {
     await check({ host: HOST, outcome: 'answers' });
     fireEvent.change(screen.getByLabelText(/Address name/), { target: { value: 'test-shop-156' } });
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
+    // Changed back, the old answer stays gone until the operator checks again.
+    fireEvent.change(screen.getByLabelText(/Address name/), { target: { value: 'test-shop-155' } });
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('says a 403 or 503 may be a Cloudflare security rule, not a missing tunnel entry', async () => {
+    const status = await check({ host: HOST, outcome: 'wrong_answer', http_status: 403 });
+    expect(status.textContent).toContain(`${HOST} refused the check (HTTP 403).`);
+    expect(status.textContent).toContain('Cloudflare security rule');
+    expect(status.textContent).not.toContain('The tunnel entry may be missing');
   });
 
   it('shows the server words when the check is refused, and cannot run with no address name', async () => {

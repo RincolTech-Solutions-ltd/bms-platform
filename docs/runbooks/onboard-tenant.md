@@ -256,6 +256,9 @@ setup token.
    `https://<slug host>/version` and says "answers" when the host reaches this app. "No DNS record
    yet" means step 1 of the next section is missing; "did not answer" or "something answered, but
    not this app" usually means the tunnel entry (step 2) is missing or the record is minutes old.
+   "Refused the check (HTTP 403 or 503)" usually means a Cloudflare security rule, bot check or
+   Access policy answered the server's request: open the address in a browser and check the
+   zone's security rules before you touch the tunnel.
    The check changes nothing, and Activate works either way.
 5. **Activate**: choose the modules, term and way in. For the paid way, note the payment received
    (method, the sender's reference, date); no amounts are modelled in this release. Activate

@@ -259,6 +259,12 @@ export function hostnameWords(check: HostnameCheck): { ready: boolean; text: str
     case 'no_answer':
       return { ready: false, text: `${host} did not answer. The tunnel entry may be missing, or the record is still new. ${RUNBOOK_STEP}` };
     case 'wrong_answer':
+      if (check.http_status === 403 || check.http_status === 503) {
+        return {
+          ready: false,
+          text: `${host} refused the check (HTTP ${check.http_status}). A Cloudflare security rule or challenge may be in front of it, not a missing tunnel entry. Open the address in a browser to see the page, and see "Make the tenant host reachable" in docs/runbooks/onboard-tenant.md.`,
+        };
+      }
       return {
         ready: false,
         text: `Something answered at ${host}, but not this app${check.http_status ? ` (HTTP ${check.http_status})` : ''}. The tunnel entry may be missing. ${RUNBOOK_STEP}`,
@@ -275,6 +281,8 @@ export function hostnameWords(check: HostnameCheck): { ready: boolean; text: str
 export function HostnameCheckPanel({ slug }: { slug: string }) {
   const [busy, setBusy] = useState(false);
   const [checked, setChecked] = useState<{ slug: string; check?: HostnameCheck; error?: string } | null>(null);
+  // Any edit of the slug drops the answer, so changing it and back never brings an old answer back.
+  useEffect(() => setChecked(null), [slug]);
   const current = checked && checked.slug === slug ? checked : null;
   async function run() {
     if (busy) return;
