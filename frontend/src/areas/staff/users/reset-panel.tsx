@@ -28,7 +28,7 @@ export function ResetPanel({ user, mfaEnabled, openLinkFor = null, onSend, onCan
   async function send() {
     if (!ready || sending.current) return;
     sending.current = true;
-    // toast-exempt: the Staff users screen says Reset link made in its toast through onSend
+    // toast-exempt: said elsewhere: the Staff users screen says Reset link made in its toast through onSend
     setBusy(true);
     setError(null);
     const credential: AdminCredential = mfaEnabled ? { totpCode: typed.trim() } : { password: typed };

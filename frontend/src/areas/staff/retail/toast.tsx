@@ -106,7 +106,8 @@ export function useToast(ms: number = TOAST_MS, silent = false): { show: (messag
  * hand-rolled try and catch) calls `sayDone(words)` when it works. A screen that already says it worked, in its own success
  * toast or a success note, keeps that and sets neither, so nothing is said twice. A success screen that replaces the form
  * still names its words, with `// success-screen: <what>` above the write (issue #824). `busy-guard.test.ts` fails a write
- * that says nothing, unless a `// toast-exempt: <reason>` line sits above it.
+ * that says nothing, unless a `// toast-exempt: <kind>: <reason>` line sits above it, the kind one of saves nothing, waits
+ * for approval, said elsewhere or success note.
  */
 export type DoneWords = string | ((data: never, variables: never) => string | null);
 

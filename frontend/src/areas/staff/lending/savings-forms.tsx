@@ -263,7 +263,7 @@ export function ReverseSavingsForm({ account, txn }: { account: SavingsAccount; 
   const accountId = account.id ?? '';
   const refresh = useRefreshAccount(accountId);
   const { key, draft, setDraft, finish } = usePersistedDraft<string>(`savings-reverse:${me.user_id ?? ''}:${txn.id ?? ''}`, '');
-  // toast-exempt: a reversal waits for a checker, and this form then says it is sent for approval
+  // toast-exempt: waits for approval: a reversal waits for a checker, and this form then says it is sent for approval
   const save = useMutation({
     mutationFn: () => savings.reverse(accountId, txn.id ?? '', draft.trim(), key),
     onSuccess: () => {

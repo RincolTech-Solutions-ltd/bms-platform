@@ -89,7 +89,8 @@ back to what opened it.
     already shows a success note keeps that and is exempt. A success screen that replaces the form is not exempt (issue
     #824): it still says it in a toast, and its write carries `// success-screen: <what replaces the form>`. A save that
     waits for approval raises no success toast. The success toast guard in `busy-guard.test.ts` fails a write that says
-    nothing, unless `// toast-exempt: <reason>` sits above it, and never takes a success screen as that reason.
+    nothing, unless `// toast-exempt: <kind>: <reason>` sits above it, the kind one of `saves nothing`, `waits for
+    approval`, `said elsewhere` or `success note`, and never takes a success screen as that reason.
     A press shows at once: every button, tile, link card and row sinks to `--press-scale` and dims to `--press-opacity`,
     by transform and opacity only, in `--motion-fast` (100 to 160ms); under reduced motion it only dims. A busy button
     is the `BusyButton` (rule 6 of the design system) and a disabled one is flat grey, never only faded.

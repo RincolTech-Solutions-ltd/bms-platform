@@ -269,11 +269,14 @@ describe('busy guard on fixtures', () => {
 // options name `meta: { success }` (the app's DoneToast says it), or its own success path shows a success toast: the
 // useMutation options (or those of the local hook it comes from), each send with the rest of its block, and the local functions
 // and same-file callback props (`onSaved={...}`) these call, three deep, hold a toast call with the 'success' tone or an
-// `added(` of useItemAdded. Anything else carries `// toast-exempt: <reason>` in the `//` lines directly above it. Like the
+// `added(` of useItemAdded. Anything else carries `// toast-exempt: <kind>: <reason>` in the `//` lines directly above it. Like the
 // busy guard it reads text, not data flow, so it proves a success toast is on the path, not what it says.
 // JUSTIFICATION-A3: #682 asks for this guard; it reuses the busy guard's mutation parser rather than a second copy.
 
-const TOAST_EXEMPT = /^\/\/\s*toast-exempt:\s*\S/;
+// Issue #824 (lead's call on the review of #828): a toast-exempt reason is one of four kinds, named first, then the reason in
+// words: `saves nothing:` (a look, a check or a download), `waits for approval:`, `said elsewhere:` (a toast the screen it
+// hands on to shows), or `success note:` (a note beside the form says it). Anything else is no reason to say nothing.
+const TOAST_EXEMPT = /^\/\/\s*toast-exempt:\s*(?:saves nothing|waits for approval|said elsewhere|success note):\s*\S/;
 // Issue #824: the owner wants a toast after every save, a success screen too, so a success screen is no reason to say nothing.
 // A write whose screen replaces the form carries `// success-screen: <what>` above it: it still toasts, and the screen it
 // sets is not read as a second success note.
@@ -363,7 +366,7 @@ function silent(text: string, hooks: string[] = mutationHooks(text), hookOpts = 
 
 // One success signal per action (review of #685): a success path that shows a toast and also sets a success note
 // (`setDone('Saved.')`, `setMessage(...)`, `setSaved(true)`) says it twice. A full success screen that replaces the form keeps
-// its screen, sets no toast and is marked `// toast-exempt: success screen`, so it never reaches this check. Clearing a note
+// its screen, also toasts (#824) and is marked `// success-screen: <what>`, so it never reaches this check. Clearing a note
 // (`setMessage(null)`) is not a note, and an onError handler or a catch block is not the success path. The check reads state
 // names, so a state that holds what a write returned is named for what it holds (`setVoided`, `setReport`); renaming a
 // success note to slip past this list is the same defect, and review must refuse it.
@@ -505,7 +508,7 @@ describe('success toast guard on fixtures', () => {
     const write = (after: string) => `async function save() {\n  setBusy(true);\n  try {\n    await api.save();${after}\n  } finally {\n    setBusy(false);\n  }\n}`;
     expect(silentByHand(write(''))).toEqual(['2 setBusy(true)']);
     expect(silentByHand(write("\n    sayDone('Member saved');"))).toEqual([]);
-    expect(silentByHand(write('').replace('  setBusy(true);', '  // toast-exempt: the welcome screen that opens says it\n  setBusy(true);'))).toEqual([]);
+    expect(silentByHand(write('').replace('  setBusy(true);', '  // toast-exempt: said elsewhere: the welcome page that opens says it in its toast\n  setBusy(true);'))).toEqual([]);
   });
 
   it('refuses a success screen as a toast-exempt reason in other words, and a success-screen tag on a note (#824)', () => {
@@ -513,7 +516,9 @@ describe('success toast guard on fixtures', () => {
       expect(misusedTags(`// toast-exempt: ${reason}\nconst save = useMutation({ mutationFn: send });`), reason).toHaveLength(1);
     }
     expect(misusedTags(`// success-screen: the Saved note under the form\nconst save = useMutation({ mutationFn: send });`)).toHaveLength(1);
-    expect(misusedTags(`// toast-exempt: it only asks for approval, nothing is saved yet\n// success-screen: the receipt replaces the form`)).toEqual([]);
+    expect(misusedTags(`// toast-exempt: waits for approval: it only asks, nothing is saved yet\n// success-screen: the receipt replaces the form`)).toEqual([]);
+    // A screen named under an allowed kind is still refused.
+    expect(misusedTags(`// toast-exempt: said elsewhere: the receipt replaces the form`)).toHaveLength(1);
   });
 
   it('reads a send in a top-level callback to the end of its statement, not the rest of the component (#824)', () => {
@@ -541,8 +546,14 @@ describe('success toast guard on fixtures', () => {
 
   it('honours a toast-exempt comment with a reason directly above the mutation, and nothing else', () => {
     const save = `const save = useMutation({ mutationFn: send });`;
-    expect(silent(`// toast-exempt: the receipt screen that opens says it\n${save}`)).toEqual([]);
+    for (const kind of ['saves nothing', 'waits for approval', 'said elsewhere', 'success note']) {
+      expect(silent(`// toast-exempt: ${kind}: why, in words\n${save}`), kind).toEqual([]);
+    }
     expect(silent(`// toast-exempt:\n${save}`)).toEqual(['2 save']);
+    expect(silent(`// toast-exempt: saves nothing:\n${save}`)).toEqual(['2 save']);
+    // A reason of no allowed kind does not count, however it is worded (review of #828).
+    expect(silent(`// toast-exempt: the receipt screen that opens says it\n${save}`)).toEqual(['2 save']);
+    expect(silent(`// toast-exempt: the receipt replaces the form\n${save}`)).toEqual(['2 save']);
     expect(silent(`// busy-exempt: the switch says Working itself\n${save}`)).toEqual(['2 save']);
   });
 });

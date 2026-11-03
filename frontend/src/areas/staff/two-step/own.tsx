@@ -29,7 +29,7 @@ export function OwnTwoStep({ blocking = false }: { blocking?: boolean }) {
 
   async function run(action: () => Promise<void>) {
     if (busy) return;
-    // toast-exempt: each step opens the next, and confirm below says Two-step sign-in is on when the recovery codes show
+    // toast-exempt: said elsewhere: each step opens the next, and confirm below says Two-step sign-in is on when the recovery codes show
     setBusy(true);
     setMessage(null);
     try {

@@ -376,9 +376,10 @@ cannot be read on a dark page: `--color-link` and `--color-focus` become `color-
    no Undo; nor does one whose result carries no version to send it on.
    A write by hand (a `setBusy(true)` with try and catch) calls `sayDone(words)` once the request has worked. Success is
    never said twice in a toast and a success note: a screen that already says it in its own success toast, a success note
-   or alert (directly or through a parent's callback), sets no `meta.success` and carries `// toast-exempt: <where it is
-   said>`; so does a write a person would not expect a toast for (a question to the assistant, a preview that saves
-   nothing, a change that only waits for approval). A success or receipt screen that replaces the form is no reason to
+   or alert (directly or through a parent's callback), sets no `meta.success` and carries `// toast-exempt: said
+   elsewhere: <where>` or `// toast-exempt: success note: <which note>`; a write a person would not expect a toast for
+   carries `// toast-exempt: saves nothing: <why>` (a question to the assistant, a preview, a download) or `// toast-exempt:
+   waits for approval: <why>`. Those four kinds are the only reasons the guard takes. A success or receipt screen that replaces the form is no reason to
    say nothing (issue #824: the owner wants a toast after every save, as his old app had): the write still names its
    toast words and carries `// success-screen: <what replaces the form>`, so the screen it sets is not read as a second
    note. The comment sits in the `//` lines directly above the `const ... = useMutation(` or `setBusy(true)` line. The
@@ -386,7 +387,7 @@ cannot be read on a dark page: `--color-link` and `--color-focus` become `color-
    sales screen, or a staff write by hand, whose success path (options, hook, each send to the end of its statement, and
    the local functions and same-file callback props they call) holds none of `meta.success` (not a bare `() => null`), a
    toast call with the `'success'` tone in its own parentheses, `sayDone(`, or a `toast-exempt` comment, and fails any
-   `toast-exempt` reason that is a success screen.
+   `toast-exempt` reason that is a success screen, and any `success-screen` tag on a note.
 7. Give the main controls of a new screen `data-tour` ids and add the screen's steps to
    `frontend/src/tour/tours.ts` (a page tour at least), with plain, short sentences.
 
