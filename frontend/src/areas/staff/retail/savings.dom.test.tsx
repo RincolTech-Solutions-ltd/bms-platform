@@ -220,3 +220,46 @@ describe('the savings screen for a salesperson', () => {
     await waitFor(() => expect(records.textContent).toContain('Saved UGX 3,000'));
   });
 });
+
+// JUSTIFICATION-A3: the on and off DOM tests issue #799 asks for, appended after the last describe block.
+// Issue #799: a user with the Sales role alone (no till, no savings permission) under the owner's switch.
+describe('the savings screen for sales staff', () => {
+  const sales = mockMe('sales');
+  const shown: SavingsSuggestion = { branch_id: branch, business_date: today, total_sold_minor: 50000, suggestion_token: 'tok-1', suggested_minor: 4000, may_change_amount: true };
+  const monthStart = `${today.slice(0, 8)}01`;
+
+  it('with the switch off has no access and asks nothing of the server', () => {
+    open({ ...sales, salespeople_see_savings_amount: false });
+    expect(screen.getByRole('heading', { name: 'Savings' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Save savings' })).toBeNull();
+    expect(savingsSuggestion).not.toHaveBeenCalled();
+    expect(listSavings).not.toHaveBeenCalled();
+  });
+
+  it("with the switch on sees the amount, changes it and saves it through the sales staff routes, and sees this month's records", async () => {
+    savingsSuggestion.mockResolvedValue(shown);
+    const older: Savings = { ...saved, id: 'sv-0', business_date: monthStart, amount_minor: 2500, suggested_minor: undefined };
+    const mine: Savings = { ...saved, amount_minor: 3000, suggested_minor: undefined, overwritten: true };
+    listSavings.mockResolvedValueOnce([older]).mockResolvedValue([mine, older]);
+    createSavings.mockResolvedValue(mine);
+    open({ ...sales, salespeople_see_savings_amount: true });
+
+    await screen.findByText('UGX 4,000', { selector: '.key-figure-value' });
+    expect(savingsSuggestion).toHaveBeenCalledWith(expect.objectContaining({ salesStaff: true }));
+    expect(document.body.textContent).not.toMatch(/Profit|Expenses for the day/);
+    const records = await screen.findByRole('region', { name: 'Savings records' });
+    expect(records.textContent).toContain('Savings this month');
+    await waitFor(() => expect(records.textContent).toContain('Saved UGX 2,500'));
+    expect(listSavings).toHaveBeenCalledWith(expect.objectContaining({ salesStaff: true, from: monthStart, to: today }));
+    expect(screen.queryByRole('button', { name: /Void/ })).toBeNull();
+
+    fireEvent.change(amount(), { target: { value: '3000' } });
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(createSavings).toHaveBeenCalledTimes(1));
+    expect(createSavings.mock.calls[0]?.[0]).toMatchObject({ amount_minor: 3000, suggestion_token: 'tok-1' });
+    expect(createSavings.mock.calls[0]?.[2]).toEqual({ salesStaff: true });
+    const panel = await screen.findByRole('region', { name: 'Savings recorded' });
+    expect(panel.textContent).toContain('Amount saved: UGX 3,000');
+    await waitFor(() => expect(records.textContent).toContain('Saved UGX 3,000'));
+  });
+});

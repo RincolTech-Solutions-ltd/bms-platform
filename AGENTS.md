@@ -1349,7 +1349,10 @@ Accepted (this list is the ADR index):
   on, a caller without `retail.profit.read` sees the suggestion and may change it before the day is saved, and sees the amount
   of records made while it is on if they hold `retail.savings.record`; the cap, the profit and the expenses stay hidden, and
   the profit can still be worked out from the suggestion; replacing a saved amount needs `retail.savings.overwrite` for
-  everyone; the audit flags `salespeople_setting` (no migration)
+  everyone; the audit flags `salespeople_setting` (no migration). Amended by #799: while it is on, a seller
+  (`retail.sale.create` at the branch) without the till records the branch's savings through
+  `/retail/savings/sales-staff` (403 while off), and this month's records show their amounts to whoever may record savings or
+  sell at the branch, whenever they were made; `/me` carries the switch so the Savings screen shows for sellers only then
 - ADR-116 The figures last loaded are kept on the phone for reading offline: an allowlist of retail reads (Home and Retail
   summaries, sales of the last 30 days, stock, customers and what they owe, past usage, the reports already made) in the
   `bms-offline` store per business and person, never lending or sign-in, capped, cleared at sign-out; one offline banner

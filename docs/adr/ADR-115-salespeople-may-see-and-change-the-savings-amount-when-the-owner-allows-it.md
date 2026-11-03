@@ -5,6 +5,8 @@
 Proposed (issue #768, 2 Nov 2026; FR-RET-18, FR-RET-19). Relaxes ADR-022 decision 13 for the savings amount only, and only
 when the Owner turns the new setting on; it answers ADR-022 open question 8 for one figure. ADR-022 decision 12 (the audit
 carries flags, never the amount) and ADR-080 (the cap) are unchanged. No migration. Renumbered at merge if needed.
+Amended by issue #799 (3 Nov 2026): the setting reaches sales staff, who hold `retail.sale.create` but not
+`retail.savings.record` or the till, and shows the whole month's amounts (decision 8; decision 3 changed). No migration.
 
 ## Context
 
@@ -40,7 +42,10 @@ want the person closing the till to set the savings aside by hand and to check t
    after that moment, while the setting is still on, and the caller holds `retail.savings.record` for its branch: in the create
    response, the void response, the Savings records rows and the suggestion's `existing_amount_minor`. Records made before, and a
    reader holding `retail.cashbook.read` alone, keep the amounts hidden. Turned off and on again, only records made from the new
-   moment show.
+   moment show. **Changed by issue #799:** besides those, while the setting is on, every record dated in the current business
+   month shows its amount and `overwritten`, whenever it was made, to a caller who holds `retail.savings.record` or
+   `retail.sale.create` for its branch (the owner asked for the whole month). A record of an earlier month made before the
+   moment, and a reader holding `retail.cashbook.read` alone, still keep the amounts hidden.
 4. **The same rule for everyone to change the amount.** With the setting on, changing the suggested amount before the day is
    saved needs `retail.savings.record`, for a caller with profit read as much as for one without; no caller gets more by holding
    less. Replacing a saved amount (the day has a voided record, so the new amount takes the place of a saved one) needs
@@ -54,6 +59,19 @@ want the person closing the till to set the savings aside by hand and to check t
    amount is written, so a reader of the audit log learns no more than before.
 7. **When it is off**, nothing changes: an amount from such a caller is 422 `amount_requires_profit_access` for every value, and
    no amount is shown or echoed. The server reads the setting once per request.
+8. **Sales staff (issue #799).** In the pilot shop the sales people take the money out and put it aside, but the Sales role holds
+   neither `retail.savings.record` nor `retail.till.close` (ADR-055), so the setting did nothing for them. While the setting is
+   on, a caller who may sell at a branch (`retail.sale.create` there) may open that branch's savings, see the suggested amount,
+   change it and save it, and see this month's savings records for the branches where they may sell, with their amounts. They
+   use their own routes, `GET /retail/savings/sales-staff/suggestion`, `POST /retail/savings/sales-staff` and
+   `GET /retail/savings/sales-staff`, declared with `retail.sale.create`, so the till's routes and their checks are untouched.
+   With the setting off these routes answer 403 `permission_denied`, the answer a seller already gets from the till's routes, so
+   nothing changes for sales staff. With it on, after the branch is resolved by `retail.sale.create`, the checks run in the same
+   order as on the till's route (token, amount, lock, token match, `may_change_amount`, `savings_exists`, then the cap), the same
+   figures are sent (never `available_minor`, `daily_profit_minor` or `day_expenses_minor`), and replacing a saved amount still
+   needs `retail.savings.overwrite`. The list moves an earlier `from` to the first day of the business month and offers no
+   void. `/me` carries `salespeople_see_savings_amount`, and the PWA shows the Savings screen in Money to a seller without the
+   till only while it is true. Whoever holds the till's savings permissions keeps the till's routes.
 
 ## Consequences
 
@@ -68,7 +86,12 @@ it is refused and one at or below it is accepted. Leaving the cap out of the ans
 accepted this (owner decision D124). The setting is off by default, only the Owner turns it on, and its help text says plainly that a
 salesperson who sees the savings amount can work out the day's profit.
 
+With issue #799 the setting reaches every seller of the branch, not only the people given the till, and turning it on shows
+the amounts of the current month's records made before it, so a salesperson can work out the profit of every day of the month
+so far; the help text says so. The owner asked for this.
+
 **Watch for:** an owner who turns it on and later off: the amounts disappear again from the screens, but what a salesperson saw
-while it was on cannot be taken back. Turning it on again does not show records made in an earlier period. A request to show
+while it was on cannot be taken back. Turning it on again shows the current month's records, but not those of earlier months
+made before it. A request to show
 the savings report or the expected-to-bank figures to salespeople is a further relaxation of ADR-022 decision 13 and needs its
 own decision.
