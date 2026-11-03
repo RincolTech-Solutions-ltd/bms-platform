@@ -2,7 +2,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ExpenseCategory } from '../../../api/retail';
+import { RetailError, type ExpenseCategory } from '../../../api/retail';
 import { createMockRetail, mockMe, setMockProfitAccess } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
 
@@ -20,6 +20,8 @@ vi.mock('../../../api/retail', async (original) => {
       ...real.retail,
       createExpenseItem: (...a: unknown[]) => createExpenseItem(...a),
       createExpense: (...a: unknown[]) => createExpense(...a),
+      // The refetch after an add stays on its way, so the lists in the cache are what the form shows.
+      listExpenseCategories: () => new Promise(() => undefined),
     },
   };
 });
@@ -86,6 +88,44 @@ describe('adding an expense item in place', () => {
     expect(screen.getAllByRole('option', { name: 'Fuel' })).toHaveLength(1);
   });
 
+  // Review of #803. JUSTIFICATION-A3: tests the review asked for, not new mechanism.
+  it('says in plain words when the owner switched that item off, and picks nothing', async () => {
+    createExpenseItem.mockRejectedValueOnce(new RetailError(
+      'This category has an item with that name that the owner switched off. Ask the owner to switch it on again.', 409, 'item_switched_off'));
+    form();
+    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'c1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add a new item' }));
+    addItem('Old route');
+    expect((await screen.findByRole('alert')).textContent).toMatch(/switched off\. Ask the owner to switch it on again/);
+    expect(screen.queryByLabelText('Item')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect((screen.getByLabelText('Item') as HTMLSelectElement).value).toBe('');
+  });
+
+  it('adds the item to the category it was sent for when the category changes before the answer', async () => {
+    let answer: (v: unknown) => void = () => undefined;
+    createExpenseItem.mockReturnValueOnce(new Promise((r) => { answer = r; }));
+    form();
+    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'c2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add a new item' }));
+    addItem('Soap');
+    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'c1' } });
+    answer({ id: 'i9', name: 'Soap', requires_explanation: false, active: true, version: 1 });
+    await waitFor(() => expect(createExpenseItem).toHaveBeenCalledWith('c2', { name: 'Soap', reuse_existing: true }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Add to the list' })).toBeNull());
+    expect(screen.queryByRole('option', { name: 'Soap' })).toBeNull();
+    expect((screen.getByLabelText('Item') as HTMLSelectElement).value).toBe('');
+    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'c2' } });
+    expect(screen.getByRole('option', { name: 'Soap' })).toBeTruthy();
+  });
+
+  it('keeps the way to the owner for a user who may not add items here', () => {
+    const without = { ...seller, permissions: (seller.permissions ?? []).filter((p) => p !== 'retail.expense.record') };
+    form(without);
+    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'c2' } });
+    expect(screen.getByText('This category has no items yet. Ask the owner to add its items first.')).toBeTruthy();
+  });
+
   it('shows no Add a new item to a user without the expense permission', () => {
     const without = { ...seller, permissions: (seller.permissions ?? []).filter((p) => p !== 'retail.expense.record') };
     form(without);
@@ -103,6 +143,7 @@ describe('the mock answers like the API', () => {
     const [transport] = await mock.listExpenseCategories({ activeOnly: true });
     const added = await mock.createExpenseItem(transport!.id!, { name: 'Test Item 01', reuse_existing: true });
     expect((await mock.createExpenseItem(transport!.id!, { name: 'test item 01', reuse_existing: true })).id).toBe(added.id);
+    expect((await mock.createExpenseItem(transport!.id!, { name: ' Test  item\t01 ', reuse_existing: true })).id).toBe(added.id);
     await mock.updateExpenseItem(transport!.id!, added.id!, { active: false }, added.version!);
     const refused = await mock.createExpenseItem(transport!.id!, { name: 'Test Item 01', reuse_existing: true }).catch((e: { code?: string }) => e);
     expect((refused as { code?: string }).code).toBe('item_switched_off');

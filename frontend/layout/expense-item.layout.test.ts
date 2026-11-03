@@ -32,11 +32,15 @@ describe('Add a new item on the expense form at 412px (#802)', () => {
     const add = page.getByRole('button', { name: 'Add a new item' });
     const button = await add.boundingBox();
     expect(button && button.x >= 0 && button.x + button.width <= WIDTH).toBe(true);
-    expect(button!.height).toBeGreaterThanOrEqual(40);
+    // docs/ui-rules.md rule 12: every tap target is at least 48px high.
+    expect(button!.height).toBeGreaterThanOrEqual(48);
     await add.click();
-    await fits(page, '[id$="-name"]');
-    const send = await page.getByRole('button', { name: 'Add to the list' }).boundingBox();
-    expect(send && send.x + send.width <= WIDTH).toBe(true);
+    expect((await fits(page, '[id$="-name"]')).height).toBeGreaterThanOrEqual(48);
+    for (const name of ['Add to the list', 'Cancel']) {
+      const box = await page.getByRole('button', { name }).boundingBox();
+      expect(box && box.x >= 0 && box.x + box.width <= WIDTH, name).toBe(true);
+      expect(box!.height, name).toBeGreaterThanOrEqual(48);
+    }
     expect(await page.evaluate(() => document.documentElement.scrollWidth), 'page width').toBeLessThanOrEqual(WIDTH);
     expect((await page.locator('main').textContent()) ?? '').not.toMatch(/Ask the owner to add its items first/);
     await page.close();

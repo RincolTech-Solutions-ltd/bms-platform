@@ -15,7 +15,7 @@ import { useToast } from './toast';
 import { BranchRequired, Gate, Problem, WaitingForApproval, money, useBranchName, useSingleBranch } from './ui';
 import { showDate } from './transfers';
 import { ActionBar } from '../../../app/ui/ActionBar';
-import { AddByName, EmptyChoice, showsEmptyChoice, type AddInline } from '../../../app/ui/EmptyChoice';
+import { AddByName, EmptyChoice, showsEmptyChoice, type AddInline, type ChoiceAdd } from '../../../app/ui/EmptyChoice';
 import { addOn } from './screen-link';
 
 // Company expenses (FR-RET-24): shop, date, category, then an item of that category, an optional
@@ -53,12 +53,16 @@ export function ExpenseForm({ branchId, onSaved, onWaiting }: { branchId: string
   const [addingItem, setAddingItem] = useState(false);
   const addItem: AddInline<ExpenseItem> | null = draft.categoryId !== '' && holdsAt(me, EXPENSE_RECORD, branchId) ? {
     label: 'Add a new item', name: 'Name of the new item', send: 'Add to the list', maxLength: 100,
-    create: (name) => retail.createExpenseItem(draft.categoryId, { name, reuse_existing: true }),
-    onAdded: (row) => {
-      queryClient.setQueryData<ExpenseCategory[]>(['retail', 'expense-categories', true], (old) => withItem(old, draft.categoryId, row));
+    // The category is the one chosen when the name is sent; the item is picked only if it is still the chosen one.
+    create: async (name) => {
+      const categoryId = draft.categoryId;
+      const row = await retail.createExpenseItem(categoryId, { name, reuse_existing: true });
+      queryClient.setQueryData<ExpenseCategory[]>(['retail', 'expense-categories', true], (old) => withItem(old, categoryId, row));
       void queryClient.invalidateQueries({ queryKey: ['retail', 'expense-categories'] });
-      update({ itemId: row.id ?? '', explanation: '' });
+      setDraft((d) => (d.categoryId === categoryId ? { ...d, itemId: row.id ?? '', explanation: '' } : d));
+      return row;
     },
+    onAdded: () => undefined,
   } : null;
   const blocked = plan.problem !== null || save.isPending;
   return (
@@ -84,7 +88,8 @@ export function ExpenseForm({ branchId, onSaved, onWaiting }: { branchId: string
       {addingItem && addItem ? (
         <AddByName id="expense-item-add" title={addItem.label} add={{ ...addItem, onAdded: (row) => { setAddingItem(false); addItem.onAdded(row); } }} onCancel={() => setAddingItem(false)} />
       ) : draft.categoryId !== '' && items.length === 0 ? (
-        <EmptyChoice id="expense-item" label="Item" text="This category has no items yet." add={addItem} />
+        <EmptyChoice id="expense-item" label="Item" text="This category has no items yet." ask="Ask the owner to add its items first."
+          add={addItem ?? (addOn(me, 'expenseSetup', 'Add an item to it', '/staff/retail/expense-lists') as ChoiceAdd<ExpenseItem> | null)} />
       ) : (
       <>
       <label htmlFor="expense-item">Item</label>

@@ -19,14 +19,20 @@ staff waited for the owner or picked a wrong item. The same screen already lets 
    `retail.expense.record`. A caller without `retail.expense.manage` may add an item only to an active category (422
    `category_inactive` otherwise) and may not send `requires_explanation: true` (403 `permission_denied`), so an item added in
    place never asks for an explanation until the owner flags it. The till rule of ADR-055 is unchanged.
-2. **A name the category has already is picked, not made again.** With `reuse_existing: true` the route answers an active item
-   of the same name, ignoring case and surrounding spaces, with 200 and that item, and writes nothing. A switched off item of
+2. **A name the category has already is picked, not made again.** A new item's name is stored with surrounding spaces removed
+   and every run of spaces or tabs inside it written as one space. With `reuse_existing: true` the route answers an active item
+   whose name is the same that way and ignoring case ("generator  FUEL" is "Generator fuel") with 200 and that item, and writes
+   nothing. The create locks the category row (`FOR UPDATE`) for its whole transaction, so two tills sending the same name at
+   once run one after the other and the second is answered with the first's item; the unique index on the category and the
+   lower-cased name (V34) stays the backstop. A switched off item of
    that name is refused with 409 `item_switched_off` ("Ask the owner to switch it on again"), so a retired item is never
    offered. Without `reuse_existing` a taken name is 409 `duplicate_item` as before, which set-up keeps.
 3. **In place on the form.** Under the Item picker a person who holds `retail.expense.record` at the form's shop sees "Add a
    new item", the same plain words as "Add a new beneficiary". It opens a small sheet with the item's name under the chosen
    category; saving puts the item in the list at once and picks it. In an empty category the same button replaces "Ask the
-   owner to add its items first".
+   owner to add its items first"; a person who may not add items at that shop still sees that line, or the owner's link to
+   Expense lists. The screen offers the button only at a shop where the person records expenses, while the server accepts any
+   holder of `retail.expense.record`, because the item lists are the business's, not a shop's (one list for every shop).
 4. **Set-up is unchanged.** The owner still renames, flags and switches off items in Expense lists; an item added in place is
    an ordinary item there, with its `retail.expense_item.created` audit row naming who added it.
 

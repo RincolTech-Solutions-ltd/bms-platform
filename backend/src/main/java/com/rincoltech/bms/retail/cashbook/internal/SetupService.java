@@ -136,6 +136,9 @@ class SetupService {
     // JUSTIFICATION-A3: the permission split and the reuse rule are the issue's two rules, inside the one create.
     @Transactional
     AddedItem createItem(UUID categoryId, ItemRequest r) {
+        // The category row is locked (FOR UPDATE) for the whole transaction, so two tills adding the same name to one
+        // category run one after the other: the second sees the first's item and reuses it (unique index V34 as
+        // backstop).
         CategoryRow c = repo.category(categoryId, true).orElseThrow(ApiException::notFound);
         boolean manager = CurrentPrincipal.require().hasPermission(CashbookSupport.EXPENSE_MANAGE);
         if (!manager && !c.active()) {
@@ -148,7 +151,8 @@ class SetupService {
                     "Permission denied",
                     "Asking for an explanation on an item needs permission to manage expenses.");
         }
-        String name = r.name().trim();
+        // Spaces inside the name are one space, so "Generator  fuel" is "Generator fuel" (ADR-118 decision 2).
+        String name = r.name().strip().replaceAll("\\s+", " ");
         var same = Boolean.TRUE.equals(r.reuseExisting())
                 ? repo.itemNamed(c.id(), name)
                 : java.util.Optional.<ItemRow>empty();

@@ -252,11 +252,18 @@ class RetailCashbookExpensesIT extends IntegrationTest {
         assertThat(added.getBody().get("requires_explanation").asBoolean()).isFalse();
         assertThat(cb.expense(hq, rent, item, 7_000, null).getStatusCode()).isEqualTo(HttpStatus.CREATED);
 
-        ResponseEntity<JsonNode> again =
-                cb.post(items, Map.of("name", " generator FUEL ", "reuse_existing", true), CASHBOOK_SALES);
-        assertThat(again.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(RetailTestSupport.id(again)).isEqualTo(item);
-        assertThat(cb.auditPayloads("retail.expense_item.created")).hasSize(3);
+        int audited = cb.auditPayloads("retail.expense_item.created").size();
+        for (String same : new String[] {" generator FUEL ", "Generator  fuel", "generator\tfuel"}) {
+            ResponseEntity<JsonNode> again =
+                    cb.post(items, Map.of("name", same, "reuse_existing", true), CASHBOOK_SALES);
+            assertThat(again.getStatusCode()).as(same).isEqualTo(HttpStatus.OK);
+            assertThat(RetailTestSupport.id(again)).as(same).isEqualTo(item);
+        }
+        assertThat(cb.auditPayloads("retail.expense_item.created")).hasSize(audited);
+        // A new name with doubled spaces is stored with one.
+        ResponseEntity<JsonNode> spaced =
+                cb.post(items, Map.of("name", "  Car   wash ", "reuse_existing", true), CASHBOOK_SALES);
+        assertThat(spaced.getBody().get("name").asString()).isEqualTo("Car wash");
         // Without reuse_existing the name is still taken, as in set-up.
         assertThat(cb.post(items, Map.of("name", "Generator fuel"), CASHBOOK_SALES)
                         .getBody()
@@ -289,6 +296,81 @@ class RetailCashbookExpensesIT extends IntegrationTest {
                 cb.post(items, Map.of("name", "Water"), "retail.cashbook.read,retail.till.close");
         assertThat(noRecord.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(noRecord.getBody().get("code").asString()).isEqualTo("permission_denied");
+    }
+
+    // Review of #803. JUSTIFICATION-A3: the tests the review asked for (race, tenant, rename), not new mechanism.
+    @Test
+    void twoTillsAddingTheSameNameAtOnceGetOneItem() throws Exception {
+        String items = "/expense-categories/" + rent + "/items";
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(4);
+        try {
+            for (int round = 0; round < 5; round++) {
+                Map<String, Object> body = Map.of("name", "Test Item " + round, "reuse_existing", true);
+                java.util.concurrent.CountDownLatch go = new java.util.concurrent.CountDownLatch(1);
+                java.util.List<java.util.concurrent.Future<ResponseEntity<JsonNode>>> calls =
+                        new java.util.ArrayList<>();
+                for (int i = 0; i < 4; i++) {
+                    calls.add(pool.submit(() -> {
+                        go.await();
+                        return cb.post(items, body, CASHBOOK_SALES);
+                    }));
+                }
+                go.countDown();
+                java.util.Set<UUID> ids = new java.util.HashSet<>();
+                int created = 0;
+                for (var call : calls) {
+                    ResponseEntity<JsonNode> r = call.get(30, java.util.concurrent.TimeUnit.SECONDS);
+                    assertThat(r.getStatusCode()).isIn(HttpStatus.CREATED, HttpStatus.OK);
+                    created += r.getStatusCode() == HttpStatus.CREATED ? 1 : 0;
+                    ids.add(RetailTestSupport.id(r));
+                }
+                assertThat(created).as("round " + round).isEqualTo(1);
+                assertThat(ids).as("round " + round).hasSize(1);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void anotherBusinessesCategoryIsNotFoundAndNothingIsWritten() {
+        TestDatabase.Fixture b = TestDatabase.tenant("cb-exp-b", false, true);
+        CashbookTestSupport other = new CashbookTestSupport(http, b);
+        UUID theirs = other.categoryWithItem("Their premises", "Their rent", false)[0];
+        int before = cb.auditPayloads("retail.expense_item.created").size();
+        for (Map<String, Object> body : java.util.List.<Map<String, Object>>of(
+                Map.of("name", "Their rent", "reuse_existing", true),
+                Map.of("name", "Their rent"),
+                Map.of("name", "Something new", "reuse_existing", true))) {
+            ResponseEntity<JsonNode> r = cb.post("/expense-categories/" + theirs + "/items", body, CASHBOOK_SALES);
+            assertThat(r.getStatusCode()).as(body.toString()).isEqualTo(HttpStatus.NOT_FOUND);
+            assertThat(r.getBody().toString()).doesNotContain("Their rent");
+        }
+        assertThat(cb.auditPayloads("retail.expense_item.created")).hasSize(before);
+        assertThat(other.get("/expense-categories", CASHBOOK_SALES).getBody().toString())
+                .doesNotContain("Something new");
+    }
+
+    @Test
+    void theOwnerStillRenamesAnItemAddedInPlaceAndTheNewNameIsTheOneReused() {
+        String items = "/expense-categories/" + rent + "/items";
+        UUID item = RetailTestSupport.id(
+                cb.post(items, Map.of("name", "Genset fuel", "reuse_existing", true), CASHBOOK_SALES));
+        assertThat(cb.patch(items + "/" + item, Map.of("name", "Diesel"), CASHBOOK_ADMIN, 1)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(cb.patch(items + "/" + item, Map.of("name", "Diesel"), CASHBOOK_SALES, 2)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+
+        ResponseEntity<JsonNode> renamed =
+                cb.post(items, Map.of("name", "diesel", "reuse_existing", true), CASHBOOK_SALES);
+        assertThat(renamed.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(RetailTestSupport.id(renamed)).isEqualTo(item);
+        ResponseEntity<JsonNode> oldName =
+                cb.post(items, Map.of("name", "Genset fuel", "reuse_existing", true), CASHBOOK_SALES);
+        assertThat(oldName.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(RetailTestSupport.id(oldName)).isNotEqualTo(item);
     }
 
     @Test
