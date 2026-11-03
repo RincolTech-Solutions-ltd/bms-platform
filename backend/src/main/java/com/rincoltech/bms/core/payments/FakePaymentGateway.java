@@ -23,6 +23,9 @@ public final class FakePaymentGateway implements PaymentGateway {
         public final String merchantReference;
         public final long orderedMinor;
         public final String currency;
+        /** The payer's number the order was made with: what a real provider shows as the paying account (issue #314). */
+        public volatile String payerPhoneE164;
+
         volatile Status status = Status.PENDING;
         volatile long reportedMinor;
         volatile String reportedCurrency;
@@ -88,6 +91,7 @@ public final class FakePaymentGateway implements PaymentGateway {
             byProviderReference.put(id, order);
             byMerchantReference.put(request.merchantReference(), order);
         }
+        order.payerPhoneE164 = request.payerPhoneE164();
         if (loseCreateAnswers > 0) {
             loseCreateAnswers--;
             throw new GatewayException(GatewayException.Kind.TRANSIENT, 0, null);
@@ -173,6 +177,13 @@ public final class FakePaymentGateway implements PaymentGateway {
         o.method = "MTN";
         o.confirmation = confirmationCode;
         o.status = Status.COMPLETED;
+    }
+
+    /** As {@link #complete}, reported as paid by this method (a card, say) instead of the default wallet. */
+    public synchronized void complete(
+            String providerReference, long paidMinor, String paidCurrency, String confirmationCode, String method) {
+        complete(providerReference, paidMinor, paidCurrency, confirmationCode);
+        byProviderReference.get(providerReference).method = method;
     }
 
     /** The status answer names this merchant reference instead of the order's own (a confused or hostile provider). */
