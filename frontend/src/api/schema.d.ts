@@ -18422,7 +18422,7 @@ export interface components {
              * @description Present only to whoever sells, oversees selling, sets prices or reads cost (retail.sale.create, retail.sale.all_sellers, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
              */
             sell_minor?: number;
-            /** @description Issue #807 (ADR-119): the quantity in every active shop of the business, this shop first and marked here, a shop with none at 0; quantities only, whatever the caller's branch scope. Absent while the owner has switched other shops' stock off or the business has one shop */
+            /** @description Issue #807 (ADR-119): the quantity in every active shop of the business, this shop first and marked here, a shop with none at 0; quantities only, whatever the caller's branch scope. Absent while the owner has switched other shops' stock off or fewer than two shops would be listed */
             shops?: components["schemas"]["RetailShopQty"][];
             standard_pack?: components["schemas"]["RetailStandardPack"];
             unit?: string;

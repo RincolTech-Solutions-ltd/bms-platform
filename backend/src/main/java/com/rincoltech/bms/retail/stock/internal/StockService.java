@@ -277,8 +277,8 @@ class StockService {
         if (!capabilities.showsOtherShopsStock()) {
             return List.of();
         }
-        // The listed branch is always in, so its own quantity is never dropped (a closed shop, or one that keeps no
-        // goods).
+        // The listed branch is always in, so its own quantity is never dropped (one that keeps no goods; a closed one
+        // is refused by resolve before this).
         List<Branch> active = branches.activeStocking(here);
         List<Branch> out =
                 new ArrayList<>(active.stream().filter(b -> b.id().equals(here)).toList());

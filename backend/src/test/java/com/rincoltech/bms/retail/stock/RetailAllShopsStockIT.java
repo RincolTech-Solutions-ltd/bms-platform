@@ -133,6 +133,7 @@ class RetailAllShopsStockIT extends IntegrationTest {
                 .params(third, t.tenantId())
                 .update();
         api.stockUp(third, product, "2");
+        api.importedBalance(t.headOffice(), product, "-3");
         TestDatabase.owner()
                 .sql("UPDATE branches SET stocks_goods = false WHERE id = ?")
                 .params(t.headOffice())
@@ -142,6 +143,34 @@ class RetailAllShopsStockIT extends IntegrationTest {
         assertThat(shops.get(0).get("branch_id").asString())
                 .isEqualTo(t.headOffice().toString());
         assertThat(shops.get(0).get("here").asBoolean()).isTrue();
+        assertThat(shops.get(0).get("qty").asString()).as("its own deficit").isEqualTo("-3.000");
+        assertThat(shops.get(0).get("negative").asBoolean()).isTrue();
+    }
+
+    @Test
+    void aClosedShopIsNeitherListedNorReadable() {
+        // Review of #809: a closed shop holding less than none. Its stock is not read as a shop in use (422, "That
+        // branch
+        // is closed."), so its deficit cannot be hidden behind the other shops; reading an open shop leaves it out.
+        UUID third = UUID.randomUUID();
+        TestDatabase.owner()
+                .sql("INSERT INTO branches (id, tenant_id, code, name) VALUES (?, ?, 'BR3', 'Test Branch Three')")
+                .params(third, t.tenantId())
+                .update();
+        api.importedBalance(third, product, "-3");
+        TestDatabase.owner()
+                .sql("UPDATE branches SET status = 'inactive' WHERE id = ?")
+                .params(third)
+                .update();
+        ResponseEntity<JsonNode> closed =
+                api.call(HttpMethod.GET, "/stock?branch_id=" + third, null, SELLER, "*", Map.of());
+        assertThat(closed.getStatusCode()).as("%s", closed.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(closed.getBody().toString()).contains("unknown_branch");
+        JsonNode shops = row(sellerStock(), product).get("shops");
+        assertThat(shops).hasSize(2);
+        for (JsonNode shop : shops) {
+            assertThat(shop.get("branch_id").asString()).isNotEqualTo(third.toString());
+        }
     }
 
     @Test

@@ -21,8 +21,8 @@ how a shop is doing. A plain count of an item at another shop of the same busine
 ## Decision
 
 1. **Every row of `GET /retail/stock` carries `shops`**: one entry per active branch of the business that keeps goods
-   (`stocks_goods`), the branch listed first with `here: true` (always, even when it is closed or keeps no goods, so its own
-   quantity is never dropped), then the others in the order of the branch list (head office
+   (`stocks_goods`), the branch listed first with `here: true` (always, even when it keeps no goods, so its own quantity is
+   never dropped), then the others in the order of the branch list (head office
    first). Each entry is `{branch_id, name, qty, negative, here}` and nothing else: no cost, no average buying price, no value,
    no movement. A shop with no balance row shows `0.000`; a balance below zero shows as it is, with `negative: true`.
 2. **Who gets it.** Whoever may read stock at the branch listed (`retail.stock.read` in its scope, as the route already
@@ -36,8 +36,10 @@ how a shop is doing. A plain count of an item at another shop of the same busine
    note when the rows carry `shops`.
 4. **The owner's switch.** `other_shops_stock` in the retail settings group (`GET` and `PUT /retail/settings/capabilities`,
    `core.settings.manage`, audited as `retail.capabilities.changed`), true unless switched off. It is not a capability and is
-   never listed in `/me`. A value that is not true or false is 400 (the request body is read as a boolean). A business with one shop that keeps goods gets no `shops` whatever the switch says, so the default is
-   in effect "on for a business with more than one shop". Off, the rows carry no `shops` and My stock is as before issue #807,
+   never listed in `/me`. A value that cannot be read as a boolean is 400 (the field is bound as a boolean, so the strings "true" and
+   "false" are taken as such). The list is left out whenever fewer than two shops would be listed (the shop listed and the
+   other active shops that keep goods), whatever the switch says, so the default is in effect "on for a business with more
+   than one shop". A closed shop is never listed and its stock is not read as a shop in use (422 `unknown_branch`). Off, the rows carry no `shops` and My stock is as before issue #807,
    with the "0 here" note still cut to the shops the person may read.
 5. **No Switch button.** The "Switch to" button of issue #728 is removed from My stock and the item's page. Changing the shop in
    use stays where it was: the shop label above every page.
