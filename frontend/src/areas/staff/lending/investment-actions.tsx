@@ -108,9 +108,9 @@ export function PayForm({ inv, kind }: { inv: Investment; kind: 'pay_return' | '
     kind === 'pay_return'
       ? inv.return_available_minor ?? 0
       : (inv.principal_held_minor ?? 0) + (inv.return_accrued_minor ?? 0) - (inv.return_paid_minor ?? 0);
-  // success-screen: the Paid screen with the voucher replaces the form; one sent for approval raises no toast
+  // success-screen: the Paid screen with the voucher replaces the form; a payment is never sent for approval
   const save = useMutation<TransactionResult>({
-    meta: { success: (r: { executed?: boolean }) => (!r?.executed ? null : kind === 'pay_return' ? 'Return paid' : 'Investment paid out') },
+    meta: { success: kind === 'pay_return' ? 'Return paid' : 'Investment paid out' },
     mutationFn: () => {
       const body = { payment_method_key: draft.method, external_reference: draft.reference.trim() || undefined };
       return kind === 'pay_return' ? investments.payReturn(id, body, key) : investments.payout(id, body, key);

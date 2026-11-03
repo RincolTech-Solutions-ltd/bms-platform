@@ -37,10 +37,9 @@ function Row({ c }: { c: PlatformClosure }) {
   const [code, setCode] = useState('');
   const [codeProblem, setCodeProblem] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
-  // success-screen: the Removed note with the keep until day takes the place of the form
+  // toast-exempt: the Removed note on the row says it, with the day the money records are kept until
   const remove = useMutation({
     mutationFn: (reason: string) => removeClosedBusiness(c.id ?? '', code.trim(), reason),
-    meta: { success: c.tenant_name ? `${c.tenant_name} removed` : 'Business removed' },
     onSuccess: (r) => {
       setOpen(false);
       setCode('');

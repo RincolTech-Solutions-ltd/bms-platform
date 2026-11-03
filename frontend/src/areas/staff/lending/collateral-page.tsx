@@ -218,7 +218,7 @@ function ReleaseRequest({ id, version, onDone }: { id: string; version: number; 
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (busy || by.trim() === '') return;
-    // toast-exempt: it only asks for approval, and the note in its place says a second person must agree first
+    // toast-exempt: it only asks for approval; nothing changes until a second person agrees in the approvals inbox
     setBusy(true);
     setFailure(null);
     try {

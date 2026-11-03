@@ -75,7 +75,7 @@ back to what opened it.
 ## Feedback
 
 14. A page load shows a skeleton, and nothing at all for under 1 second.
-15. Toasts are dark and neutral, at the bottom, with an icon, for 6 seconds (12 with an Undo), with at most one action. An error is never
+15. Toasts are dark and neutral, at the bottom, with an icon, for 4 seconds (8 with an Undo; the owner's ask in issue #824), with at most one action. An error is never
     a blocking dialog. Sign-in and the invitation page say an error in an error toast as well as in their error line (issue
     #122); the line stays on the page and is the one read out, so that toast is silent and carries no button. The toast shows
     only while the line does, so the next attempt and the step after it never keep an old error, and a second failure

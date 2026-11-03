@@ -278,7 +278,15 @@ const TOAST_EXEMPT = /^\/\/\s*toast-exempt:\s*\S/;
 // A write whose screen replaces the form carries `// success-screen: <what>` above it: it still toasts, and the screen it
 // sets is not read as a second success note.
 const SUCCESS_SCREEN = /^\/\/\s*success-screen:\s*\S/;
-const SCREEN_AS_EXEMPT = /\/\/\s*toast-exempt:\s*success screen/;
+// A toast-exempt reason that says a screen, panel or receipt takes the form's place, in any words, is a success screen.
+const SCREEN_AS_EXEMPT = /\/\/\s*toast-exempt:[^\n]*\b(?:success screen|replaces?|replaced|in (?:its|the form's) place|in place of|instead of the form|(?:saved|success|receipt|done) (?:panel|screen))\b/i;
+// A success-screen tag turns off the said-twice check, so it is for a screen that replaces the form, never a note beside it.
+const SCREEN_ON_NOTE = /\/\/\s*success-screen:[^\n]*\bnote\b/i;
+
+/** The toast-exempt and success-screen comments of one file that misuse their tag (#824). */
+function misusedTags(text: string): string[] {
+  return text.split('\n').flatMap((line, i) => (SCREEN_AS_EXEMPT.test(line) || SCREEN_ON_NOTE.test(line) ? [`${i + 1} ${line.trim()}`] : []));
+}
 // meta.success that is not a bare `() => null`; a toast call whose own parentheses (one level of nesting) hold the 'success'
 // tone; sayDone(; or useItemAdded's added(.
 const SAYS_DONE =
@@ -315,18 +323,21 @@ function restOfBlock(text: string, from: number): string {
 }
 
 /**
- * The code after a send: to the end of its block, but never past the next declaration or return at the same depth. A send in
- * a top-level callback of a component (`useEntryChecks(..., () => save.mutate())`) would otherwise read the whole rest of the
- * component, and any toast in it passed Move stock while its save said nothing (#824).
+ * The code after a send: to the end of its block, or, once the send has left the expression it sits in (a callback handed
+ * to a call), to the end of that statement. A send in a top-level callback of a component (`useEntryChecks(..., () =>
+ * save.mutate())`) would otherwise read the whole rest of the component, and any toast in it passed Move stock while its
+ * save said nothing (#824). A send that is a statement of its own block reads the rest of the block. Strings are skipped.
  */
 function restOfSend(text: string, from: number): string {
   const rest = restOfBlock(text, from);
   let depth = 0;
   for (let i = 0; i < rest.length; i += 1) {
-    const c = rest[i];
-    if (c === '{' || c === '(') depth += 1;
+    const c = rest[i] ?? '';
+    if (c === "'" || c === '"' || c === '`') {
+      for (i += 1; i < rest.length && (rest[i] !== c || rest[i - 1] === '\\'); i += 1);
+    } else if (c === '{' || c === '(') depth += 1;
     else if (c === '}' || c === ')') depth -= 1;
-    else if (c === '\n' && depth <= 0 && /^\s*(?:const|let|function|return|export)\b/.test(rest.slice(i + 1))) return rest.slice(0, i);
+    else if (depth < 0 && (c === ';' || c === '\n')) return rest.slice(0, i);
   }
   return rest;
 }
@@ -448,8 +459,8 @@ describe('success toast guard', () => {
     expect(shop.flatMap(({ file, text }) => silentByHand(text).map((m) => `${file}:${m}`))).toEqual([]);
   });
 
-  it('never takes a success screen as a reason to say nothing (#824)', () => {
-    expect(staff.filter(({ text }) => SCREEN_AS_EXEMPT.test(text)).map(({ file }) => file)).toEqual([]);
+  it('never takes a success screen as a reason to say nothing, nor a note as a success screen (#824)', () => {
+    expect(staff.flatMap(({ file, text }) => misusedTags(text).map((m) => `${file}:${m}`))).toEqual([]);
   });
 });
 
@@ -497,10 +508,24 @@ describe('success toast guard on fixtures', () => {
     expect(silentByHand(write('').replace('  setBusy(true);', '  // toast-exempt: the welcome screen that opens says it\n  setBusy(true);'))).toEqual([]);
   });
 
+  it('refuses a success screen as a toast-exempt reason in other words, and a success-screen tag on a note (#824)', () => {
+    for (const reason of ['success screen, the receipt', 'the receipt replaces the form', 'the Saved panel shows', 'the done screen in its place', 'it shows in place of the form']) {
+      expect(misusedTags(`// toast-exempt: ${reason}\nconst save = useMutation({ mutationFn: send });`), reason).toHaveLength(1);
+    }
+    expect(misusedTags(`// success-screen: the Saved note under the form\nconst save = useMutation({ mutationFn: send });`)).toHaveLength(1);
+    expect(misusedTags(`// toast-exempt: it only asks for approval, nothing is saved yet\n// success-screen: the receipt replaces the form`)).toEqual([]);
+  });
+
   it('reads a send in a top-level callback to the end of its statement, not the rest of the component (#824)', () => {
     const form = `const save = useMutation({ mutationFn: send });\nconst entry = useChecks(() => save.mutate());\nconst add = (p) => added(p.id, p.name);`;
     expect(silent(form)).toEqual(['1 save']);
     expect(silent(`const save = useMutation({ mutationFn: send });\nasync function go() {\n  await save.mutateAsync(x);\n  show('Saved', 'success');\n}`)).toEqual([]);
+    // A declaration between the send and its toast inside one callback still counts (review of #828).
+    expect(silent(`const save = useMutation({ mutationFn: send });\nconst go = async () => {\n  const r = await save.mutateAsync(x);\n  const n = r.no;\n  show(\`Saved \${n}\`, 'success');\n};`)).toEqual([]);
+    // A toast in a later statement that does not start with a keyword is not the send's.
+    expect(silent(`const save = useMutation({ mutationFn: send });\nconst entry = useChecks(() => save.mutate());\nuseEffect(() => show('Saved', 'success'));`)).toEqual(['1 save']);
+    // A brace or parenthesis in a string does not move the depth.
+    expect(silent(`const save = useMutation({ mutationFn: send });\nconst entry = useChecks(() => save.mutate(')'));\nconst add = (p) => added(p.id, p.name);`)).toEqual(['1 save']);
   });
 
   it('follows a local function and a callback prop of the same file', () => {

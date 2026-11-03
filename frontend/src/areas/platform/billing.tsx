@@ -49,10 +49,9 @@ function SettingsForm({ current }: { current: BillingSettings }) {
   const [howToPay, setHowToPay] = useState(current.how_to_pay ?? '');
   const [reason, setReason] = useState('');
   const [done, setDone] = useState<string | null>(null);
-  // success-screen: the Saved note under the form names the grace period now in force
+  // toast-exempt: the Saved note under the form says it, with the grace period now in force
   const save = useMutation({
     mutationFn: () => saveBillingSettings({ grace_days: Number(grace), how_to_pay: howToPay, reason: reason.trim() }),
-    meta: { success: 'Billing settings saved' },
     onSuccess: (saved) => {
       queryClient.setQueryData(['billing-settings'], saved);
       void queryClient.invalidateQueries({ queryKey: ['due-for-suspension'] });
