@@ -104,7 +104,8 @@ describe('what is sent', () => {
     type('withdrawal-date', earlier);
     const why = await screen.findByLabelText('Why an earlier date');
     expect(offendingWords(why.closest('form')?.textContent ?? '')).toEqual([]);
-    expect(why.closest('form')?.textContent ?? '').not.toMatch(/[–—]/);
+    const dashes = [0x2013, 0x2014].map((c) => String.fromCharCode(c));
+    expect(dashes.some((d) => (why.closest('form')?.textContent ?? '').includes(d))).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: 'Save withdrawal' }));
     await settle();
     expect(create).not.toHaveBeenCalled();
