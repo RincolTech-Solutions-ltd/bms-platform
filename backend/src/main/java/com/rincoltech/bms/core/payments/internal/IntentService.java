@@ -236,6 +236,20 @@ class IntentService implements PaymentCollections {
                 .optional();
     }
 
+    // JUSTIFICATION-A3: one query for a page of transactions instead of one per row; nothing existing batches it.
+    @Override
+    public Map<UUID, String> confirmationCodesOf(java.util.Collection<UUID> bookedTransactionIds) {
+        Map<UUID, String> codes = new HashMap<>();
+        if (!bookedTransactionIds.isEmpty()) {
+            jdbc.sql("SELECT booked_subject_txn_id, confirmation_code FROM payment_intents"
+                            + " WHERE booked_subject_txn_id IN (:ids) AND confirmation_code IS NOT NULL")
+                    .param("ids", List.copyOf(bookedTransactionIds))
+                    .query((rs, n) -> codes.put(rs.getObject(1, UUID.class), rs.getString(2)))
+                    .list();
+        }
+        return codes;
+    }
+
     @Override
     public IntentView get(UUID intentId) {
         Principal principal = CurrentPrincipal.require();
