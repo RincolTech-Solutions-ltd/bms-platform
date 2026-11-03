@@ -73,7 +73,7 @@ export function StockTable({ rows, showCost, searching = false, filterKey = '', 
   elsewhere?: ReadonlyMap<string, Elsewhere>;
 } & Narrowing) {
   const away = (r: StockRow) => {
-    const at = noneHere(r.qty) ? elsewhere?.get(r.product_id ?? '') : undefined;
+    const at = noneHere(r.qty) && !r.shops ? elsewhere?.get(r.product_id ?? '') : undefined;
     return at && <ElsewhereNote at={at} id={r.product_id ?? ''} />;
   };
   // On a phone the category sits under the item's name, so the table keeps room for the quantity and price.
@@ -93,8 +93,8 @@ export function StockTable({ rows, showCost, searching = false, filterKey = '', 
       <li key={r.product_id} className="rt-card stock-card">
         <strong>{r.description}</strong>
         {showCategory && r.category && <CategoryLabel category={r.category} />}
-        <p className="stock-card-qty">In stock: <span className={r.standard_pack ? 'num qty-packs' : 'num'}><InPacks qty={r.qty ?? '0'} unit={r.unit} pack={r.standard_pack} /></span></p>
-        {r.negative && <p className="rt-flag">Negative</p>}
+        {r.shops ? <ShopQuantities row={r} /> : <p className="stock-card-qty">In stock: <span className={r.standard_pack ? 'num qty-packs' : 'num'}><InPacks qty={r.qty ?? '0'} unit={r.unit} pack={r.standard_pack} /></span></p>}
+        {r.negative && !r.shops && <p className="rt-flag">Negative</p>}
         {away(r)}
         {keptWords(r.qty, r.reserved_qty) && <p className="hint">{keptWords(r.qty, r.reserved_qty)}</p>}
         {(r.sell_minor !== undefined || (showCost && r.cost_minor !== undefined)) && <p className="hint"><PriceLine cost={showCost ? r.cost_minor : undefined} sell={r.sell_minor} /></p>}
@@ -120,8 +120,8 @@ export function StockTable({ rows, showCost, searching = false, filterKey = '', 
         </td>
         {!phone && !grouping && <td>{r.category}</td>}
         <td className={r.standard_pack ? 'num qty-packs' : 'num'}>
-          <InPacks qty={r.qty ?? '0'} unit={r.unit} pack={r.standard_pack} />
-          {r.negative && <div className="rt-flag">Negative</div>}
+          {r.shops ? <ShopQuantities row={r} /> : <InPacks qty={r.qty ?? '0'} unit={r.unit} pack={r.standard_pack} />}
+          {r.negative && !r.shops && <div className="rt-flag">Negative</div>}
           {away(r)}
           {keptWords(r.qty, r.reserved_qty) && <div className="hint">{keptWords(r.qty, r.reserved_qty)}</div>}
         </td>
@@ -160,6 +160,24 @@ export function StockTable({ rows, showCost, searching = false, filterKey = '', 
 function InPacks({ qty, unit, pack }: { qty: string; unit?: string; pack?: PackSize }) {
   const { inPacks, total } = packsAndPiecesParts(qty, unit, pack);
   return total ? <><span className="qty-in-packs">{inPacks}</span> <span className="qty-total">({total})</span></> : <>{inPacks}</>;
+}
+
+/**
+ * Issue #807 (ADR-119): the item's quantity in every shop of the business, this shop first as "In stock here", a shop with
+ * none at 0 and one below zero said in words as well as by its minus sign. Quantities only; nothing moves the person.
+ */
+function ShopQuantities({ row }: { row: StockRow }) {
+  return (
+    <ul className="shop-qtys" data-testid={`shops-${row.product_id}`} aria-label={`${row.description} in each shop`}>
+      {(row.shops ?? []).map((s) => (
+        <li key={s.branch_id} className={s.here ? 'shop-qty-here' : undefined}>
+          {s.here ? 'In stock here' : s.name}:{' '}
+          <span className={row.standard_pack ? 'num qty-packs' : 'num'}><InPacks qty={s.qty ?? '0'} unit={row.unit} pack={row.standard_pack} /></span>
+          {s.negative && <span className="rt-flag"> Below zero</span>}
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 /** One quantity with its unit, in the item's standard pack and pieces when it has one (issue #650), and the negative flag in words. */
