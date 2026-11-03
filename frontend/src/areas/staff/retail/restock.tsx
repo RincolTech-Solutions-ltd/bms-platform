@@ -5,9 +5,9 @@ import { RETAIL_CURRENCY, businessToday, retail, type Product, type Supplier, ty
 import { branchLabel } from '../../../auth/branch';
 import { parseMinor } from '../../../components/money';
 import { useStaff } from '../context';
-import { usePersistedDraft } from './idempotency';
+import { newIdempotencyKey, usePersistedDraft } from './idempotency';
 import { lineTotalMinor, parseQty, qtyString, showDate, showQty } from './maths';
-import { chosenUnitHint, redraftOf } from './restock-correct-state';
+import { EDIT_REASON, alreadyVoided, chosenUnitHint, editNote, listIsStale, redraftOf } from './restock-correct-state';
 import { Gate, Money, Note, Problem, ProductPicker, money, useProfitAccess } from './ui';
 import { ScanBar } from './scan';
 import { PACK_UNUSABLE, plusOne, scanInto, touchedLine } from './barcode-state';
@@ -162,7 +162,14 @@ export function supplierOptions(all: Supplier[], chosenId: string): Supplier[] {
   return all.filter((s) => s.active !== false || s.id === chosenId);
 }
 
-export function RestockForm({ onSaved, draftName, initial, again = false }: { onSaved?: (p: Purchase, context: RestockContext) => void; draftName?: string; initial?: RestockDraft; again?: boolean }) {
+export function RestockForm({ onSaved, draftName, initial, again = false, replaces }: {
+  onSaved?: (p: Purchase, context: RestockContext) => void;
+  draftName?: string;
+  initial?: RestockDraft;
+  again?: boolean;
+  /** Edit a delivery (issue #830): saving voids this purchase (the correct-this-purchase path) and saves the form as a new one that names it. */
+  replaces?: Purchase;
+}) {
   const { me, branch } = useStaff();
   const canProfit = useProfitAccess();
   // A new selling price applies in every shop, so only someone who may change prices sets it here (ADR-055); Purchasing given
@@ -185,12 +192,15 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
   const setLines = (f: (ls: RestockLine[]) => RestockLine[]) => setDraft((d) => ({ ...d, lines: f(d.lines) }));
   const suppliers = useQuery({ queryKey: ['retail', 'suppliers'], queryFn: () => retail.listSuppliers() });
 
-  // toast-exempt: success screen, the purchase saved screen that replaces the form
+  // The purchase saved screen replaces the form; an edited delivery also says "Delivery updated" (issue #830).
   const save = useMutation({
     mutationFn: async () => {
       const supplierName = (suppliers.data ?? []).find((x) => x.id === supplierId)?.name ?? '';
       const before = Object.fromEntries(lines.map((l) => [l.product.id ?? '', { sell: l.product.sell_minor, cost: l.product.cost_minor }]));
-      const saved = await retail.createPurchase(buildPurchase({ supplierId, purchasedOn, method, lines }), key);
+      // Edit (issue #830): the old delivery is voided first, as Correct this purchase does, so a refusal (its stock moved) saves
+      // nothing new; a void that already went through, from an earlier press whose answer was lost, is the same end state.
+      if (replaces?.id) await retail.voidPurchase(replaces.id, EDIT_REASON, newIdempotencyKey()).catch((e: unknown) => { if (!alreadyVoided(e)) throw e; });
+      const saved = await retail.createPurchase({ ...buildPurchase({ supplierId, purchasedOn, method, lines }), ...(replaces ? { note: editNote(replaces) } : {}) }, key);
       return { saved, context: { supplierName, before } };
     },
     onSuccess: ({ saved, context }) => {
@@ -199,6 +209,8 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       onSaved?.(saved, context);
     },
+    onError: (e) => { if (replaces && listIsStale(e)) void queryClient.invalidateQueries({ queryKey: ['retail'] }); },
+    meta: { success: () => (replaces ? 'Delivery updated' : null) },
   });
 
   const unitsOn = capabilityOn(me, 'retail', UNITS);
@@ -410,7 +422,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
 
       <p className="rt-total" aria-live="polite" data-testid="restock-total">Total cost <Money minor={restockTotal(lines)} /></p>
       <Problem error={save.error} />
-      <BusyButton type="submit" className="rt-primary" data-tour="restock-save" busy={save.isPending} notReady={blocked}>Save the purchase</BusyButton>
+      <BusyButton type="submit" className="rt-primary" data-tour="restock-save" busy={save.isPending} notReady={blocked}>{replaces ? 'Save changes' : 'Save the purchase'}</BusyButton>
 
       {lines.length > 0 && !save.isPending && (
         <button type="button" onClick={() => { discard(); save.reset(); }}>Clear this purchase</button>
@@ -479,23 +491,37 @@ export function RestockSaved({ purchase, context, onNew }: { purchase: Purchase;
  * A voided restock entered again (issue #351): the form opens with its lines, supplier, date and payment, in a draft of its own, and
  * a line says which restock it replaces. Nothing is saved until the person saves it.
  */
-function Again({ purchaseId, onSaved }: { purchaseId: string; onSaved: (p: Purchase, context: RestockContext) => void }) {
+export function Again({ purchaseId, onSaved, edit = false }: { purchaseId: string; onSaved: (p: Purchase, context: RestockContext) => void; edit?: boolean }) {
   const { me } = useStaff();
   const loaded = useQuery({
-    queryKey: ['retail', 'restock-again', purchaseId],
+    queryKey: ['retail', edit ? 'restock-edit' : 'restock-again', purchaseId],
     queryFn: async () => {
       const purchase = await retail.getPurchase(purchaseId);
       const products = await Promise.all((purchase.lines ?? []).map((l) => retail.getProduct(l.product_id ?? '')));
-      return { purchase, draft: redraftOf(purchase, products, businessToday()) };
+      // Edit keeps the delivery's own date, as the old app did; the date warning says when that day may be banked.
+      const draft = redraftOf(purchase, products, businessToday());
+      return { purchase, draft: edit && purchase.purchased_on ? { ...draft, purchasedOn: purchase.purchased_on } : draft };
     },
     gcTime: 0,
   });
   if (loaded.isPending) return <p className="loading">Loading</p>;
   if (!loaded.data) return <Problem error={loaded.error} />;
+  const { purchase } = loaded.data;
+  // Issue #830: Edit a delivery that is still recorded; one voided already is entered again as before.
+  if (edit && purchase.status !== 'voided') {
+    return (
+      <>
+        <Note>
+          You are editing delivery {purchase.purchase_no}. Change what was wrong, then save. The old entry is kept in Past purchases, marked Voided, and the new one says it replaces it.
+        </Note>
+        <RestockForm draftName={`restock-edit:${me.user_id ?? ''}:${purchaseId}`} initial={loaded.data.draft} onSaved={onSaved} again replaces={purchase} />
+      </>
+    );
+  }
   return (
     <>
       <Note>
-        You are entering purchase {loaded.data.purchase.purchase_no} again{loaded.data.purchase.status === 'voided' ? ', which you voided' : ''}. Check each quantity, unit and price, then save.
+        You are entering purchase {purchase.purchase_no} again{purchase.status === 'voided' ? ', which you voided' : ''}. Check each quantity, unit and price, then save.
       </Note>
       <RestockForm draftName={`restock-again:${me.user_id ?? ''}:${purchaseId}`} initial={loaded.data.draft} onSaved={onSaved} again />
     </>
@@ -505,12 +531,14 @@ function Again({ purchaseId, onSaved }: { purchaseId: string; onSaved: (p: Purch
 export function RestockPage() {
   const [done, setDone] = useState<{ purchase: Purchase; context: RestockContext } | null>(null);
   const [round, setRound] = useState(0);
-  const again = (useRouterState({ select: (state) => state.location.search }) as { again?: string }).again;
+  const { again, edit } = useRouterState({ select: (state) => state.location.search }) as { again?: string; edit?: string };
   return (
     <Gate screen="restock" title={WORDS.buyStock}>
       <Link className="link-row" data-tour="restock-past" to="/staff/retail/restocks">Past purchases, to correct a mistake<RowChevron /></Link>
       {done ? (
         <RestockSaved purchase={done.purchase} context={done.context} onNew={() => { setDone(null); setRound((n) => n + 1); }} />
+      ) : typeof edit === 'string' && edit !== '' ? (
+        <Again purchaseId={edit} edit onSaved={(purchase, context) => setDone({ purchase, context })} />
       ) : typeof again === 'string' && again !== '' ? (
         <Again purchaseId={again} onSaved={(purchase, context) => setDone({ purchase, context })} />
       ) : (
