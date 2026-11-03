@@ -284,6 +284,29 @@ class ReaderLimitsTest {
         refusedWith(Parsing.FILE_UNREADABLE, () -> parse(FileType.JSONL, nested));
     }
 
+    // JUSTIFICATION-A3: the two tests for items 3 and 5 of the review of 6e4f8c0, no new mechanism.
+    @Test
+    void theTextOfABackslashAndU0000IsNotANul() throws IOException {
+        // The JSON holds an escaped backslash then the letters u0000, as a Windows path might: no NUL at all.
+        var parsed = parse(FileType.JSONL, TestFiles.csv("{\"code\":\"FAB-1\",\"tags\":[\"C:\\\\u0000x\"]}\n"));
+        assertThat(parsed.rows()).isEqualTo(1);
+        JsonNode tags = JSON.readTree(rows.get(0).rawJson()).get("tags").get("value");
+        assertThat(tags.get(0).asString()).isEqualTo("C:\\u0000x");
+    }
+
+    @Test
+    void renamedHeadersNeverTakeAnotherHeadersName() throws IOException {
+        // Phone (2) is a real header, and so is column_5, the name a fifth cell beyond the header would get.
+        parse(FileType.CSV, TestFiles.csv("Phone,Phone,Phone (2),column_5\nA,B,C,D,E\n"));
+        JsonNode raw = JSON.readTree(rows.get(0).rawJson());
+        assertThat(raw.size()).as("no cell is lost").isEqualTo(5);
+        assertThat(raw.get("Phone").get("value").asString()).isEqualTo("A");
+        assertThat(raw.get("Phone (2)").get("value").asString()).isEqualTo("B");
+        assertThat(raw.get("Phone (2) (2)").get("value").asString()).isEqualTo("C");
+        assertThat(raw.get("column_5").get("value").asString()).isEqualTo("D");
+        assertThat(raw.get("column_5 (2)").get("value").asString()).isEqualTo("E");
+    }
+
     @Test
     void blankLinesBeforeTheFirstJsonObjectAreNotRows() throws IOException {
         var parsed = parse(FileType.JSONL, TestFiles.csv("\n\n{\"code\":\"FAB-1\"}\n\n{\"code\":\"FAB-2\"}\n"));

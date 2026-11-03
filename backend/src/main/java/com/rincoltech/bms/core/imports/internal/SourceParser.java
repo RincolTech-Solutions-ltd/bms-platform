@@ -123,7 +123,7 @@ final class SourceParser {
                 // PostgreSQL cannot store a NUL in jsonb, though JSON may carry one (JSON Lines {"a":"\u0000"}).
                 if (name.indexOf('\0') >= 0
                         || (cell.value() instanceof String s && s.indexOf('\0') >= 0)
-                        || (cell.value() instanceof JsonNode n && n.toString().contains("\\u0000"))) {
+                        || (cell.value() instanceof JsonNode n && hasNul(n))) {
                     throw Parsing.unreadable("Row " + sourceRowNo + " holds a NUL character.");
                 }
                 Map<String, Object> c = new LinkedHashMap<>();
@@ -136,6 +136,22 @@ final class SourceParser {
             if (chunk.size() == CHUNK) {
                 flush();
             }
+        }
+
+        /** A NUL in any text or key of nested JSON, found in the values, so a backslash followed by u0000 is not one. */
+        private static boolean hasNul(JsonNode n) {
+            if (n.isString()) {
+                return n.asString().indexOf('\0') >= 0;
+            }
+            if (n.isObject()) {
+                return n.properties().stream().anyMatch(e -> e.getKey().indexOf('\0') >= 0 || hasNul(e.getValue()));
+            }
+            for (JsonNode child : n) {
+                if (hasNul(child)) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         void flush() {

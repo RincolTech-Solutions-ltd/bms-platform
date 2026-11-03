@@ -1,7 +1,7 @@
 package com.rincoltech.bms.core.imports.internal;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -98,7 +98,7 @@ final class Parsing {
         private int headerRowNo;
         private int lastRowNo;
         private int rows;
-        private final Map<String, Integer> seen = new HashMap<>();
+        private final Set<String> seen = new HashSet<>();
 
         Limits limits() {
             return limits;
@@ -143,7 +143,7 @@ final class Parsing {
                 if (i >= limits.maxColumns()) {
                     throw tooManyColumns();
                 }
-                String name = i < names.size() ? names.get(i) : "column_" + (i + 1);
+                String name = i < names.size() ? names.get(i) : free("column_" + (i + 1), false);
                 if (!limits.ignoredColumns().contains(key(name))) {
                     raw.put(name, c);
                 }
@@ -197,7 +197,7 @@ final class Parsing {
                 String name = c == null || c.blank()
                         ? "column_" + (i + 1)
                         : String.valueOf(c.value()).strip();
-                out.add(unique(name));
+                out.add(free(name, true));
             }
             names = List.copyOf(out);
             headerRowNo = rowNo;
@@ -205,10 +205,16 @@ final class Parsing {
             sink.header(rowNo, names);
         }
 
-        /** A repeated header name gets its count, {@code Phone (2)}, so no cell is lost under another's name. */
-        private String unique(String name) {
-            int n = seen.merge(key(name), 1, Integer::sum);
-            return n == 1 ? name : name + " (" + n + ")";
+        /**
+         * The name, or the name with the first count no header holds, {@code Phone (2)}, so no cell is lost under another's
+         * name, even for {@code Phone, Phone, Phone (2)} or a header named {@code column_7}; {@code take} keeps it.
+         */
+        private String free(String name, boolean take) {
+            String candidate = name;
+            for (int n = 2; take ? !seen.add(key(candidate)) : seen.contains(key(candidate)); n++) {
+                candidate = name + " (" + n + ")";
+            }
+            return candidate;
         }
 
         private Failure tooManyRows() {
