@@ -277,7 +277,7 @@ export const expensesPage: Tour = {
     step({ id: 'form', target: 'expense-form', title: 'Record an expense', body: 'Pick the date, the category and the item. Type the amount. Some items ask you to explain. Then tap save.' }),
     step({ id: 'lists', target: 'expenses-lists-link', needs: [EXPENSE_MANAGE, CASHBOOK_READ], optional: true, title: 'Change what you can pick', body: 'Tap Expense lists to add a category or an item.' }),
     step({ id: 'report', target: 'expenses-report-link', optional: true, title: 'Totals', body: 'Tap Expenses report to see the totals by category, item, shop or month.' }),
-    step({ id: 'records', target: 'expense-records', needs: [CASHBOOK_READ], optional: true, title: 'Expense records', body: 'Choose the dates to list what was spent. If one was a mistake, tap Void and give the reason.' }),
+    step({ id: 'records', target: 'expense-records', needs: [CASHBOOK_READ], optional: true, title: 'Expense records', body: 'Choose the dates to list what was spent. If one was a mistake, tap Edit to change it, or Delete to take it out of the cash book.' }),
   ],
 };
 
