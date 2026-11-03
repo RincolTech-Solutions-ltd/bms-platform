@@ -5320,6 +5320,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/expenses/{expense_id}/replace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Edit an expense: void it and record the request in its place, in one transaction (issue #830); M
+         * @description The old expense is voided with the reason "Edited: entered again with the changes" and the new one, at the same branch, carries an explanation naming it; a refusal of either changes nothing. Needs retail.expense.record at the branch as well, and, as every cash book route, retail.till.close (ADR-055). An amount that would wait for an administrator (ADR-091) is 422 edit_needs_approval.
+         */
+        post: operations["replaceRetailExpense"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/expenses/{expense_id}/void": {
         parameters: {
             query?: never;
@@ -6454,6 +6474,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/purchases/{purchase_id}/replace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Edit a delivery: void the restock and record the request in its place, in one transaction (issue #830); M */
+        post: operations["replaceRetailPurchase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/purchases/{purchase_id}/void": {
         parameters: {
             query?: never;
@@ -7270,8 +7307,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * This month's savings records for sales staff, newest first
-         * @description Issue #799, ADR-115: only while the Owner's setting salespeople_see_savings_amount is on, else 403 permission_denied; the branch must be one where the caller may sell (retail.sale.create). Only records dated this month, at the branches where the caller may sell.
+         * Savings records of every month for sales staff, newest first
+         * @description Issue #799, ADR-115: only while the Owner's setting salespeople_see_savings_amount is on, else 403 permission_denied; the branch must be one where the caller may sell (retail.sale.create). Records of every month (issue #827), at the branches where the caller may sell.
          */
         get: operations["listRetailSalesStaffSavings"];
         put?: never;
@@ -7280,6 +7317,26 @@ export interface paths {
          * @description Issue #799, ADR-115: only while the Owner's setting salespeople_see_savings_amount is on, else 403 permission_denied; the branch must be one where the caller may sell (retail.sale.create).
          */
         post: operations["createRetailSalesStaffSavings"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/savings/sales-staff/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Savings of every month for sales staff, by shop, year, month and person, with totals
+         * @description Issue #799, ADR-115: only while the Owner's setting salespeople_see_savings_amount is on, else 403 permission_denied; the branch must be one where the caller may sell (retail.sale.create). Issue #827: active records only, amounts saved only.
+         */
+        get: operations["getRetailSalesStaffSavingsGroups"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -7409,6 +7466,40 @@ export interface paths {
         put?: never;
         /** Correct the quantity of an item at a branch with a reason; an adjustment that is not shrinkage (issue #351); M */
         post: operations["correctRetailStockQuantity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/stock/items/{product_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One item's stock in each shop the caller may read (issue #813) */
+        get: operations["getRetailItemStock"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/stock/items/{product_id}/movements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every movement of one item newest first, with the shop's balance after each (issue #813); a branch outside the caller's scope is 404 */
+        get: operations["listRetailItemMovements"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -15178,6 +15269,35 @@ export interface components {
             sell_price_minor?: number;
             unit?: string;
         };
+        /** @description The item in one shop or store */
+        RetailItemShop: {
+            /**
+             * Format: int64
+             * @description The shop's average buying price per piece (ADR-079); Present only with retail.profit.read
+             */
+            avg_cost_minor?: number;
+            /** Format: uuid */
+            branch_id?: string;
+            /** @description A closed branch, listed only while it still holds the item */
+            closed?: boolean;
+            code?: string;
+            name?: string;
+            negative?: boolean;
+            qty?: string;
+        };
+        /** @description The top of the item page (issue #813) */
+        RetailItemStock: {
+            active?: boolean;
+            category?: string;
+            code?: string;
+            description?: string;
+            /** Format: uuid */
+            product_id?: string;
+            shops?: components["schemas"]["RetailItemShop"][];
+            /** @description The sum over the shops listed */
+            total_qty?: string;
+            unit?: string;
+        };
         /** @description An item without sizes that becomes one size or colour of the item */
         RetailJoinItem: {
             /** @description A colour or a print */
@@ -16518,6 +16638,8 @@ export interface components {
              * @description Issue #384: the id of the photo of the item this size belongs to, which it shows while it has none of its own; absent when the item has none
              */
             item_photo_id?: string;
+            /** @description Issue #815: with branch_id, the quantity at or below which the item is low at that branch: the branch's own minimum, else the item's, else low_stock_threshold of the stock list (ADR-029). The sale screen says Only N left at or below it, and Out of stock at zero */
+            low_stock_level?: string;
             /** @description True when the branch balance is below zero */
             negative?: boolean;
             /** @description The pack sizes of the product; present only while the units capability is on */
@@ -17978,6 +18100,14 @@ export interface components {
             credit?: components["schemas"]["RetailSalesSummaryMethod"];
             mobile_money?: components["schemas"]["RetailSalesSummaryMethod"];
         };
+        RetailSavedDay: {
+            /** Format: int64 */
+            amount_minor?: number;
+            /** Format: date */
+            business_date?: string;
+            /** Format: uuid */
+            id?: string;
+        };
         RetailSavings: {
             /**
              * Format: int64
@@ -18036,9 +18166,35 @@ export interface components {
             /** Format: int64 */
             total_sold_minor?: number;
         };
+        RetailSavingsGroups: {
+            shops?: components["schemas"]["RetailSavingsShop"][];
+            /** Format: int64 */
+            total_minor?: number;
+        };
+        RetailSavingsMonth: {
+            /**
+             * Format: int32
+             * @description 1 to 12
+             */
+            month?: number;
+            people?: components["schemas"]["RetailSavingsPerson"][];
+            /** Format: int64 */
+            total_minor?: number;
+        };
         RetailSavingsPage: {
             items?: components["schemas"]["RetailSavings"][];
             next_cursor?: string;
+        };
+        RetailSavingsPerson: {
+            name?: string;
+            records?: components["schemas"]["RetailSavedDay"][];
+            /** Format: int64 */
+            total_minor?: number;
+            /**
+             * Format: uuid
+             * @description Null on a record brought in from an earlier system with no person
+             */
+            user_id?: string;
         };
         RetailSavingsReport: {
             currency?: string;
@@ -18063,6 +18219,13 @@ export interface components {
             /** @description Optional, even when the amount differs from the suggestion */
             overwrite_reason?: string;
             suggestion_token: string;
+        };
+        RetailSavingsShop: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: int64 */
+            total_minor?: number;
+            years?: components["schemas"]["RetailSavingsYear"][];
         };
         RetailSavingsSuggestion: {
             /**
@@ -18102,6 +18265,13 @@ export interface components {
             suggestion_token: string;
             /** Format: int64 */
             total_sold_minor?: number;
+        };
+        RetailSavingsYear: {
+            months?: components["schemas"]["RetailSavingsMonth"][];
+            /** Format: int64 */
+            total_minor?: number;
+            /** Format: int32 */
+            year?: number;
         };
         /** @description Another branch in the caller's scope where the same item sells faster, and what to move there */
         RetailSellsBetterAt: {
@@ -18407,6 +18577,8 @@ export interface components {
         RetailStockMovement: {
             /** Format: date-time */
             at?: string;
+            /** @description The item page (issue #813): what the branch held of the item just after this movement, over its whole history in movement order; absent on the list across items */
+            balance_after?: string;
             /** Format: uuid */
             branch_id?: string;
             /** Format: uuid */
@@ -18427,6 +18599,11 @@ export interface components {
             note?: string;
             /** Format: uuid */
             product_id?: string;
+            /**
+             * Format: int64
+             * @description The item page (issue #813), on a sale: the sale line's total less its cost; Present only with retail.profit.read
+             */
+            profit_minor?: number;
             qty?: string;
             /** Format: uuid */
             reverses_movement_id?: string;
@@ -30273,6 +30450,34 @@ export interface operations {
             };
         };
     };
+    replaceRetailExpense: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                expense_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailExpenseRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailExpense"];
+                };
+            };
+        };
+    };
     voidRetailExpense: {
         parameters: {
             query?: never;
@@ -32427,6 +32632,34 @@ export interface operations {
             };
         };
     };
+    replaceRetailPurchase: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                purchase_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailPurchaseRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailPurchase"];
+                };
+            };
+        };
+    };
     voidRetailPurchase: {
         parameters: {
             query?: never;
@@ -33836,6 +34069,30 @@ export interface operations {
             };
         };
     };
+    getRetailSalesStaffSavingsGroups: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSavingsGroups"];
+                };
+            };
+        };
+    };
     getRetailSalesStaffSavingsSuggestion: {
         parameters: {
             query?: {
@@ -34045,6 +34302,56 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApprovalWaiting"];
+                };
+            };
+        };
+    };
+    getRetailItemStock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailItemStock"];
+                };
+            };
+        };
+    };
+    listRetailItemMovements: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailStockMovementPage"];
                 };
             };
         };

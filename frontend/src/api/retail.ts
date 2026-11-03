@@ -225,6 +225,7 @@ export type InFlightTransfer = S['RetailInFlightTransfer'];
 export type Savings = S['RetailSavings'];
 export type SavingsRequest = S['RetailSavingsRequest'];
 export type SavingsSuggestion = S['RetailSavingsSuggestion'];
+export type SavingsGroups = S['RetailSavingsGroups'];
 export type Banking = S['RetailBanking'];
 export type BankingRequest = S['RetailBankingRequest'];
 export type BankingExpected = S['RetailBankingExpected'];
@@ -626,6 +627,8 @@ export interface RetailApi {
   getPurchase(id: string): Promise<Purchase>;
   /** Voids a restock by reversal, once (retail.purchase.create at every branch it touched); takes the Idempotency-Key of its form. */
   voidPurchase(id: string, reason: string, idempotencyKey: string): Promise<Purchase>;
+  /** Edit a delivery (issue #830): voids it and records the body in its place, in one call; a refusal changes nothing. */
+  replacePurchase(id: string, body: PurchaseRequest, idempotencyKey: string): Promise<Purchase>;
   createUsage(body: UsageRequest, idempotencyKey: string): Promise<Usage>;
   createStocktake(body: StocktakeRequest): Promise<Stocktake>;
   /** Issue #636: `acknowledged` names the big drops ticked on the review; the server refuses with 409 while one is left out. */
@@ -669,10 +672,12 @@ export interface RetailApi {
   // a void takes one too. Figures the schema marks "present only with retail.profit.read" are absent
   // from a body for any other caller, and the screens never infer them.
   // `salesStaff` (issue #799, ADR-115): the routes for a seller without the till, open only while the owner's switch is on;
-  // the same bodies, this month's records only.
+  // the same bodies, every month's records (issue #827).
   savingsSuggestion(q: { branchId: string; date: string; salesStaff?: boolean }): Promise<SavingsSuggestion>;
   createSavings(body: SavingsRequest, idempotencyKey: string, opts?: { salesStaff?: boolean }): Promise<Savings>;
   listSavings(q: CashQuery & { salesStaff?: boolean }): Promise<Savings[]>;
+  /** Issue #827: a seller's savings of every month by shop, year, month and person, with the amount saved at each level. */
+  savingsGroups(q: { branchIds?: string[]; from?: string; to?: string }): Promise<SavingsGroups>;
   voidSavings(id: string, reason: string, idempotencyKey: string): Promise<Savings>;
   bankingExpected(q: { branchId: string; date: string }): Promise<BankingExpected>;
   createBanking(body: BankingRequest, idempotencyKey: string): Promise<Banking>;
@@ -692,6 +697,8 @@ export interface RetailApi {
   createExpense(body: ExpenseRequest, idempotencyKey: string): Promise<Expense | ApprovalWaiting>;
   listExpenses(q: CashQuery & { categoryId?: string; itemId?: string }): Promise<Expense[]>;
   voidExpense(id: string, reason: string, idempotencyKey: string): Promise<Expense>;
+  /** Edit an expense (issue #830): voids it and records the body in its place, in one call; a refusal changes nothing. */
+  replaceExpense(id: string, body: ExpenseRequest, idempotencyKey: string): Promise<Expense>;
   createAdvance(body: AdvanceRequest, idempotencyKey: string): Promise<Advance>;
   listAdvances(q: CashQuery & { partyId?: string; openOnly?: boolean }): Promise<Advance[]>;
   getAdvance(id: string): Promise<Advance>;
@@ -1444,6 +1451,10 @@ const realRetail: RetailApi = {
     return unwrap(await api.POST('/api/v1/retail/purchases/{purchase_id}/void', { params: { path: { purchase_id: id }, header: { 'Idempotency-Key': key } }, body: { reason } }));
   },
 
+  async replacePurchase(id, body, key) {
+    return unwrap(await api.POST('/api/v1/retail/purchases/{purchase_id}/replace', { params: { path: { purchase_id: id }, header: { 'Idempotency-Key': key } }, body }));
+  },
+
   async createUsage(body, key) {
     return unwrap(await api.POST('/api/v1/retail/usage', { body, params: { header: { 'Idempotency-Key': key } } }));
   },
@@ -1573,6 +1584,11 @@ const realRetail: RetailApi = {
       : await api.POST('/api/v1/retail/savings', { body, params }));
   },
 
+  async savingsGroups({ branchIds, from, to }) {
+    const query = { branch_id: branchIds && branchIds.length > 0 ? branchIds : undefined, from: from || undefined, to: to || undefined };
+    return unwrap(await api.GET('/api/v1/retail/savings/sales-staff/groups', { params: { query } }));
+  },
+
   async listSavings(q) {
     return allPages((cursor) => {
       const query = { ...cashParams(q), limit: 200, cursor };
@@ -1656,6 +1672,10 @@ const realRetail: RetailApi = {
 
   async voidExpense(id, reason, key) {
     return unwrap(await api.POST('/api/v1/retail/expenses/{expense_id}/void', { params: { path: { expense_id: id }, header: { 'Idempotency-Key': key } }, body: { reason } }));
+  },
+
+  async replaceExpense(id, body, key) {
+    return unwrap(await api.POST('/api/v1/retail/expenses/{expense_id}/replace', { params: { path: { expense_id: id }, header: { 'Idempotency-Key': key } }, body }));
   },
 
   async createAdvance(body, key) {

@@ -14244,6 +14244,70 @@
           }
         }
       },
+      "RetailItemShop" : {
+        "description" : "The item in one shop or store",
+        "properties" : {
+          "avg_cost_minor" : {
+            "description" : "The shop's average buying price per piece (ADR-079); Present only with retail.profit.read",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "closed" : {
+            "description" : "A closed branch, listed only while it still holds the item",
+            "type" : "boolean"
+          },
+          "code" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "negative" : {
+            "type" : "boolean"
+          },
+          "qty" : {
+            "type" : "string"
+          }
+        }
+      },
+      "RetailItemStock" : {
+        "description" : "The top of the item page (issue #813)",
+        "properties" : {
+          "active" : {
+            "type" : "boolean"
+          },
+          "category" : {
+            "type" : "string"
+          },
+          "code" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "product_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "shops" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailItemShop"
+            },
+            "type" : "array"
+          },
+          "total_qty" : {
+            "description" : "The sum over the shops listed",
+            "type" : "string"
+          },
+          "unit" : {
+            "type" : "string"
+          }
+        }
+      },
       "RetailJoinItem" : {
         "description" : "An item without sizes that becomes one size or colour of the item",
         "properties" : {
@@ -16889,6 +16953,10 @@
           "item_photo_id" : {
             "description" : "Issue #384: the id of the photo of the item this size belongs to, which it shows while it has none of its own; absent when the item has none",
             "format" : "uuid",
+            "type" : "string"
+          },
+          "low_stock_level" : {
+            "description" : "Issue #815: with branch_id, the quantity at or below which the item is low at that branch: the branch's own minimum, else the item's, else low_stock_threshold of the stock list (ADR-029). The sale screen says Only N left at or below it, and Out of stock at zero",
             "type" : "string"
           },
           "negative" : {
@@ -19662,6 +19730,22 @@
           }
         }
       },
+      "RetailSavedDay" : {
+        "properties" : {
+          "amount_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "business_date" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }
+      },
       "RetailSavings" : {
         "properties" : {
           "amount_minor" : {
@@ -19758,6 +19842,39 @@
           }
         }
       },
+      "RetailSavingsGroups" : {
+        "properties" : {
+          "shops" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailSavingsShop"
+            },
+            "type" : "array"
+          },
+          "total_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailSavingsMonth" : {
+        "properties" : {
+          "month" : {
+            "description" : "1 to 12",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "people" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailSavingsPerson"
+            },
+            "type" : "array"
+          },
+          "total_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
       "RetailSavingsPage" : {
         "properties" : {
           "items" : {
@@ -19767,6 +19884,28 @@
             "type" : "array"
           },
           "next_cursor" : {
+            "type" : "string"
+          }
+        }
+      },
+      "RetailSavingsPerson" : {
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "records" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailSavedDay"
+            },
+            "type" : "array"
+          },
+          "total_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "user_id" : {
+            "description" : "Null on a record brought in from an earlier system with no person",
+            "format" : "uuid",
             "type" : "string"
           }
         }
@@ -19827,6 +19966,24 @@
         },
         "required" : [ "suggestion_token" ]
       },
+      "RetailSavingsShop" : {
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "total_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "years" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailSavingsYear"
+            },
+            "type" : "array"
+          }
+        }
+      },
       "RetailSavingsSuggestion" : {
         "properties" : {
           "available_minor" : {
@@ -19880,6 +20037,24 @@
           }
         },
         "required" : [ "suggestion_token" ]
+      },
+      "RetailSavingsYear" : {
+        "properties" : {
+          "months" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailSavingsMonth"
+            },
+            "type" : "array"
+          },
+          "total_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "year" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }
       },
       "RetailSellsBetterAt" : {
         "description" : "Another branch in the caller's scope where the same item sells faster, and what to move there",
@@ -20470,6 +20645,10 @@
             "format" : "date-time",
             "type" : "string"
           },
+          "balance_after" : {
+            "description" : "The item page (issue #813): what the branch held of the item just after this movement, over its whole history in movement order; absent on the list across items",
+            "type" : "string"
+          },
           "branch_id" : {
             "format" : "uuid",
             "type" : "string"
@@ -20509,6 +20688,11 @@
           "product_id" : {
             "format" : "uuid",
             "type" : "string"
+          },
+          "profit_minor" : {
+            "description" : "The item page (issue #813), on a sale: the sale line's total less its cost; Present only with retail.profit.read",
+            "format" : "int64",
+            "type" : "integer"
           },
           "qty" : {
             "type" : "string"
@@ -39519,6 +39703,52 @@
         "tags" : [ "retail-cashbook" ]
       }
     },
+    "/api/v1/retail/expenses/{expense_id}/replace" : {
+      "post" : {
+        "description" : "The old expense is voided with the reason \"Edited: entered again with the changes\" and the new one, at the same branch, carries an explanation naming it; a refusal of either changes nothing. Needs retail.expense.record at the branch as well, and, as every cash book route, retail.till.close (ADR-055). An amount that would wait for an administrator (ADR-091) is 422 edit_needs_approval.",
+        "operationId" : "replaceRetailExpense",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "expense_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RetailExpenseRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailExpense"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Edit an expense: void it and record the request in its place, in one transaction (issue #830); M",
+        "tags" : [ "retail-cashbook" ]
+      }
+    },
     "/api/v1/retail/expenses/{expense_id}/void" : {
       "post" : {
         "description" : "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied",
@@ -42940,6 +43170,51 @@
         "tags" : [ "retail-purchasing" ]
       }
     },
+    "/api/v1/retail/purchases/{purchase_id}/replace" : {
+      "post" : {
+        "operationId" : "replaceRetailPurchase",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "purchase_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RetailPurchaseRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailPurchase"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Edit a delivery: void the restock and record the request in its place, in one transaction (issue #830); M",
+        "tags" : [ "retail-purchasing" ]
+      }
+    },
     "/api/v1/retail/purchases/{purchase_id}/void" : {
       "post" : {
         "operationId" : "voidRetailPurchase",
@@ -45381,7 +45656,7 @@
     },
     "/api/v1/retail/savings/sales-staff" : {
       "get" : {
-        "description" : "Issue #799, ADR-115: only while the Owner's setting salespeople_see_savings_amount is on, else 403 permission_denied; the branch must be one where the caller may sell (retail.sale.create). Only records dated this month, at the branches where the caller may sell.",
+        "description" : "Issue #799, ADR-115: only while the Owner's setting salespeople_see_savings_amount is on, else 403 permission_denied; the branch must be one where the caller may sell (retail.sale.create). Records of every month (issue #827), at the branches where the caller may sell.",
         "operationId" : "listRetailSalesStaffSavings",
         "parameters" : [ {
           "in" : "query",
@@ -45446,7 +45721,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "This month's savings records for sales staff, newest first",
+        "summary" : "Savings records of every month for sales staff, newest first",
         "tags" : [ "retail-cashbook" ]
       },
       "post" : {
@@ -45483,6 +45758,54 @@
           }
         },
         "summary" : "Record the day's savings as sales staff (FR-RET-18 to FR-RET-20); M",
+        "tags" : [ "retail-cashbook" ]
+      }
+    },
+    "/api/v1/retail/savings/sales-staff/groups" : {
+      "get" : {
+        "description" : "Issue #799, ADR-115: only while the Owner's setting salespeople_see_savings_amount is on, else 403 permission_denied; the branch must be one where the caller may sell (retail.sale.create). Issue #827: active records only, amounts saved only.",
+        "operationId" : "getRetailSalesStaffSavingsGroups",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "branch_id",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        }, {
+          "in" : "query",
+          "name" : "from",
+          "required" : false,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "to",
+          "required" : false,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailSavingsGroups"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Savings of every month for sales staff, by shop, year, month and person, with totals",
         "tags" : [ "retail-cashbook" ]
       }
     },
@@ -45866,6 +46189,104 @@
           }
         },
         "summary" : "Correct the quantity of an item at a branch with a reason; an adjustment that is not shrinkage (issue #351); M",
+        "tags" : [ "retail-stock" ]
+      }
+    },
+    "/api/v1/retail/stock/items/{product_id}" : {
+      "get" : {
+        "operationId" : "getRetailItemStock",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "product_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailItemStock"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "One item's stock in each shop the caller may read (issue #813)",
+        "tags" : [ "retail-stock" ]
+      }
+    },
+    "/api/v1/retail/stock/items/{product_id}/movements" : {
+      "get" : {
+        "operationId" : "listRetailItemMovements",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "product_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "branch_id",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        }, {
+          "in" : "query",
+          "name" : "from",
+          "required" : false,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "to",
+          "required" : false,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "cursor",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailStockMovementPage"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Every movement of one item newest first, with the shop's balance after each (issue #813); a branch outside the caller's scope is 404",
         "tags" : [ "retail-stock" ]
       }
     },

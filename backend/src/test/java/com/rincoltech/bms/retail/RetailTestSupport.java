@@ -35,7 +35,8 @@ public final class RetailTestSupport {
 
     /** The routes that create those entries; every other route refuses an unknown field such as date_reason. */
     private static final String DATED_ROUTES =
-            "/(expenses|savings|bankings|withdrawals|advances|advances/[^/]+/repayments|purchases|transfers)";
+            "/(expenses|expenses/[^/]+/replace|savings|bankings|withdrawals|advances|advances/[^/]+/repayments|purchases"
+                    + "|purchases/[^/]+/replace|transfers)";
 
     /** The sales column of the chapter 8 matrix for retail. */
     public static final String SALES =

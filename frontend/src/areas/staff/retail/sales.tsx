@@ -11,7 +11,7 @@ import { useStaff } from '../context';
 import { SALE_RETURN, canRankSellers, canUse, holdsAt } from './permissions';
 import { settledWords } from './returns-state';
 import { showDate } from './transfers';
-import { Gate, Problem, money, useBranchName, useBranchView, useIsPhone, useProfitAccess } from './ui';
+import { Gate, ItemPageLink, Problem, money, useBranchName, useBranchView, useIsPhone, useProfitAccess } from './ui';
 import { SaleDocuments } from './documents-ui';
 import { ShareReceipt } from './receipt-share';
 import { useRootFigures } from './sales-grouped';
@@ -35,11 +35,14 @@ const METHODS: { value: SalePayment; label: string }[] = [
 ];
 const methodLabel = (m: string | undefined) => METHODS.find((x) => x.value === m)?.label ?? m ?? '';
 
-export type SaleState = { label: 'Paid' | 'Part paid' | 'Unpaid' | 'Overdue' | 'Voided' | 'Written off'; tone: 'success' | 'warning' | 'danger' | 'info' };
+export type SaleState = { label: 'Paid' | 'Part paid' | 'Unpaid' | 'Overdue' | 'Deleted' | 'Written off'; tone: 'success' | 'warning' | 'danger' | 'info' };
 
-/** What a sale is, in words: voided, paid, or (credit) unpaid, part paid or overdue on the business date `today`. */
+/**
+ * What a sale is, in words: deleted (a voided sale, issue #830 uses the old app's word; it is kept), paid, or (credit) unpaid, part paid
+ * or overdue on the business date `today`.
+ */
 export function saleState(sale: Sale, today: string): SaleState {
-  if (sale.status === 'voided') return { label: 'Voided', tone: 'warning' };
+  if (sale.status === 'voided') return { label: 'Deleted', tone: 'warning' };
   if (sale.write_off) return { label: 'Written off', tone: 'warning' };
   const owed = sale.balance_minor ?? 0;
   if (sale.payment_method !== 'credit' || owed <= 0) return { label: 'Paid', tone: 'success' };
@@ -106,7 +109,7 @@ export function SaleDetail({ sale, today, branchName }: { sale: Sale; today: str
     ...(sale.buyer_name ? [['Buyer', sale.buyer_name] as [string, string]] : []),
     ...(sale.buyer_contact ? [['Contact', sale.buyer_contact] as [string, string]] : []),
     ...(sale.due_date ? [['Due', showDate(sale.due_date)] as [string, string]] : []),
-    ...(sale.status === 'voided' && sale.void_reason ? [['Voided because', sale.void_reason] as [string, string]] : []),
+    ...(sale.status === 'voided' && sale.void_reason ? [['Deleted because', sale.void_reason] as [string, string]] : []),
     ...(sale.delivery_fee_owed_minor ? [['Delivery fee owed', `${money(sale.delivery_fee_owed_minor)} on the account, paid on its order`] as [string, string]] : []),
     ...(sale.write_off ? [['Written off', `${showDate(sale.write_off.written_off_on)}, ${money(sale.write_off.unpaid_minor ?? 0)} owed was cleared${sale.write_off.delivery_fee_minor ? `, of which ${money(sale.write_off.delivery_fee_minor)} was the delivery fee` : ''}: ${sale.write_off.reason ?? ''}`] as [string, string]] : []),
   ];
@@ -135,6 +138,7 @@ export function SaleDetail({ sale, today, branchName }: { sale: Sale; today: str
               <td>
                 {l.description}
                 {phone && <><br /><span className="hint">{enteredQty(l)} at {money(enteredPriceMinor(l))}</span></>}
+                <br /><ItemPageLink productId={l.product_id} name={l.description} />
                 {l.price && <><br /><span className="hint" data-testid="price-note">{receiptNote(l, money)}</span></>}
               </td>
               {!phone && <td className="num">{enteredQty(l)}</td>}

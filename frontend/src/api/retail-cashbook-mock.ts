@@ -27,9 +27,9 @@ export interface CashbookEnv {
   waiting: (actionType: string, amountMinor: number) => ApprovalWaiting | null;
 }
 
-type Keys = 'savingsSuggestion' | 'createSavings' | 'listSavings' | 'voidSavings' | 'bankingExpected' | 'createBanking' | 'listBankings' | 'voidBanking'
+type Keys = 'savingsSuggestion' | 'createSavings' | 'listSavings' | 'savingsGroups' | 'voidSavings' | 'bankingExpected' | 'createBanking' | 'listBankings' | 'voidBanking'
   | 'createWithdrawal' | 'listWithdrawals' | 'voidWithdrawal' | 'listExpenseCategories' | 'createExpenseCategory' | 'updateExpenseCategory'
-  | 'createExpenseItem' | 'updateExpenseItem' | 'listCashParties' | 'createCashParty' | 'createExpense' | 'listExpenses' | 'voidExpense'
+  | 'createExpenseItem' | 'updateExpenseItem' | 'listCashParties' | 'createCashParty' | 'createExpense' | 'listExpenses' | 'voidExpense' | 'replaceExpense'
   | 'createAdvance' | 'listAdvances' | 'getAdvance' | 'voidAdvance' | 'createRepayment' | 'voidRepayment' | 'cashDaily' | 'bankingReport'
   | 'expensesReport' | 'advancesReport';
 
@@ -201,6 +201,30 @@ export function createCashbookMock(env: CashbookEnv): Pick<RetailApi, Keys> {
       })),
 
     listSavings: (q) => delay(newestFirst(savings.filter((r) => inWindow(r, q))).map(savingsRow)),
+    // JUSTIFICATION-A3: RetailApi gained savingsGroups (issue #827); the mock must answer it with its four levels and totals.
+    // The active records by shop, year, month and person (the mock has one person), newest day first, with totals.
+    savingsGroups: (q) => {
+      const live = savings.filter((r) => inWindow(r, { ...q, includeVoided: false }))
+        .sort((a, b) => b.business_date.localeCompare(a.business_date));
+      const sum = (xs: { total_minor: number }[]) => xs.reduce((n, x) => n + x.total_minor, 0);
+      const by = <T,>(xs: T[], key: (x: T) => string): [string, T[]][] => {
+        const m = new Map<string, T[]>();
+        for (const x of xs) m.set(key(x), [...(m.get(key(x)) ?? []), x]);
+        return [...m];
+      };
+      const shops = by(live, (r) => r.branch_id).map(([branch_id, rs]) => {
+        const years = by(rs, (r) => r.business_date.slice(0, 4)).map(([year, ys]) => {
+          const months = by(ys, (r) => r.business_date.slice(5, 7)).map(([month, ms]) => {
+            const records = ms.map((r) => ({ id: r.id, business_date: r.business_date, amount_minor: r.amount }));
+            const people = [{ user_id: USER.by, name: USER.by_name, total_minor: records.reduce((n, x) => n + x.amount_minor, 0), records }];
+            return { month: Number(month), total_minor: sum(people), people };
+          });
+          return { year: Number(year), total_minor: sum(months), months };
+        });
+        return { branch_id, total_minor: sum(years), years };
+      });
+      return delay({ total_minor: sum(shops), shops });
+    },
     voidSavings: (id, reason, key) => run(() => once(`void|${key}`, { id, reason }, () => savingsRow(voidIt(savings.find((r) => r.id === id), reason)))),
 
     bankingExpected: ({ branchId, date }) =>
@@ -310,6 +334,22 @@ export function createCashbookMock(env: CashbookEnv): Pick<RetailApi, Keys> {
     listExpenses: (q) =>
       delay(newestFirst(expenses.filter((r) => inWindow(r, q) && (!q.categoryId || r.category_id === q.categoryId) && (!q.itemId || r.item_id === q.itemId))).map(expenseRow)),
     voidExpense: (id, reason, key) => run(() => once(`void|${key}`, { id, reason }, () => expenseRow(voidIt(expenses.find((r) => r.id === id), reason)))),
+    // Issue #830: as the server's one transaction, every refusal comes before the old expense is voided.
+    replaceExpense: (id, body, key) =>
+      run(() => once(`replace-expense|${key}`, { id, body }, () => {
+        const old = expenses.find((r) => r.id === id);
+        const category = categories.find((c) => c.id === body.category_id);
+        if (!category?.items?.some((i) => i.id === body.item_id)) refuse(422, 'item_not_in_category', 'The item is not in the category.');
+        if (!category?.active) refuse(422, 'category_inactive', 'Inactive.');
+        if (env.waiting('retail_expense', body.amount_minor)) refuse(422, 'edit_needs_approval', 'This amount needs an administrator\'s approval, so it cannot be edited in place. Delete the expense and record it again.');
+        const fresh = base(old?.branch_id, body.business_date, 'x');
+        const was = expenseRow(voidIt(old, 'Edited: entered again with the changes'));
+        const own = body.explanation?.trim();
+        const explanation = `${own ? `${own} ` : ''}Replaces the ${was.item_name ?? 'expense'} entry of ${was.business_date ?? ''}, edited.`;
+        const row = { ...fresh, amount: body.amount_minor, category_id: body.category_id, item_id: body.item_id, ...(body.party_id ? { party_id: body.party_id } : {}), explanation };
+        expenses.push(row);
+        return expenseRow(row);
+      })),
 
     createAdvance: (body, key) =>
       run(() => once(`advance|${key}`, body, (): Advance => {
