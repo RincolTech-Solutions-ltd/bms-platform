@@ -1,10 +1,10 @@
 package com.rincoltech.bms.retail.sales.internal;
 
+import com.rincoltech.bms.core.identity.DataKeys;
 import com.rincoltech.bms.core.tenancy.ShortLinkTarget;
 import com.rincoltech.bms.core.tenancy.ShortNames;
 import com.rincoltech.bms.kernel.BusinessClock;
 import java.nio.charset.StandardCharsets;
-import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
@@ -17,9 +17,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,8 +25,8 @@ import org.springframework.transaction.annotation.Transactional;
  * Receipt links (issue #760, ADR-116): a short link {@code rincoltech.com/<token>} on the short link host of ADR-108 that
  * opens the receipt PDF of one sale, read only and with no sign-in, for 90 days. It goes in the message a seller sends to
  * a typed WhatsApp number, since a wa.me link cannot carry a file. The token is 26 characters of lower case base32 (130
- * bits) from a keyed hash of the link's random id, longer than any new short name, and only its SHA-256 is stored; a
- * sale has one live link at a time, given again on every share. On the platform host the short link
+ * bits), random, longer than any new short name; it is found by its SHA-256 and kept sealed with the application data
+ * key so it can be given again: a sale has one current link (V128's unique partial index), given on every share. On the platform host the short link
  * finds the shop with V128's {@code retail_receipt_link_shop} and goes on to the shop's own host, where the receipt is
  * rendered under the shop's row level security. A wrong or expired link shows {@link #GONE_PAGE}, which says nothing
  * about the business or the sale.
@@ -71,34 +68,16 @@ class ReceiptLinks implements ShortLinkTarget {
     private final JdbcClient jdbc;
     private final BusinessClock clock;
     private final ShortNames names;
-    private final byte[] tokenKey;
+    private static final SecureRandom RANDOM = new SecureRandom();
 
-    ReceiptLinks(
-            JdbcClient jdbc, BusinessClock clock, ShortNames names, @Value("${bms.auth.data-key:}") String dataKey) {
+    /** The application data key's sealer, the one stored provider credentials use; it refuses to start without a key. */
+    private final DataKeys keys;
+
+    ReceiptLinks(JdbcClient jdbc, BusinessClock clock, ShortNames names, DataKeys keys) {
         this.jdbc = jdbc;
         this.clock = clock;
         this.names = names;
-        this.tokenKey = purposeKey(dataKey);
-    }
-
-    /**
-     * HMAC-SHA256 of this purpose's label under the data key, as {@code CashbookSupport} keys its tokens, so the data key
-     * itself never keys a token. The dev and test profiles may leave the data key blank: the key is then random, and a
-     * link made before a restart is not given again (a new one is made), though it still opens.
-     */
-    private static byte[] purposeKey(String dataKey) {
-        if (dataKey == null || dataKey.isBlank()) {
-            byte[] key = new byte[32];
-            new SecureRandom().nextBytes(key);
-            return key;
-        }
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(dataKey.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            return mac.doFinal("bms.retail.receipt-link.v1".getBytes(StandardCharsets.UTF_8));
-        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
-            throw new IllegalStateException(e);
-        }
+        this.keys = keys;
     }
 
     /**
@@ -150,44 +129,71 @@ class ReceiptLinks implements ShortLinkTarget {
         return opens.merge("link:" + link, 1, Integer::sum) <= OPENS_PER_LINK;
     }
 
+    /** The sale's current link row, read under its row lock. */
+    private record Current(UUID id, byte[] sealed, Instant expiresAt) {}
+
     /**
-     * The sale's link, in the caller's write transaction with the business bound: its live link until that expires,
-     * otherwise a new one ({@code created}). One sale therefore has one live link however often, from however many
-     * phones, it is shared (second review of #762, item 1). The sale's lock makes two taps at once share it too; the
-     * lock stands in for a unique index, which cannot say "live" since its predicate may not read the clock. A link made
-     * under a data key since rotated cannot be given again and a new one is made.
+     * The sale's link, in the caller's write transaction with the business bound (the lead's design on #762): its current
+     * link while that is live and its sealed token opens, given again; otherwise the current one is revoked and a new one
+     * made for 90 days ({@code created}). The unique partial index of V128 on the links not revoked holds one per sale in
+     * the database itself: when two shares meet, the second's insert does nothing and it reads the first one's link.
      */
     Minted mint(UUID saleId, UUID by) {
-        jdbc.sql("SELECT 1 FROM (SELECT pg_advisory_xact_lock(hashtext('bms.receipt-link:' || ?))) AS l")
-                .param(saleId.toString())
-                .query(Integer.class)
-                .single();
         Instant now = clock.now();
-        Optional<Minted> kept = jdbc.sql("""
-                        SELECT id, token_hash, expires_at FROM retail_receipt_links
-                         WHERE sale_id = ? AND expires_at > ? ORDER BY expires_at DESC LIMIT 1
-                        """)
-                .params(saleId, Timestamp.from(now))
-                .query((rs, n) -> {
-                    String token = token(rs.getObject("id", UUID.class));
-                    return hash(token).equals(rs.getString("token_hash"))
-                            ? minted(token, rs.getTimestamp("expires_at").toInstant(), false)
-                            : null;
-                })
-                .optional();
-        if (kept.isPresent()) {
-            return kept.get();
+        for (int attempt = 0; attempt < 3; attempt++) {
+            Current current = jdbc.sql("""
+                            SELECT id, token_sealed, expires_at FROM retail_receipt_links
+                             WHERE sale_id = ? AND revoked_at IS NULL FOR UPDATE
+                            """)
+                    .param(saleId)
+                    .query((rs, n) -> new Current(
+                            rs.getObject("id", UUID.class),
+                            rs.getBytes("token_sealed"),
+                            rs.getTimestamp("expires_at").toInstant()))
+                    .optional()
+                    .orElse(null);
+            if (current != null) {
+                String token = current.expiresAt().isAfter(now) ? opened(current.sealed()) : null;
+                if (token != null) {
+                    return minted(token, current.expiresAt(), false);
+                }
+                // Expired, or sealed under a data key no longer configured: replaced in this transaction.
+                jdbc.sql("UPDATE retail_receipt_links SET revoked_at = ? WHERE id = ?")
+                        .params(Timestamp.from(now), current.id())
+                        .update();
+            }
+            String token = newToken();
+            Instant expires = now.plus(LIFETIME);
+            int made = jdbc.sql("""
+                            INSERT INTO retail_receipt_links
+                                (id, tenant_id, sale_id, token_hash, token_sealed, created_by, created_at, expires_at)
+                            VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?)
+                            ON CONFLICT (tenant_id, sale_id) WHERE revoked_at IS NULL DO NOTHING
+                            """)
+                    .params(
+                            UUID.randomUUID(),
+                            saleId,
+                            hash(token),
+                            keys.seal(token.getBytes(StandardCharsets.UTF_8)),
+                            by,
+                            Timestamp.from(now),
+                            Timestamp.from(expires))
+                    .update();
+            if (made == 1) {
+                return minted(token, expires, true);
+            }
+            // Another share made the sale's link at the same moment: read it on the next turn.
         }
-        UUID id = UUID.randomUUID();
-        String token = token(id);
-        Instant expires = now.plus(LIFETIME);
-        jdbc.sql("""
-                        INSERT INTO retail_receipt_links (id, tenant_id, sale_id, token_hash, created_by, created_at, expires_at)
-                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
-                        """)
-                .params(id, saleId, hash(token), by, Timestamp.from(now), Timestamp.from(expires))
-                .update();
-        return minted(token, expires, true);
+        throw new IllegalStateException("The receipt link of sale " + saleId + " could not be read or made");
+    }
+
+    /** The token in a sealed box, or null when no configured data key opens it any more. */
+    private String opened(byte[] sealed) {
+        try {
+            return new String(keys.open(sealed), StandardCharsets.UTF_8);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     private Minted minted(String token, Instant expires, boolean created) {
@@ -195,23 +201,13 @@ class ReceiptLinks implements ShortLinkTarget {
         return new Minted("https://" + link, link, expires, created);
     }
 
-    /**
-     * A link's token: 26 characters of lower case base32 (130 bits) from an HMAC of its row id under a key made from the
-     * data key for this purpose alone, so the server can give a live link again while storing only its hash.
-     */
-    String token(UUID linkId) {
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(tokenKey, "HmacSHA256"));
-            byte[] bytes = mac.doFinal(linkId.toString().getBytes(StandardCharsets.UTF_8));
-            StringBuilder token = new StringBuilder(26);
-            for (int i = 0; i < 26; i++) {
-                token.append(ALPHABET.charAt(bytes[i] & 31));
-            }
-            return token.toString();
-        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
-            throw new IllegalStateException(e);
+    /** 26 random characters of lower case base32: 130 bits. */
+    private static String newToken() {
+        StringBuilder token = new StringBuilder(26);
+        for (int i = 0; i < 26; i++) {
+            token.append(ALPHABET.charAt(RANDOM.nextInt(ALPHABET.length())));
         }
+        return token.toString();
     }
 
     /** The live link of the bound business with this token, in the caller's transaction; empty when wrong or expired. */
@@ -219,7 +215,8 @@ class ReceiptLinks implements ShortLinkTarget {
         if (token == null || !TOKEN.matcher(token).matches()) {
             return Optional.empty();
         }
-        return jdbc.sql("SELECT sale_id, created_by FROM retail_receipt_links WHERE token_hash = ? AND expires_at > ?")
+        return jdbc.sql("SELECT sale_id, created_by FROM retail_receipt_links"
+                        + " WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > ?")
                 .params(hash(token), Timestamp.from(clock.now()))
                 .query((rs, n) -> new Live(rs.getObject("sale_id", UUID.class), rs.getObject("created_by", UUID.class)))
                 .optional();

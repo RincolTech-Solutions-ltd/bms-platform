@@ -631,8 +631,10 @@ public class RlsIsolationIT {
                         """).params(t.tenantId(), saleReturn, user).update();
         // A short link to the fixture sale's receipt (migration V128, #760): only the token's hash is stored.
         owner.sql("""
-                        INSERT INTO retail_receipt_links (id, tenant_id, sale_id, token_hash, created_by, created_at, expires_at)
-                        VALUES (?, ?, ?, ?, ?, TIMESTAMPTZ '2026-01-16 09:00:00+03', TIMESTAMPTZ '2026-04-16 09:00:00+03')
+                        INSERT INTO retail_receipt_links (id, tenant_id, sale_id, token_hash, token_sealed, created_by, created_at,
+                                                          expires_at)
+                        VALUES (?, ?, ?, ?, decode('00', 'hex'), ?, TIMESTAMPTZ '2026-01-16 09:00:00+03',
+                                TIMESTAMPTZ '2026-04-16 09:00:00+03')
                         """)
                 .params(
                         UUID.randomUUID(),

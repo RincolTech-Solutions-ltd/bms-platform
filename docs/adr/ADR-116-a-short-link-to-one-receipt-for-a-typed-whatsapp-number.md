@@ -30,16 +30,17 @@ typed so the receipt shows it instead of Cash customer.
    connection, the message goes without it and the screen says so.
 3. **The token is unguessable, stored only as a hash, and lives 90 days; a sale has one link.** 26 characters of lower
    case base32 (130 bits), longer than any new short name (ADR-108 decision 1) so the two never meet, and lower case
-   because the rule's endpoint reads names in lower case. The token is an HMAC of the link row's random id under a key
-   made for this purpose from the data key (`bms.auth.data-key`, as `CashbookSupport` keys its tokens), so the server can
-   give a live link again while storing only its SHA-256 (`retail_receipt_links`): the table cannot be turned back into
-   links without the data key. A sale has one live link: every share of it, from any phone or person and at any time,
-   gets that link until it expires; the next share then makes a new one for 90 days, and only a new one is audited. The
-   sale's advisory lock keeps two shares at once to one link; a unique index cannot, since an index predicate may not
-   read the clock to say which links are live. A link
-   made under a data key since rotated is not given again (a new one is made), though it still opens. The hash is a
-   `text` column checked to 64 hex digits, so the lookups, bound as text, use its unique index and a stream of wrong
-   links never scans the table. Links are never changed and simply expire.
+   because the rule's endpoint reads names in lower case. The token is random, found by its SHA-256 and kept sealed with
+   the application data key (`DataKeys`, AES-256-GCM, the sealer of stored provider credentials) in
+   `retail_receipt_links.token_sealed`, so a share can give it again and the table holds no token in clear. A sale has
+   one current link, held by the database: a unique partial index on `(tenant_id, sale_id) WHERE revoked_at IS NULL`.
+   Every share, from any phone or person and at any time, gets that link while it is live and its box opens. When it has
+   expired, or no configured data key opens its box any more (a retired key), the share sets its `revoked_at` and
+   inserts the new link, valid 90 days, in one transaction; only a new link is audited. Two shares at once meet at the
+   index: the second's insert does nothing and it reads the first one's link. Liveness for the index is `revoked_at`,
+   not the clock, since an index predicate may not read the time. `revoked_at` is the only column the application may
+   change, once, from null (a guard trigger); a revoked link never opens again. The hash is a `text` column checked to
+   64 hex digits, so the lookups, bound as text, use its unique index and a stream of wrong links never scans the table.
 4. **The platform forwards, the shop's host renders.** The short link endpoint asks the shops first, then each module's
    `ShortLinkTarget` (a hook in `core.tenancy`, so the core names no vertical). Retail answers a token-shaped name: a live
    link is a 302 to `<shop host>/api/v1/retail/receipt-links/<token>`, found with the definer function

@@ -2,6 +2,7 @@ package com.rincoltech.bms.retail.sales;
 
 import static com.rincoltech.bms.retail.RetailTestSupport.SALES;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
@@ -209,16 +210,75 @@ class ReceiptLinkIT extends IntegrationTest {
         String renewed = token(makeLink(seller, sale, SALES));
         assertThat(renewed).isNotEqualTo(token);
         assertThat(links(sale)).isEqualTo(2);
+        assertThat(current(sale)).as("the expired link is revoked as the new one is made").isEqualTo(1);
         assertThat(token(makeLink(other, sale, SaleReceiptPdfIT.SUPERVISOR))).isEqualTo(renewed);
         gonePage(open(t, token));
+        // A sealed token no configured data key opens (a retired key) is replaced too, never a second current link.
+        TestDatabase.owner()
+                .sql("DO $$ BEGIN PERFORM set_config('bms.allow_mutation', 'on', true);"
+                        + " UPDATE retail_receipt_links SET token_sealed = decode('00', 'hex')"
+                        + " WHERE revoked_at IS NULL AND sale_id = '" + sale + "'; END $$")
+                .update();
+        String resealed = token(makeLink(seller, sale, SALES));
+        assertThat(resealed).isNotEqualTo(renewed);
+        assertThat(current(sale)).isEqualTo(1);
+        gonePage(open(t, renewed));
+        // The database refuses a second current link however it is written.
+        assertThatThrownBy(() -> TestDatabase.owner()
+                        .sql("INSERT INTO retail_receipt_links (id, tenant_id, sale_id, token_hash, token_sealed, created_by,"
+                                + " created_at, expires_at) VALUES (?, ?, ?, ?, decode('00', 'hex'), ?, now(),"
+                                + " now() + interval '1 day')")
+                        .params(UUID.randomUUID(), t.tenantId(), sale, "f".repeat(64), seller.userId())
+                        .update())
+                .hasMessageContaining("retail_receipt_links_one_current");
+    }
+
+    static long current(UUID sale) {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM retail_receipt_links WHERE sale_id = ? AND revoked_at IS NULL")
+                .param(sale)
+                .query(Long.class)
+                .single();
+    }
+
+    // JUSTIFICATION-A3: third review of #762, item 3: two shares at the same moment, which the unique index exists for.
+    /** Two shares of one sale at the same moment give one link and one row. */
+    @Test
+    void twoSharesAtOnceGiveOneLink() throws Exception {
+        UUID sale = cashSale("Test Customer 45", null);
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            java.util.concurrent.Callable<ResponseEntity<JsonNode>> share = () -> {
+                start.await();
+                return makeLink(seller, sale, SALES);
+            };
+            var first = pool.submit(share);
+            var second = pool.submit(share);
+            start.countDown();
+            String a = token(first.get(60, java.util.concurrent.TimeUnit.SECONDS));
+            String b = token(second.get(60, java.util.concurrent.TimeUnit.SECONDS));
+            assertThat(a).isEqualTo(b);
+            assertThat(links(sale)).isEqualTo(1);
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     /** Moves the sale's links back in time, as if made that long ago. */
     static void shift(UUID sale, String ago) {
+        shiftWhere("sale_id = '" + sale + "'", ago);
+    }
+
+    /**
+     * The owner moves links back in time with bms.allow_mutation on, the guard's one way round (V128): the application
+     * may only set revoked_at. {@code where} and {@code ago} are this test's own constants.
+     */
+    static void shiftWhere(String where, String ago) {
         TestDatabase.owner()
-                .sql("UPDATE retail_receipt_links SET created_at = created_at - ?::interval,"
-                        + " expires_at = expires_at - ?::interval WHERE sale_id = ?")
-                .params(ago, ago, sale)
+                .sql("DO $$ BEGIN PERFORM set_config('bms.allow_mutation', 'on', true);"
+                        + " UPDATE retail_receipt_links SET created_at = created_at - interval '" + ago + "',"
+                        + " expires_at = expires_at - interval '" + ago + "' WHERE " + where + "; END $$")
                 .update();
     }
 
@@ -243,11 +303,7 @@ class ReceiptLinkIT extends IntegrationTest {
         TestDatabase.Fixture elsewhere = TestDatabase.tenant("retail-rlink-b", false, true);
         gonePage(open(elsewhere, token));
 
-        TestDatabase.owner()
-                .sql("UPDATE retail_receipt_links SET created_at = created_at - interval '91 days',"
-                        + " expires_at = expires_at - interval '91 days' WHERE tenant_id = ?")
-                .param(t.tenantId())
-                .update();
+        shiftWhere("tenant_id = '" + t.tenantId() + "'", "91 days");
         gonePage(open(t, token));
         gonePage(follow(token));
     }
