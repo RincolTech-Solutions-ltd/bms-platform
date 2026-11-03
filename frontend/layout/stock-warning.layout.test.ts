@@ -30,9 +30,13 @@ async function badges(page: Page, within: string) {
     [...document.querySelectorAll<HTMLElement>(`${selector} [data-testid="stock-warning"]`)].map((b) => {
       const box = b.getBoundingClientRect();
       const style = getComputedStyle(b);
+      const svg = b.querySelector('svg')?.getBoundingClientRect();
       return {
         words: b.textContent,
-        icon: b.querySelector('svg') !== null,
+        icon: svg !== undefined,
+        // On the words' row: the icon's middle at the badge's middle, and the words start after it.
+        iconInline: svg !== undefined && Math.abs(svg.top + svg.height / 2 - (box.top + box.height / 2)) <= 3 && svg.right <= box.right - 10,
+        widestBorder: Math.max(...[style.borderLeftWidth, style.borderRightWidth, style.borderTopWidth, style.borderBottomWidth].map(parseFloat)),
         left: box.left,
         right: box.right,
         tinted: style.backgroundColor !== 'rgba(0, 0, 0, 0)' && style.backgroundColor !== 'transparent',
@@ -56,6 +60,8 @@ describe.each([
       expect(found.map((b) => b.words), where).toEqual(['Out of stock', 'Only 10 left']);
       for (const b of found) {
         expect(b.icon, `${where} ${b.words}`).toBe(true);
+        expect(b.iconInline, `${where} ${b.words} icon on the words' row`).toBe(true);
+        expect(b.widestBorder, `${where} ${b.words} no stripe`).toBeLessThanOrEqual(1);
         expect(b.tinted, `${where} ${b.words}`).toBe(true);
         expect(b.gradient).toBe(false);
         expect(b.edges).toBe(1);

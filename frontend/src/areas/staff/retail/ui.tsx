@@ -277,12 +277,6 @@ export function useProfitAccess(): boolean {
   return canSeeProfit(useStaff().me);
 }
 
-/**
- * Search the catalogue and add an item, each with what `branchId` holds (negative flagged). The
- * sale screen shows the price too; the stock move screen shows the source branch's stock. The matches
- * show only while something is typed and close once one is picked (ItemCombobox, issue #534): there is
- * no browsable list here, the Stock page has the whole list.
- */
 /** Issue #815: Out of stock or Only N left as a tinted badge with an icon and the words, never colour alone; nothing otherwise. */
 export function StockWarning({ product }: { product: Product }) {
   const words = stockWarning(product);
@@ -296,6 +290,12 @@ export function StockWarning({ product }: { product: Product }) {
   );
 }
 
+/**
+ * Search the catalogue and add an item, each with what `branchId` holds (negative flagged). The
+ * sale screen shows the price too; the stock move screen shows the source branch's stock. The matches
+ * show only while something is typed and close once one is picked (ItemCombobox, issue #534): there is
+ * no browsable list here, the Stock page has the whole list.
+ */
 export function ProductPicker({ id, branchId, onAdd, showPrice = false, showStock = true, warnStock = false, addLabel = 'Add', label = 'Find an item by name, code or category', notFound }: {
   id: string;
   /** Issue #815, the sale screen: Out of stock or Only N left on each match. */

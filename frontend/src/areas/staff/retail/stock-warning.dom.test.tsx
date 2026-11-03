@@ -16,6 +16,7 @@ vi.setConfig({ testTimeout: 20000 });
 
 const listProducts = vi.fn();
 const createSale = vi.fn();
+const findByBarcode = vi.fn();
 
 vi.mock('../../../api/retail', async (original) => {
   const real = await original<typeof import('../../../api/retail')>();
@@ -25,6 +26,7 @@ vi.mock('../../../api/retail', async (original) => {
       listProducts: (...a: unknown[]) => listProducts(...a),
       listCustomers: () => Promise.resolve([]),
       createSale: (...a: unknown[]) => createSale(...a),
+      findByBarcode: (...a: unknown[]) => findByBarcode(...a),
     },
   };
 });
@@ -63,6 +65,7 @@ afterEach(() => {
   sessionStorage.clear();
   listProducts.mockReset();
   createSale.mockReset();
+  findByBarcode.mockReset();
 });
 
 describe('the words', () => {
@@ -107,6 +110,17 @@ describe('Record sale, online', () => {
     expect(within(lineOf('Test Bulb Plenty')).queryByTestId('stock-warning')).toBeNull();
     // The words do not stop the sale: the button stays as it is with any item on it.
     expect((screen.getByRole('button', { name: /^Record sale/ }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('says it on the line of a scanned item, from the barcode lookup with the shop', async () => {
+    findByBarcode.mockResolvedValue({ product: { ...atLevel, qty: '3.000' }, barcode: { id: 'b1', product_id: atLevel.id, code: 'IN00008151', format: 'code128', generated: true } });
+    open();
+    const box = await screen.findByLabelText('Scan here');
+    fireEvent.change(box, { target: { value: 'IN00008151' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    await waitFor(() => expect(document.getElementById('qty-0')).not.toBeNull());
+    expect(findByBarcode).toHaveBeenCalledWith('IN00008151', branch);
+    expect(within(lineOf('Test Bulb Level')).getByTestId('stock-warning').textContent).toBe('Only 3 left');
   });
 });
 
