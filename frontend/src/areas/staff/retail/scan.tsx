@@ -124,19 +124,20 @@ export function ScanBar({ id, branchId, onFound, autoFocus = false, toasts = fal
       // The phone's offline catalogue (issue #458) holds the items of each selling branch with their barcodes too.
       const onPhone = offline?.catalogue?.products ?? {};
       // Each copy's item keeps when that copy was read (issue #769): the phone's copy as of its prices, a screen's answer
-      // as of its query.
-      const readAt = new Map<Product, number>();
-      const phoneAt = offline?.catalogue?.pricesAsOf ? Date.parse(offline.catalogue.pricesAsOf) : undefined;
+      // as of its query. Keyed by the item's id, the first copy holding it winning as in the search below, so a found item
+      // that is a copy of the row still finds its time (issue #776); an unknown time stays unknown.
+      const readAt = new Map<string, number | undefined>();
+      const dated = (rows: Product[], at: number | undefined) => rows.forEach((p) => p.id && !readAt.has(p.id) && readAt.set(p.id, at));
       const phone = branchId ? onPhone[branchId] ?? [] : Object.values(onPhone).flat();
-      if (phoneAt) phone.forEach((p) => readAt.set(p, phoneAt));
+      dated(phone, offline?.catalogue?.pricesAsOf ? Date.parse(offline.catalogue.pricesAsOf) || undefined : undefined);
       const screens = queryClient.getQueryCache().findAll({ queryKey: ['retail', 'products'] }).flatMap((q) => {
         const data = q.state.data as Product[] | { items?: Product[] } | undefined;
         const rows = Array.isArray(data) ? data : data?.items ?? [];
-        rows.forEach((p) => q.state.dataUpdatedAt && readAt.set(p, q.state.dataUpdatedAt));
+        dated(rows, q.state.dataUpdatedAt || undefined);
         return rows;
       });
       const hit = error instanceof TypeError ? findByBarcodeIn([...phone, ...screens], code) : null;
-      if (hit) found(hit.product, hit.unitId, readAt.get(hit.product));
+      if (hit) found(hit.product, hit.unitId, hit.product.id ? readAt.get(hit.product.id) : undefined);
       else {
         feedback(false);
         setOutcome({ kind: 'failed', error });
