@@ -264,7 +264,9 @@ describe('the savings screen for sales staff', () => {
 
     await screen.findByText('UGX 4,000', { selector: '.key-figure-value' });
     expect(savingsSuggestion).toHaveBeenCalledWith(expect.objectContaining({ salesStaff: true }));
-    expect((screen.getByLabelText('Date') as HTMLInputElement).min).toBe(monthStart);
+    // ADR-120: the app dates the seller's savings today, so there is no date box.
+    expect(screen.queryByLabelText('Date')).toBeNull();
+    expect(savingsSuggestion).toHaveBeenCalledWith(expect.objectContaining({ date: today }));
     expect(document.body.textContent).not.toMatch(/Profit|Expenses for the day/);
     const records = await screen.findByRole('region', { name: 'Savings records' });
     expect(records.textContent).toContain('Savings this month');

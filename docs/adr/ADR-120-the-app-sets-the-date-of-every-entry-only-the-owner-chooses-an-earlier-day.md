@@ -2,8 +2,9 @@
 
 ## Status
 
-Proposed (issue #811, 3 Nov 2026; FR-RET-84). Amends ADR-022 (the cash book, whose records took any business date up to
-today) and the date fields of Buy stock (FR-RET-06) and Move stock (issue #84). Adds the permission `retail.entry.backdate`
+Proposed (issue #811, 3 Nov 2026; FR-RET-85). Amends ADR-022 (the cash book, whose records took any business date up to
+today), the date fields of Buy stock (FR-RET-06) and Move stock (issue #84), and ADR-115 decision 8 (issue #799: sales
+staff opened any day of this month; an earlier day is now the owner's only, decision 2). Adds the permission `retail.entry.backdate`
 in migration `V131`, the next number after `V130` on main; renumbered at merge if needed. Leaves ADR-067 (offline sales)
 unchanged.
 
@@ -18,7 +19,8 @@ asked, months ago, that the app set the date, and that only the owner may put an
 ## Decision
 
 1. **The server dates the entry.** On `POST /retail/expenses`, `/savings`, `/bankings`, `/withdrawals`, `/advances`,
-   `/advances/{advance_id}/repayments`, `/purchases` and `/transfers`, a date left out is today on the business clock in the
+   `/advances/{advance_id}/repayments`, `/purchases` and `/transfers` (and the sales staff's `POST /retail/savings/sales-staff`,
+   which keeps its own refusal of a day before this month), a date left out is today on the business clock in the
    tenant's time zone. `purchased_on` is no longer required. A future date is refused as before.
 2. **An earlier day is the owner's.** A date before today is taken only from a holder of the new permission
    `retail.entry.backdate` at every branch the entry touches: the entry's branch, every branch the lines of a purchase stock,

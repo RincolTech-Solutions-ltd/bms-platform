@@ -220,8 +220,7 @@ class SavingsService {
         branchContext.requireSells(branch, "branch_id");
         LocalDate date = businessDate(caller, r.businessDate(), "business_date");
         // ADR-120: an earlier day is the owner's, with a reason, on the till's route and on the sales staff's alike.
-        EntryDates.Backdate backdate =
-                support.entryDates().check(date, "business_date", r.dateReason(), branch);
+        EntryDates.Backdate backdate = support.entryDates().check(date, "business_date", r.dateReason(), branch);
         boolean profit = mayProfit(branch);
         boolean salesperson = !profit && setting.on();
         if (r.suggestionToken() == null || r.suggestionToken().isBlank()) {

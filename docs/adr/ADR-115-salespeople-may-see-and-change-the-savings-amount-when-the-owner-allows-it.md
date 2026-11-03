@@ -7,6 +7,7 @@ when the Owner turns the new setting on; it answers ADR-022 open question 8 for 
 carries flags, never the amount) and ADR-080 (the cap) are unchanged. No migration. Renumbered at merge if needed.
 Amended by issue #799 (3 Nov 2026): the setting reaches sales staff, who hold `retail.sale.create` but not
 `retail.savings.record` or the till, and shows the whole month's amounts (decision 8; decision 3 changed). No migration.
+Amended by ADR-120 (issue #811): sales staff save today's savings; an earlier day of the month is the owner's, with a reason.
 
 ## Context
 
