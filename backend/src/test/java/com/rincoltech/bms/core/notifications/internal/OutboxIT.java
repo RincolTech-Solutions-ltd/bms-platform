@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.core.notifications.Outbox;
+import com.rincoltech.bms.kernel.RequestContext;
 import com.rincoltech.bms.testsupport.Api;
 import com.rincoltech.bms.testsupport.Api.Session;
 import java.sql.Connection;
@@ -21,6 +22,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
@@ -454,7 +457,16 @@ class OutboxIT extends IntegrationTest {
         String key = key();
         enqueue("email", "test-fallback@example.test", key);
 
-        dispatcher.dispatch(List.of(resend), 1000);
+        // Inside a request, so the row shows it went through the PlatformAuditLog port (issue #777): the port stores
+        // the request id and the client address, which the raw insert it replaced left empty.
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader(RequestContext.HEADER, "fabricated-request-0777");
+        request.setRemoteAddr("192.0.2.77");
+        new RequestContext()
+                .doFilter(
+                        request,
+                        new MockHttpServletResponse(),
+                        (req, res) -> dispatcher.dispatch(List.of(resend), 1000));
 
         assertThat(carried).contains(key);
         assertThat(row(key).get("status")).isEqualTo("sent");
@@ -463,13 +475,17 @@ class OutboxIT extends IntegrationTest {
                 .param(key)
                 .query(String.class)
                 .single();
-        assertThat(TestDatabase.owner()
-                        .sql("SELECT data ->> 'via' FROM platform_audit_log"
-                                + " WHERE action = 'platform.outbox.sent_via' AND data ->> 'outbox_id' = ?")
-                        .param(id)
-                        .query(String.class)
-                        .single())
-                .isEqualTo("smtp");
+        Map<String, Object> sentVia = TestDatabase.owner()
+                .sql("SELECT data ->> 'via' AS via, data ->> 'channel' AS channel, request_id, host(ip) AS ip"
+                        + " FROM platform_audit_log"
+                        + " WHERE action = 'platform.outbox.sent_via' AND data ->> 'outbox_id' = ?")
+                .param(id)
+                .query()
+                .singleRow();
+        assertThat(sentVia.get("via")).isEqualTo("smtp");
+        assertThat(sentVia.get("channel")).isEqualTo("email");
+        assertThat(sentVia.get("request_id")).isEqualTo("fabricated-request-0777");
+        assertThat(sentVia.get("ip")).isEqualTo("192.0.2.77");
     }
 
     /** FR-NTF-09: a sent row is marked sent and its parameters (which may hold a link) cleared. */

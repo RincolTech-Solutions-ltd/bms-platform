@@ -395,7 +395,9 @@ class ImportRunService implements ImportRuns {
                 unlock.execute();
             } catch (SQLException e) {
                 // A session that could not unlock must not go back to the pool still holding the loop: end it.
-                log.warn("import commit loop not unlocked, closing its connection: {}", e.getClass().getSimpleName());
+                log.warn(
+                        "import commit loop not unlocked, closing its connection: {}",
+                        e.getClass().getSimpleName());
                 try {
                     connection.abort(Runnable::run);
                 } catch (SQLException ignored) {
@@ -433,7 +435,11 @@ class ImportRunService implements ImportRuns {
                                 runId,
                                 "core.import_run.batch_failed",
                                 Map.of(),
-                                Map.of("batch_seq", batch.seq(), "error", e.getClass().getSimpleName()))));
+                                Map.of(
+                                        "batch_seq",
+                                        batch.seq(),
+                                        "error",
+                                        e.getClass().getSimpleName()))));
             }
         }
         tx.executeWithoutResult(s -> {

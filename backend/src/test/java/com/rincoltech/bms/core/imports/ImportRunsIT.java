@@ -502,9 +502,11 @@ class ImportRunsIT extends IntegrationTest {
             runs.transition(run.id(), "uploaded");
             runs.transition(run.id(), "in_review");
             assertThatThrownBy(() -> runs.requestHalt(run.id()))
-                    .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getMessage())
-                            .isEqualTo("Only an import being imported can be stopped; this one is in review.")
-                            .doesNotContain("in_review", "committing"));
+                    .isInstanceOfSatisfying(
+                            ApiException.class,
+                            e -> assertThat(e.getMessage())
+                                    .isEqualTo("Only an import being imported can be stopped; this one is in review.")
+                                    .doesNotContain("in_review", "committing"));
             return null;
         });
     }

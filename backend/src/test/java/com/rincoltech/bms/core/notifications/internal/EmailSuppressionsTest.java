@@ -58,8 +58,7 @@ class EmailSuppressionsTest {
     void theDataKeyIsBmsDataKeyThroughTheRealApplicationYml() throws Exception {
         // Issue #777: the test profile has a key of its own, so this binds the constructor's own @Value placeholder
         // against the main application.yml alone, with BMS_DATA_KEY set as a host's environment would set it.
-        String placeholder = Arrays.stream(
-                        EmailSuppressions.class.getDeclaredConstructors()[0].getParameters())
+        String placeholder = Arrays.stream(EmailSuppressions.class.getDeclaredConstructors()[0].getParameters())
                 .map(p -> p.getAnnotation(Value.class))
                 .filter(Objects::nonNull)
                 .findFirst()
@@ -73,7 +72,8 @@ class EmailSuppressionsTest {
                 .as("unset on the host: blank, which stops the start")
                 .isBlank();
         String bound = applicationYml(Map.of("BMS_DATA_KEY", key)).resolvePlaceholders(placeholder);
-        assertThat(build(bound, "server").hash(ADDRESS)).isEqualTo(build(key, "server").hash(ADDRESS));
+        assertThat(build(bound, "server").hash(ADDRESS))
+                .isEqualTo(build(key, "server").hash(ADDRESS));
     }
 
     /** The main application.yml under a host environment of {@code variables} only, as a server would read it. */
