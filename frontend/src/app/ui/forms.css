@@ -199,14 +199,20 @@ legend {
   margin-top: var(--space-5);
 }
 
-/* A laptop (issue #825, buttons.css): the form's buttons take the width of their label and stand at its right. */
+/* A laptop (issue #825, buttons.css): the form's buttons and links drawn as buttons take the width of their label; a main action
+   stands at its right, any other at its start. */
 @media (min-width: 1024px) {
-  .form-stack > button,
-  .form-actions > button {
+  .form-stack > :is(button, .btn),
+  .form-actions > :is(button, .btn) {
     width: fit-content;
     min-width: min(100%, var(--button-min-wide));
     max-width: min(100%, var(--button-max));
-    margin-inline-start: auto;
+    margin-inline-end: auto;
+  }
+
+  .form-stack > :is(.btn-primary, .btn-brand, .btn-danger, .rt-primary),
+  .form-actions > :is(.btn-primary, .btn-brand, .btn-danger, .rt-primary) {
+    margin-inline: auto 0;
   }
 }
 

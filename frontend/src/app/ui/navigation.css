@@ -32,6 +32,13 @@
 
 /* Below 430px the bar's controls sit closer, so the branch name keeps its room (issue #605); each is still a 48px target, Ask
    and the sync indicator exactly 48px wide, and two targets stand --tap-gap apart (issue #825). */
+/* The phone layout (issue #825): the bar floats over the page as it scrolls, so its targets stand 8px inside its top and bottom. */
+@media (max-width: 719px) {
+  .staff-bar-top {
+    padding-block: var(--tap-gap);
+  }
+}
+
 @media (max-width: 429px) {
   .staff-bar-top {
     gap: var(--tap-gap);
@@ -1092,7 +1099,8 @@ img.menu-shop-logo {
   right: 0;
   bottom: 0;
   z-index: var(--z-nav);
-  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  /* The page scrolls under the bar, so the tabs stand --tap-gap inside its top edge (issue #825), the bar no taller for it. */
+  padding: var(--tap-gap) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   background: var(--color-surface);
   border-top: 1px solid var(--color-border);
 }
@@ -1115,7 +1123,7 @@ img.menu-shop-logo {
   align-items: center;
   justify-content: center;
   gap: var(--tab-gap);
-  min-height: var(--tab-height);
+  min-height: calc(var(--tab-height) - var(--tap-gap));
   min-width: var(--tap);
   padding: var(--space-1) var(--tab-gap);
   color: var(--color-text-muted);

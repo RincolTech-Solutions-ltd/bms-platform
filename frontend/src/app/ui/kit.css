@@ -737,7 +737,7 @@ button.list-row:focus-visible {
 }
 
 /* A laptop (issue #825): the bar is a row at the right of the form, each button as wide as its label (buttons.css), in the order
-   of the page (the main action first), so what is seen matches the Tab order. */
+   of the page with the main action last, so it stands at the far right and what is seen matches the Tab order. */
 @media (min-width: 1024px) {
   .action-bar {
     display: flex;

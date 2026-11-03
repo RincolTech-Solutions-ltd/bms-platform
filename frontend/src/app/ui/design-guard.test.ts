@@ -774,6 +774,34 @@ function namesTarget(selector: string): boolean {
 /** The button classes a stylesheet's selectors name. */
 const buttonClassesIn = (css: string) => new Set([...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{/g)].flatMap(([, sel]) => [...(sel as string).matchAll(BUTTON_CLASS)].map(([, c]) => c as string)));
 
+// JUSTIFICATION-A3: the third review of #833 asks for a guard over the order of every sheet's actions; no reader of JSX props exists.
+const PRIMARY_CLASS = /\b(?:rt-primary|btn-primary|btn-brand|btn-danger)\b/;
+
+/**
+ * What is wrong with the order of each sheet's actions in `source`: the `actions={...}` of every `<Sheet>` (up to its `</Sheet>`
+ * or the end of a self-closed tag), its button tags in order (button, BusyButton, a Link drawn as a button), and of two or more
+ * the one with a primary class must be the last. A sheet of one button may have any.
+ */
+function sheetActionProblems(source: string): string[] {
+  return [...source.matchAll(/<Sheet\b/g)].flatMap((m) => {
+    const rest = source.slice(m.index);
+    const start = rest.indexOf('actions={');
+    const end = rest.indexOf('</Sheet>');
+    if (start < 0 || (end >= 0 && start > end)) return [];
+    let depth = 0;
+    let i = start + 'actions='.length;
+    for (; i < rest.length; i++) {
+      if (rest[i] === '{') depth++;
+      else if (rest[i] === '}' && --depth === 0) break;
+    }
+    const tags = [...rest.slice(start, i).matchAll(/<(?:button|BusyButton|Link)\b([^>]*)>/g)].map(([, attrs]) => (attrs as string).match(PRIMARY_CLASS)?.[0] ?? 'plain');
+    if (tags.length < 2) return [];
+    const primaries = tags.filter((t) => t !== 'plain').length;
+    if (primaries === 0) return [`no primary among ${tags.length} buttons`];
+    return primaries === 1 && tags.at(-1) !== 'plain' ? [] : [`the primary is not last: ${tags.join(', ')}`];
+  });
+}
+
 /** The rules of `css` whose selector ends on a target (the target itself, not an icon inside it) and can shrink it. */
 function shrinkingButtons(css: string): string[] {
   return rulesOf(css).flatMap(({ selectors, body }) => {
@@ -817,11 +845,30 @@ describe('design guard, every button class keeps the 48px target (issue #825)', 
   });
 
   // Review of #833: the ActionBar and the sheet's buttons are seen in the order of the page, so the Tab order matches (WCAG 2.4.3).
-  it('never reverses or reorders the buttons of the ActionBar or a sheet', () => {
-    // Every stylesheet, and any rule naming the bar or the sheet's foot, or a button in them.
-    const rules = allStylesheets.flatMap((f) => rulesOf(code(relative(SRC, f)))).filter(({ selectors }) => selectors.some((s) => /\.(?:action-bar|sheet-actions)(?![\w-])/.test(s)));
-    expect(rules.length).toBeGreaterThan(2);
-    expect(rules.filter(({ body }) => /row-reverse|column-reverse|(?<![\w-])order\s*:/.test(body)).map(({ selectors }) => selectors.join(', '))).toEqual([]);
+  // What is seen matches the Tab order (WCAG 2.4.3): no stylesheet moves a box away from its place in the page, and no component
+  // does so in an inline style. A grid placement is allowed in general layout, but never on the ActionBar, a sheet's foot or a
+  // button in them.
+  it.each(allStylesheets.map((f) => relative(SRC, f)))('%s never reorders what it draws', (file) => {
+    const css = code(file);
+    expect(css.match(/row-reverse|column-reverse|(?<![\w-])order\s*:|direction\s*:\s*rtl|grid-auto-flow\s*:[^;]*dense|(?<![\w-])float\s*:\s*(?:left|right|inline-start|inline-end)/)?.[0] ?? null).toBeNull();
+    const bars = rulesOf(css).filter(({ selectors }) => selectors.some((s) => /\.(?:action-bar|sheet-actions)(?![\w-])/.test(s)));
+    expect(bars.filter(({ body }) => /grid-(?:column|row|area)\s*:/.test(body)).map(({ selectors }) => selectors.join(', '))).toEqual([]);
+  });
+
+  it.each(components.map((f) => relative(SRC, f)))('%s never reorders what it draws in an inline style', (file) => {
+    expect(code(file).match(/flexDirection:\s*['"`](?:row|column)-reverse|(?<![\w-])order:\s*[-\d'"`]|direction:\s*['"`]rtl|float:\s*['"`]/)?.[0] ?? null).toBeNull();
+  });
+
+  // The Sheet contract (issue #825): of the buttons in a sheet's actions, one is the primary, named by its class, and it is the last.
+  it('finds the buttons of a sheet in order, and a primary that is not last', () => {
+    expect(sheetActionProblems('<Sheet open actions={<><button className="btn-primary">Save</button><button>Cancel</button></>}>')).toEqual(['the primary is not last: btn-primary, plain']);
+    expect(sheetActionProblems('<Sheet open actions={<><button>A</button><button>B</button></>}>')).toEqual(['no primary among 2 buttons']);
+    expect(sheetActionProblems('<Sheet open actions={<>{x && <BusyButton type="button">Remove</BusyButton>}<BusyButton className="rt-primary">Save</BusyButton></>}>')).toEqual([]);
+    expect(sheetActionProblems('<Sheet open actions={<button className="rt-primary">Done</button>}>')).toEqual([]);
+  });
+
+  it.each(components.filter((f) => /<Sheet\b/.test(readFileSync(f, 'utf8'))).map((f) => relative(SRC, f)))('%s puts the primary button of every sheet last', (file) => {
+    expect(sheetActionProblems(code(file))).toEqual([]);
   });
 
   it.each(allStylesheets.map((f) => relative(SRC, f)))('%s never makes a button smaller than the target', (file) => {

@@ -4,8 +4,8 @@
  * of a view, .btn-danger destroys or refuses, .btn-ghost is a quiet action. .btn turns a link into
  * a button. Every button is a target of at least 48 by 48px (--tap), whatever its size class.
  *
- * Sizes per screen (issue #825): on a phone (up to 600px) two buttons side by side stand --tap-gap (8px) apart and the screen's
- * main action is full width in the sticky ActionBar (kit.css). On a laptop (from 1024px) a button is as wide as its label and
+ * Sizes per screen (issue #825): in the phone layout (under 720px, which holds the issue's phone up to 600px) two targets stand
+ * --tap-gap (8px) apart and the screen's main action is full width in the sticky ActionBar (kit.css). On a laptop (from 1024px) a button is as wide as its label and
  * never wider than --button-max, so nothing stretches across the page; the main action of a form (.rt-primary, a full width
  * .btn-block, the button of a .form-stack or .form-actions) is at least --button-min-wide and sits at the right of its form.
  */

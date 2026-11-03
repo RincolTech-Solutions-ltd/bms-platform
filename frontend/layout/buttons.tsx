@@ -16,6 +16,8 @@ import { ShopSetupPage } from '../src/areas/staff/retail/shop-setup';
 import { StockTable } from '../src/areas/staff/retail/stock';
 import { Gate } from '../src/areas/staff/retail/ui';
 import { StaffBar } from '../src/areas/staff/route';
+import { SignOutEverywhere } from '../src/areas/staff/top-bar';
+import { PeriodPicker } from '../src/app/ui/PeriodPicker';
 import { MoneyPage } from '../src/areas/staff/tab-pages';
 import { Sheet } from '../src/app/ui/Sheet';
 import { TourProvider } from '../src/tour/host';
@@ -25,7 +27,8 @@ import '../src/app/ui/index.css';
 import { layoutRouter } from './router';
 
 // The page buttons.layout.test.ts lays out in a real browser (issue #825): one daily screen of an owner, chosen by ?screen= (sell,
-// stock, buy, money, expenses, savings, setup, labels for a bar of two buttons, sheet for an open Sheet), under the staff top bar, the staff layout with the bottom tabs, under the app's own stylesheets, so
+// stock, buy, money, expenses, savings, setup, items, labels for a bar of two buttons, period and signout for two real sheets of
+// two buttons, sheet for a Sheet of the kit), under the staff top bar, the staff layout with the bottom tabs, under the app's own stylesheets, so
 // the test can measure every button on a phone and on a laptop. The lists are in the query cache, so nothing is fetched. Every
 // name and figure is invented.
 
@@ -71,6 +74,15 @@ const SCREENS: Record<string, { path: string; body: ReactNode }> = {
   },
   // Not a daily screen: the one ActionBar with two buttons, Print and Make the labels.
   labels: { path: '/staff/retail/catalogue/labels', body: <LabelsPage /> },
+  // Two real sheets of more than one button: the PeriodPicker's days (the test opens it from Custom) and Sign out everywhere.
+  period: {
+    path: '/staff/retail/sales',
+    body: <PeriodPicker from="" to={date} openStart onChange={() => undefined} />,
+  },
+  signout: {
+    path: '/staff',
+    body: <SignOutEverywhere open waiting={0} busy={false} onConfirm={() => undefined} onClose={() => undefined} />,
+  },
   // A confirmation in the kit's Sheet, its primary button last as Sheet asks.
   sheet: {
     path: '/staff/retail/stock',

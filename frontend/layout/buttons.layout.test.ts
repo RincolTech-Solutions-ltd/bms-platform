@@ -46,6 +46,8 @@ const SCREENS: { screen: string; ready: string; main?: string; secondary?: strin
   { screen: 'setup', ready: 'main fieldset label', main: '.action-bar .rt-primary' },
   { screen: 'items', ready: 'main [data-tour="product-list"] :is(.list-row, li)' },
   { screen: 'labels', ready: '.action-bar .rt-primary', main: '.action-bar .rt-primary' },
+  { screen: 'period', ready: '.period-picker' },
+  { screen: 'signout', ready: '.sheet-actions button' },
   { screen: 'sheet', ready: '.sheet-actions button' },
 ];
 
@@ -55,8 +57,12 @@ type Target = Box & { name: string; width: number; height: number; group: number
 async function open(screen: string, ready: string, size: { width: number; height: number }, phone: boolean): Promise<Page> {
   const page = await browser.newPage({ viewport: size, hasTouch: phone, isMobile: phone });
   await openLayout(page, `layout/buttons.html?screen=${screen}`, page.locator(ready));
-  // Set up your shop shows its Add these once a kind of shop is chosen.
+  // Set up your shop shows its Add these once a kind of shop is chosen; the PeriodPicker opens its sheet from Custom.
   if (screen === 'setup') await page.locator('main fieldset label').first().click();
+  if (screen === 'period') {
+    await page.locator('.period-picker .segmented > button', { hasText: 'Custom' }).click();
+    await page.locator('.sheet-actions button').last().waitFor();
+  }
   await settle(page.locator('main'));
   return page;
 }
@@ -89,14 +95,27 @@ async function targets(page: Page): Promise<Target[]> {
       }
       return null;
     };
-    const tappable = 'button, a[href], summary, select, textarea, input:not([type="hidden"], [type="radio"], [type="checkbox"]), [role="button"], label:has(> input[type="radio"], > input[type="checkbox"])';
-    return [...document.querySelectorAll<HTMLElement>(`:is(main, .staff-bar, .sheet-panel, .tab-bar) :is(${tappable})`)]
+    // A tick box or a choice is tapped through its label, which is then the target: a label holding it, or one naming it (htmlFor).
+    const labelled = (el: Element) => el instanceof HTMLInputElement && /^(radio|checkbox)$/.test(el.type) && (el.labels?.length ?? 0) > 0;
+    const tappable = [
+      'button', 'a[href]', 'summary', 'select', 'textarea', 'input:not([type="hidden"])', 'label:has(input[type="radio"], input[type="checkbox"])',
+      '[role="button"]', '[role="link"]', '[role="tab"]', '[role="switch"]', '[role="menuitem"]', '[role="option"]', '[role="checkbox"]', '[role="radio"]',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(', ');
+    const labels = [...document.querySelectorAll<HTMLLabelElement>('label[for]')].filter((l) => l.control && labelled(l.control));
+    // A link inside running text (a sentence in a paragraph) is left out, as WCAG 2.5.8 does; a link standing on its own is not.
+    const inText = (el: HTMLElement) => getComputedStyle(el).display === 'inline' && ((el.parentElement?.textContent ?? '').trim().length > (el.textContent ?? '').trim().length);
+    return [...new Set([...document.querySelectorAll<HTMLElement>(`:is(main, .staff-bar, .sheet-panel, .tab-bar) :is(${tappable})`), ...labels])]
       .filter((el) => {
         const r = el.getBoundingClientRect();
         const style = getComputedStyle(el);
-        return r.width > 0 && r.height > 0 && style.visibility !== 'hidden'
-          && !(el.tagName === 'A' && style.display === 'inline')
-          && !el.closest('details:not([open]) > :not(summary), [aria-hidden="true"], [inert], .visually-hidden');
+        return r.width > 0 && r.height > 0 && style.visibility !== 'hidden' && !labelled(el)
+          && !(el.tagName === 'A' && inText(el))
+          && !el.closest('details:not([open]) > :not(summary), [aria-hidden="true"], [inert], .visually-hidden')
+          // A control inside another target (a field inside its label, a button inside a summary) is part of that target.
+          && !el.parentElement?.closest('label, summary, button, a[href]')
+          // A focusable box that holds targets (a Segmented's group, which passes focus to its choices) is not one itself.
+          && !(el.matches(':not(button, a, input, select, textarea, summary, label)') && el.querySelector(tappable));
       })
       .map((el) => {
         const r = el.getBoundingClientRect();
@@ -115,24 +134,37 @@ async function targets(page: Page): Promise<Target[]> {
 
 /** How far apart two boxes stand: the larger of the gaps across and down, below zero when they overlap. */
 const apart = (a: Box, b: Box) => Math.max(b.left - a.right, a.left - b.right, b.top - a.bottom, a.top - b.bottom);
-const meets = (a: Box, b: Box) => apart(a, b) < 0;
+
+/** The targets of a floating bar nearer than 8px to an edge of the bar that faces the page (not an edge of the screen). */
+function floatingInset(all: Target[], screen: { width: number; height: number }): string[] {
+  return all.flatMap((t) => {
+    const bar = t.cover;
+    if (!bar?.floating) return [];
+    const edges = [
+      bar.left > 0.5 ? t.left - bar.left : Infinity,
+      bar.top > 0.5 ? t.top - bar.top : Infinity,
+      bar.right < screen.width - 0.5 ? bar.right - t.right : Infinity,
+      bar.bottom < screen.height - 0.5 ? bar.bottom - t.bottom : Infinity,
+    ];
+    const near = Math.min(...edges);
+    return near < GAP - 0.5 ? [`${t.name}: ${Math.round(near)}px inside its bar`] : [];
+  });
+}
 
 /**
  * The pairs of targets nearer than 8px, measured where they are drawn. Two parts of one control touch by design. While a bar
- * floats over the page (the fixed tabs, a stuck bar away from its place) the page scrolls under it, so its targets are measured
- * against the other pinned ones only, and the bar's inset (checked in the test) keeps them clear of whatever shows beside it. A bar
- * in its own place is measured against the page like any target, bar a target of the page hidden under it: so the top bar against
- * the first target of the page at the top, and the ActionBar against Clear this purchase at the foot.
+ * floats over the page (the fixed tabs, the top bar or the ActionBar stuck away from its place) the page scrolls under it, so its
+ * targets are measured against the other pinned ones only, and `floatingInset` keeps them 8px inside every edge of the bar that
+ * faces the page. A bar in its own place is measured against the page like any target, overlap included: the top bar against the
+ * first target of the page at the top, and the ActionBar put back in the flow against Clear this purchase.
  */
 function tooClose(all: Target[]): string[] {
   const close: string[] = [];
   all.forEach((a, i) => all.slice(i + 1).forEach((b) => {
     if (a.group >= 0 && a.group === b.group) return;
-    if (!a.cover !== !b.cover) {
-      const [inPage, inBar] = a.cover ? [b, a] : [a, b];
-      const bar = inBar.cover as Box & { floating: boolean };
-      if (bar.floating || meets(inPage, bar)) return;
-    }
+    // A floating bar's own inset (checked in the test) keeps whatever of the page shows beside it clear; a bar in its place is
+    // measured against the page like any target, overlap included.
+    if (!a.cover !== !b.cover && (a.cover ?? b.cover)?.floating) return;
     const gap = apart(a, b);
     if (gap < GAP - 0.5) close.push(`${a.name} and ${b.name}: ${Math.round(gap)}px`);
   }));
@@ -162,16 +194,25 @@ describe.each(SCREENS)('the buttons of $screen (#825)', ({ screen, ready, main, 
     expect(await page.evaluate(() => document.documentElement.scrollWidth), 'page width').toBeLessThanOrEqual(PHONE.width);
     // Measured at the top of the page, at its foot, and with the ActionBar put back in the flow of the form, where it stands on a
     // page short enough not to stick: there its buttons are measured against the page around it (Clear this purchase under it).
-    for (const at of ['top', 'foot', 'flow'] as const) {
+    // On a screen with a main action, once more after a press of it while its fields are not ready (Buy: the cost is empty), when
+    // the form points at what is missing.
+    const passes = main ? (['top', 'foot', 'flow', 'pressed'] as const) : (['top', 'foot', 'flow'] as const);
+    for (const at of passes) {
       if (at === 'foot') await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      if (at === 'pressed' && main) {
+        await page.locator(main).first().click();
+        await page.evaluate(() => window.scrollTo(0, 0));
+      }
       const flow = at === 'flow' ? await page.addStyleTag({ content: '.action-bar { position: static !important; }' }) : null;
       await settle(page.locator('main'));
       const all = await targets(page);
       expect(all.length, 'targets found').toBeGreaterThan(0);
       expect(all.filter((t) => t.width < TAP - 0.5 || t.height < TAP - 0.5).map((t) => `${t.name} ${Math.round(t.width)}x${Math.round(t.height)}`), at).toEqual([]);
       expect(tooClose(all), `measured at the ${at}`).toEqual([]);
+      expect(floatingInset(all, PHONE), `measured at the ${at}`).toEqual([]);
       await flow?.evaluate((el) => (el as Element).remove());
     }
+    await page.evaluate(() => window.scrollTo(0, 0));
     await settle(page.locator('main'));
     for (const bar of await bars(page)) {
       // A button of the stuck bar stands 8px inside every edge of the bar, so whatever is beside the bar is 8px from it.
@@ -185,7 +226,8 @@ describe.each(SCREENS)('the buttons of $screen (#825)', ({ screen, ready, main, 
       const tops = bar.boxes.map((b) => b.top);
       expect(tops).toEqual([...tops].sort((a, b) => a - b));
       expect(bar.boxes.filter((b) => b.width < bar.inner.right - bar.inner.left - 1)).toEqual([]);
-      if (bar.primaries.length > 0) expect(bar.primaries, 'the primary is last').toEqual([bar.boxes.length - 1]);
+      // A bar or sheet of more than one button names its one primary by its class, and it is the last.
+      if (bar.boxes.length > 1 || bar.primaries.length > 0) expect(bar.primaries, 'one primary, the last').toEqual([bar.boxes.length - 1]);
     }
     if (main) {
       await page.evaluate(() => window.scrollTo(0, 0));
@@ -251,7 +293,7 @@ describe.each(SCREENS)('the buttons of $screen (#825)', ({ screen, ready, main, 
         expect(gap, 'the bar keeps its buttons together').toBeLessThanOrEqual(12.5);
       });
       expect(Math.abs(bar.inner.right - (bar.boxes.at(-1)?.right ?? bar.inner.right))).toBeLessThanOrEqual(1);
-      if (bar.primaries.length > 0) expect(bar.primaries, 'the primary is last').toEqual([bar.boxes.length - 1]);
+      if (bar.boxes.length > 1 || bar.primaries.length > 0) expect(bar.primaries, 'one primary, the last').toEqual([bar.boxes.length - 1]);
     }
     await page.close();
   });
