@@ -3,7 +3,6 @@ package com.rincoltech.bms.core.notifications.internal;
 import com.rincoltech.bms.core.notifications.Outbox;
 import com.rincoltech.bms.core.tenancy.TenantSettings;
 import com.rincoltech.bms.kernel.BusinessClock;
-import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Set;
@@ -44,30 +43,19 @@ class JdbcOutbox implements Outbox {
         this.settings = settings;
     }
 
-    /**
-     * The id of an SMS row, from its idempotency key (issue #772): the key names one event for one member in one tenant
-     * and is unique, so the id is too, and {@link SmsEventsService#status} can find the row of an event without
-     * storing anything. Only a member SMS of {@link SmsEventsService} gets it ({@link #memberSms}); every other row
-     * keeps a random id.
-     */
-    static UUID smsRowId(String idempotencyKey) {
-        return UUID.nameUUIDFromBytes(("outbox:" + idempotencyKey).getBytes(StandardCharsets.UTF_8));
-    }
-
-    /**
-     * A member SMS: its key is {@link SmsEventsService#key} ({@code sms:<template>:<tenant>:<event>:<member>}), and it is
-     * only ever written inside that service's savepoint. A concurrent duplicate of it can therefore meet the primary key
-     * as well as the key's unique index, which {@code ON CONFLICT (idempotency_key)} does not absorb; that error is
-     * caught by the savepoint, answered as a failure of the duplicate, and the first row stands. Direct writers
-     * (an owner's or the billing texts) are not in a savepoint, so they keep a random id and the plain no-op.
-     */
-    private static boolean memberSms(Message message) {
-        return SMS.equals(message.channel()) && message.idempotencyKey().startsWith("sms:");
-    }
-
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public boolean enqueue(Message message) {
+        return enqueueTracked(message).written();
+    }
+
+    /**
+     * Every row gets a fresh random id, so only the idempotency key decides a repeat ({@code ON CONFLICT} on its
+     * index, the arbiter): a concurrent duplicate waits for the first and then writes nothing, it never errs.
+     */
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Enqueued enqueueTracked(Message message) {
         if (!CHANNELS.contains(message.channel())) {
             throw new IllegalArgumentException("unknown outbox channel " + message.channel());
         }
@@ -90,10 +78,11 @@ class JdbcOutbox implements Outbox {
             expiresAt = expiresAt == null || expiresAt.isAfter(windowEnd) ? windowEnd : expiresAt;
         }
         Subject subject = message.subject();
-        return Boolean.TRUE.equals(
+        UUID id = UUID.randomUUID();
+        boolean written = Boolean.TRUE.equals(
                 jdbc.sql("SELECT notification_outbox_enqueue(?, ?, ?, ?, CAST(? AS jsonb), ?, ?, ?, ?, ?, ?, ?, ?)")
                         .params(
-                                memberSms(message) ? smsRowId(message.idempotencyKey()) : UUID.randomUUID(),
+                                id,
                                 message.channel(),
                                 message.recipient(),
                                 message.templateKey(),
@@ -108,6 +97,7 @@ class JdbcOutbox implements Outbox {
                                 notBefore == null ? null : Timestamp.from(notBefore))
                         .query(Boolean.class)
                         .single());
+        return new Enqueued(written, written ? id : null);
     }
 
     @Override

@@ -720,13 +720,13 @@ Built in slice #231 (no migration). Where the build sharpens the text above:
   time is not up), `sent` (the provider or, on staging, the sink took it), `failed` (the provider failed, refused or blocked
   it), `unconfirmed` (the send's outcome is `unknown`: it may have arrived) or `expired` (it never reached the provider before
   the intent expired or its hour ran out, or its payment closed). `already_sent` alone only proves the audit row. The status
-  is read through `SmsEvents.status`: a member SMS row's id (key `sms:...`, written only by `SmsEventsService`) is a name based
-  UUID of its idempotency key, so the row of an event is found without storing anything (no migration);
-  `notification_outbox_is_pending` says whether it waits, and the tenant's one `sms_deliveries` row (unique per outbox row,
-  row-level security) says what the provider did. Two transactions queueing the same event at once also meet on that
-  primary key, which `ON CONFLICT (idempotency_key)` does not absorb: the second is refused inside the port's savepoint, the
-  first row stands and the caller's transaction is unharmed (`SmsEventsIT`). Other SMS rows (an owner's, billing) keep a
-  random id. The screen says "queued earlier" while it waits, "sent" only when sent, after `failed` or `expired` offers "Make a
+  is read through `SmsEvents.status` by the outbox row's id, which `SmsEvents.queueTracked` answers when the text is queued
+  and the link text keeps in its audit row (`outbox_id`, never the number). Every outbox row keeps a random id, so only the
+  idempotency key decides a repeat (`ON CONFLICT` on its index): two transactions queueing the same event at once write one
+  row and the second no-ops without an error (`SmsEventsIT`). The outbox is read only through its functions, and none reads
+  by key, so the id is kept rather than adding a function (no migration). `notification_outbox_is_pending` says whether it
+  waits, and the tenant's one `sms_deliveries` row (`UNIQUE (tenant_id, outbox_id)`, row-level security) says what the
+  provider did. A text queued before this release has no `outbox_id`: it reads `queued` until its time is up. The screen says "queued earlier" while it waits, "sent" only when sent, after `failed` or `expired` offers "Make a
   new payment link" (it cancels this payment first, only while it can be cancelled), and after `unconfirmed` asks staff to
   check with the payer or copy the link, without pushing a new one.
 - **Withdrawn when the payment closes (issue #772).** When an intent leaves `pending` (paid, cancelled, failed or expired

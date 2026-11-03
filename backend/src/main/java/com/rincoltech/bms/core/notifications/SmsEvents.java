@@ -211,11 +211,21 @@ public interface SmsEvents {
         NOT_SENT
     }
 
+    /** What {@link #queueTracked} did: the outcome and, when a row was written, its outbox id. */
+    record Queued(Result result, UUID rowId) {}
+
     /**
-     * Where the message of {@code templateKey} about the event {@code eventRef} for {@code memberId} of the bound tenant
-     * stands. Guarded: a failure answers {@link TextStatus#PENDING}, which never claims that a text went.
+     * As {@link #queue}, also answering the outbox id of the row written, for a caller that will ask its
+     * {@link #status} later (the payment link, issue #772). Guarded like {@link #queue}.
      */
-    TextStatus status(String templateKey, String eventRef, UUID memberId);
+    Queued queueTracked(MemberSms message);
+
+    /**
+     * Where the member message with this outbox id ({@link #queueTracked}) stands, for the bound tenant; a null id (one
+     * queued before ids were kept) answers {@link TextStatus#NOT_SENT}. Guarded: a failure answers
+     * {@link TextStatus#PENDING}, which never claims that a text went.
+     */
+    TextStatus status(UUID rowId);
 
     /**
      * The bound business's name as a short plain text carries it (issue #772): every dash written as a space, a curly

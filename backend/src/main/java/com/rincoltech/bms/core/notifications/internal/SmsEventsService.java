@@ -115,7 +115,13 @@ class SmsEventsService implements SmsEvents {
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public Result queue(MemberSms message) {
-        return guarded("queue " + message.templateKey(), Result.FAILED, () -> write(message));
+        return queueTracked(message).result();
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Queued queueTracked(MemberSms message) {
+        return guarded("queue " + message.templateKey(), new Queued(Result.FAILED, null), () -> write(message));
     }
 
     @Override
@@ -137,7 +143,8 @@ class SmsEventsService implements SmsEvents {
                 return Result.TOO_OLD;
             }
             return write(new MemberSms(
-                    templateKey, memberId, phone.get(), params.get(), eventRef, category, valueDate, expiresAt));
+                            templateKey, memberId, phone.get(), params.get(), eventRef, category, valueDate, expiresAt))
+                    .result();
         });
     }
 
@@ -154,21 +161,24 @@ class SmsEventsService implements SmsEvents {
     }
 
     /**
-     * The row is found by its id, which follows from the event's key ({@link JdbcOutbox#smsRowId}): still pending, it
-     * has not reached the provider; otherwise the delivery log (row-level security keeps it to the bound tenant) says
-     * what the provider did, and no delivery row means it never got there. JUSTIFICATION-A3: a new read on the port.
+     * The row is found by the id {@link #queueTracked} answered: still pending, it has not reached the provider;
+     * otherwise the delivery log (row-level security keeps it to the bound tenant) says what the provider did, and no
+     * delivery row means it never got there. JUSTIFICATION-A3: a new read on the port.
      */
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
-    public TextStatus status(String templateKey, String eventRef, UUID memberId) {
+    public TextStatus status(UUID row) {
+        if (row == null) {
+            return TextStatus.NOT_SENT;
+        }
         return guarded("status", TextStatus.PENDING, () -> {
-            UUID row = JdbcOutbox.smsRowId(key(templateKey, tenant.profile().id(), eventRef, memberId));
             if (Boolean.TRUE.equals(jdbc.sql("SELECT notification_outbox_is_pending(?)")
                     .param(row)
                     .query(Boolean.class)
                     .single())) {
                 return TextStatus.PENDING;
             }
+            // At most one row: UNIQUE (tenant_id, outbox_id) and the tenant binding (SmsEventsIT pins it).
             return jdbc.sql("SELECT status FROM sms_deliveries WHERE outbox_id = ?")
                     .param(row)
                     .query(String.class)
@@ -256,10 +266,10 @@ class SmsEventsService implements SmsEvents {
                 && valueDate.isBefore(clock.today(tenant.profile().timezone()).minusDays(maxAgeDays));
     }
 
-    private Result write(MemberSms message) {
+    private Queued write(MemberSms message) {
         Optional<String> to = PhoneNumbers.forSms(message.phone());
         if (to.isEmpty()) {
-            return Result.NO_PHONE;
+            return new Queued(Result.NO_PHONE, null);
         }
         CurrentTenant.Profile profile = tenant.profile();
         Map<String, String> params = new LinkedHashMap<>(message.params());
@@ -275,7 +285,7 @@ class SmsEventsService implements SmsEvents {
         if (message.expiresAt() != null && message.expiresAt().isBefore(receiptExpiry)) {
             receiptExpiry = message.expiresAt();
         }
-        boolean queued = outbox.enqueue(new Outbox.Message(
+        Outbox.Enqueued queued = outbox.enqueueTracked(new Outbox.Message(
                 Outbox.SMS,
                 to.get(),
                 message.templateKey(),
@@ -286,7 +296,7 @@ class SmsEventsService implements SmsEvents {
                 message.category(),
                 Outbox.Subject.member(message.memberId()),
                 null));
-        return queued ? Result.QUEUED : Result.NOT_QUEUED;
+        return queued.written() ? new Queued(Result.QUEUED, queued.id()) : new Queued(Result.NOT_QUEUED, null);
     }
 
     /** The idempotency key: the same event for the same member in the same tenant is one row, ever. */

@@ -192,10 +192,10 @@ class SmsEventsIT extends IntegrationTest {
     // ---- What is queued, once ----------------------------------------------------------------------
 
     /**
-     * Issue #772: a member SMS row's id follows from its key, so two transactions that queue the same event at once meet
-     * on the primary key as well as on the key. The second waits for the first, then is refused (or no-ops) inside its
-     * savepoint: one row, the second caller's transaction unharmed, and a later write in it commits.
-     * JUSTIFICATION-A3: the concurrency test the review of #781 asked for; the anchor is the insertion point.
+     * Issue #772: two transactions that queue the same event at once. Every row has its own random id, so only the
+     * idempotency key decides: the second waits for the first and then writes nothing, without an error. One row, and a
+     * later write in the second transaction commits. JUSTIFICATION-A3: the concurrency test the review of #781 asked
+     * for; the anchor is the insertion point.
      */
     @Test
     void twoTransactionsQueueingTheSameEventAtOnceWriteOneRowAndNeitherIsHarmed() throws Exception {
@@ -244,7 +244,7 @@ class SmsEventsIT extends IntegrationTest {
             release.countDown();
             assertThat(first.get(30, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(Result.QUEUED);
             List<Result> seconds = second.get(30, java.util.concurrent.TimeUnit.SECONDS);
-            assertThat(seconds.get(0)).isIn(Result.NOT_QUEUED, Result.FAILED);
+            assertThat(seconds.get(0)).isEqualTo(Result.NOT_QUEUED);
             assertThat(seconds.get(1)).isEqualTo(Result.QUEUED);
         } finally {
             release.countDown();
@@ -254,6 +254,28 @@ class SmsEventsIT extends IntegrationTest {
                 .containsExactlyInAnyOrder(
                         SmsEventsService.key("loan.repayment_received", t.tenantId(), ref, member),
                         SmsEventsService.key("loan.repayment_received", t.tenantId(), other, member));
+    }
+
+    /**
+     * Issue #772: the status read takes the one delivery row of an outbox row. The delivery log holds at most one per
+     * outbox row in a tenant: a second is refused. JUSTIFICATION-A3: the pin the lead's note on #781 asked for.
+     */
+    @Test
+    void anOutboxRowHasAtMostOneDeliveryRow() {
+        TestDatabase.Fixture t = tenant(1000);
+        UUID outboxId = UUID.randomUUID();
+        String insert = "INSERT INTO sms_deliveries (id, tenant_id, outbox_id, template_key, category,"
+                + " recipient_masked, recipient_hash, provider, status) VALUES (?, ?, ?, 'payment.link',"
+                + " 'transactional', '+256*****0772', repeat('a', 64), 'fake', 'sent')";
+        TestDatabase.owner()
+                .sql(insert)
+                .params(UUID.randomUUID(), t.tenantId(), outboxId)
+                .update();
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> TestDatabase.owner()
+                        .sql(insert)
+                        .params(UUID.randomUUID(), t.tenantId(), outboxId)
+                        .update())
+                .isInstanceOf(org.springframework.dao.DuplicateKeyException.class);
     }
 
     @Test

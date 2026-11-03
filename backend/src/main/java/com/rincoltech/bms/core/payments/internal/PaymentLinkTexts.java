@@ -148,9 +148,9 @@ class PaymentLinkTexts {
                 .param("payments:link-text:" + intent.tenantId())
                 .query((rs, n) -> 0)
                 .list();
-        Optional<Boolean> texted = texted(intentId);
+        Optional<Texted> texted = texted(intentId);
         if (texted.isPresent()) {
-            return new LinkText(intentId, true, textStatus(intent, member, texted.get()), intent.expiresAt());
+            return new LinkText(intentId, true, textStatus(intent, texted.get()), intent.expiresAt());
         }
         // Read again under the intent's row lock: a payment confirmed since the first read is not texted.
         intent = store.lock(intentId).orElseThrow(ApiException::notFound);
@@ -197,7 +197,7 @@ class PaymentLinkTexts {
                 "reference",
                 handler.label(intent.subjectId()).orElse("your payment").replace('-', ' '));
         params.put("link", intent.redirectUrl());
-        SmsEvents.Result result = sms.queue(new SmsEvents.MemberSms(
+        SmsEvents.Queued queued = sms.queueTracked(new SmsEvents.MemberSms(
                 TEMPLATE,
                 member,
                 intent.payerPhone(),
@@ -206,7 +206,7 @@ class PaymentLinkTexts {
                 Outbox.TRANSACTIONAL,
                 null,
                 intent.expiresAt()));
-        switch (result) {
+        switch (queued.result()) {
             case QUEUED -> {}
             // Not "already sent": the outbox row and the audit row are written in one transaction and the audit row was
             // looked for above, under the member's lock, so no row exists for this intent. The channel refused it (a
@@ -230,22 +230,34 @@ class PaymentLinkTexts {
         extra.put("member_id", member.toString());
         extra.put("template", TEMPLATE);
         extra.put("expires_at", intent.expiresAt().toString());
+        // The outbox row's id, so a later press reads where this text stands (issue #772): an internal id, not the
+        // number.
+        if (queued.rowId() != null) {
+            extra.put("outbox_id", queued.rowId().toString());
+        }
         audit.user(intent, "link_texted", intent.status(), extra);
         return new LinkText(intentId, false, "queued", intent.expiresAt());
     }
 
+    /** That an intent's link was texted: whether the text's hour has run out, and its outbox row (null before #772). */
+    record Texted(boolean hourOver, UUID outboxId) {}
+
     /**
-     * Whether this intent's link was texted, from its audit row: empty when it never was, otherwise whether the text's
-     * hour has run out, on the database's clock, the one the audit row is stamped with.
+     * Whether this intent's link was texted, from its audit row: empty when it never was. The hour is read on the
+     * database's clock, the one the audit row is stamped with.
      */
-    private Optional<Boolean> texted(UUID intentId) {
+    private Optional<Texted> texted(UUID intentId) {
         return jdbc.sql("""
-                        SELECT min(created_at) <= now() - CAST(? AS interval) FROM audit_log
+                        SELECT created_at <= now() - CAST(? AS interval) AS hour_over,
+                               data -> 'after' ->> 'outbox_id' AS outbox_id
+                        FROM audit_log
                         WHERE entity_type = 'payment_intent' AND entity_id = ? AND action = ?
-                        HAVING count(*) > 0
+                        ORDER BY created_at LIMIT 1
                         """)
                 .params(TEXT_LIFETIME.toMinutes() + " minutes", intentId, ACTION)
-                .query(Boolean.class)
+                .query((rs, n) -> new Texted(
+                        rs.getBoolean("hour_over"),
+                        rs.getString("outbox_id") == null ? null : UUID.fromString(rs.getString("outbox_id"))))
                 .optional();
     }
 
@@ -253,14 +265,15 @@ class PaymentLinkTexts {
      * Where the earlier text stands (issue #772). One that has not reached the provider is queued until its time runs out
      * (the intent's expiry or the transactional hour) or its payment closes, and expired after.
      */
-    private String textStatus(Intent intent, UUID member, boolean hourOver) {
-        return switch (sms.status(TEMPLATE, intent.id().toString(), member)) {
+    private String textStatus(Intent intent, Texted texted) {
+        boolean hourOver = texted.hourOver();
+        return switch (sms.status(texted.outboxId())) {
             case PENDING -> "queued";
             case SENT -> "sent";
             case FAILED -> "failed";
             case UNCONFIRMED -> "unconfirmed";
             // Not at the provider and its time not up: still "queued", never "failed", so staff are not led to cancel a
-            // payment whose text may yet go (a row queued before this release, whose id is not the derived one).
+            // payment whose text may yet go (a text queued before this release, whose audit row has no outbox id).
             case NOT_SENT ->
                 hourOver || !clock.now().isBefore(intent.expiresAt()) || !"pending".equals(intent.status())
                         ? "expired"
