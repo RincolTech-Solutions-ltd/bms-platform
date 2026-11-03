@@ -349,11 +349,17 @@ button.list-row:focus-visible {
   margin: 0 calc(var(--space-5) * -1);
 }
 
+/* From 720px the sheet is a dialog: its buttons are as wide as their labels (issue #825), the primary one (first) at the right. */
 .sheet-actions {
   display: flex;
+  flex-direction: row-reverse;
   flex-wrap: wrap;
   gap: var(--space-3);
   padding: 0 var(--space-5) var(--space-5);
+}
+
+.sheet-actions > * {
+  max-width: min(100%, var(--button-max));
 }
 
 @media (max-width: 719px) {
@@ -405,6 +411,7 @@ button.list-row:focus-visible {
 
   .sheet-actions > * {
     width: 100%;
+    max-width: none;
   }
 }
 
@@ -688,7 +695,7 @@ button.list-row:focus-visible {
     border-top: 1px solid var(--color-border);
   }
 
-  .action-bar > :is(.rt-primary, .btn-primary, .btn-brand) {
+  .action-bar > :is(.rt-primary, .btn-primary, .btn-brand, .btn-danger) {
     display: flex;
     width: 100%;
     margin-top: 0;
@@ -702,6 +709,22 @@ button.list-row:focus-visible {
   .has-tab-bar .action-bar {
     bottom: var(--tab-bar-offset);
     padding-bottom: var(--space-3);
+  }
+}
+
+/* A laptop (issue #825): the bar is a row at the right of the form, the main action (first in the bar) at the far right and any
+   other button to its left, each as wide as its label (buttons.css). */
+@media (min-width: 1024px) {
+  .action-bar {
+    display: flex;
+    flex-direction: row-reverse;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .action-bar > * {
+    margin: 0;
   }
 }
 
@@ -807,7 +830,8 @@ p:has(> .link-row:only-child) {
   display: flex;
   align-items: flex-start;
   gap: var(--space-1);
-  margin: 0 0 var(--space-3);
+  /* The info button's 48px target hangs over the line by --space-3, so the next control still stands --tap-gap clear (issue #825). */
+  margin: 0 0 calc(var(--space-3) + var(--tap-gap));
   /* A grid or flex item: without this the one uncut line would widen its column, and the page with it (issue #343). */
   min-width: 0;
 }

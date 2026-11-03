@@ -380,9 +380,22 @@
   font-size: var(--text-lg);
 }
 
-.rt-primary ~ button:not(.rt-primary) {
+.rt-primary ~ button:not(.rt-primary),
+.rt-primary + p {
   width: 100%;
   margin-top: var(--space-3);
+}
+
+/* A laptop (issue #825, buttons.css): the main action and the buttons under it take the width of their label, at the right. */
+@media (min-width: 1024px) {
+  .rt-primary,
+  .rt-primary ~ button:not(.rt-primary) {
+    display: flex;
+    width: fit-content;
+    min-width: min(100%, var(--button-min-wide));
+    max-width: min(100%, var(--button-max));
+    margin-inline-start: auto;
+  }
 }
 
 .rt section > h2:first-child {
@@ -928,7 +941,7 @@ th[scope='rowgroup'] .cat-head {
 }
 
 .rc-chip {
-  min-height: 40px;
+  min-height: var(--tap);
   padding: var(--space-1) var(--space-3);
   border: 1px solid var(--color-border-strong);
   border-radius: 999px;

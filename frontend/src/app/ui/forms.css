@@ -199,6 +199,17 @@ legend {
   margin-top: var(--space-5);
 }
 
+/* A laptop (issue #825, buttons.css): the form's buttons take the width of their label and stand at its right. */
+@media (min-width: 1024px) {
+  .form-stack > button,
+  .form-actions > button {
+    width: fit-content;
+    min-width: min(100%, var(--button-min-wide));
+    max-width: min(100%, var(--button-max));
+    margin-inline-start: auto;
+  }
+}
+
 .field-hint {
   display: block;
   margin-top: 6px;
