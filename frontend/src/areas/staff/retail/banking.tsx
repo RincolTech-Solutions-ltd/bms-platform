@@ -47,9 +47,10 @@ export function BankingForm({ branchId, onSaved }: { branchId: string; onSaved?:
   const expected = useQuery({ queryKey: ['retail', 'banking-expected', branchId, entry.day], queryFn: () => retail.bankingExpected({ branchId, date: entry.day }) });
   const shown = draft.amount ?? bankingPrefill(expected.data);
   const minor = amountOrNull(shown);
-  // toast-exempt: success screen, the Saved panel replaces the form
+  // success-screen: the Saved panel replaces the form
   const save = useMutation({
     mutationFn: () => retail.createBanking({ branch_id: branchId, ...dateFields(entry), amount_minor: minor ?? 0, ...(draft.reference.trim() ? { reference: draft.reference.trim() } : {}) }, key),
+    meta: { success: 'Banking saved' },
     onSuccess: (saved) => {
       finish();
       void queryClient.invalidateQueries({ queryKey: ['retail'] });

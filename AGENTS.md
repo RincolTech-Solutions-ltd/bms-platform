@@ -874,6 +874,13 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   answer; the Sell line's price field is Selling price, and the sale lines export sheet's price column too. Tests:
   `shop-here.dom.test.tsx`, `stock-cards.dom.test.tsx`, `layout/my-stock.layout.test.ts`, `design-guard.test.ts`,
   `glossary.test.ts`, `maths.test.ts`, `DataExportIT`.
+- **Built (every shop's stock on My stock, issue #807, ADR-119, FR-RET-84):** no migration and no permission. Each row of
+  `GET /retail/stock` carries `shops` (`{branch_id, name, qty, negative, here}` per active shop that keeps goods, the listed one
+  first), from one read of the stock balances per page, for everyone who may read stock at the listed shop; absent while the
+  retail setting `other_shops_stock` (on by default, Retail settings, "Show other shops' stock to everyone") is off or
+  fewer than two shops would be listed. My stock lists the shops on each card and in the In stock cell, "In stock here" first; the Switch to
+  button of #728 is gone. Tests: `RetailAllShopsStockIT`, `RetailAllShopsStockReadsIT`, `all-shops-stock.dom.test.tsx`, `where-is-my-stock.dom.test.tsx`,
+  `layout/my-stock.layout.test.ts`.
 - **Built (Past usage and damage, issue #145, AppSheet "Damaged or used stock not sold"):** no migration and no permission.
   `GET /retail/stock/movements` takes a repeatable `kind` filter (422 for an unknown or blank kind) and each row carries the
   item's `code`, `description` and `unit`, and for a profit reader `line_cost_minor`, the value the screen shows as is. The page `/staff/retail/usage-history` (`usage-history.tsx`, `retail.stock.read`), linked
@@ -1344,12 +1351,16 @@ Accepted (this list is the ADR index):
 - ADR-111 Sizes, colours and types in Add an item, picked from ready lists shipped with the app: the same one form asks
   about sizes, `POST /retail/product-families` takes `packs` made on every size in its transaction, and `GET
   /retail/product-families/options` offers the sizes and colours a shop used before (#697, D81, D98; no migration)
-- ADR-115 Salespeople may see and change the savings amount when the owner allows it (Proposed, #768): the setting
+- ADR-115 Salespeople may see and change the savings amount when the owner allows it (Accepted, #768, D124): the setting
   `salespeople_see_savings_amount` in the settings document, off by default, set by the Owner only (403 `owner_only`); when
   on, a caller without `retail.profit.read` sees the suggestion and may change it before the day is saved, and sees the amount
   of records made while it is on if they hold `retail.savings.record`; the cap, the profit and the expenses stay hidden, and
   the profit can still be worked out from the suggestion; replacing a saved amount needs `retail.savings.overwrite` for
-  everyone; the audit flags `salespeople_setting` (no migration)
+  everyone; the audit flags `salespeople_setting` (no migration). Amended by #799: while it is on, a seller
+  (`retail.sale.create` at the branch) without the till records the branch's savings through
+  `/retail/savings/sales-staff` (403 while off), and this month's records show their amounts to whoever may record savings or
+  sell at the branch, whenever they were made; sellers open and save days of this month only; `/me` carries the switch so the
+  Savings screen shows for sellers only then; once a day is saved its suggestion is sent to no one, the Owner included
 - ADR-116 The figures last loaded are kept on the phone for reading offline: an allowlist of retail reads (Home and Retail
   summaries, sales of the last 30 days, stock, customers and what they owe, past usage, the reports already made) in the
   `bms-offline` store per business and person, never lending or sign-in, capped, cleared at sign-out; one offline banner
@@ -1364,6 +1375,10 @@ Accepted (this list is the ADR index):
   "Messages not sent" page; a hard bounce, a complaint or `email.suppressed` stores a keyed hash of the address
   (`EmailSuppressions`, never the address), both senders then refuse it with `recipient_suppressed`, and
   `POST /api/v1/platform/outbox/unsuppress` clears it (#333; no migration, no new column)
+- ADR-119 My stock shows every shop's quantity to everyone who may see stock (#807, asked for by the owner): each row of
+  `GET /retail/stock` carries `shops`, the quantity in every active shop that keeps goods, the listed shop always first and
+  marked `here`, the balances read for the page in one query; quantities only, whatever the caller's scope at the other shops; the owner's switch `other_shops_stock`
+  in the retail settings group, on unless switched off; the Switch to button of #728 is gone (no migration)
 
 Pending (cite only as "pending ADR-NNN"):
 

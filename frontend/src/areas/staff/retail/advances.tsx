@@ -52,8 +52,9 @@ export function AdvanceForm({ branchId, onSaved }: { branchId: string; onSaved?:
   const parties = useCashParties();
   const minor = amountOrNull(draft.principal);
   const entry = useEntryDate(branchId, draft.date, draft.dateReason);
-  // toast-exempt: success screen, the Saved panel replaces the form
+  // success-screen: the Saved panel replaces the form
   const save = useMutation({
+    meta: { success: 'Advance saved' },
     mutationFn: () =>
       retail.createAdvance({
         branch_id: branchId, ...dateFields(entry), party_id: draft.partyId, principal_minor: minor ?? 0,
@@ -104,8 +105,9 @@ export function RepaymentForm({ branchId, onSaved }: { branchId: string; onSaved
   const advance = (open.data ?? []).find((a) => a.id === draft.advanceId);
   const problem = repaymentProblem(advance, draft.amount);
   const entry = useEntryDate(branchId, draft.date, draft.dateReason);
-  // toast-exempt: success screen, the Saved panel replaces the form
+  // success-screen: the Saved panel replaces the form
   const save = useMutation({
+    meta: { success: 'Repayment saved' },
     mutationFn: () => retail.createRepayment(draft.advanceId, { branch_id: branchId, amount_minor: amountOrNull(draft.amount) ?? 0, method: draft.method, ...dateFields(entry, 'paid_on') }, key),
     onSuccess: (saved) => {
       finish();

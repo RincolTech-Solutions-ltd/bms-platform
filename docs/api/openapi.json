@@ -6733,6 +6733,10 @@
             },
             "type" : "array"
           },
+          "salespeople_see_savings_amount" : {
+            "description" : "True while the Owner lets salespeople see and change the savings amount (ADR-115, issue #799): the PWA offers the Savings screen to a seller only then",
+            "type" : "boolean"
+          },
           "tenant_currency" : {
             "description" : "The business's currency (ISO 4217): forms type and show money in it before the record they make carries one (issue #289)",
             "type" : "string"
@@ -10842,6 +10846,10 @@
             "type" : "boolean"
           },
           "documents" : {
+            "type" : "boolean"
+          },
+          "other_shops_stock" : {
+            "description" : "Issue #807 (ADR-119): My stock shows everyone who may read stock at a shop how many of each item every active shop holds (quantities only); true, the default, unless the owner switched it off",
             "type" : "boolean"
           },
           "price_lists" : {
@@ -19695,7 +19703,7 @@
             "type" : "boolean"
           },
           "suggested_minor" : {
-            "description" : "Present only with retail.profit.read in the record's branch",
+            "description" : "Present only with retail.profit.read in the record's branch and only on a voided record: an active record is a saved day, whose suggestion is sent to no one (issue #799)",
             "format" : "int64",
             "type" : "integer"
           },
@@ -19740,7 +19748,7 @@
             "type" : "boolean"
           },
           "suggested_minor" : {
-            "description" : "Present only with retail.profit.read in the record's branch",
+            "description" : "Present only with retail.profit.read in the record's branch and only on a voided record: an active record is a saved day, whose suggestion is sent to no one (issue #799)",
             "format" : "int64",
             "type" : "integer"
           },
@@ -19854,11 +19862,11 @@
             "type" : "string"
           },
           "may_change_amount" : {
-            "description" : "True when this caller may save an amount different from the suggestion: with retail.savings.overwrite, or with salespeople_see_savings_amount on when no saved record of the day was voided (replacing a saved amount needs retail.savings.overwrite; ADR-115)",
+            "description" : "True when this caller may save an amount different from the suggestion: with retail.savings.overwrite, or with salespeople_see_savings_amount on when no saved record of the day was voided (replacing a saved amount needs retail.savings.overwrite; ADR-115); false once the day has an active savings record (issue #799)",
             "type" : "boolean"
           },
           "suggested_minor" : {
-            "description" : "Present only with retail.profit.read in the record's branch",
+            "description" : "Present only with retail.profit.read in the record's branch; absent for every caller once the day has an active savings record (issue #799)",
             "format" : "int64",
             "type" : "integer"
           },
@@ -19886,6 +19894,29 @@
           },
           "suggested_qty" : {
             "description" : "Whole units to move: what that branch sells in cover_days, less its stock, at most what this branch holds above slow_months of its own sales",
+            "type" : "string"
+          }
+        }
+      },
+      "RetailShopQty" : {
+        "description" : "Issue #807: how many of an item one shop holds, nothing else of it",
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "here" : {
+            "description" : "True for the shop the list was read for",
+            "type" : "boolean"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "negative" : {
+            "description" : "Below zero in this shop",
+            "type" : "boolean"
+          },
+          "qty" : {
             "type" : "string"
           }
         }
@@ -20590,6 +20621,13 @@
             "description" : "Present only to whoever sells, oversees selling, sets prices or reads cost (retail.sale.create, retail.sale.all_sellers, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)",
             "format" : "int64",
             "type" : "integer"
+          },
+          "shops" : {
+            "description" : "Issue #807 (ADR-119): the quantity in every active shop of the business, this shop first and marked here, a shop with none at 0; quantities only, whatever the caller's branch scope. Absent while the owner has switched other shops' stock off or fewer than two shops would be listed",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailShopQty"
+            },
+            "type" : "array"
           },
           "standard_pack" : {
             "$ref" : "#/components/schemas/RetailStandardPack"
@@ -25906,6 +25944,10 @@
             "type" : "boolean"
           },
           "documents" : {
+            "type" : "boolean"
+          },
+          "other_shops_stock" : {
+            "description" : "Show every shop's quantity on My stock to everyone who may read stock (issue #807)",
             "type" : "boolean"
           },
           "price_lists" : {
@@ -45334,6 +45376,150 @@
           }
         },
         "summary" : "Record the day's savings (FR-RET-18 to FR-RET-20); M",
+        "tags" : [ "retail-cashbook" ]
+      }
+    },
+    "/api/v1/retail/savings/sales-staff" : {
+      "get" : {
+        "description" : "Issue #799, ADR-115: only while the Owner's setting salespeople_see_savings_amount is on, else 403 permission_denied; the branch must be one where the caller may sell (retail.sale.create). Only records dated this month, at the branches where the caller may sell.",
+        "operationId" : "listRetailSalesStaffSavings",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "branch_id",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        }, {
+          "in" : "query",
+          "name" : "from",
+          "required" : false,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "to",
+          "required" : false,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "include_voided",
+          "required" : false,
+          "schema" : {
+            "default" : false,
+            "type" : "boolean"
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "cursor",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailSavingsPage"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "This month's savings records for sales staff, newest first",
+        "tags" : [ "retail-cashbook" ]
+      },
+      "post" : {
+        "description" : "Issue #799, ADR-115: only while the Owner's setting salespeople_see_savings_amount is on, else 403 permission_denied; the branch must be one where the caller may sell (retail.sale.create).",
+        "operationId" : "createRetailSalesStaffSavings",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RetailSavingsRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailSavings"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Record the day's savings as sales staff (FR-RET-18 to FR-RET-20); M",
+        "tags" : [ "retail-cashbook" ]
+      }
+    },
+    "/api/v1/retail/savings/sales-staff/suggestion" : {
+      "get" : {
+        "description" : "Issue #799, ADR-115: only while the Owner's setting salespeople_see_savings_amount is on, else 403 permission_denied; the branch must be one where the caller may sell (retail.sale.create).",
+        "operationId" : "getRetailSalesStaffSavingsSuggestion",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "branch_id",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "date",
+          "required" : false,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailSavingsSuggestion"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The day's savings suggestion for sales staff (FR-RET-18)",
         "tags" : [ "retail-cashbook" ]
       }
     },

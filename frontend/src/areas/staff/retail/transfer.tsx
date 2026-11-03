@@ -63,8 +63,10 @@ export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId:
   );
   // ADR-120: only the owner at the source sees the date; nothing is sent for today and the server dates the move itself.
   const dated = useEntryDate(fromBranchId, draft.transferDate, draft.dateReason);
+  // success-screen: Move stock shows the summary of the move in place of the form, and the toast says it too (#824)
   const save = useMutation({
     mutationFn: () => retail.createTransfer({ ...buildTransfer(fromBranchId, { ...draft, transferDate: dated.sent?.date ?? '' }), ...dateFields(dated, 'transfer_date') }, key),
+    meta: { success: (t: Transfer) => (t?.status === 'in_transit' ? `Stock sent to ${label(t.to_branch_id)}` : `Stock moved to ${label(t?.to_branch_id)}`) },
     onSuccess: (t) => {
       entry.saved();
       finish();

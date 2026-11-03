@@ -24,12 +24,12 @@ export function useEntryDate(branchId: string | null | undefined, chosen: string
  * The date of a new entry, never after today, shown only to the owner (ADR-120): the app dates it today for everyone else,
  * so nobody else sees a box. An earlier day asks why; the reason is kept in the audit log.
  */
-export function DateField({ id, label, entry, value, reason, onChange, onReason }: { id: string; label: string; entry: EntryDate; value: string; reason: string | undefined; onChange: (value: string) => void; onReason: (value: string) => void }) {
+export function DateField({ id, label, entry, value, reason, onChange, onReason, min }: { id: string; label: string; entry: EntryDate; value: string; reason: string | undefined; onChange: (value: string) => void; onReason: (value: string) => void; min?: string }) {
   if (!entry.mayChoose) return null;
   return (
     <>
       <label htmlFor={id}>{label}</label>
-      <input id={id} type="date" value={value} max={businessToday()} onChange={(e) => onChange(e.target.value)} />
+      <input id={id} type="date" value={value} min={min} max={businessToday()} onChange={(e) => onChange(e.target.value)} />
       {entry.earlier && (
         <>
           <label htmlFor={`${id}-reason`}>Why an earlier date</label>
@@ -114,7 +114,7 @@ export function VoidAction({ what, run, onVoided }: { what: string; run: (reason
   const [reason, setReason] = useState('');
   const key = useRef(newIdempotencyKey());
   const id = useId();
-  // toast-exempt: each screen says it through onVoided (Expenses, Banking, Savings, Withdrawals and Advances call show with success)
+  // toast-exempt: said elsewhere: each screen says it through onVoided (Expenses, Banking, Savings, Withdrawals and Advances call show with success)
   const void_ = useMutation({
     mutationFn: () => run(reason.trim(), key.current),
     onSuccess: () => {
