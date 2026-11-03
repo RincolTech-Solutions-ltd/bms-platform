@@ -70,8 +70,12 @@ class ImportRunService implements ImportRuns {
                             WHERE locktype = 'advisory' AND granted AND pid = pg_backend_pid() AND objsubid = 1
                               AND ((classid::bigint << 32) | objid::bigint) = hashtextextended(?, 0))""";
 
-    /** Seconds the probe of the claim may take before the claim counts as lost. */
-    private static final int CLAIM_PROBE_TIMEOUT_SECONDS = 10;
+    /**
+     * Milliseconds the probe of the claim may wait on the database before the claim counts as lost (issue #792). It is
+     * the claim connection's network timeout, not a query timeout: pgjdbc cancels a query on a new socket and never
+     * unblocks the read on a black-holed one, while a socket read that times out ends the connection.
+     */
+    private static final int CLAIM_PROBE_TIMEOUT_MILLIS = 10_000;
 
     private static final Logger log = LoggerFactory.getLogger(ImportRunService.class);
 
@@ -406,15 +410,7 @@ class ImportRunService implements ImportRuns {
          * claim is lost: {@code claim_connection_lost} when the probe fails, {@code claim_not_held} when it answers no.
          */
         String lostReason() {
-            try (PreparedStatement probe = connection.prepareStatement(CLAIM_HELD)) {
-                probe.setQueryTimeout(CLAIM_PROBE_TIMEOUT_SECONDS);
-                probe.setString(1, key);
-                try (ResultSet rs = probe.executeQuery()) {
-                    return rs.next() && rs.getBoolean(1) ? null : "claim_not_held";
-                }
-            } catch (SQLException e) {
-                return "claim_connection_lost";
-            }
+            return probeClaim(connection, key, CLAIM_PROBE_TIMEOUT_MILLIS);
         }
 
         @Override
@@ -435,6 +431,36 @@ class ImportRunService implements ImportRuns {
                 }
             } finally {
                 DataSourceUtils.releaseConnection(connection, dataSource);
+            }
+        }
+    }
+
+    // JUSTIFICATION-A3: the probe body moved out of LoopClaim, static so issue #792's stalled read test can reach it.
+    /**
+     * The probe of {@link LoopClaim#lostReason()}: every read on the connection is bounded by {@code timeoutMillis}
+     * through its network timeout, and the previous network timeout is put back afterwards. A read that times out ends
+     * the connection, so the claim counts as {@code claim_connection_lost} and there is nothing left to restore.
+     */
+    static String probeClaim(Connection connection, String key, int timeoutMillis) {
+        int previous;
+        try {
+            previous = connection.getNetworkTimeout();
+            connection.setNetworkTimeout(Runnable::run, timeoutMillis);
+        } catch (SQLException e) {
+            return "claim_connection_lost";
+        }
+        try (PreparedStatement probe = connection.prepareStatement(CLAIM_HELD)) {
+            probe.setString(1, key);
+            try (ResultSet rs = probe.executeQuery()) {
+                return rs.next() && rs.getBoolean(1) ? null : "claim_not_held";
+            }
+        } catch (SQLException e) {
+            return "claim_connection_lost";
+        } finally {
+            try {
+                connection.setNetworkTimeout(Runnable::run, previous);
+            } catch (SQLException e) {
+                // The probe timed out and the driver closed the connection: the close of the claim discards it.
             }
         }
     }
