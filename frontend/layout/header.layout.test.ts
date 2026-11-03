@@ -85,8 +85,10 @@ describe.each([360, 390, 412])('the business and the branch at %ipx wide', (widt
         await openLayout(page, `layout/header.html?font=${font}&ask=${ask === 'on' ? 1 : 0}&sync=${sync}&waiting=${waiting}&${names}`, page.locator('.staff-bar-top .ask-open'));
         const button = page.locator('.staff-bar-top .sync-button');
         await button.waitFor();
-        // The title is read only once the fonts are in and it measures the same twice in a row (issue #775).
+        // Read only once the fonts are in and what is asserted measures the same twice in a row (issue #775): the title,
+        // whose visible text is read, and the whole bar, whose 48px targets and edges are.
         await settle(page.locator('.staff-bar-top .top-title'));
+        await settle(page.locator('.staff-bar-top'));
         // The business name comes from the branding of this page's host; without it the title would show the platform's name.
         expect(await page.locator('.top-title-business').textContent()).toBe('Tumaini Traders');
         // Ask is its icon and the sync indicator its dot and number, both 48px targets that keep their names.

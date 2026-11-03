@@ -66,8 +66,8 @@ describe.each([1, 1.5])('An item\'s packages at 412px, font scale %s', (font) =>
     const page = await browser.newPage({ viewport: { width: WIDTH, height: 900 }, hasTouch: true, isMobile: true });
     await openLayout(page, `layout/pack-table.html?font=${font}`, page.locator('[data-testid="pack-table"]'));
     await page.addStyleTag({ content: '* { font-family: "DejaVu Sans", sans-serif !important; }' });
-    await settle(page.locator('[data-testid="pack-table"]'));
     const wrap = page.locator('[data-testid="pack-table"]').locator('xpath=ancestor::*[contains(@class,"table-wrap")][1]');
+    await settle(wrap);
     expect(await wrap.evaluate((e) => e.scrollWidth - e.clientWidth), 'the table scrolls sideways').toBeLessThanOrEqual(0);
     await page.close();
   });
