@@ -143,6 +143,29 @@ describe('keeping and restoring', () => {
     }
   });
 
+  // JUSTIFICATION-A3: a new test case the #774 follow-up asks for (no write over a copy of other rights before a ping).
+  it('never writes over a copy made under other rights before a ping confirms the network, then replaces it (issue #774)', async () => {
+    const store = memoryStore();
+    const other = { savedAt: 1, access: accessOf(mockMe('sales')), entries: [entry(['retail', 'home', 'all'], 'Test figures under other rights', Date.now())] };
+    await store.putReadCache(SHOP, other);
+    const client = new QueryClient();
+    let reachable = false;
+    let pings = 0;
+    const keeper = keepReads(client, store, SHOP, ADMIN, () => Date.now(), 0, async () => (pings++, reachable));
+    await fetched(client, ['retail', 'dashboard', 'all'], { title: 'Test fresh totals' });
+    await expect.poll(() => pings).toBe(1);
+    await keeper.settled();
+    expect(await store.readCache(SHOP)).toEqual(other);
+
+    reachable = true;
+    await fetched(client, ['retail', 'stock', 'b1'], { items: ['Test item 01'] });
+    await expect.poll(async () => (await store.readCache(SHOP))?.access).toBe(ADMIN);
+    keeper.stop();
+    const kept = JSON.stringify(await store.readCache(SHOP));
+    expect(kept).not.toContain('other rights');
+    expect(kept).toContain('Test fresh totals');
+  });
+
   it('never puts back figures older than what the screen already holds', () => {
     const client = new QueryClient();
     client.setQueryData(['retail', 'home', 'all'], 'fresh', { updatedAt: NOW });

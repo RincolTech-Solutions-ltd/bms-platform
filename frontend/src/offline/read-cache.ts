@@ -191,15 +191,27 @@ export interface ReadKeeper {
 /**
  * Writes this person's kept reads to the device store a moment after any of them is fetched, merged with what was kept
  * before. Only answers fetched from the server while this keeper runs, and the reads it put back, are written: never data
- * the app set in the cache itself, and never a read another person left in memory.
+ * the app set in the cache itself, and never a read another person left in memory. A kept copy made under other rights is
+ * replaced only once `confirm` (the ping of the server) says the network answers (ADR-116 decision 3): until then the rights
+ * may come from a saved profile that lags the copy, so nothing is written over it.
  */
-export function keepReads(client: QueryClient, store: OfflineStore, scope: string, access: string, now: () => number = () => Date.now(), delayMs = SAVE_AFTER_MS): ReadKeeper {
+export function keepReads(
+  client: QueryClient,
+  store: OfflineStore,
+  scope: string,
+  access: string,
+  now: () => number = () => Date.now(),
+  delayMs = SAVE_AFTER_MS,
+  confirm: () => Promise<boolean> = () => Promise.resolve(false),
+): ReadKeeper {
   // Each kept read with its size, and the answer it was made from: a poll that brings the same answer (React Query keeps the
   // same object) only moves the time, without measuring the read again.
   const mine = new Map<string, { entry: ReadEntry; size: number; raw?: unknown }>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
   let writing: Promise<void> = Promise.resolve();
+  // Whether a ping has confirmed the network, so a copy made under other rights may be replaced; asked once it is needed.
+  let confirmed = false;
   const take = (entry: ReadEntry, raw?: unknown) => {
     const before = mine.get(entry.queryHash);
     const size = before && raw !== undefined && before.raw === raw ? before.size : JSON.stringify(entry).length;
@@ -211,6 +223,10 @@ export function keepReads(client: QueryClient, store: OfflineStore, scope: strin
       .then(async () => {
         if (stopped) return;
         const before = await store.readCache(scope);
+        if (before !== null && !usable(before, access) && !confirmed) {
+          confirmed = await confirm().catch(() => false);
+          if (!confirmed) return;
+        }
         const kept = usable(before, access) ? before.entries : [];
         const sizes = new Map([...mine.values()].map((m) => [m.entry, m.size]));
         const entries = merged(kept, [...mine.values()].map((m) => m.entry), now(), READ_CACHE_MAX_BYTES, (e) => sizes.get(e) ?? JSON.stringify(e).length);
