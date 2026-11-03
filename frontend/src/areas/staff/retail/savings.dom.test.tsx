@@ -36,6 +36,8 @@ vi.mock('../../../api/retail', async (original) => {
 });
 
 const { businessToday } = await import('../../../api/retail');
+const { retail: realRetail } = await vi.importActual<typeof import('../../../api/retail')>('../../../api/retail');
+const { api } = await import('../../../api/client');
 const { SavingsScreen } = await import('./savings');
 
 afterEach(() => {
@@ -279,5 +281,22 @@ describe('the savings screen for sales staff', () => {
     const panel = await screen.findByRole('region', { name: 'Savings recorded' });
     expect(panel.textContent).toContain('Amount saved: UGX 3,000');
     await waitFor(() => expect(records.textContent).toContain('Saved UGX 3,000'));
+  });
+
+  // JUSTIFICATION-A3: a new test the review of PR #800 asks for (item 7), appended after the last test of the block.
+  // The records list goes through the real client, so the branch_id the request carries is the one checked.
+  it("asks the sales staff records route for this month's records of the branch the seller works in", async () => {
+    const get = vi.spyOn(api, 'GET').mockImplementation((async () => ({ data: { items: [] }, response: new Response(null, { status: 200 }) })) as never);
+    savingsSuggestion.mockResolvedValue(shown);
+    listSavings.mockImplementation((q: Parameters<typeof realRetail.listSavings>[0]) => realRetail.listSavings(q));
+    try {
+      open({ ...sales, salespeople_see_savings_amount: true });
+      await screen.findByText('No savings recorded this month.');
+      expect(get.mock.calls.map((c) => c[0] as string)).toEqual(['/api/v1/retail/savings/sales-staff']);
+      const { query } = (get.mock.calls[0]?.[1] as unknown as { params: { query: Record<string, unknown> } }).params;
+      expect(query).toMatchObject({ branch_id: [branch], from: monthStart, to: today });
+    } finally {
+      get.mockRestore();
+    }
   });
 });

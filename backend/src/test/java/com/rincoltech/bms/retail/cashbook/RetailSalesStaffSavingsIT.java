@@ -347,6 +347,14 @@ class RetailSalesStaffSavingsIT extends IntegrationTest {
         assertThat(backdated.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(backdated.getBody().get("errors").get(0).get("code").asString())
                 .isEqualTo("outside_this_month");
+        // Nor a day after today.
+        LocalDate tomorrow = today.plusDays(1);
+        ResponseEntity<JsonNode> later = suggestion(seller, hq, tomorrow);
+        assertThat(later.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(later.getBody().get("errors").get(0).get("code").asString()).isEqualTo("future_date");
+        ResponseEntity<JsonNode> ahead = save(seller, hq, tomorrow, token, null);
+        assertThat(ahead.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(ahead.getBody().get("errors").get(0).get("code").asString()).isEqualTo("future_date");
         assertThat(cb.accountMovement("savings_reserve", hq)).isZero();
         // The till keeps every day.
         assertThat(cb.get("/savings/suggestion?branch_id=" + hq + "&date=" + lastMonth, ALL)
@@ -374,6 +382,44 @@ class RetailSalesStaffSavingsIT extends IntegrationTest {
             go.countDown();
             for (var call : calls) {
                 ResponseEntity<JsonNode> r = call.get();
+                statuses.add(HttpStatus.valueOf(r.getStatusCode().value()));
+                if (r.getStatusCode() == HttpStatus.CONFLICT) {
+                    assertThat(r.getBody().get("code").asString()).isEqualTo("savings_exists");
+                }
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(statuses).containsExactlyInAnyOrder(HttpStatus.CREATED, HttpStatus.CONFLICT);
+        assertThat(cb.accountMovement("savings_reserve", hq)).isEqualTo(2_500);
+    }
+
+    // JUSTIFICATION-A3: the race the review of PR #800 asks for (item 4), a seller against the till, as a test of its
+    // own.
+    /** A seller's save and the till's save for one shop and day at once: exactly one wins, the other is 409. */
+    @Test
+    void aSalesStaffSaveRacingATillSaveForOneShopAndDayLeavesOneRecord() throws Exception {
+        theSwitch(true);
+        String token =
+                suggestion(seller, hq, today).getBody().get("suggestion_token").asString();
+        Map<String, Object> till =
+                Map.of("branch_id", hq, "business_date", today.toString(), "suggestion_token", token);
+        java.util.concurrent.CountDownLatch go = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        java.util.List<HttpStatus> statuses = new java.util.ArrayList<>();
+        try {
+            java.util.List<java.util.concurrent.Future<ResponseEntity<JsonNode>>> calls = java.util.List.of(
+                    pool.submit(() -> {
+                        go.await();
+                        return save(seller, hq, today, token, null);
+                    }),
+                    pool.submit(() -> {
+                        go.await();
+                        return cb.post("/savings", till, ALL);
+                    }));
+            go.countDown();
+            for (var call : calls) {
+                ResponseEntity<JsonNode> r = call.get(60, java.util.concurrent.TimeUnit.SECONDS);
                 statuses.add(HttpStatus.valueOf(r.getStatusCode().value()));
                 if (r.getStatusCode() == HttpStatus.CONFLICT) {
                     assertThat(r.getBody().get("code").asString()).isEqualTo("savings_exists");
