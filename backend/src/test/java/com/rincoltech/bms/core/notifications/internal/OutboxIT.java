@@ -418,7 +418,7 @@ class OutboxIT extends IntegrationTest {
     /** Issue #777: the value sent to the clear is an address or a typo of one, so a refusal never repeats it. */
     @Test
     @ExtendWith(OutputCaptureExtension.class)
-    void anUnsuppressOfANonAddressAnswers400WithoutEchoingIt(CapturedOutput output) {
+    void anUnsuppressOfANonAddressIsRefusedWithoutEchoingIt(CapturedOutput output) {
         Api platform = Api.platform(http);
         String opEmail = Api.email("operator");
         UUID opId = Api.platformUser(opEmail);
@@ -427,7 +427,8 @@ class OutboxIT extends IntegrationTest {
 
         var answer = platform.post("/api/v1/platform/outbox/unsuppress", Map.of("email", typed), op.accessToken());
 
-        assertThat(answer.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        // A validation refusal answers 422 in this API (ApiException.validation).
+        assertThat(answer.getStatusCode().value()).isEqualTo(422);
         assertThat(String.valueOf(answer.getBody())).contains("email").doesNotContain(typed);
         assertThat(output.getAll()).doesNotContain(typed);
     }
