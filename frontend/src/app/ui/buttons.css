@@ -132,7 +132,8 @@ button[aria-disabled='true'],
 /*
  * A laptop (issue #825): the buttons that are full width on a phone take the width of their label instead, between
  * --button-min-wide and --button-max (never more than their form). A main action (.btn-primary, .btn-brand, .btn-danger,
- * .rt-primary) stands at the right of its form; any other button at its start, where the eye reads on. The More page's search
+ * .rt-primary) stands at the right of its form, and a secondary action right under it (retail.css: .rt-primary ~ button, Buy
+ * stock's Clear this purchase) under it at the right; any other block button at the start, where the eye reads on. The More page's search
  * button is drawn as a search field, so it keeps the width of the page. The height stays --tap for a touch laptop. The same
  * rule is in forms.css for .form-stack and .form-actions and in retail.css for .rt-primary, which load after this file.
  */

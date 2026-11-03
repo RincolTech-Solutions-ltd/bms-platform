@@ -199,9 +199,12 @@
   list-style: none;
 }
 
-/* A list outside a card or sheet ends 8px above whatever follows, so a button under its last row stands clear of it (#825). */
-.row-list:not(.ui-card > .row-list, .sheet-body > .row-list) {
-  margin-bottom: var(--tap-gap);
+/* The phone layout (under 720px, which holds the phone of issue #825 up to 600px): a list outside a card or sheet stands 8px from
+   what comes before and after it, so a field above its first row or a button under its last stands clear of it. */
+@media (max-width: 719px) {
+  .row-list:not(.ui-card > .row-list, .sheet-body > .row-list) {
+    margin-block: var(--tap-gap);
+  }
 }
 
 .row-list > li + li {
@@ -362,7 +365,7 @@ button.list-row:focus-visible {
 }
 
 /* A laptop (issue #825): the dialog's buttons are as wide as their labels and stand together at its right, in the order of the
-   page (the primary first), so what is seen matches the Tab order. */
+   page (the primary last, so at the far right), so what is seen matches the Tab order. */
 @media (min-width: 1024px) {
   .sheet-actions {
     justify-content: flex-end;
@@ -774,10 +777,11 @@ button.list-row:focus-visible {
   margin: 0 0 var(--space-2);
 }
 
-/* The four choices stay on one row at 360px: equal widths, the small text size, no wrap inside a choice. */
+/* The four choices stay on one row at 360px: equal widths, never under the 48px target (#825), the small text size, no wrap
+   inside a choice. */
 .period-picker .segmented > button {
   flex: 1 1 0;
-  min-width: 0;
+  min-width: var(--tap);
   padding: 8px var(--space-1);
   font-size: var(--text-sm);
   white-space: nowrap;
@@ -865,11 +869,16 @@ p:has(> .link-row:only-child) {
   align-items: flex-start;
   gap: var(--space-1);
   margin: 0 0 var(--space-3);
-  /* The info button's 48px target hangs --space-3 below the line, so with any margin of at least --space-3 under it the next
-     control still stands --tap-gap clear (issue #825). */
-  padding-bottom: var(--tap-gap);
   /* A grid or flex item: without this the one uncut line would widen its column, and the page with it (issue #343). */
   min-width: 0;
+}
+
+/* The phone layout (issue #825): the info button's 48px target hangs --space-3 below the line, so with any margin of at least
+   --space-3 under it the next control still stands --tap-gap clear. */
+@media (max-width: 719px) {
+  .hint-line {
+    padding-bottom: var(--tap-gap);
+  }
 }
 
 .hint-line > .hint {

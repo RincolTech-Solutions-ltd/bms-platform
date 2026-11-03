@@ -715,36 +715,69 @@ const BUTTON_CLASSES: Record<string, string> = {
 // A size of a target (width, height, inline-size, block-size, with or without min- or max-) and its value.
 // JUSTIFICATION-A3: review of #833 found the one regex missed max-*, logical sizes, var() and calc(); this replaces it.
 const SIZE_DECL = /^\s*(?:(?:min|max)-)?(?:height|width|inline-size|block-size)\s*:\s*(.+?)\s*(?:!important)?\s*$/;
-// The tokens of theme.css written in px, so a var() is read as the size it stands for.
-const PX_TOKENS = new Map([...code('app/theme.css').matchAll(/(--[\w-]+):\s*(\d+(?:\.\d+)?)px\s*;/g)].map(([, name, px]) => [name as string, Number(px)]));
+// Every token of theme.css (its first value), so a var() is read as the size it stands for, through other tokens and rem.
+const TOKENS = new Map<string, string>();
+for (const [, name, value] of code('app/theme.css').matchAll(/(--[\w-]+):\s*([^;]+);/g)) if (!TOKENS.has(name as string)) TOKENS.set(name as string, (value as string).trim());
+// The classes of targets that are not named as buttons: the staff top bar's Search and Ask, the Hint's info button, the rows
+// and headers that open something, the category picker, the theme menu. A rule ending on one is held to --tap as well.
+const TARGET_CLASSES = ['find-open', 'ask-open', 'hint-more', 'list-row', 'link-row', 'cat-head', 'cp-trigger', 'theme-menu-item'];
+
+/** The px a size stands for (px, rem or em at 16px, zero, a token), 'part' for a percentage, or null when the guard cannot tell. */
+function pxOf(value: string, depth = 0): number | 'part' | null {
+  const v = value.trim();
+  if (/^\d*\.?\d+%$/.test(v)) return 'part';
+  if (v === '0') return 0;
+  const px = /^(\d*\.?\d+)px$/.exec(v)?.[1];
+  if (px !== undefined) return Number(px);
+  const em = /^(\d*\.?\d+)r?em$/.exec(v)?.[1];
+  if (em !== undefined) return Number(em) * 16;
+  const token = /^var\((--[\w-]+)\)$/.exec(v)?.[1];
+  if (token && depth < 8) {
+    const held = TOKENS.get(token);
+    if (held === undefined) return null;
+    // A token made from --tap and more (the tab bar's height) is at least the target.
+    if (/^calc\(/.test(held) && /var\(--tap\)\s*\+/.test(held)) return 48;
+    return pxOf(held, depth + 1);
+  }
+  return null;
+}
+
+/** The arguments of a CSS function call, split at its own commas. */
+const argsOf = (call: string) => call.slice(call.indexOf('(') + 1, call.lastIndexOf(')')).split(/,(?![^(]*\))/).map((a) => a.trim());
 
 /**
- * True when a size value is under the 48px target: a px value under 48, a rem or em under 3, zero, a var() of a theme token under
- * 48px, or a calc(), min(), max() or clamp() that does not hold --tap or start at 100% (the guard cannot work one out, so it
- * asks for the token). Words such as auto, none, fit-content or 100% pass.
+ * True when a size value can be under the 48px target: a length or token under 48px; a min() with any argument under 48px or
+ * one the guard cannot read; a max() with no argument of 48px or more; a clamp() whose floor is under 48px; a calc() without
+ * --tap. A min() or max() against 100% reads its other arguments. Words such as auto, none, fit-content or 100% pass.
  */
 function underTap(value: string): boolean {
   const v = value.trim();
-  if (/^(?:calc|min|max|clamp)\(/.test(v)) return !/var\(--tap\)/.test(v) && !/^(?:min|max)\(100%/.test(v);
-  const token = /^var\((--[\w-]+)\)$/.exec(v)?.[1];
-  if (token) return (PX_TOKENS.get(token) ?? Infinity) < 48;
-  const px = /^(\d*\.?\d+)px$/.exec(v)?.[1];
-  if (px !== undefined) return Number(px) < 48;
-  const em = /^(\d*\.?\d+)r?em$/.exec(v)?.[1];
-  if (em !== undefined) return Number(em) < 3;
-  return v === '0';
+  if (/^min\(/.test(v)) return argsOf(v).map((a) => pxOf(a)).some((n) => n === null || (typeof n === 'number' && n < 48));
+  if (/^max\(/.test(v)) return !argsOf(v).map((a) => pxOf(a)).some((n) => n === 'part' || (typeof n === 'number' && n >= 48));
+  if (/^clamp\(/.test(v)) { const floor = pxOf(argsOf(v)[0] ?? ''); return !(typeof floor === 'number' && floor >= 48); }
+  if (/^calc\(/.test(v)) return !/var\(--tap\)/.test(v);
+  const n = pxOf(v);
+  if (n === 'part') return false;
+  if (n === null) return /^var\(/.test(v);
+  return n < 48;
+}
+
+/** True when the last part of a selector is a target: a listed button class, a target class, or a button element. */
+function namesTarget(selector: string): boolean {
+  const last = selector.split(/\s+|>|\+|~/).filter(Boolean).pop() ?? '';
+  if (/::/.test(last)) return false;
+  return [...last.matchAll(BUTTON_CLASS)].some(([, c]) => (c as string) in BUTTON_CLASSES)
+    || TARGET_CLASSES.some((c) => new RegExp(`\\.${c}(?![\\w-])`).test(last))
+    || /^button(?![\w-])/.test(last);
 }
 
 /** The button classes a stylesheet's selectors name. */
 const buttonClassesIn = (css: string) => new Set([...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{/g)].flatMap(([, sel]) => [...(sel as string).matchAll(BUTTON_CLASS)].map(([, c]) => c as string)));
 
-/** The rules of `css` whose selector ends on a listed button class (the target itself, not an icon inside it) and shrink it. */
+/** The rules of `css` whose selector ends on a target (the target itself, not an icon inside it) and can shrink it. */
 function shrinkingButtons(css: string): string[] {
   return rulesOf(css).flatMap(({ selectors, body }) => {
-    const targets = selectors.filter((s) => {
-      const last = s.split(/\s+|>|\+|~/).filter(Boolean).pop() ?? '';
-      return [...last.matchAll(BUTTON_CLASS)].some(([, c]) => (c as string) in BUTTON_CLASSES) && !/::/.test(last);
-    });
+    const targets = selectors.filter(namesTarget);
     return targets.length > 0 && body.split(';').some((decl) => underTap(SIZE_DECL.exec(decl)?.[1] ?? 'auto')) ? targets : [];
   });
 }
@@ -766,6 +799,13 @@ describe('design guard, every button class keeps the 48px target (issue #825)', 
     expect(shrinkingButtons('.btn-sm { height: calc(2rem + 4px); }')).toEqual(['.btn-sm']);
     expect(shrinkingButtons('.rc-chip { min-height: 40px; }')).toEqual(['.rc-chip']);
     expect(shrinkingButtons('.btn-sm { height: calc(var(--tap) + 4px); max-width: min(100%, var(--button-max)); }')).toEqual([]);
+    // The second review of #833: a token through another token, a rem token, a min() against 100%, an element and the top bar.
+    expect(shrinkingButtons('.btn-sm { min-height: var(--tap-gap); }')).toEqual(['.btn-sm']);
+    expect(shrinkingButtons('.btn-sm { min-height: var(--text-xl); }')).toEqual(['.btn-sm']);
+    expect(shrinkingButtons('.btn-sm { min-height: min(100%, 20px); }')).toEqual(['.btn-sm']);
+    expect(shrinkingButtons('.foo button { height: 32px; }')).toEqual(['.foo button']);
+    expect(shrinkingButtons('.staff-bar-top .find-open, .ask-open:hover { min-width: 40px; }')).toEqual(['.staff-bar-top .find-open', '.ask-open:hover']);
+    expect(shrinkingButtons('.btn-sm { min-width: min(100%, var(--button-min-wide)); } .foo button svg { width: 20px; }')).toEqual([]);
     expect([...buttonClassesIn('.chip, .x-pill, .y-clear, .z-close, .w-toggle { color: red; }')].sort()).toEqual(['chip', 'w-toggle', 'x-pill', 'y-clear', 'z-close']);
   });
 
@@ -778,9 +818,10 @@ describe('design guard, every button class keeps the 48px target (issue #825)', 
 
   // Review of #833: the ActionBar and the sheet's buttons are seen in the order of the page, so the Tab order matches (WCAG 2.4.3).
   it('never reverses or reorders the buttons of the ActionBar or a sheet', () => {
-    const kit = rulesOf(code('app/ui/kit.css')).filter(({ selectors }) => selectors.some((s) => /\.(?:action-bar|sheet-actions)\b/.test(s)));
-    expect(kit.length).toBeGreaterThan(2);
-    expect(kit.filter(({ body }) => /row-reverse|column-reverse|(?<![\w-])order\s*:/.test(body)).map(({ selectors }) => selectors.join(', '))).toEqual([]);
+    // Every stylesheet, and any rule naming the bar or the sheet's foot, or a button in them.
+    const rules = allStylesheets.flatMap((f) => rulesOf(code(relative(SRC, f)))).filter(({ selectors }) => selectors.some((s) => /\.(?:action-bar|sheet-actions)(?![\w-])/.test(s)));
+    expect(rules.length).toBeGreaterThan(2);
+    expect(rules.filter(({ body }) => /row-reverse|column-reverse|(?<![\w-])order\s*:/.test(body)).map(({ selectors }) => selectors.join(', '))).toEqual([]);
   });
 
   it.each(allStylesheets.map((f) => relative(SRC, f)))('%s never makes a button smaller than the target', (file) => {

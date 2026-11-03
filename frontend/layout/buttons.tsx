@@ -7,6 +7,7 @@ import { businessToday, type ExpenseCategory, type Product, type SavingsSuggesti
 import { mockMe } from '../src/api/retail-mock';
 import { StaffContext } from '../src/areas/staff/context';
 import { ExpenseForm } from '../src/areas/staff/retail/expenses';
+import { ProductList } from '../src/areas/staff/retail/catalogue-products';
 import { LabelsPage } from '../src/areas/staff/retail/labels';
 import { RestockForm, type RestockDraft } from '../src/areas/staff/retail/restock';
 import { SaleForm } from '../src/areas/staff/retail/sale';
@@ -51,6 +52,9 @@ client.setQueryData(['retail', 'savings-suggestion', branch, date], suggestion);
 client.setQueryData(['retail', 'suppliers'], [{ id: 's1', name: 'Test Supplies', active: true, version: 1 }]);
 client.setQueryData(['retail', 'catalogue', 'categories'], []);
 client.setQueryData(['retail', 'catalogue', 'units'], [{ id: 'u1', name: 'Piece', active: true, product_count: 0, version: 1 }]);
+// The Items list, read for the whole business and for the branch in use alike.
+const listed = { pages: [{ items: [item, { ...item, id: 'p2', code: 'BL-1', description: 'Test LED bulb 9W screw' }] }], pageParams: [''] };
+for (const at of ['', branch]) client.setQueryData(['retail', 'catalogue', 'products', '', '', 'active', at], listed);
 
 const SCREENS: Record<string, { path: string; body: ReactNode }> = {
   sell: { path: '/staff/retail/sale', body: <Gate screen="sale" title="Record a sale"><SaleForm branchId={branch} /></Gate> },
@@ -60,13 +64,18 @@ const SCREENS: Record<string, { path: string; body: ReactNode }> = {
   expenses: { path: '/staff/retail/expenses', body: <Gate screen="expenses" title="Expenses"><ExpenseForm branchId={branch} /></Gate> },
   savings: { path: '/staff/retail/savings', body: <Gate screen="savings" title="Savings"><SavingsForm branchId={branch} /></Gate> },
   setup: { path: '/staff/retail/catalogue/set-up', body: <ShopSetupPage /> },
+  // The catalogue Items list: on a phone the ways to add sizes and colours follow its last row (#825).
+  items: {
+    path: '/staff/retail/catalogue/products',
+    body: <Gate screen="products" title="Items"><ProductList onEdit={() => undefined} onPrice={() => undefined} onAdd={() => undefined} /></Gate>,
+  },
   // Not a daily screen: the one ActionBar with two buttons, Print and Make the labels.
   labels: { path: '/staff/retail/catalogue/labels', body: <LabelsPage /> },
-  // A confirmation in the kit's Sheet, its primary button first as Sheet asks.
+  // A confirmation in the kit's Sheet, its primary button last as Sheet asks.
   sheet: {
     path: '/staff/retail/stock',
     body: (
-      <Sheet open onClose={() => undefined} title="Remove this item?" actions={<><button type="button" className="btn-danger">Remove</button><button type="button">Keep it</button></>}>
+      <Sheet open onClose={() => undefined} title="Remove this item?" actions={<><button type="button">Keep it</button><button type="button" className="btn-danger">Remove</button></>}>
         <p>Test LED bulb 9W screw leaves this sale.</p>
       </Sheet>
     ),

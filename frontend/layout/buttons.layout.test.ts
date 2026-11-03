@@ -5,11 +5,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { openLayout, settle } from './open';
 
 // Buttons sized for a phone and a laptop (issue #825), on the daily screens of an owner (layout/buttons.html): Sell, My stock,
-// Buy, Money, Expenses, Savings and Set up your shop. On a phone 412 by 900 every target is at least 48 by 48px and 8px clear of
-// the next, and the screen's main action is full width in the bar stuck above the bottom tabs. On a laptop 1366 by 800 no button
-// is wider than --button-max (320px), the main action is as wide as its label (at least 160px), stands at the right of its form
-// and is still 48px tall. Nothing scrolls sideways at either size. With LAYOUT_SHOTS=1 it saves the pictures of the pull request
-// in docs/ui/button-sizes-825.
+// Buy, Money, Expenses, Savings and Set up your shop, with the catalogue Items, Barcode labels (a bar of two buttons) and an open
+// Sheet, each under the staff top bar and over the bottom tabs. On a phone 412 by 900 every target is at least 48 by 48px and 8px
+// clear of every other, and the screen's main action is full width in the bar stuck above the bottom tabs. On a laptop 1366 by
+// 800 no button is wider than --button-max (320px), the main action is as wide as its label (at least 160px), stands at the right
+// of its form and is still 48px tall. A bar or sheet shows its buttons in the order of the page, the primary last. Nothing scrolls
+// sideways at either size. With LAYOUT_SHOTS=1 it saves the pictures of the pull request in docs/ui/button-sizes-825.
 
 let browser: Browser;
 const SHOTS = process.env.LAYOUT_SHOTS === '1' ? resolve(process.cwd(), '../docs/ui/button-sizes-825') : null;
@@ -31,21 +32,25 @@ const MAX = 320;
 const MIN_WIDE = 160;
 // The page gutter of the staff layout on a phone (layout.css): the stuck bar runs over it, its button inside it.
 const GUTTER = 16;
+// The classes of a main action (buttons.css).
+const PRIMARY = '.rt-primary, .btn-primary, .btn-brand, .btn-danger';
 
 /** The screens, the selector of the main action of the ones that have one, and of a secondary action under it. */
 const SCREENS: { screen: string; ready: string; main?: string; secondary?: string }[] = [
   { screen: 'sell', ready: '.sale-bar-action', main: '.sale-bar-action' },
   { screen: 'stock', ready: '.stock-card, .cat-head' },
-  { screen: 'buy', ready: 'main .rt-primary', main: 'main .rt-primary', secondary: 'main .action-bar ~ button' },
+  { screen: 'buy', ready: 'main .rt-primary', main: 'main .rt-primary', secondary: 'main .action-bar + button' },
   { screen: 'money', ready: '.list-row' },
   { screen: 'expenses', ready: '.action-bar .rt-primary', main: '.action-bar .rt-primary' },
   { screen: 'savings', ready: '.action-bar .rt-primary', main: '.action-bar .rt-primary' },
   { screen: 'setup', ready: 'main fieldset label', main: '.action-bar .rt-primary' },
+  { screen: 'items', ready: 'main [data-tour="product-list"] :is(.list-row, li)' },
   { screen: 'labels', ready: '.action-bar .rt-primary', main: '.action-bar .rt-primary' },
   { screen: 'sheet', ready: '.sheet-actions button' },
 ];
 
-type Target = { name: string; x: number; y: number; width: number; height: number; group: number; pinned: boolean };
+type Box = { left: number; top: number; right: number; bottom: number };
+type Target = Box & { name: string; width: number; height: number; group: number; cover: (Box & { floating: boolean }) | null };
 
 async function open(screen: string, ready: string, size: { width: number; height: number }, phone: boolean): Promise<Page> {
   const page = await browser.newPage({ viewport: size, hasTouch: phone, isMobile: phone });
@@ -57,79 +62,133 @@ async function open(screen: string, ready: string, size: { width: number; height
 }
 
 /**
- * Every target of the screen a person can tap: the staff top bar, the page's buttons, links drawn as buttons, rows and choice
- * rows, an open sheet, and the bottom tabs (what a sheet hides from a screen reader is left out, as it cannot be tapped).
- * `group` numbers the one control a target is a part of (a Segmented, a Stepper, the rows of one list, the tabs), whose parts
- * touch by design, and is -1 for a target of its own. `pinned` marks a target in a stuck or fixed bar: it is measured where it is
- * drawn on the screen, the others where they are on the page.
+ * Every target a person can tap, where it is drawn on the screen now: in the staff top bar, the page, an open sheet and the bottom
+ * tabs, every button, link (bar a link inside running text, which WCAG 2.5.8 leaves out), summary, select, field and choice row.
+ * What a sheet hides from a screen reader, or a closed details holds, cannot be tapped and is left out. `group` numbers the one
+ * control a target is a part of, whose parts touch by design: the rows of one list, the parts of one Segmented or Stepper, the
+ * tabs; -1 for a target of its own. `cover` is the stuck or fixed bar a target is drawn in, null for one in the page.
  */
 async function targets(page: Page): Promise<Target[]> {
   return page.evaluate(() => {
     const groups = new Map<Element, number>();
-    const pinnedIn = (el: Element) => {
-      for (let box: Element | null = el; box; box = box.parentElement) if (/^(sticky|fixed)$/.test(getComputedStyle(box).position)) return true;
-      return false;
+    // The stuck or fixed bar a target is drawn in, and whether it floats over the page now: a fixed bar always does, a sticky one
+    // when it stands away from its own place in the page (read with the bar put back in the flow for a moment).
+    const coverOf = (el: Element) => {
+      for (let box: HTMLElement | null = el as HTMLElement; box; box = box.parentElement) {
+        const position = getComputedStyle(box).position;
+        if (!/^(sticky|fixed)$/.test(position)) continue;
+        const r = box.getBoundingClientRect();
+        let floating = position === 'fixed';
+        if (!floating) {
+          const was = box.style.position;
+          box.style.position = 'relative';
+          floating = Math.abs(box.getBoundingClientRect().top - r.top) > 0.5;
+          box.style.position = was;
+        }
+        return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, floating };
+      }
+      return null;
     };
-    return [...document.querySelectorAll<HTMLElement>(':is(main, .staff-bar, .sheet-panel) :is(button, a.btn, a.list-row, [role="button"], label:has(> input[type="radio"], > input[type="checkbox"])), .tab-bar :is(a, button)')]
+    const tappable = 'button, a[href], summary, select, textarea, input:not([type="hidden"], [type="radio"], [type="checkbox"]), [role="button"], label:has(> input[type="radio"], > input[type="checkbox"])';
+    return [...document.querySelectorAll<HTMLElement>(`:is(main, .staff-bar, .sheet-panel, .tab-bar) :is(${tappable})`)]
       .filter((el) => {
         const r = el.getBoundingClientRect();
-        return r.width > 0 && r.height > 0 && !el.closest('details:not([open]) > :not(summary), [aria-hidden="true"], .visually-hidden');
+        const style = getComputedStyle(el);
+        return r.width > 0 && r.height > 0 && style.visibility !== 'hidden'
+          && !(el.tagName === 'A' && style.display === 'inline')
+          && !el.closest('details:not([open]) > :not(summary), [aria-hidden="true"], [inert], .visually-hidden');
       })
       .map((el) => {
         const r = el.getBoundingClientRect();
         const name = `${el.tagName.toLowerCase()}.${[...el.classList].join('.')} "${(el.textContent || el.getAttribute('aria-label') || '').trim().slice(0, 30)}"`;
-        const control = el.closest('.segmented, .stepper, .row-list, [role="radiogroup"], .tab-bar');
+        const control = el.matches('.row-list > li > .list-row, .row-list > .list-row') ? el.closest('.row-list')
+          : el.matches('.segmented > button, .stepper > *') ? el.parentElement
+            : el.closest('.tab-bar');
         if (control && !groups.has(control)) groups.set(control, groups.size);
-        const pinned = pinnedIn(el);
         return {
-          name, x: r.x + (pinned ? 0 : window.scrollX), y: r.y + (pinned ? 0 : window.scrollY), width: r.width, height: r.height,
-          group: control ? (groups.get(control) as number) : -1, pinned,
+          name, left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height,
+          group: control ? (groups.get(control) as number) : -1, cover: coverOf(el),
         };
       });
   });
 }
 
 /** How far apart two boxes stand: the larger of the gaps across and down, below zero when they overlap. */
-const apart = (a: Target, b: Target) => Math.max(b.x - (a.x + a.width), a.x - (b.x + b.width), b.y - (a.y + a.height), a.y - (b.y + b.height));
+const apart = (a: Box, b: Box) => Math.max(b.left - a.right, a.left - b.right, b.top - a.bottom, a.top - b.bottom);
+const meets = (a: Box, b: Box) => apart(a, b) < 0;
+
+/**
+ * The pairs of targets nearer than 8px, measured where they are drawn. Two parts of one control touch by design. While a bar
+ * floats over the page (the fixed tabs, a stuck bar away from its place) the page scrolls under it, so its targets are measured
+ * against the other pinned ones only, and the bar's inset (checked in the test) keeps them clear of whatever shows beside it. A bar
+ * in its own place is measured against the page like any target, bar a target of the page hidden under it: so the top bar against
+ * the first target of the page at the top, and the ActionBar against Clear this purchase at the foot.
+ */
+function tooClose(all: Target[]): string[] {
+  const close: string[] = [];
+  all.forEach((a, i) => all.slice(i + 1).forEach((b) => {
+    if (a.group >= 0 && a.group === b.group) return;
+    if (!a.cover !== !b.cover) {
+      const [inPage, inBar] = a.cover ? [b, a] : [a, b];
+      const bar = inBar.cover as Box & { floating: boolean };
+      if (bar.floating || meets(inPage, bar)) return;
+    }
+    const gap = apart(a, b);
+    if (gap < GAP - 0.5) close.push(`${a.name} and ${b.name}: ${Math.round(gap)}px`);
+  }));
+  return close;
+}
+
+/** The buttons of each ActionBar and sheet: their boxes in the order of the page, which is the primary, and the bar's inner box. */
+async function bars(page: Page) {
+  return page.locator('.action-bar, .sheet-actions').evaluateAll((all, primary) => all.map((bar) => {
+    const cs = getComputedStyle(bar);
+    const r = bar.getBoundingClientRect();
+    const buttons = [...bar.querySelectorAll<HTMLElement>(':scope > :is(button, a)')];
+    return {
+      sticky: cs.position === 'sticky',
+      edge: { left: r.left, top: r.top, right: r.right, bottom: r.bottom },
+      inner: { left: r.left + parseFloat(cs.paddingLeft), right: r.right - parseFloat(cs.paddingRight) },
+      boxes: buttons.map((b) => { const x = b.getBoundingClientRect(); return { left: x.left, top: x.top, right: x.right, bottom: x.bottom, width: x.width }; }),
+      primaries: buttons.map((b, i) => (b.matches(primary) ? i : -1)).filter((i) => i >= 0),
+    };
+  }), PRIMARY);
+}
 
 describe.each(SCREENS)('the buttons of $screen (#825)', ({ screen, ready, main, secondary }) => {
   it('on a phone 412 by 900: every target 48 by 48px and 8px apart, the main action full width in the stuck bar', async () => {
     const page = await open(screen, ready, PHONE, true);
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/${screen}-after-412.png`, fullPage: false });
     expect(await page.evaluate(() => document.documentElement.scrollWidth), 'page width').toBeLessThanOrEqual(PHONE.width);
-    const all = await targets(page);
-    expect(all.length, 'targets found').toBeGreaterThan(0);
-    expect(all.filter((t) => t.width < TAP - 0.5 || t.height < TAP - 0.5).map((t) => `${t.name} ${Math.round(t.width)}x${Math.round(t.height)}`)).toEqual([]);
-    const close: string[] = [];
-    all.forEach((a, i) => all.slice(i + 1).forEach((b) => {
-      // Two parts of one control touch by design. The page scrolls under a pinned bar, so a pinned target is measured against the
-      // other pinned ones (the stuck bar against the tabs); the bar's own padding keeps it clear of the page, checked below.
-      if ((a.group >= 0 && a.group === b.group) || a.pinned !== b.pinned) return;
-      const gap = apart(a, b);
-      if (gap < GAP - 0.5) close.push(`${a.name} and ${b.name}: ${Math.round(gap)}px`);
-    }));
-    expect(close).toEqual([]);
-    // A target in the stuck bar stands at least 8px inside the bar's edges, so whatever of the page shows above it is 8px away.
-    const inset = await page.locator('.action-bar').evaluateAll((bars) =>
-      bars.flatMap((bar) => {
-        const edge = bar.getBoundingClientRect();
-        return [...bar.querySelectorAll('button, a.btn')].map((el) => el.getBoundingClientRect().top - edge.top);
-      }),
-    );
-    expect(inset.filter((d) => d < GAP - 0.5)).toEqual([]);
-    // What is seen matches the Tab order: the buttons of an ActionBar or a sheet stand one under the other in the order of the
-    // page, each the full width of the bar.
-    const stacks = await page.locator('.action-bar, .sheet-actions').evaluateAll((all) => all.map((bar) => {
-      const cs = getComputedStyle(bar);
-      const inner = bar.getBoundingClientRect().width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-      const boxes = [...bar.querySelectorAll(':scope > :is(button, a)')].map((c) => c.getBoundingClientRect());
-      return { inner, tops: boxes.map((b) => b.top), widths: boxes.map((b) => b.width) };
-    }));
-    for (const s of stacks) {
-      expect(s.tops).toEqual([...s.tops].sort((a, b) => a - b));
-      expect(s.widths.filter((w) => w < s.inner - 1)).toEqual([]);
+    // Measured at the top of the page, at its foot, and with the ActionBar put back in the flow of the form, where it stands on a
+    // page short enough not to stick: there its buttons are measured against the page around it (Clear this purchase under it).
+    for (const at of ['top', 'foot', 'flow'] as const) {
+      if (at === 'foot') await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      const flow = at === 'flow' ? await page.addStyleTag({ content: '.action-bar { position: static !important; }' }) : null;
+      await settle(page.locator('main'));
+      const all = await targets(page);
+      expect(all.length, 'targets found').toBeGreaterThan(0);
+      expect(all.filter((t) => t.width < TAP - 0.5 || t.height < TAP - 0.5).map((t) => `${t.name} ${Math.round(t.width)}x${Math.round(t.height)}`), at).toEqual([]);
+      expect(tooClose(all), `measured at the ${at}`).toEqual([]);
+      await flow?.evaluate((el) => (el as Element).remove());
+    }
+    await settle(page.locator('main'));
+    for (const bar of await bars(page)) {
+      // A button of the stuck bar stands 8px inside every edge of the bar, so whatever is beside the bar is 8px from it.
+      if (bar.sticky) {
+        for (const b of bar.boxes) {
+          expect(Math.min(b.left - bar.edge.left, b.top - bar.edge.top, bar.edge.right - b.right, bar.edge.bottom - b.bottom), 'inside the bar').toBeGreaterThanOrEqual(GAP - 0.5);
+        }
+      }
+      // What is seen matches the Tab order: one under the other in the order of the page, each the full width of the bar, the
+      // primary last, nearest the thumb.
+      const tops = bar.boxes.map((b) => b.top);
+      expect(tops).toEqual([...tops].sort((a, b) => a - b));
+      expect(bar.boxes.filter((b) => b.width < bar.inner.right - bar.inner.left - 1)).toEqual([]);
+      if (bar.primaries.length > 0) expect(bar.primaries, 'the primary is last').toEqual([bar.boxes.length - 1]);
     }
     if (main) {
+      await page.evaluate(() => window.scrollTo(0, 0));
       const action = page.locator(main).first();
       const box = await action.boundingBox();
       expect(box, 'main action').not.toBeNull();
@@ -144,13 +203,8 @@ describe.each(SCREENS)('the buttons of $screen (#825)', ({ screen, ready, main, 
       expect(stuck.bottom, 'the main action shows above the bottom tabs').toBeLessThanOrEqual(stuck.tabs + 0.5);
     }
     if (secondary) {
-      // A secondary action under the bar keeps the width of the form and stands clear of what is above it.
-      const under = await page.locator(secondary).first().evaluate((el) => {
-        const r = el.getBoundingClientRect();
-        return { width: r.width, margin: parseFloat(getComputedStyle(el).marginTop) };
-      });
-      expect(under.width).toBeGreaterThanOrEqual(PHONE.width - 2 * GUTTER - 1);
-      expect(under.margin).toBeGreaterThanOrEqual(GAP);
+      // A secondary action under the bar keeps the width of the form; its distance from the bar is measured above.
+      expect((await page.locator(secondary).first().boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(PHONE.width - 2 * GUTTER - 1);
     }
     await page.close();
   });
@@ -161,8 +215,8 @@ describe.each(SCREENS)('the buttons of $screen (#825)', ({ screen, ready, main, 
     expect(await page.evaluate(() => document.documentElement.scrollWidth), 'page width').toBeLessThanOrEqual(LAPTOP.width);
     const all = await targets(page);
     expect(all.filter((t) => t.height < TAP - 0.5).map((t) => t.name)).toEqual([]);
-    // Rows, choice rows and the category headers are lines of a list, not buttons, so they keep the width of their list.
-    const buttons = all.filter((t) => !/^(?:a\.list-row|label|button\.cat-head)/.test(t.name));
+    // Fields, rows, choice rows and the category headers are lines of a form or list, not buttons, so they keep its width.
+    const buttons = all.filter((t) => /^(?:button|a)\./.test(t.name) && !/^(?:a\.list-row|a\.link-row|button\.cat-head|button\.cp-trigger)/.test(t.name));
     expect(buttons.filter((t) => t.width > MAX + 0.5).map((t) => `${t.name} ${Math.round(t.width)}px`)).toEqual([]);
     if (main) {
       const placed = await page.locator(main).first().evaluate((el) => {
@@ -186,17 +240,18 @@ describe.each(SCREENS)('the buttons of $screen (#825)', ({ screen, ready, main, 
       expect(under.width).toBeLessThanOrEqual(MAX + 0.5);
       expect(Math.abs(under.formRight - under.right), 'the secondary action stands under the main one, at the right').toBeLessThanOrEqual(1);
     }
-    // What is seen matches the Tab order: the buttons of an ActionBar or a sheet run left to right in the order of the page, side
-    // by side, the last at the right of the bar.
-    const bars = await page.locator('.action-bar, .sheet-actions').evaluateAll((all) => all.map((bar) => ({
-      right: bar.getBoundingClientRect().right - parseFloat(getComputedStyle(bar).paddingRight),
-      boxes: [...bar.querySelectorAll(':scope > :is(button, a)')].map((c) => ({ left: c.getBoundingClientRect().left, right: c.getBoundingClientRect().right })),
-    })));
-    for (const bar of bars) {
+    // What is seen matches the Tab order: the buttons of an ActionBar or a sheet run left to right in the order of the page, 8 to
+    // 12px apart, the last, the primary, at the right of the bar.
+    for (const bar of await bars(page)) {
       const lefts = bar.boxes.map((b) => b.left);
       expect(lefts).toEqual([...lefts].sort((a, b) => a - b));
-      bar.boxes.slice(1).forEach((b, i) => expect(b.left - (bar.boxes[i] as { right: number }).right, 'the bar keeps its buttons together').toBeLessThanOrEqual(12.5));
-      expect(Math.abs(bar.right - (bar.boxes.at(-1)?.right ?? bar.right))).toBeLessThanOrEqual(1);
+      bar.boxes.slice(1).forEach((b, i) => {
+        const gap = b.left - (bar.boxes[i] as Box).right;
+        expect(gap, 'the bar keeps its buttons apart').toBeGreaterThanOrEqual(GAP - 0.5);
+        expect(gap, 'the bar keeps its buttons together').toBeLessThanOrEqual(12.5);
+      });
+      expect(Math.abs(bar.inner.right - (bar.boxes.at(-1)?.right ?? bar.inner.right))).toBeLessThanOrEqual(1);
+      if (bar.primaries.length > 0) expect(bar.primaries, 'the primary is last').toEqual([bar.boxes.length - 1]);
     }
     await page.close();
   });
