@@ -121,7 +121,17 @@ describe('what is sent', () => {
   // JUSTIFICATION-A3: new test cases the review asked for, one row per form; no existing test covers them.
   type Api = typeof retail;
   const OTHER = owner.branches?.[1]?.id ?? '';
-  const forms: [string, () => ReactElement, string, string, string, keyof Api, () => Promise<void>][] = [
+  const forms: [string, () => ReactElement, string, string, string, keyof Api, () => Promise<void>, number?, (() => Promise<unknown>)?][] = [
+    ['savings', () => <SavingsForm branchId={branch} />, 'savings-date', 'Save savings', 'business_date', 'createSavings', async () => {
+      // The chosen day's suggestion has loaded: its token goes with the save.
+      await screen.findByText(new RegExp(`Sold on ${Number(earlier.slice(8))} `));
+    }],
+    // A repayment's body is the second argument (the advance comes first); the advance is made before the form opens.
+    ['repayments', () => <RepaymentForm branchId={branch} />, 'repay-date', 'Save repayment', 'paid_on', 'createRepayment', async () => {
+      const advance = (await screen.findAllByRole('option', { name: /Test Owner 01/ }))[0] as HTMLOptionElement;
+      fireEvent.change(box('repay-advance') as HTMLElement, { target: { value: advance.value } });
+      type('repay-amount', '1000');
+    }, 1, () => retail.createAdvance({ branch_id: branch, business_date: daysBefore(today, 5), date_reason: 'Older advance', party_id: 'a0000000-0000-4000-8000-000000000001', principal_minor: 5000 }, 'advance-for-repayment')],
     ['expenses', () => <ExpenseForm branchId={branch} />, 'expense-date', 'Save expense', 'business_date', 'createExpense', async () => {
       await screen.findByRole('option', { name: 'Transport' });
       fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'e0000000-0000-4000-8000-000000000001' } });
@@ -149,7 +159,8 @@ describe('what is sent', () => {
     }],
   ];
 
-  it.each(forms)('%s: the owner\'s earlier day saves only with a reason, which is sent with the date', async (_name, form, id, save, field, create, fill) => {
+  it.each(forms)('%s: the owner\'s earlier day saves only with a reason, which is sent with the date', async (_name, form, id, save, field, create, fill, arg = 0, setup) => {
+    await setup?.();
     const sent = vi.spyOn(retail, create as 'createWithdrawal') as unknown as { mock: { calls: unknown[][] } } & Parameters<typeof expect>[0];
     open(owner, form());
     // The date first: a new day empties what depends on it (banking takes the new day's expected amount).
@@ -164,7 +175,7 @@ describe('what is sent', () => {
     await settle();
     fireEvent.click(screen.getByRole('button', { name: save }));
     await waitFor(() => expect(sent).toHaveBeenCalledTimes(1));
-    expect(sent.mock.calls[0]?.[0]).toMatchObject({ [field]: earlier, date_reason: 'Slip found in the drawer' });
+    expect(sent.mock.calls[0]?.[arg]).toMatchObject({ [field]: earlier, date_reason: 'Slip found in the drawer' });
   });
 
   it('the owner saving today sends no date and no reason', async () => {
