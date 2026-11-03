@@ -17,6 +17,8 @@ import { ladderLevels, packsAndPieces, packsAndPiecesMilli, packsAndPiecesProble
 import { plural } from '../../../app/glossary';
 import { BRANCH_ROLES, branchesWhere, canSeeProfit, canUse, capabilityOn, sellingBranches, type RetailScreen } from './permissions';
 import { keptWords } from './orders-state';
+import { stockWarning } from './sale-state';
+import { icons } from '../../../components/icons';
 import { NoAccess } from '../../../app/ui/EmptyState';
 
 // Shared pieces of the retail screens. Phone first: one column, 44px tap targets, labels on every
@@ -281,8 +283,23 @@ export function useProfitAccess(): boolean {
  * show only while something is typed and close once one is picked (ItemCombobox, issue #534): there is
  * no browsable list here, the Stock page has the whole list.
  */
-export function ProductPicker({ id, branchId, onAdd, showPrice = false, showStock = true, addLabel = 'Add', label = 'Find an item by name, code or category', notFound }: {
+/** Issue #815: Out of stock or Only N left as a tinted badge with an icon and the words, never colour alone; nothing otherwise. */
+export function StockWarning({ product }: { product: Product }) {
+  const words = stockWarning(product);
+  if (words === null) return null;
+  const out = words === 'Out of stock';
+  return (
+    <span className={`badge stock-warning ${out ? 'badge-danger' : 'badge-warning'}`} data-testid="stock-warning">
+      <span aria-hidden="true">{out ? icons.error : icons.warning}</span>
+      {words}
+    </span>
+  );
+}
+
+export function ProductPicker({ id, branchId, onAdd, showPrice = false, showStock = true, warnStock = false, addLabel = 'Add', label = 'Find an item by name, code or category', notFound }: {
   id: string;
+  /** Issue #815, the sale screen: Out of stock or Only N left on each match. */
+  warnStock?: boolean;
   /**
    * Drawn under the box once a search has found nothing, with what was typed (Sell's Add it here, issue #615). `hold` keeps it
    * drawn while a form it opened is open, so a later search that finds something never wipes what was typed (review of #616).
@@ -339,6 +356,7 @@ export function ProductPicker({ id, branchId, onAdd, showPrice = false, showStoc
                   </>
                 )}
               </span>
+              {warnStock && <StockWarning product={p} />}
             </span>
             <span className="cb-verb" aria-hidden="true">{addLabel}</span>
           </>
