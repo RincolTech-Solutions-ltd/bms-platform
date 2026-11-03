@@ -22,11 +22,11 @@ type Box = { x: number; y: number; width: number; height: number };
 const overlap = (a: Box, b: Box) => Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x) > 0.5 && Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y) > 0.5;
 const box = async (page: Page, selector: string) => (await page.locator(selector).first().boundingBox()) as Box;
 
-async function open(width: number, font: number, low = 12) {
+async function open(width: number, font: number, low = 12, toast = false) {
   const page = await browser.newPage({ viewport: { width, height: 900 }, hasTouch: true, isMobile: true });
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 0, left: 0, right: 0, bottom: INSET } });
-  return openLayout(page, `layout/tabs.html?font=${font}&low=${low}`, page.locator('nav.tab-bar .tab-badge'));
+  return openLayout(page, `layout/tabs.html?font=${font}&low=${low}${toast ? '&toast=1' : ''}`, page.locator(toast ? '.toast' : 'nav.tab-bar .tab-badge'));
 }
 
 describe.each([360, 412])('the bottom tabs at %ipx wide', (width) => {
@@ -77,6 +77,17 @@ describe.each([360, 412])('the bottom tabs at %ipx wide', (width) => {
       const action = await box(page, '.action-bar');
       expect(last.y + last.height).toBeLessThanOrEqual(action.y + 0.5);
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+      await page.close();
+    });
+
+    it('shows the toast after a save above the action bar and the tabs, white on dark, inside the screen (#824)', async () => {
+      const page = await open(width, font, 12, true);
+      const toast = await box(page, '.toast');
+      expect(toast.y + toast.height).toBeLessThanOrEqual((await box(page, '.action-bar')).y + 0.5);
+      expect(toast.x).toBeGreaterThanOrEqual(15.5);
+      expect(toast.x + toast.width).toBeLessThanOrEqual(width - 15.5);
+      const look = await page.locator('.toast').evaluate((t) => [getComputedStyle(t).color, getComputedStyle(t).backgroundImage, getComputedStyle(t).borderLeftWidth]);
+      expect(look).toEqual(['rgb(255, 255, 255)', 'none', '0px']);
       await page.close();
     });
   });

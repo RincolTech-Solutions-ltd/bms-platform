@@ -103,8 +103,9 @@ export function useToast(ms: number = TOAST_MS, silent = false): { show: (messag
  * outcome that is not a success); `doneToasts` raises them in the one `DoneToast` the app mounts beside the router. A write
  * that can be taken back names how in `meta.undo`, and the toast then carries Undo. A write that is not a mutation (a
  * hand-rolled try and catch) calls `sayDone(words)` when it works. A screen that already says it worked, in its own success
- * toast or a success note or screen, keeps that and sets neither, so nothing is said twice. `busy-guard.test.ts` fails a
- * staff write that says nothing, unless a `// toast-exempt: <reason>` line sits above it.
+ * toast or a success note, keeps that and sets neither, so nothing is said twice. A success screen that replaces the form
+ * still names its words, with `// success-screen: <what>` above the write (issue #824). `busy-guard.test.ts` fails a write
+ * that says nothing, unless a `// toast-exempt: <reason>` line sits above it.
  */
 export type DoneWords = string | ((data: never, variables: never) => string | null);
 
