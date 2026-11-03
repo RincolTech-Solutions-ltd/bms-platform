@@ -723,6 +723,44 @@ class SavingsDepositByGatewayIT extends LoanFixtures {
         assertThat(balance(account)).isEqualTo(50_000L);
     }
 
+    // JUSTIFICATION-A3: a new test case for issue #314; no existing test reads the transaction list after a gateway
+    // deposit.
+    @Test
+    void theTransactionListShowsThePaymentCodeOnAGatewayDepositOnlyAndNeverThePayersNumber() {
+        String account = account();
+        cashDeposit(account, 20_000);
+        JsonNode intent = intentFor(account, 50_000);
+        pay(intent, 50_000, "CONF-314-0001");
+        tick(Duration.ofMinutes(3));
+        assertThat(row(intent).get("status")).isEqualTo("booked");
+        String path = ACCOUNTS + "/" + account + "/transactions";
+
+        // A cashier with lending.savings.read in the branch sees the code on the gateway deposit, not on the cash one.
+        ResponseEntity<JsonNode> r = send(HttpMethod.GET, path, as(cashier, cashierPerms, "*", null), null);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+        JsonNode items = r.getBody().get("items");
+        assertThat(items).hasSize(2);
+        assertThat(items.get(0).get("payment_method_key").asString()).isEqualTo("gateway");
+        assertThat(items.get(0).get("payment_code").asString()).isEqualTo("CONF-314-0001");
+        assertThat(items.get(1).get("payment_method_key").asString()).isEqualTo("cash");
+        assertThat(items.get(1).get("payment_code").isNull()).isTrue();
+        // Only the code: the payer's number appears nowhere, in full or masked.
+        assertThat(r.getBody().toString()).doesNotContain("700000219").doesNotContain("payer_phone");
+
+        // A caller who may not read the account (another branch, or no savings read at all) gets no code.
+        ResponseEntity<JsonNode> otherBranch = send(
+                HttpMethod.GET,
+                path,
+                as(UUID.randomUUID(), "lending.savings.read", UUID.randomUUID().toString(), null),
+                null);
+        assertThat(otherBranch.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(String.valueOf(otherBranch.getBody())).doesNotContain("CONF-314-0001");
+        ResponseEntity<JsonNode> noRead =
+                send(HttpMethod.GET, path, as(UUID.randomUUID(), "core.payments.collect", "*", null), null);
+        assertThat(noRead.getStatusCode().value()).isIn(403, 404);
+        assertThat(String.valueOf(noRead.getBody())).doesNotContain("CONF-314-0001");
+    }
+
     @Test
     void aStaffMemberWithoutCollectInTheAccountsBranchIsRefusedBeforeTheAmountIsChecked() {
         String account = account();
