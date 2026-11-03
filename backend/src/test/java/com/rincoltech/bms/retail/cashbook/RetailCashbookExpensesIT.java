@@ -332,6 +332,54 @@ class RetailCashbookExpensesIT extends IntegrationTest {
         }
     }
 
+    /**
+     * The loser of a race with a writer that skips the category lock: a raw insert of the same name, not yet committed, makes
+     * the API's insert wait on the unique index; once it commits, the API answers with that item (reuse_existing) or
+     * duplicate_item (set-up), never a 500. JUSTIFICATION-A3: the test the lead's note asks for, not new mechanism.
+     */
+    @Test
+    void theLoserOfARaceOnTheUniqueIndexGetsTheWinningItem() throws Exception {
+        String items = "/expense-categories/" + rent + "/items";
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newSingleThreadExecutor();
+        try {
+            for (boolean reuse : new boolean[] {true, false}) {
+                String name = "Raced item " + reuse;
+                UUID winner = UUID.randomUUID();
+                try (java.sql.Connection c = TestDatabase.ownerDataSource().getConnection()) {
+                    c.setAutoCommit(false);
+                    try (var st = c.prepareStatement(
+                            "INSERT INTO retail_expense_items (id, tenant_id, category_id, name) VALUES (?, ?, ?, ?)")) {
+                        st.setObject(1, winner);
+                        st.setObject(2, t.tenantId());
+                        st.setObject(3, rent);
+                        st.setString(4, name);
+                        st.executeUpdate();
+                    }
+                    Map<String, Object> body =
+                            reuse ? Map.of("name", name.toUpperCase(), "reuse_existing", true) : Map.of("name", name);
+                    java.util.concurrent.Future<ResponseEntity<JsonNode>> add =
+                            pool.submit(() -> cb.post(items, body, CASHBOOK_SALES));
+                    Thread.sleep(1_500);
+                    assertThat(add.isDone())
+                            .as("the insert waits on the unique index")
+                            .isFalse();
+                    c.commit();
+
+                    ResponseEntity<JsonNode> r = add.get(30, java.util.concurrent.TimeUnit.SECONDS);
+                    if (reuse) {
+                        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.OK);
+                        assertThat(RetailTestSupport.id(r)).isEqualTo(winner);
+                    } else {
+                        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+                        assertThat(r.getBody().get("code").asString()).isEqualTo("duplicate_item");
+                    }
+                }
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
     @Test
     void anotherBusinessesCategoryIsNotFoundAndNothingIsWritten() {
         TestDatabase.Fixture b = TestDatabase.tenant("cb-exp-b", false, true);

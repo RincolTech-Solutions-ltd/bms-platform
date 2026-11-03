@@ -24,7 +24,8 @@ staff waited for the owner or picked a wrong item. The same screen already lets 
    whose name is the same that way and ignoring case ("generator  FUEL" is "Generator fuel") with 200 and that item, and writes
    nothing. The create locks the category row (`FOR UPDATE`) for its whole transaction, so two tills sending the same name at
    once run one after the other and the second is answered with the first's item; the unique index on the category and the
-   lower-cased name (V34) stays the backstop. A switched off item of
+   lower-cased name (V34) stays the backstop: the insert is `ON CONFLICT DO NOTHING`, and when a writer that skipped the lock
+   won, the create reads that item and answers with it (with `reuse_existing`) or 409 `duplicate_item`, never a 500. A switched off item of
    that name is refused with 409 `item_switched_off` ("Ask the owner to switch it on again"), so a retired item is never
    offered. Without `reuse_existing` a taken name is 409 `duplicate_item` as before, which set-up keeps.
 3. **In place on the form.** Under the Item picker a person who holds `retail.expense.record` at the form's shop sees "Add a

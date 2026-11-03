@@ -153,23 +153,26 @@ class SetupService {
         }
         // Spaces inside the name are one space, so "Generator  fuel" is "Generator fuel" (ADR-118 decision 2).
         String name = r.name().strip().replaceAll("\\s+", " ");
-        var same = Boolean.TRUE.equals(r.reuseExisting())
-                ? repo.itemNamed(c.id(), name)
-                : java.util.Optional.<ItemRow>empty();
-        if (same.isPresent() && same.get().active()) {
-            return new AddedItem(view(same.get()), false);
-        }
+        boolean reuse = Boolean.TRUE.equals(r.reuseExisting());
+        var same = reuse ? repo.itemNamed(c.id(), name) : java.util.Optional.<ItemRow>empty();
         if (same.isPresent()) {
-            throw duplicate(
-                    "item_switched_off",
-                    "This category has an item with that name that the owner switched off. Ask the owner to switch it on again.");
+            return existing(same.get());
         }
         if (repo.itemNameTaken(c.id(), name, null)) {
             throw duplicate("duplicate_item", "This category has an item with that name already.");
         }
         UUID id = UUID.randomUUID();
         boolean explain = Boolean.TRUE.equals(r.requiresExplanation());
-        repo.insertItem(id, c.id(), name, explain, CurrentPrincipal.require().userId());
+        if (!repo.insertItem(
+                id, c.id(), name, explain, CurrentPrincipal.require().userId())) {
+            // The loser of a race with a writer that did not take the category lock: answer with the winner, never a
+            // 500.
+            ItemRow winner = repo.itemNamed(c.id(), name).orElseThrow();
+            if (reuse) {
+                return existing(winner);
+            }
+            throw duplicate("duplicate_item", "This category has an item with that name already.");
+        }
         audit.record(AuditLog.Entry.created(
                 "retail.expense_item.created",
                 "retail.expense_item",
@@ -177,6 +180,16 @@ class SetupService {
                 null,
                 Map.of("category_id", c.id().toString(), "name", name, "requires_explanation", explain)));
         return new AddedItem(view(repo.item(id, false).orElseThrow()), true);
+    }
+
+    /** An item of the same name, picked again when it is active (200) and refused in plain words when switched off. */
+    private AddedItem existing(ItemRow same) {
+        if (!same.active()) {
+            throw duplicate(
+                    "item_switched_off",
+                    "This category has an item with that name that the owner switched off. Ask the owner to switch it on again.");
+        }
+        return new AddedItem(view(same), false);
     }
 
     @Transactional
