@@ -34,7 +34,7 @@ class ImportUploadReviewIT extends IntegrationTest {
     ImportUploads uploads;
 
     @Autowired
-    UploadService service;
+    UploadTestSeams seams;
 
     @Autowired
     ImportRuns runs;
@@ -55,7 +55,7 @@ class ImportUploadReviewIT extends IntegrationTest {
 
     @AfterEach
     void unhook() {
-        service.afterFetch = null;
+        seams.afterFetch = null;
     }
 
     <T> T as(Supplier<T> work) {
@@ -63,7 +63,10 @@ class ImportUploadReviewIT extends IntegrationTest {
     }
 
     Batch upload(UUID runId, String name, String content) {
-        byte[] bytes = TestFiles.csv(content);
+        return upload(runId, name, TestFiles.csv(content));
+    }
+
+    Batch upload(UUID runId, String name, byte[] bytes) {
         return as(() ->
                 uploads.upload(runId, new Upload(name, new ByteArrayInputStream(bytes), bytes.length, operator, null)));
     }
@@ -92,11 +95,11 @@ class ImportUploadReviewIT extends IntegrationTest {
         assertThat(rows(batch.id())).isEqualTo(2);
 
         // The cancel lands between the fetch and the write, as a second operator's would.
-        service.afterFetch = () -> uploads.cancelBatch(batch.id());
+        seams.afterFetch = () -> uploads.cancelBatch(batch.id());
         assertThatThrownBy(() -> as(() -> uploads.parse(batch.id(), null)))
                 .isInstanceOfSatisfying(
                         ApiException.class, e -> assertThat(e.code()).isEqualTo("invalid_status_transition"));
-        service.afterFetch = null;
+        seams.afterFetch = null;
 
         Batch after = as(() -> uploads.batch(batch.id()));
         assertThat(after.status()).isEqualTo("cancelled");
@@ -110,11 +113,11 @@ class ImportUploadReviewIT extends IntegrationTest {
         Batch batch = upload(runId, "fabricated.csv", CSV);
         as(() -> runs.transition(runId, "in_review"));
 
-        service.afterFetch = () -> runs.transition(runId, "ready");
+        seams.afterFetch = () -> runs.transition(runId, "ready");
         assertThatThrownBy(() -> as(() -> uploads.parse(batch.id(), null)))
                 .isInstanceOfSatisfying(
                         ApiException.class, e -> assertThat(e.code()).isEqualTo("invalid_status_transition"));
-        service.afterFetch = null;
+        seams.afterFetch = null;
 
         assertThat(as(() -> runs.get(runId)).status()).isEqualTo("ready");
         assertThat(as(() -> uploads.batch(batch.id())).status()).isEqualTo("parsed");
@@ -133,6 +136,54 @@ class ImportUploadReviewIT extends IntegrationTest {
         assertThat(csv.failureCode())
                 .as("a NUL past the bytes the upload sniffs")
                 .isEqualTo(Parsing.FILE_UNREADABLE);
+    }
+
+    // JUSTIFICATION-A3: the two tests the review of 6e4f8c0 asks for, a long sheet name and a refused final UPDATE.
+    @Test
+    void aSheetNameOverOneHundredCharactersFailsTheBatchWithACode() throws Exception {
+        // The column holds 100 characters; a hand-edited workbook can name its sheet anything.
+        UUID runId = as(() -> runs.open(operator).id());
+        String sheet = ReaderLimitsTest.SHEET
+                + "<row r=\"2\"><c r=\"A2\" t=\"inlineStr\"><is><t>FAB-1</t></is></c></row>" + ReaderLimitsTest.END;
+        byte[] book = ReaderLimitsTest.workbook(
+                "N".repeat(120), ReaderLimitsTest.sst("<si><t>Code</t></si>"), sheet, null, java.util.Map.of());
+        Batch batch = upload(runId, "fabricated.xlsx", book);
+        assertThat(batch.status()).isEqualTo("failed");
+        assertThat(batch.failureCode()).isEqualTo(Parsing.FILE_UNREADABLE);
+        assertThat(rows(batch.id())).isZero();
+        assertThat(objectKey(batch.id())).as("the file is deleted").isNull();
+    }
+
+    @Test
+    void aDatabaseRefusalOfTheBatchsOwnUpdateFailsTheBatchWithACode() {
+        // A refusal the parser cannot foresee, raised on the final UPDATE of the batch (a value too long, 22001), so
+        // the whole write is proven mapped and not only the row inserts.
+        TestDatabase.owner().sql("""
+                CREATE FUNCTION test_refuse_parsed() RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN
+                    RAISE EXCEPTION 'fabricated refusal' USING ERRCODE = '22001';
+                END $$
+                """).update();
+        TestDatabase.owner().sql("""
+                CREATE TRIGGER test_refuse_parsed BEFORE UPDATE ON import_batches FOR EACH ROW
+                 WHEN (NEW.status = 'parsed' AND NEW.source_filename = 'refused-update.csv')
+                 EXECUTE FUNCTION test_refuse_parsed()
+                """).update();
+        try {
+            UUID runId = as(() -> runs.open(operator).id());
+            Batch batch = upload(runId, "refused-update.csv", CSV);
+            assertThat(batch.status()).isEqualTo("failed");
+            assertThat(batch.failureCode()).isEqualTo(Parsing.FILE_UNREADABLE);
+            assertThat(rows(batch.id()))
+                    .as("the rows inserted before the UPDATE are rolled back")
+                    .isZero();
+            assertThat(objectKey(batch.id())).isNull();
+        } finally {
+            TestDatabase.owner()
+                    .sql("DROP TRIGGER test_refuse_parsed ON import_batches")
+                    .update();
+            TestDatabase.owner().sql("DROP FUNCTION test_refuse_parsed()").update();
+        }
     }
 
     @Test

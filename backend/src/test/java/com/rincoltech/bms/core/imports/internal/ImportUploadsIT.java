@@ -59,7 +59,7 @@ class ImportUploadsIT extends IntegrationTest {
     ImportUploads uploads;
 
     @Autowired
-    UploadService service;
+    UploadTestSeams seams;
 
     @Autowired
     ImportRuns runs;
@@ -94,7 +94,7 @@ class ImportUploadsIT extends IntegrationTest {
 
     @AfterEach
     void diskBack() {
-        service.freeDisk = null;
+        seams.freeDisk = null;
     }
 
     <T> T as(TestDatabase.Fixture f, Supplier<T> work) {
@@ -261,9 +261,9 @@ class ImportUploadsIT extends IntegrationTest {
                         () -> uploads.upload(
                                 runId, new Upload("big.csv", new Repeating((25 << 20) + 1), -1, operator, null))),
                 Parsing.FILE_TOO_LARGE);
-        service.freeDisk = () -> 10;
+        seams.freeDisk = () -> 10;
         refused(() -> upload(t, runId, "fabricated.csv", TestFiles.csv(CSV), null), "UPLOAD_DISK_LOW");
-        service.freeDisk = null;
+        seams.freeDisk = null;
         assertThat(as(t, () -> uploads.batches(runId))).isEmpty();
         assertThat(as(t, () -> quarantine.list().toList())).as("no file stored").isEmpty();
 

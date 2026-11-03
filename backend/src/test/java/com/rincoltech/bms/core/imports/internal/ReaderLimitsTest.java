@@ -7,6 +7,7 @@ import com.rincoltech.bms.core.imports.internal.QuarantineWriter.FileType;
 import com.rincoltech.bms.core.imports.internal.SourceParser.StagedRow;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -15,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
@@ -47,12 +49,19 @@ class ReaderLimitsTest {
     /** A workbook of one sheet, its shared strings, optional styles and any extra parts, in that order. */
     static byte[] workbook(String sharedStrings, String sheet, String styles, Map<String, byte[]> extra)
             throws IOException {
+        return workbook("S", sharedStrings, sheet, styles, extra);
+    }
+
+    static byte[] workbook(
+            String sheetName, String sharedStrings, String sheet, String styles, Map<String, byte[]> extra)
+            throws IOException {
         Map<String, byte[]> parts = new LinkedHashMap<>();
         parts.put(
                 "xl/workbook.xml",
                 utf8(
-                        "<workbook xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/"
-                                + "relationships\"><sheets><sheet name=\"S\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>"));
+                        "<workbook xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets>"
+                                + "<sheet name=\"" + sheetName
+                                + "\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>"));
         parts.put(
                 "xl/_rels/workbook.xml.rels",
                 utf8("<Relationships><Relationship Id=\"rId1\" Target=\"worksheets/sheet1.xml\"/></Relationships>"));
@@ -88,6 +97,10 @@ class ReaderLimitsTest {
     }
 
     static void read(byte[] book, XlsxRows.Caps caps, Parsing.Limits limits) throws IOException {
+        read(() -> new ByteArrayInputStream(book), caps, limits);
+    }
+
+    static void read(XlsxRows.Source source, XlsxRows.Caps caps, Parsing.Limits limits) throws IOException {
         Parsing.Sink none = new Parsing.Sink() {
             @Override
             public void header(int headerRowNo, List<String> names) {}
@@ -95,7 +108,7 @@ class ReaderLimitsTest {
             @Override
             public void row(int sourceRowNo, Map<String, Parsing.Cell> raw) {}
         };
-        XlsxRows.read(() -> new ByteArrayInputStream(book), null, new Parsing.Sheet(limits, none), caps);
+        XlsxRows.read(source, null, new Parsing.Sheet(limits, none), caps);
     }
 
     SourceParser.Parsed parse(FileType type, byte[] bytes) throws IOException {
@@ -162,6 +175,65 @@ class ReaderLimitsTest {
         refusedWith(
                 Parsing.FILE_UNREADABLE,
                 () -> read(workbook(sst("<si><t>Code</t></si>"), inline, null, Map.of()), XlsxRows.Caps.DEFAULT));
+    }
+
+    // JUSTIFICATION-A3: two tests the review of 6e4f8c0 asks for; the sheet streams so no 100 MB text is held.
+    @Test
+    void manyLongRunsInOneInlineCellAreStoppedAtTheCellLimit() throws IOException {
+        // One inline cell of 3,000 runs of 32,767 characters each, about 100 MB unpacked and about 100 KB zipped. Each
+        // run is within the limit; the cell is refused as its second run is added, not when the cell ends.
+        byte[] run = utf8("<r><t>" + "x".repeat(Parsing.MAX_CELL_CHARS) + "</t></r>");
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(out)) {
+            byte[] plain = workbook(sst("<si><t>Code</t></si>"), SHEET + END, null, Map.of());
+            try (ZipInputStream parts = new ZipInputStream(new ByteArrayInputStream(plain))) {
+                for (ZipEntry e; (e = parts.getNextEntry()) != null; ) {
+                    if (!e.getName().equals("xl/worksheets/sheet1.xml")) {
+                        put(zip, e.getName(), parts.readAllBytes());
+                    }
+                }
+            }
+            zip.putNextEntry(new ZipEntry("xl/worksheets/sheet1.xml"));
+            zip.write(utf8(SHEET + "<row r=\"2\"><c r=\"A2\" t=\"inlineStr\"><is>"));
+            for (int i = 0; i < 3_000; i++) {
+                zip.write(run);
+            }
+            zip.write(utf8("</is></c></row>" + END));
+            zip.closeEntry();
+        }
+        byte[] book = out.toByteArray();
+        assertThat(book.length).as("small on disk").isLessThan(1_000_000);
+
+        // The bytes the sheet's pass (the second open) takes before it stops: a small part, not the whole cell.
+        long[] sheetPass = new long[1];
+        int[] opens = new int[1];
+        XlsxRows.Source source = () -> {
+            boolean second = ++opens[0] == 2;
+            return new FilterInputStream(new ByteArrayInputStream(book)) {
+                @Override
+                public int read(byte[] b, int off, int len) throws IOException {
+                    int n = super.read(b, off, len);
+                    sheetPass[0] += second && n > 0 ? n : 0;
+                    return n;
+                }
+            };
+        };
+        assertThatThrownBy(() -> read(source, XlsxRows.Caps.DEFAULT, LIMITS))
+                .isInstanceOfSatisfying(Parsing.Failure.class, f -> {
+                    assertThat(f.code).isEqualTo(Parsing.FILE_UNREADABLE);
+                    assertThat(f.getMessage()).contains("row 2");
+                });
+        assertThat(opens[0]).isEqualTo(2);
+        assertThat(sheetPass[0]).as("stopped early in the cell").isLessThan(book.length / 4);
+    }
+
+    @Test
+    void aSheetNameLongerThanTheBatchRecordsIsUnreadable() throws IOException {
+        String sheet = SHEET + "<row r=\"2\"><c r=\"A2\" t=\"inlineStr\"><is><t>FAB-1</t></is></c></row>" + END;
+        String fits = "N".repeat(XlsxRows.MAX_SHEET_NAME);
+        read(workbook(fits, sst("<si><t>Code</t></si>"), sheet, null, Map.of()), XlsxRows.Caps.DEFAULT);
+        byte[] over = workbook(fits + "N", sst("<si><t>Code</t></si>"), sheet, null, Map.of());
+        refusedWith(Parsing.FILE_UNREADABLE, () -> read(over, XlsxRows.Caps.DEFAULT));
     }
 
     @Test

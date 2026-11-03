@@ -56,6 +56,9 @@ final class XlsxRows {
         static final Caps DEFAULT = new Caps(1L << 30, 96L << 20);
     }
 
+    /** The longest sheet name a batch records: {@code import_batches.sheet_name} is {@code varchar(100)} (V129). */
+    static final int MAX_SHEET_NAME = 100;
+
     /** The parts of the first pass; each may appear once. */
     private static final java.util.Set<String> PARTS =
             java.util.Set.of("xl/workbook.xml", "xl/_rels/workbook.xml.rels", "xl/styles.xml", "xl/sharedStrings.xml");
@@ -200,6 +203,7 @@ final class XlsxRows {
         private final List<String> shared = new ArrayList<>();
         private final Map<Integer, String> customFormats = new HashMap<>();
         private final List<Integer> styleFormats = new ArrayList<>();
+        private final Map<Integer, DateKind> dateKinds = new HashMap<>();
         private boolean date1904;
         private final Caps caps;
         private long held;
@@ -340,6 +344,10 @@ final class XlsxRows {
                         ? !d.hidden()
                         : Parsing.key(d.name()).equals(Parsing.key(wanted));
                 if (match && targets.containsKey(d.relationshipId())) {
+                    // Excel keeps names to 31 characters; a hand-edited file can carry any, and the batch records it.
+                    if (d.name() != null && d.name().length() > MAX_SHEET_NAME) {
+                        throw Parsing.unreadable("The sheet's name is longer than " + MAX_SHEET_NAME + " characters.");
+                    }
                     return new SheetRef(d.name(), targets.get(d.relationshipId()));
                 }
             }
@@ -384,6 +392,11 @@ final class XlsxRows {
                         case "t" -> {
                             if (inline != null) {
                                 inline.append(readText(r, "on row " + rowNo));
+                                // Checked after every run, as shared strings are, so many runs cannot grow one cell.
+                                if (inline.length() > Parsing.MAX_CELL_CHARS) {
+                                    throw Parsing.unreadable("A cell on row " + rowNo + " is longer than "
+                                            + Parsing.MAX_CELL_CHARS + " characters.");
+                                }
                             }
                         }
                         default -> {}
@@ -472,7 +485,12 @@ final class XlsxRows {
             TIME
         }
 
+        /** Each format is analysed once, not once a cell. */
         private DateKind dateKind(int format) {
+            return dateKinds.computeIfAbsent(format, this::analyse);
+        }
+
+        private DateKind analyse(int format) {
             if (BUILTIN_TIME_ONLY.get(format)) {
                 return DateKind.TIME;
             }

@@ -30,6 +30,7 @@ import java.util.UUID;
 import javax.sql.DataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
@@ -76,11 +77,21 @@ class UploadService implements ImportUploads {
     private final UploadSettings.ImportKey importKey;
     private final ObjectMapper mapper;
 
-    /** For tests: the free disk the next uploads see, in bytes; {@code null} reads the work directory's file store. */
-    volatile java.util.function.LongSupplier freeDisk;
+    private final Seams seams;
 
-    /** For tests: runs between fetching a batch's file and reading it, where a concurrent cancel or move can land. */
-    volatile Runnable afterFetch;
+    /**
+     * Where a test reaches into an upload (review of #790): the free disk it sees, and a step between fetching a batch's
+     * file and writing its rows, where a concurrent cancel or move can land. Production has no such bean, so these
+     * defaults are what it runs.
+     */
+    interface Seams {
+
+        default long freeDisk(Path work) throws IOException {
+            return Files.getFileStore(work).getUsableSpace();
+        }
+
+        default void afterFetch() {}
+    }
 
     UploadService(
             JdbcClient jdbc,
@@ -90,7 +101,9 @@ class UploadService implements ImportUploads {
             QuarantineStorage quarantine,
             UploadSettings.Properties settings,
             UploadSettings.ImportKey importKey,
-            ObjectMapper mapper) {
+            ObjectMapper mapper,
+            ObjectProvider<Seams> seams) {
+        this.seams = seams.getIfAvailable(() -> new Seams() {});
         this.jdbc = jdbc;
         this.batchJdbc = new JdbcTemplate(dataSource);
         this.tx = new TransactionTemplate(transactions);
@@ -257,10 +270,7 @@ class UploadService implements ImportUploads {
             } catch (IOException e) {
                 throw new UncheckedIOException("the quarantined file could not be fetched", e);
             }
-            Runnable hook = afterFetch;
-            if (hook != null) {
-                hook.run();
-            }
+            seams.afterFetch();
             Path copy = temp;
             Parsing.Limits limits = new Parsing.Limits(
                     settings.maxRows(), settings.maxColumns(), opts.requiredHeaders(), opts.ignoredColumns());
@@ -274,6 +284,13 @@ class UploadService implements ImportUploads {
                         parsed.columns());
             } catch (Parsing.Failure f) {
                 fail(held, f.code, f.getMessage());
+            } catch (DataIntegrityViolationException e) {
+                // A value PostgreSQL refuses anywhere in the write, the batch's own UPDATE included (review of #790):
+                // the file's fault, so the batch fails with a code instead of staying uploaded behind a server error.
+                // The message may quote the value and is not kept. A transient error (a lost connection, a lock
+                // timeout) is not the file's fault: it stays a server error and the batch keeps its file for a retry.
+                log.info("import batch {}: the database refused a value from the file", batchId);
+                fail(held, Parsing.FILE_UNREADABLE, "The file holds a value that cannot be stored.");
             }
         } finally {
             Arrays.fill(dataKey, (byte) 0);
@@ -556,9 +573,7 @@ class UploadService implements ImportUploads {
         long usable;
         try {
             Files.createDirectories(settings.work());
-            usable = freeDisk != null
-                    ? freeDisk.getAsLong()
-                    : Files.getFileStore(settings.work()).getUsableSpace();
+            usable = seams.freeDisk(settings.work());
         } catch (IOException e) {
             throw new UncheckedIOException("the import work directory cannot be used", e);
         }
