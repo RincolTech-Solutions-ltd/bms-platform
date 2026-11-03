@@ -95,6 +95,15 @@ class RetailSalesStaffSavingsIT extends IntegrationTest {
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
     }
 
+    /** A read of the cash book as the Owner of the business. */
+    JsonNode asOwner(String path) {
+        HttpHeaders h = cb.api.headers(ALL, "*", Map.of());
+        h.set("X-Dev-User-Id", owner.toString());
+        ResponseEntity<JsonNode> r = http.exchange(R + path, HttpMethod.GET, new HttpEntity<>(h), JsonNode.class);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+        return r.getBody();
+    }
+
     ResponseEntity<JsonNode> suggestion(String token, UUID branch, LocalDate date) {
         return api.get(SALES_STAFF + "/suggestion?branch_id=" + branch + "&date=" + date, token);
     }
@@ -186,6 +195,36 @@ class RetailSalesStaffSavingsIT extends IntegrationTest {
                 save(seller, hq, today, s.get("suggestion_token").asString(), null);
         assertThat(again.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(again.getBody().get("code").asString()).isEqualTo("savings_exists");
+
+        // JUSTIFICATION-A3: the lead's request on PR #800 asks for this check for a seller and for the owner.
+        // The owner's request: once the day is saved, its suggestion is gone for the seller and for the owner alike,
+        // and
+        // only what was saved shows; a stale form on that day is not told the new suggestion either.
+        JsonNode sellerView = suggestion(seller, hq, today).getBody();
+        assertThat(sellerView.has("suggested_minor")).isFalse();
+        assertThat(sellerView.get("may_change_amount").asBoolean()).isFalse();
+        assertThat(sellerView.get("existing_amount_minor").asLong()).isEqualTo(2_000);
+        JsonNode ownerView = asOwner("/savings/suggestion?branch_id=" + hq + "&date=" + today);
+        assertThat(ownerView.has("suggested_minor")).isFalse();
+        assertThat(ownerView.get("existing_amount_minor").asLong()).isEqualTo(2_000);
+        assertThat(cb.sale(hq, "cash", product, "2", today).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> stale =
+                save(seller, hq, today, s.get("suggestion_token").asString(), null);
+        assertThat(stale.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(stale.getBody().get("code").asString()).isEqualTo("suggestion_changed");
+        assertThat(stale.getBody().has("suggested_minor")).isFalse();
+        ResponseEntity<JsonNode> staleOwner = cb.post(
+                "/savings",
+                Map.of(
+                        "branch_id",
+                        hq,
+                        "business_date",
+                        today.toString(),
+                        "suggestion_token",
+                        ownerView.get("suggestion_token").asString()),
+                ALL);
+        assertThat(staleOwner.getBody().get("code").asString()).isEqualTo("suggestion_changed");
+        assertThat(staleOwner.getBody().has("suggested_minor")).isFalse();
 
         // The older record of this month shows its amount on the suggestion and in the records.
         assertThat(suggestion(seller, second, today)

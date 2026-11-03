@@ -78,7 +78,9 @@ export function SavingsForm({ branchId, onSaved }: { branchId: string; onSaved?:
     onSuccess: (saved) => {
       finish();
       showInRecords(queryClient, saved);
-      queryClient.setQueryData(suggestionKey, (old: typeof s) => (old ? { ...old, existing_id: saved.id } : old));
+      // The day is saved: its suggestion goes and only the saved amount stays (issue #799), before the refetch says the same.
+      queryClient.setQueryData(suggestionKey, (old: typeof s) =>
+        (old ? { ...old, existing_id: saved.id, existing_amount_minor: saved.amount_minor, suggested_minor: undefined, may_change_amount: false } : old));
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       onSaved?.(saved);
     },
@@ -107,9 +109,17 @@ export function SavingsForm({ branchId, onSaved }: { branchId: string; onSaved?:
           <p>
             Sold on {showDate(s.business_date ?? draft.date)}: <strong>{money(s.total_sold_minor ?? 0)}</strong>
           </p>
-          {s.existing_id != null && <Note>Savings are already recorded for this shop on this day. If that record is wrong, void it in the records below, then save again.</Note>}
-          {nowAboveWords(s) && <Note>{nowAboveWords(s)}</Note>}
-          {profitView ? (
+          {/* Issue #799 (the owner's request): a saved day shows only what was saved, never its suggestion. */}
+          {s.existing_id != null ? (
+            <>
+              <Note>
+                Savings are already recorded for this shop on this day. If that record is wrong,{' '}
+                {salesStaff ? 'ask an administrator to void it.' : 'void it in the records below, then save again.'}
+              </Note>
+              {s.existing_amount_minor !== undefined && <KeyFigure label="Saved" value={money(s.existing_amount_minor)} />}
+              {nowAboveWords(s) && <Note>{nowAboveWords(s)}</Note>}
+            </>
+          ) : profitView ? (
             <>
               {s.daily_profit_minor === undefined ? null : s.available_minor !== undefined ? (
                 <dl className="rt-figures" aria-label="The day's figures">

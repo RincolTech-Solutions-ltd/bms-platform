@@ -228,6 +228,22 @@ describe('the savings screen for sales staff', () => {
   const shown: SavingsSuggestion = { branch_id: branch, business_date: today, total_sold_minor: 50000, suggestion_token: 'tok-1', suggested_minor: 4000, may_change_amount: true };
   const monthStart = `${today.slice(0, 8)}01`;
 
+  // The owner's request on PR #800: a saved day shows only what was saved, for the seller and for the owner, never its suggestion.
+  it.each([
+    ['a seller', { ...sales, salespeople_see_savings_amount: true }],
+    ['the owner', { ...admin, is_owner: true }],
+  ])('for a day already saved shows %s only the saved amount, no suggestion and no amount field', async (_who, me) => {
+    savingsSuggestion.mockResolvedValue({ ...shown, suggested_minor: undefined, may_change_amount: false, existing_id: 'sv-1', existing_amount_minor: 3500 });
+    listSavings.mockResolvedValue([]);
+    open(me);
+    await screen.findByText(/Savings are already recorded for this shop on this day/);
+    expect(screen.getByText('UGX 3,500', { selector: '.key-figure-value' })).toBeTruthy();
+    expect(screen.queryByText('Suggested savings')).toBeNull();
+    expect(screen.queryByLabelText(/Amount to save/)).toBeNull();
+    expect(screen.queryByText('Savings will be recorded using the standard amount.')).toBeNull();
+    expect(saveButton().getAttribute('data-not-ready')).toBe('true');
+  });
+
   it('with the switch off has no access and asks nothing of the server', () => {
     open({ ...sales, salespeople_see_savings_amount: false });
     expect(screen.getByRole('heading', { name: 'Savings' })).toBeTruthy();

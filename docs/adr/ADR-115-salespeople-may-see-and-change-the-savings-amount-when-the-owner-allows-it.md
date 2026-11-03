@@ -72,6 +72,14 @@ want the person closing the till to set the savings aside by hand and to check t
    needs `retail.savings.overwrite`. The list moves an earlier `from` to the first day of the business month and offers no
    void. `/me` carries `salespeople_see_savings_amount`, and the PWA shows the Savings screen in Money to a seller without the
    till only while it is true. Whoever holds the till's savings permissions keeps the till's routes.
+9. **A saved day shows only what was saved (issue #799, the owner's request, as in the shop's old spreadsheet app).** Once a
+   branch's savings for a day are recorded (an active record), the suggestion for that day is no longer sent to anyone, the
+   Owner included, setting on or off: the suggestion answer leaves out `suggested_minor` and carries `may_change_amount` false,
+   and a 409 `suggestion_changed` for that day leaves out `suggested_minor` (the refusal order is unchanged). The Savings
+   screen then shows the note that the day is saved and the saved amount (`existing_amount_minor`, where the caller may see
+   it), with no suggestion and no amount field. Voiding the record brings the suggestion back. The day's profit, expenses and
+   available amount still reach a caller with `retail.profit.read`, and the ADR-080 note "Saved UGX X; profit less expenses is
+   now UGX Y" stays. The suggestion is shown on no other screen: Home, Money and the cash summary never carried it.
 
 ## Consequences
 

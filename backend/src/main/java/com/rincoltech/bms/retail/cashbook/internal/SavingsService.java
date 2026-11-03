@@ -157,13 +157,16 @@ class SavingsService {
                 on,
                 figures.day(branch, on).totalSold(),
                 support.suggestionToken(branch, on, d.suggested()),
-                sees ? d.suggested() : null,
+                // Issue #799 (the owner's request): once the day is saved, its suggestion is no longer sent to anyone;
+                // the
+                // screen shows only what was saved.
+                sees && existing == null ? d.suggested() : null,
                 gate ? d.profit() : null,
                 gate ? d.expenses() : null,
                 gate ? d.available() : null,
                 existing,
                 existingAmount,
-                sees && mayChangeAmount(branch, on, setting));
+                sees && existing == null && mayChangeAmount(branch, on, setting));
     }
 
     /**
@@ -221,7 +224,8 @@ class SavingsService {
         if (!support.tokenMatches(branch, date, suggested, r.suggestionToken())) {
             Map<String, Object> extra = new LinkedHashMap<>();
             extra.put("suggestion_token", support.suggestionToken(branch, date, suggested));
-            if (profit || salesperson) {
+            // Issue #799: never for a day already saved; the 409 savings_exists that follows a fresh read says why.
+            if ((profit || salesperson) && repo.activeSavings(branch, date).isEmpty()) {
                 extra.put("suggested_minor", suggested);
             }
             throw new ApiException(

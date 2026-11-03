@@ -91,7 +91,10 @@ final class CashbookApi {
             @Schema(description = "Opaque; echo it on the create call", requiredMode = Schema.RequiredMode.REQUIRED)
             String suggestionToken,
 
-            @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = PROFIT_ONLY)
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description = PROFIT_ONLY + "; absent for every caller once the day has an active savings record"
+                            + " (issue #799)")
             Long suggestedMinor,
 
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = PROFIT_ONLY)
@@ -117,7 +120,8 @@ final class CashbookApi {
             @Schema(
                     description = "True when this caller may save an amount different from the suggestion: with"
                             + " retail.savings.overwrite, or with salespeople_see_savings_amount on when no saved record of"
-                            + " the day was voided (replacing a saved amount needs retail.savings.overwrite; ADR-115)")
+                            + " the day was voided (replacing a saved amount needs retail.savings.overwrite; ADR-115);"
+                            + " false once the day has an active savings record (issue #799)")
             boolean mayChangeAmount) {}
 
     @Schema(name = "RetailSavingsRequest")
