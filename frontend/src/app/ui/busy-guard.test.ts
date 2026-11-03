@@ -314,12 +314,29 @@ function restOfBlock(text: string, from: number): string {
   return text.slice(from);
 }
 
-/** The code that runs when a mutation works: its options, its hook's, each send to the end of its block, and what they call. */
+/**
+ * The code after a send: to the end of its block, but never past the next declaration or return at the same depth. A send in
+ * a top-level callback of a component (`useEntryChecks(..., () => save.mutate())`) would otherwise read the whole rest of the
+ * component, and any toast in it passed Move stock while its save said nothing (#824).
+ */
+function restOfSend(text: string, from: number): string {
+  const rest = restOfBlock(text, from);
+  let depth = 0;
+  for (let i = 0; i < rest.length; i += 1) {
+    const c = rest[i];
+    if (c === '{' || c === '(') depth += 1;
+    else if (c === '}' || c === ')') depth -= 1;
+    else if (c === '\n' && depth <= 0 && /^\s*(?:const|let|function|return|export)\b/.test(rest.slice(i + 1))) return rest.slice(0, i);
+  }
+  return rest;
+}
+
+/** The code that runs when a mutation works: its options, its hook's, each send to the end of its statement, and what they call. */
 function successCode(text: string, m: Mutation, hookOpts: Map<string, string>, successOnly = false): string {
   const callee = /=\s*(\w+)/.exec(text.slice(m.index))?.[1] ?? '';
   const parts = [balanced(text, text.indexOf('(', m.index)), hookOpts.get(callee) ?? ''];
   for (const send of m.sends) {
-    for (const call of text.matchAll(new RegExp(`(^|[^\\w.])${send.replace('.', '\\.')}\\s*\\(`, 'g'))) parts.push(restOfBlock(text, call.index + call[0].length - 1));
+    for (const call of text.matchAll(new RegExp(`(^|[^\\w.])${send.replace('.', '\\.')}\\s*\\(`, 'g'))) parts.push(restOfSend(text, call.index + call[0].length - 1));
   }
   if (!successOnly) return follow(text, parts, true);
   // Stripped after following too: following a name can bring back a function whose failure path sets a message.
@@ -478,6 +495,12 @@ describe('success toast guard on fixtures', () => {
     expect(silentByHand(write(''))).toEqual(['2 setBusy(true)']);
     expect(silentByHand(write("\n    sayDone('Member saved');"))).toEqual([]);
     expect(silentByHand(write('').replace('  setBusy(true);', '  // toast-exempt: the welcome screen that opens says it\n  setBusy(true);'))).toEqual([]);
+  });
+
+  it('reads a send in a top-level callback to the end of its statement, not the rest of the component (#824)', () => {
+    const form = `const save = useMutation({ mutationFn: send });\nconst entry = useChecks(() => save.mutate());\nconst add = (p) => added(p.id, p.name);`;
+    expect(silent(form)).toEqual(['1 save']);
+    expect(silent(`const save = useMutation({ mutationFn: send });\nasync function go() {\n  await save.mutateAsync(x);\n  show('Saved', 'success');\n}`)).toEqual([]);
   });
 
   it('follows a local function and a callback prop of the same file', () => {
