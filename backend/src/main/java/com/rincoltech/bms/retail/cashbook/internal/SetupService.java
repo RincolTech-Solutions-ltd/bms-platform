@@ -131,7 +131,8 @@ class SetupService {
     record AddedItem(ExpenseItem item, boolean created) {}
 
     // ADR-118: whoever records expenses may add an item in place; an inactive category and the explanation flag stay
-    // with retail.expense.manage. With reuse_existing an active item of the same name is picked, a switched off one refused.
+    // with retail.expense.manage. With reuse_existing an active item of the same name is picked, a switched off one
+    // refused.
     // JUSTIFICATION-A3: the permission split and the reuse rule are the issue's two rules, inside the one create.
     @Transactional
     AddedItem createItem(UUID categoryId, ItemRequest r) {
@@ -141,16 +142,22 @@ class SetupService {
             throw ApiException.rule("category_inactive", "This category is switched off. Pick another one.");
         }
         if (!manager && Boolean.TRUE.equals(r.requiresExplanation())) {
-            throw new ApiException(HttpStatus.FORBIDDEN, "permission_denied", "Permission denied",
+            throw new ApiException(
+                    HttpStatus.FORBIDDEN,
+                    "permission_denied",
+                    "Permission denied",
                     "Asking for an explanation on an item needs permission to manage expenses.");
         }
         String name = r.name().trim();
-        var same = Boolean.TRUE.equals(r.reuseExisting()) ? repo.itemNamed(c.id(), name) : java.util.Optional.<ItemRow>empty();
+        var same = Boolean.TRUE.equals(r.reuseExisting())
+                ? repo.itemNamed(c.id(), name)
+                : java.util.Optional.<ItemRow>empty();
         if (same.isPresent() && same.get().active()) {
             return new AddedItem(view(same.get()), false);
         }
         if (same.isPresent()) {
-            throw duplicate("item_switched_off",
+            throw duplicate(
+                    "item_switched_off",
                     "This category has an item with that name that the owner switched off. Ask the owner to switch it on again.");
         }
         if (repo.itemNameTaken(c.id(), name, null)) {

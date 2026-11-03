@@ -268,7 +268,8 @@ class RetailCashbookExpensesIT extends IntegrationTest {
         assertThat(cb.post(items, Map.of("name", "Water", "requires_explanation", true), CASHBOOK_SALES)
                         .getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
-        int version = categoryVersion(cb.get("/expense-categories", CASHBOOK_SALES).getBody(), other);
+        int version =
+                categoryVersion(cb.get("/expense-categories", CASHBOOK_SALES).getBody(), other);
         cb.patch("/expense-categories/" + other, Map.of("active", false), CASHBOOK_ADMIN, version);
         assertThat(cb.post("/expense-categories/" + other + "/items", fuel, CASHBOOK_SALES)
                         .getStatusCode())

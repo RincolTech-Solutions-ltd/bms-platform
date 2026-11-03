@@ -139,10 +139,7 @@ class CashbookRepository {
     Optional<ItemRow> itemNamed(UUID categoryId, String name) {
         return jdbc.sql("""
                         SELECT id, category_id, name, requires_explanation, active, version FROM retail_expense_items
-                         WHERE category_id = ? AND lower(name) = lower(?)""")
-                .params(categoryId, name)
-                .query((rs, n) -> item(rs))
-                .optional();
+                         WHERE category_id = ? AND lower(name) = lower(?)""").params(categoryId, name).query((rs, n) -> item(rs)).optional();
     }
 
     boolean itemNameTaken(UUID categoryId, String name, UUID exceptId) {
