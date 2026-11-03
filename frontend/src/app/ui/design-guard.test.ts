@@ -458,7 +458,7 @@ describe('design guard, the cross-cutting fixes of the 70-screen audit', () => {
 
   // Item 6: the main action is brand filled and never looks off; on a phone it sticks full width at the bottom.
   it('keeps the main action of the forms of the audit in the sticky ActionBar, and never greys one whose fields are not ready', () => {
-    for (const screen of ['banking', 'expenses', 'savings', 'withdrawals', 'usage', 'transfer', 'catalogue-import', 'labels', 'sale']) {
+    for (const screen of ['banking', 'expenses', 'savings', 'withdrawals', 'usage', 'transfer', 'catalogue-import', 'labels', 'sale', 'restock', 'shop-setup']) {
       expect(code(`areas/staff/retail/${screen}.tsx`), screen).toMatch(/<ActionBar\b|<SaleBar\b/);
     }
     const phone = code('app/ui/kit.css').match(/@media \(max-width: 719px\) \{\s*\.action-bar \{([^}]*)\}/)?.[1] ?? '';
@@ -672,5 +672,83 @@ describe('design guard, no bare Price or Cost label on a retail screen (issue #6
 
   it.each([...files(join(SRC, 'areas/staff/retail'), /\.tsx$/), ...files(join(SRC, 'offline'), /\.tsx$/)].map((f) => relative(SRC, f)))('%s has no bare Price or Cost label', (file) => {
     expect(code(file).match(BARE_PRICE_LABEL)?.[0] ?? null).toBeNull();
+  });
+});
+
+// Issue #825: every button is a 48 by 48px target on a phone and as wide as its label on a laptop (buttons.css), which
+// layout/buttons.layout.test.ts measures on the daily screens. A class named as a button (.btn, .btn-*, *-btn, *-button) is
+// listed here once it has been checked against those sizes, so a new one fails until it is; and no rule of a listed class may
+// make its target smaller than --tap. JUSTIFICATION-A3: the issue asks for this design-guard rule.
+const BUTTON_CLASS = /\.((?:btn(?:-[a-z0-9]+)*)|(?:[a-z0-9-]+-(?:btn|button)))(?![\w-])/g;
+const BUTTON_CLASSES: Record<string, string> = {
+  btn: 'a link drawn as a button; the base rule of buttons.css',
+  'btn-block': 'full width on a phone, its label wide on a laptop',
+  'btn-brand': 'the primary fill in the tenant colour',
+  'btn-danger': 'destroys or refuses',
+  'btn-ghost': 'a quiet action, still a 48px target',
+  'btn-icon': 'sizes the icon inside, never the target',
+  'btn-lg': 'taller than --tap',
+  'btn-primary': 'the one main action',
+  'btn-sm': 'smaller text and padding, still 48 by 48px',
+  'busy-button': 'keeps its width while busy',
+  'help-tip-button': 'a 48px question mark',
+  'iv-drill-btn': 'an insights drill down, --tap tall',
+  'iv-tip-btn': 'an insights tip, 48 by 48px',
+  'iv-value-btn': 'an insights figure that opens its rows, --tap tall',
+  'menu-button': 'the phone menu, 48px wide',
+  'refresh-button': 'the staff bar Refresh, a plain button',
+  'sync-button': 'the staff bar sync indicator, 48 by 48px',
+  'top-menu-button': 'the staff bar account menu, 48px wide',
+};
+// A size written below the 48px target: a px value under 48, a rem or em under 3, or zero.
+const UNDER_TAP = /(?<![\w-])(?:min-)?(?:height|width)\s*:\s*(?:(?:[0-3]?\d|4[0-7])(?:\.\d+)?px|[0-2](?:\.\d+)?r?em|0)\s*(?:!important)?\s*(?:;|$)/;
+
+/** The button classes a stylesheet's selectors name. */
+const buttonClassesIn = (css: string) => new Set([...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{/g)].flatMap(([, sel]) => [...(sel as string).matchAll(BUTTON_CLASS)].map(([, c]) => c as string)));
+
+/** The rules of `css` whose selector ends on a listed button class (the target itself, not an icon inside it) and shrink it. */
+function shrinkingButtons(css: string): string[] {
+  return rulesOf(css).flatMap(({ selectors, body }) => {
+    const targets = selectors.filter((s) => {
+      const last = s.split(/\s+|>|\+|~/).filter(Boolean).pop() ?? '';
+      return [...last.matchAll(BUTTON_CLASS)].some(([, c]) => (c as string) in BUTTON_CLASSES) && !/::/.test(last);
+    });
+    return targets.length > 0 && body.split(';').some((decl) => UNDER_TAP.test(`${decl.trim()};`)) ? targets : [];
+  });
+}
+
+describe('design guard, every button class keeps the 48px target (issue #825)', () => {
+  it('finds a button class and a size under the target, and passes the target and an icon inside', () => {
+    expect([...buttonClassesIn('.btn-tiny:hover { color: red; } .save-btn, .x-button > svg { width: 20px; }')].sort()).toEqual(['btn-tiny', 'save-btn', 'x-button']);
+    expect(shrinkingButtons('.btn-sm { min-height: 36px; }')).toEqual(['.btn-sm']);
+    expect(shrinkingButtons('.btn-sm { height: 2rem; }')).toEqual(['.btn-sm']);
+    expect(shrinkingButtons('.bar .btn-ghost { min-width: 0; }')).toEqual(['.bar .btn-ghost']);
+    expect(shrinkingButtons('.btn-sm { min-height: var(--tap); padding: 6px 12px; }')).toEqual([]);
+    expect(shrinkingButtons('.btn-icon svg { width: 20px; height: 20px; }')).toEqual([]);
+    expect(shrinkingButtons('.btn-lg { min-height: 52px; }')).toEqual([]);
+  });
+
+  it('lists every button class a stylesheet names, with what it is', () => {
+    const named = new Set(allStylesheets.flatMap((f) => [...buttonClassesIn(readFileSync(f, 'utf8'))]));
+    const unlisted = [...named].filter((c) => !(c in BUTTON_CLASSES));
+    expect(unlisted, 'a new button class: check it is 48 by 48px on a phone and as wide as its label on a laptop, then list it').toEqual([]);
+    expect(Object.keys(BUTTON_CLASSES).filter((c) => !named.has(c)), 'a listed class no stylesheet names any more').toEqual([]);
+  });
+
+  it.each(allStylesheets.map((f) => relative(SRC, f)))('%s never makes a button smaller than the target', (file) => {
+    expect(shrinkingButtons(code(file))).toEqual([]);
+  });
+
+  it('keeps the sizes on the tokens: 48px, 8px apart, at most --button-max wide from 1024px', () => {
+    const theme = code('app/theme.css');
+    expect(theme).toMatch(/--tap:\s*48px/);
+    expect(theme).toMatch(/--tap-gap:\s*var\(--space-2\)/);
+    expect(theme).toMatch(/--button-max:\s*[\d.]+rem/);
+    const base = rulesOf(code('app/ui/buttons.css')).find(({ selectors }) => selectors.includes('button') && selectors.includes('.btn'));
+    expect(base?.body).toMatch(/min-width:\s*var\(--tap\)/);
+    expect(base?.body).toMatch(/min-height:\s*var\(--tap\)/);
+    for (const file of ['app/ui/buttons.css', 'app/ui/forms.css', 'app/ui/retail.css']) {
+      expect(code(file), file).toMatch(/@media \(min-width: 1024px\)[\s\S]*?max-width:\s*min\(100%,\s*var\(--button-max\)\)/);
+    }
   });
 });

@@ -830,8 +830,10 @@ p:has(> .link-row:only-child) {
   display: flex;
   align-items: flex-start;
   gap: var(--space-1);
-  /* The info button's 48px target hangs over the line by --space-3, so the next control still stands --tap-gap clear (issue #825). */
-  margin: 0 0 calc(var(--space-3) + var(--tap-gap));
+  margin: 0 0 var(--space-3);
+  /* The info button's 48px target hangs --space-3 below the line, so with any margin of at least --space-3 under it the next
+     control still stands --tap-gap clear (issue #825). */
+  padding-bottom: var(--tap-gap);
   /* A grid or flex item: without this the one uncut line would widen its column, and the page with it (issue #343). */
   min-width: 0;
 }
