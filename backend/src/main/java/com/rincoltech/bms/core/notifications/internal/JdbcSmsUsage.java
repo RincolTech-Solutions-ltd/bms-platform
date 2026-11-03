@@ -6,6 +6,7 @@ import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.List;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
@@ -21,7 +22,11 @@ class JdbcSmsUsage implements SmsUsage {
     private final JdbcClient jdbc;
     private final SmsTenantConfig config;
 
-    JdbcSmsUsage(JdbcClient jdbc, SmsTenantConfig config) {
+    /**
+     * The tenant config is lazy: the settings service lists every report definition while it is being made, and this port
+     * sits under one ({@code core.sms_usage}), so a direct reference would be a cycle.
+     */
+    JdbcSmsUsage(JdbcClient jdbc, @Lazy SmsTenantConfig config) {
         this.jdbc = jdbc;
         this.config = config;
     }

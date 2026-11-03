@@ -125,7 +125,10 @@ class SmsDeliveryReportController {
             reports.count("store_failed");
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
-        reports.count(report.status().equals("sent") && outcome.equals("not_forward") ? "interim" : outcome);
+        // An interim report of a known message never moves it, whatever its row says: counted as what it is.
+        boolean interim =
+                report.status().equals("sent") && (outcome.equals("not_forward") || outcome.equals("repeated"));
+        reports.count(interim ? "interim" : outcome);
         log.debug("SMS delivery report {}: {}", report.status(), outcome);
         return ResponseEntity.ok().build();
     }
