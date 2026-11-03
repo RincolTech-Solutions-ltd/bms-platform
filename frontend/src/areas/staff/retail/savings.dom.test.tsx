@@ -314,6 +314,10 @@ describe('the savings screen for sales staff', () => {
     expect(panel.textContent).toContain('Amount saved: UGX 3,000');
     // The totals are read again (the toast is in save-toasts.dom.test.tsx).
     await waitFor(() => expect(records.textContent).toContain('Saved in all shops UGX 6,500'));
+    // The new record is in its group right after the save: the seller's line, the month and the shop carry it.
+    expect(savingsGroups).toHaveBeenCalledTimes(2);
+    expect(records.textContent).toMatch(/Test Seller 01\s*UGX 4,000/);
+    expect(within(records).getByRole('heading', { name: new RegExp(`${monthLabel(today)}\\s*UGX 4,000`) })).toBeTruthy();
   });
 
   // JUSTIFICATION-A3: the review of PR #800 (item 7) checks the request through the real client; issue #827 moves it to /groups.
