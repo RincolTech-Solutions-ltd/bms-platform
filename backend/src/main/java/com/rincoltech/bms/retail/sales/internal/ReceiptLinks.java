@@ -65,9 +65,6 @@ class ReceiptLinks implements ShortLinkTarget {
             </html>
             """;
 
-    /** A live link is given again while it has at least this long left; after that a sale gets a new one. */
-    static final Duration REUSE_WHILE = Duration.ofDays(30);
-
     private static final String ALPHABET = "abcdefghijklmnopqrstuvwxyz234567";
     private static final Pattern TOKEN = Pattern.compile("[a-z2-7]{26}");
 
@@ -154,10 +151,11 @@ class ReceiptLinks implements ShortLinkTarget {
     }
 
     /**
-     * The sale's link, in the caller's write transaction with the business bound: its live link while that has more than
-     * {@link #REUSE_WHILE} left, otherwise a new one ({@code created}). One sale therefore has one link to share however
-     * often, from however many phones, it is sent (second review of #762, item 1). The sale's lock makes two taps at once
-     * share it too. A link made under a data key since rotated cannot be given again and a new one is made.
+     * The sale's link, in the caller's write transaction with the business bound: its live link until that expires,
+     * otherwise a new one ({@code created}). One sale therefore has one live link however often, from however many
+     * phones, it is shared (second review of #762, item 1). The sale's lock makes two taps at once share it too; the
+     * lock stands in for a unique index, which cannot say "live" since its predicate may not read the clock. A link made
+     * under a data key since rotated cannot be given again and a new one is made.
      */
     Minted mint(UUID saleId, UUID by) {
         jdbc.sql("SELECT 1 FROM (SELECT pg_advisory_xact_lock(hashtext('bms.receipt-link:' || ?))) AS l")
@@ -169,7 +167,7 @@ class ReceiptLinks implements ShortLinkTarget {
                         SELECT id, token_hash, expires_at FROM retail_receipt_links
                          WHERE sale_id = ? AND expires_at > ? ORDER BY expires_at DESC LIMIT 1
                         """)
-                .params(saleId, Timestamp.from(now.plus(REUSE_WHILE)))
+                .params(saleId, Timestamp.from(now))
                 .query((rs, n) -> {
                     String token = token(rs.getObject("id", UUID.class));
                     return hash(token).equals(rs.getString("token_hash"))

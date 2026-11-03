@@ -194,25 +194,31 @@ class ReceiptLinkIT extends IntegrationTest {
         assertThat(row.get("created_by")).isEqualTo(seller.userId());
         assertThat(String.valueOf(row.get("token_hash"))).hasSize(64).isNotEqualTo(token);
 
-        // JUSTIFICATION-A3: second review of #762, item 1: one link per sale, given again, renewed near its end.
-        // A second share, and another person's, give the same link and write no row; once it has less than 30 days
-        // left,
-        // the next share makes a new one for 90 days.
+        // JUSTIFICATION-A3: second review of #762, item 1: one live link per sale, given again until it expires.
+        // A second call, a second device (another person), and a call after 6 minutes give the same link and write no row.
         assertThat(token(makeLink(seller, sale, SALES))).isEqualTo(token);
         assertThat(token(makeLink(other, sale, SaleReceiptPdfIT.SUPERVISOR))).isEqualTo(token);
+        shift(sale, "6 minutes");
+        assertThat(token(makeLink(seller, sale, SALES))).isEqualTo(token);
         assertThat(links(sale)).isEqualTo(1);
-        TestDatabase.owner()
-                .sql("UPDATE retail_receipt_links SET created_at = created_at - interval '61 days',"
-                        + " expires_at = expires_at - interval '61 days' WHERE sale_id = ?")
-                .param(sale)
-                .update();
+        // Even with minutes left it is the sale's one link; once expired, the next share makes a new one for 90 days.
+        shift(sale, "89 days 23 hours 50 minutes");
+        assertThat(token(makeLink(seller, sale, SALES))).isEqualTo(token);
+        shift(sale, "1 day");
         String renewed = token(makeLink(seller, sale, SALES));
         assertThat(renewed).isNotEqualTo(token);
         assertThat(links(sale)).isEqualTo(2);
-        assertThat(token(makeLink(seller, sale, SALES))).isEqualTo(renewed);
-        assertThat(open(t, token).getStatusCode())
-                .as("the older link still opens until it expires")
-                .isEqualTo(HttpStatus.OK);
+        assertThat(token(makeLink(other, sale, SaleReceiptPdfIT.SUPERVISOR))).isEqualTo(renewed);
+        gonePage(open(t, token));
+    }
+
+    /** Moves the sale's links back in time, as if made that long ago. */
+    static void shift(UUID sale, String ago) {
+        TestDatabase.owner()
+                .sql("UPDATE retail_receipt_links SET created_at = created_at - ?::interval,"
+                        + " expires_at = expires_at - ?::interval WHERE sale_id = ?")
+                .params(ago, ago, sale)
+                .update();
     }
 
     static long links(UUID sale) {
