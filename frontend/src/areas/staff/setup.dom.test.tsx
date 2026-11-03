@@ -367,3 +367,41 @@ describe('the salespeople savings setting', () => {
     expect(screen.queryByLabelText('Salespeople can see and change the savings amount')).toBeNull();
   });
 });
+
+// JUSTIFICATION-A3: the DOM test the #783 follow-up asks for (a section link with a cold settings cache).
+describe('a link to a section of Set-up (issue #783)', () => {
+  it('scrolls to the Reports section and puts the cursor on its switch once the settings have loaded', async () => {
+    const scrolled: string[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this.id);
+    } as never;
+    window.location.hash = '#reports';
+    try {
+      // A cold cache: the page waits for the settings, and the section is not there yet.
+      show({ modules: ['retail'] });
+      expect(screen.getByText('Loading')).toBeTruthy();
+      expect(document.getElementById('reports')).toBeNull();
+      const box = await screen.findByLabelText(/Let staff run reports/);
+      await waitFor(() => expect(document.activeElement).toBe(box));
+      expect(scrolled).toEqual(['reports']);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+      window.location.hash = '';
+    }
+  });
+
+  it('stays at the top with no section in the address', async () => {
+    const scrollIntoView = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrollIntoView as never;
+    try {
+      show({ modules: ['retail'] });
+      await screen.findByLabelText(/Let staff run reports/);
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(document.body);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+});
