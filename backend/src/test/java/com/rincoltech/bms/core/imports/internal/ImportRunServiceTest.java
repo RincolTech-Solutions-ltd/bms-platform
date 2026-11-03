@@ -1,12 +1,28 @@
 package com.rincoltech.bms.core.imports.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Proxy;
+import java.net.SocketTimeoutException;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
-/** The audit of a failed batch never replaces the batch's own error (review of #736, issue #779). */
+/**
+ * The audit of a failed batch never replaces the batch's own error (review of #736, issue #779), and the claim probe is
+ * bounded by the connection's network timeout, which it puts back (issue #792).
+ */
 class ImportRunServiceTest {
+
+    private static final String KEY = "core.imports.loop:fabricated";
 
     @Test
     void aFailingAuditIsAddedAsSuppressedAndTheBatchErrorIsTheOneThrown() {
@@ -31,5 +47,91 @@ class ImportRunServiceTest {
         assertThat(audited).isTrue();
         assertThat(thrown).isSameAs(batch);
         assertThat(thrown.getSuppressed()).isEmpty();
+    }
+
+    @Test
+    void aProbeWhoseReadStallsCountsTheClaimLostWithinItsNetworkTimeout() {
+        // JUSTIFICATION-A3: the stalled read test issue #792 asks for; without the network timeout the read never ends.
+        FakeClaimConnection claim = new FakeClaimConnection(true, 0);
+
+        String reason = assertTimeoutPreemptively(
+                Duration.ofSeconds(5), () -> ImportRunService.probeClaim(claim.connection(), KEY, 200));
+
+        assertThat(reason).isEqualTo("claim_connection_lost");
+        assertThat(claim.timeouts)
+                .as("the bound was set; the closed connection has nothing to restore")
+                .containsExactly(200);
+    }
+
+    @Test
+    void aProbeThatAnswersPutsThePreviousNetworkTimeoutBack() {
+        FakeClaimConnection claim = new FakeClaimConnection(false, 30_000);
+
+        String reason = ImportRunService.probeClaim(claim.connection(), KEY, 200);
+
+        assertThat(reason).as("the claim is still held").isNull();
+        assertThat(claim.timeouts).containsExactly(200, 30_000);
+    }
+
+    /**
+     * A claim connection over a fabricated socket. A stalled read blocks until the network timeout, then ends the
+     * connection, as pgjdbc does on a socket read timeout; with no network timeout it blocks past the test's deadline.
+     */
+    private static final class FakeClaimConnection {
+
+        final List<Integer> timeouts = new CopyOnWriteArrayList<>();
+        private final boolean stalled;
+        private volatile int networkTimeout;
+        private volatile boolean closed;
+
+        FakeClaimConnection(boolean stalled, int networkTimeout) {
+            this.stalled = stalled;
+            this.networkTimeout = networkTimeout;
+        }
+
+        Connection connection() {
+            return proxy(Connection.class, (p, method, args) -> {
+                if (closed) {
+                    throw new SQLException("fabricated connection closed", "08003");
+                }
+                return switch (method.getName()) {
+                    case "getNetworkTimeout" -> networkTimeout;
+                    case "setNetworkTimeout" -> {
+                        networkTimeout = (Integer) args[1];
+                        timeouts.add(networkTimeout);
+                        yield null;
+                    }
+                    case "prepareStatement" -> statement();
+                    default -> throw new UnsupportedOperationException(method.getName());
+                };
+            });
+        }
+
+        private PreparedStatement statement() {
+            return proxy(PreparedStatement.class, (p, method, args) -> switch (method.getName()) {
+                case "setString", "close" -> null;
+                case "executeQuery" -> read();
+                default -> throw new UnsupportedOperationException(method.getName());
+            });
+        }
+
+        private ResultSet read() throws InterruptedException, SQLException {
+            if (stalled) {
+                Thread.sleep(networkTimeout == 0 ? 60_000 : networkTimeout);
+                closed = true;
+                throw new SQLException(
+                        "fabricated read timed out", "08006", new SocketTimeoutException("Read timed out"));
+            }
+            return proxy(ResultSet.class, (p, method, args) -> switch (method.getName()) {
+                case "next", "getBoolean" -> true;
+                case "close" -> null;
+                default -> throw new UnsupportedOperationException(method.getName());
+            });
+        }
+
+        private static <T> T proxy(Class<T> type, InvocationHandler handler) {
+            return type.cast(
+                    Proxy.newProxyInstance(FakeClaimConnection.class.getClassLoader(), new Class<?>[] {type}, handler));
+        }
     }
 }
