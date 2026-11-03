@@ -921,8 +921,11 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
                 .query(UUID.class)
                 .single();
         TestDatabase.owner()
-                .sql("UPDATE notification_outbox SET status = ?, last_error = ? WHERE id = ?")
-                .params(outboxStatus, lastError, row)
+                // With the time the sender records, as the operator's outbox page reads it for every failed row.
+                .sql("UPDATE notification_outbox SET status = ?, last_error = ?,"
+                        + " failed_at = CASE WHEN ? = 'failed' THEN now() END,"
+                        + " sent_at = CASE WHEN ? = 'sent' THEN now() END WHERE id = ?")
+                .params(outboxStatus, lastError, outboxStatus, outboxStatus, row)
                 .update();
         if (delivery != null) {
             TestDatabase.owner()
