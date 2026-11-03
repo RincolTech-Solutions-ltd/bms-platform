@@ -199,6 +199,11 @@
   list-style: none;
 }
 
+/* A list outside a card or sheet ends 8px above whatever follows, so a button under its last row stands clear of it (#825). */
+.row-list:not(.ui-card > .row-list, .sheet-body > .row-list) {
+  margin-bottom: var(--tap-gap);
+}
+
 .row-list > li + li {
   border-top: 1px solid var(--color-border);
 }
@@ -349,17 +354,23 @@ button.list-row:focus-visible {
   margin: 0 calc(var(--space-5) * -1);
 }
 
-/* From 720px the sheet is a dialog: its buttons are as wide as their labels (issue #825), the primary one (first) at the right. */
 .sheet-actions {
   display: flex;
-  flex-direction: row-reverse;
   flex-wrap: wrap;
   gap: var(--space-3);
   padding: 0 var(--space-5) var(--space-5);
 }
 
-.sheet-actions > * {
-  max-width: min(100%, var(--button-max));
+/* A laptop (issue #825): the dialog's buttons are as wide as their labels and stand together at its right, in the order of the
+   page (the primary first), so what is seen matches the Tab order. */
+@media (min-width: 1024px) {
+  .sheet-actions {
+    justify-content: flex-end;
+  }
+
+  .sheet-actions > * {
+    max-width: min(100%, var(--button-max));
+  }
 }
 
 @media (max-width: 719px) {
@@ -411,7 +422,6 @@ button.list-row:focus-visible {
 
   .sheet-actions > * {
     width: 100%;
-    max-width: none;
   }
 }
 
@@ -712,19 +722,32 @@ button.list-row:focus-visible {
   }
 }
 
-/* A laptop (issue #825): the bar is a row at the right of the form, the main action (first in the bar) at the far right and any
-   other button to its left, each as wide as its label (buttons.css). */
+/* A laptop (issue #825): the bar is a row at the right of the form, each button as wide as its label (buttons.css), in the order
+   of the page (the main action first), so what is seen matches the Tab order. */
 @media (min-width: 1024px) {
   .action-bar {
     display: flex;
-    flex-direction: row-reverse;
     flex-wrap: wrap;
+    justify-content: flex-end;
     align-items: center;
     gap: var(--space-3);
   }
 
-  .action-bar > * {
+  /* The second selector outweighs retail.css's secondary action under the main one, which would push it apart from the main one. */
+  .action-bar > *,
+  .action-bar > .rt-primary ~ button:not(.rt-primary) {
     margin: 0;
+  }
+
+  /* A BusyButton's status line: its own line under the buttons when it has words, out of the row while empty, so it takes no
+     gap; it stays in the page either way, so the live region is there when the words come. */
+  .action-bar > .busy-nudge {
+    flex-basis: 100%;
+    text-align: end;
+  }
+
+  .action-bar > .busy-nudge-empty {
+    position: absolute;
   }
 }
 

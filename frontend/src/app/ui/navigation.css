@@ -30,17 +30,23 @@
   min-height: 56px;
 }
 
-/* Below 430px the bar's controls sit closer, so the branch name keeps its room (issue #605); each is still a 48px target. With
-   Refresh in the bar again (issue #631) they touch: an icon in a 48px target already has its own space around it, and Ask and
-   the sync indicator are exactly 48px wide. */
+/* Below 430px the bar's controls sit closer, so the branch name keeps its room (issue #605); each is still a 48px target, Ask
+   and the sync indicator exactly 48px wide. From 412px two targets stand --tap-gap apart (issue #825); below 412px they
+   touch (issue #631), because 8px gaps there would cut the business and branch names under the minimum of #605. */
 @media (max-width: 429px) {
   .staff-bar-top {
-    gap: 0;
+    gap: var(--tap-gap);
   }
 
   .staff-bar-top .ask-open,
   .staff-bar-top .sync-button {
     padding-inline: 0;
+  }
+}
+
+@media (max-width: 411px) {
+  .staff-bar-top {
+    gap: 0;
   }
 }
 
