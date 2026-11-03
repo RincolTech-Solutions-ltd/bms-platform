@@ -210,7 +210,9 @@ class ReceiptLinkIT extends IntegrationTest {
         String renewed = token(makeLink(seller, sale, SALES));
         assertThat(renewed).isNotEqualTo(token);
         assertThat(links(sale)).isEqualTo(2);
-        assertThat(current(sale)).as("the expired link is revoked as the new one is made").isEqualTo(1);
+        assertThat(current(sale))
+                .as("the expired link is revoked as the new one is made")
+                .isEqualTo(1);
         assertThat(token(makeLink(other, sale, SaleReceiptPdfIT.SUPERVISOR))).isEqualTo(renewed);
         gonePage(open(t, token));
         // A sealed token no configured data key opens (a retired key) is replaced too, never a second current link.
@@ -225,9 +227,10 @@ class ReceiptLinkIT extends IntegrationTest {
         gonePage(open(t, renewed));
         // The database refuses a second current link however it is written.
         assertThatThrownBy(() -> TestDatabase.owner()
-                        .sql("INSERT INTO retail_receipt_links (id, tenant_id, sale_id, token_hash, token_sealed, created_by,"
-                                + " created_at, expires_at) VALUES (?, ?, ?, ?, decode('00', 'hex'), ?, now(),"
-                                + " now() + interval '1 day')")
+                        .sql(
+                                "INSERT INTO retail_receipt_links (id, tenant_id, sale_id, token_hash, token_sealed, created_by,"
+                                        + " created_at, expires_at) VALUES (?, ?, ?, ?, decode('00', 'hex'), ?, now(),"
+                                        + " now() + interval '1 day')")
                         .params(UUID.randomUUID(), t.tenantId(), sale, "f".repeat(64), seller.userId())
                         .update())
                 .hasMessageContaining("retail_receipt_links_one_current");
