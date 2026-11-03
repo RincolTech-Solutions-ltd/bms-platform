@@ -29,6 +29,9 @@ interface SavingsDraft { date: string; amount: string; reason: string; other: st
 
 const EMPTY = { amount: '', reason: '', other: '' };
 
+/** The last part of a query key read through the sales staff routes (issue #799). */
+export const SALES_STAFF_KEY = 'sales-staff';
+
 /**
  * Put a new record at the top of the savings lists already loaded that would show it: their key is
  * ['retail', 'savings', scope, from, to] (SavingsRecords), the scope lists branch ids or is empty for all, and the
@@ -36,9 +39,10 @@ const EMPTY = { amount: '', reason: '', other: '' };
  */
 export function showInRecords(client: QueryClient, saved: Savings) {
   const day = saved.business_date ?? '';
-  // Only the records list itself: exactly five parts, the branch ids (undefined for all) and a from and to date.
+  // Only the records list itself: five parts, the branch ids (undefined for all) and a from and to date, and a sixth that marks
+  // the sales staff route (issue #799).
   const holds = (key: readonly unknown[]): boolean => {
-    if (key.length !== 5) return false;
+    if (key.length !== 5 && !(key.length === 6 && key[5] === SALES_STAFF_KEY)) return false;
     const [, , scope, from, to] = key;
     if ((scope !== undefined && !Array.isArray(scope)) || typeof from !== 'string' || typeof to !== 'string') return false;
     const inScope = scope === undefined || scope.length === 0 || scope.includes(saved.branch_id);
@@ -59,7 +63,8 @@ export function SavingsForm({ branchId, onSaved }: { branchId: string; onSaved?:
   const [reasonOpen, setReasonOpen] = useState(false);
   // Issue #799: a seller without the till goes through the sales staff routes while the owner's switch is on.
   const salesStaff = savesAsSalesStaff(me);
-  const suggestionKey = ['retail', 'savings-suggestion', branchId, draft.date];
+  // The sales staff route has its own cache entry, so a till answer (or a 403) cached under one is never served for the other.
+  const suggestionKey = ['retail', 'savings-suggestion', branchId, draft.date, ...(salesStaff ? [SALES_STAFF_KEY] : [])];
   const suggestion = useQuery({ queryKey: suggestionKey, queryFn: () => retail.savingsSuggestion({ branchId, date: draft.date, salesStaff }) });
   const s = suggestion.data;
   const profitView = seesAmounts(s);
@@ -188,7 +193,7 @@ export function SavingsRecords({ onVoided, salesStaff = false }: { onVoided?: (m
   const from = salesStaff ? `${today.slice(0, 8)}01` : window.from;
   const to = salesStaff ? today : window.to;
   const rows = useQuery({
-    queryKey: ['retail', 'savings', scope, from, to],
+    queryKey: ['retail', 'savings', scope, from, to, ...(salesStaff ? [SALES_STAFF_KEY] : [])],
     queryFn: () => retail.listSavings({ branchIds: scope, from, to, includeVoided: true, salesStaff }),
   });
   return (

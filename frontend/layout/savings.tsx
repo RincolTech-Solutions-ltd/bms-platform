@@ -5,7 +5,7 @@ import type { Me } from '../src/api/client';
 import { businessToday, type Savings, type SavingsSuggestion } from '../src/api/retail';
 import { mockMe } from '../src/api/retail-mock';
 import { StaffContext } from '../src/areas/staff/context';
-import { SavingsForm, SavingsRecords } from '../src/areas/staff/retail/savings';
+import { SALES_STAFF_KEY, SavingsForm, SavingsRecords } from '../src/areas/staff/retail/savings';
 import '../src/app/theme.css';
 import '../src/app/ui/index.css';
 import { layoutRouter } from './router';
@@ -25,13 +25,13 @@ const suggestion: SavingsSuggestion = {
   branch_id: branch, business_date: date, total_sold_minor: 1250000, suggestion_token: 'tok-1', suggested_minor: 240000,
 };
 const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
-client.setQueryData(['retail', 'savings-suggestion', branch, date], suggestion);
+client.setQueryData(['retail', 'savings-suggestion', branch, date, ...(sales ? [SALES_STAFF_KEY] : [])], suggestion);
 const monthStart = `${date.slice(0, 8)}01`;
 const records: Savings[] = [
   { id: 'sv-2', branch_id: branch, business_date: date, currency: 'UGX', amount_minor: 200000, overwritten: true, total_sold_minor: 1250000, by_name: 'Test Seller 01', at: new Date().toISOString(), voided: false, historical: false },
   { id: 'sv-1', branch_id: branch, business_date: monthStart, currency: 'UGX', amount_minor: 1150000, overwritten: false, total_sold_minor: 4800000, by_name: 'Test Till 01', at: new Date().toISOString(), voided: false, historical: false },
 ];
-client.setQueryData(['retail', 'savings', [branch], monthStart, date], records);
+client.setQueryData(['retail', 'savings', [branch], monthStart, date, SALES_STAFF_KEY], records);
 
 createRoot(document.getElementById('root') as HTMLElement).render(
   <RouterContextProvider router={layoutRouter('/staff/retail/savings')}>

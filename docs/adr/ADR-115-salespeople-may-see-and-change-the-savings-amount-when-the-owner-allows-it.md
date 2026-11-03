@@ -41,8 +41,8 @@ want the person closing the till to set the savings aside by hand and to check t
    it. A savings record shows `amount_minor` and `overwritten` to a caller without `retail.profit.read` only when it was made
    after that moment, while the setting is still on, and the caller holds `retail.savings.record` for its branch: in the create
    response, the void response, the Savings records rows and the suggestion's `existing_amount_minor`. Records made before, and a
-   reader holding `retail.cashbook.read` alone, keep the amounts hidden. Turned off and on again, only records made from the new
-   moment show. **Changed by issue #799:** besides those, while the setting is on, every record dated in the current business
+   reader holding `retail.cashbook.read` alone, keep the amounts hidden. Turned off and on again, of the records of earlier
+   months only those made from the new moment show. **Changed by issue #799:** besides those, while the setting is on, every record dated in the current business
    month shows its amount and `overwritten`, whenever it was made, to a caller who holds `retail.savings.record` or
    `retail.sale.create` for its branch (the owner asked for the whole month). A record of an earlier month made before the
    moment, and a reader holding `retail.cashbook.read` alone, still keep the amounts hidden.

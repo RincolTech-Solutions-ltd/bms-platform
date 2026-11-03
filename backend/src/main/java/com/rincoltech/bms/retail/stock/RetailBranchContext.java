@@ -156,6 +156,31 @@ public class RetailBranchContext {
      * unknown id is outside every scope but one over all branches, so a scoped caller cannot tell it from another's branch; a
      * closed branch inside the scope stays the 422 field problem {@code unknown_branch}.
      */
+    // JUSTIFICATION-A3: review of ddb697f, must-fix 1: a list naming a branch outside the scope answers as resolve
+    // does.
+    /**
+     * For a list that names branches (issue #799): each named branch must be inside the permission's scope, refused as
+     * {@link #resolve} refuses one, 404 {@code unknown_branch}, so a list answers a branch outside the scope as a single read
+     * does. Closed branches are not refused here: a list may still read their records.
+     */
+    public void requireInScope(String permission, List<UUID> named, String field) {
+        Principal principal = CurrentPrincipal.require();
+        for (UUID branch : named == null ? List.<UUID>of() : named) {
+            if (!principal.may(permission, branch)) {
+                throw outsideScope(field);
+            }
+        }
+    }
+
+    private static ApiException outsideScope(String field) {
+        return new ApiException(
+                HttpStatus.NOT_FOUND,
+                "unknown_branch",
+                "Branch not found",
+                "That branch is not one you work in. Choose another branch.",
+                List.of(new FieldProblem(field, "unknown_branch", "That branch is not one you work in.")));
+    }
+
     public UUID resolve(String permission, UUID requested, String field) {
         BranchScope scope = CurrentPrincipal.require()
                 .scopeOf(permission)
@@ -173,12 +198,7 @@ public class RetailBranchContext {
             branch = scope.branchIds().iterator().next();
         }
         if (!scope.covers(branch)) {
-            throw new ApiException(
-                    HttpStatus.NOT_FOUND,
-                    "unknown_branch",
-                    "Branch not found",
-                    "That branch is not one you work in. Choose another branch.",
-                    List.of(new FieldProblem(field, "unknown_branch", "That branch is not one you work in.")));
+            throw outsideScope(field);
         }
         if (active(branch).isEmpty()) {
             throw ApiException.validation(List.of(new FieldProblem(field, "unknown_branch", CLOSED)));

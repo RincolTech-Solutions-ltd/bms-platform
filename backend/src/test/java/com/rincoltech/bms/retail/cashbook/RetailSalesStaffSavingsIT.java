@@ -327,8 +327,13 @@ class RetailSalesStaffSavingsIT extends IntegrationTest {
         assertThat(list.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(list.getBody().get("items")).isEmpty();
         ResponseEntity<JsonNode> named = api.get(SALES_STAFF + "?branch_id=" + second, hqSeller);
-        assertThat(named.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(named.getBody().get("items")).isEmpty();
+        assertThat(named.getStatusCode()).as("%s", named.getBody()).isEqualTo(HttpStatus.NOT_FOUND);
+        for (ResponseEntity<JsonNode> r : java.util.List.of(elsewhere, savedElsewhere, named)) {
+            assertThat(r.getBody().get("code").asString()).isEqualTo("unknown_branch");
+        }
+        assertThat(named.toString()).doesNotContain("amount_minor");
+        assertThat(api.get(SALES_STAFF + "?branch_id=" + hq, hqSeller).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
     }
 
     // JUSTIFICATION-A3: review of 0669c82, must-fix 1 and nice-to-haves 4 and 5, one test each.
@@ -381,7 +386,7 @@ class RetailSalesStaffSavingsIT extends IntegrationTest {
             }
             go.countDown();
             for (var call : calls) {
-                ResponseEntity<JsonNode> r = call.get();
+                ResponseEntity<JsonNode> r = call.get(60, java.util.concurrent.TimeUnit.SECONDS);
                 statuses.add(HttpStatus.valueOf(r.getStatusCode().value()));
                 if (r.getStatusCode() == HttpStatus.CONFLICT) {
                     assertThat(r.getBody().get("code").asString()).isEqualTo("savings_exists");
