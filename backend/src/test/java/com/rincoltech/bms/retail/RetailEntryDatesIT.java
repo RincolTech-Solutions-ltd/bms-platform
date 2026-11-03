@@ -73,8 +73,15 @@ class RetailEntryDatesIT extends IntegrationTest {
                 HttpMethod.POST,
                 new HttpEntity<>(
                         body,
-                        cb.api.headers(permissions, "*", Map.of("Idempotency-Key", UUID.randomUUID().toString()))),
+                        cb.api.headers(
+                                permissions,
+                                "*",
+                                Map.of("Idempotency-Key", UUID.randomUUID().toString()))),
                 JsonNode.class);
+    }
+
+    static LocalDate today() {
+        return LocalDate.now(com.rincoltech.bms.kernel.BusinessClock.DEFAULT_ZONE);
     }
 
     static Map<String, Object> with(Map<String, Object> body, String field, Object value) {
@@ -99,24 +106,28 @@ class RetailEntryDatesIT extends IntegrationTest {
         ResponseEntity<JsonNode> refused = send(path, with(bodyFor.apply(earlier), dateField, earlier), notOwner);
         assertThat(refused.getStatusCode()).as(path).isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(refused.getBody().get("code").asString()).isEqualTo("date_not_today");
-        assertThat(refused.getBody().get("errors").get(0).get("field").asString()).isEqualTo(dateField);
+        assertThat(refused.getBody().get("errors").get(0).get("field").asString())
+                .isEqualTo(dateField);
         // A reason does not stand in for the permission.
         Map<String, Object> withReason = with(with(bodyFor.apply(earlier), dateField, earlier), "date_reason", REASON);
         assertThat(send(path, withReason, notOwner).getStatusCode()).as(path).isEqualTo(HttpStatus.FORBIDDEN);
 
-        ResponseEntity<JsonNode> today = send(path, bodyFor.apply(LocalDate.now(com.rincoltech.bms.kernel.BusinessClock.DEFAULT_ZONE)), notOwner);
+        ResponseEntity<JsonNode> today = send(path, bodyFor.apply(today()), notOwner);
         assertThat(today.getStatusCode()).as(path + " " + today.getBody()).isEqualTo(HttpStatus.CREATED);
 
         ResponseEntity<JsonNode> noReason = send(path, with(bodyFor.apply(earlier), dateField, earlier), ALL);
         assertThat(noReason.getStatusCode()).as(path).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(noReason.getBody().get("errors").get(0).get("field").asString()).isEqualTo("date_reason");
+        assertThat(noReason.getBody().get("errors").get(0).get("field").asString())
+                .isEqualTo("date_reason");
 
         ResponseEntity<JsonNode> backdated = send(path, withReason, ALL);
-        assertThat(backdated.getStatusCode()).as(path + " " + backdated.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(backdated.getStatusCode())
+                .as(path + " " + backdated.getBody())
+                .isEqualTo(HttpStatus.CREATED);
         assertThat(backdated.getBody().get(dateField).asString()).isEqualTo(earlier.toString());
         List<String> audits = cb.auditPayloads("retail.entry.backdated");
         assertThat(audits).hasSize(auditsBefore + 1);
-        String enteredOn = LocalDate.now(com.rincoltech.bms.kernel.BusinessClock.DEFAULT_ZONE).toString();
+        String enteredOn = today().toString();
         assertThat(audits)
                 .anyMatch(a -> a.contains(REASON)
                         && a.contains("\"date\": \"" + earlier + "\"")
@@ -137,8 +148,8 @@ class RetailEntryDatesIT extends IntegrationTest {
                 "/expenses",
                 "business_date",
                 "retail.expense",
-                d -> new LinkedHashMap<>(Map.of(
-                        "branch_id", hq, "category_id", rent, "item_id", rentItem, "amount_minor", 4_000)),
+                d -> new LinkedHashMap<>(
+                        Map.of("branch_id", hq, "category_id", rent, "item_id", rentItem, "amount_minor", 4_000)),
                 CASHIER);
     }
 
@@ -146,13 +157,12 @@ class RetailEntryDatesIT extends IntegrationTest {
     void anExpenseWithNoDateIsDatedTodayByTheServer() {
         ResponseEntity<JsonNode> r = send(
                 "/expenses",
-                new LinkedHashMap<>(Map.of(
-                        "branch_id", hq, "category_id", rent, "item_id", rentItem, "amount_minor", 4_000)),
+                new LinkedHashMap<>(
+                        Map.of("branch_id", hq, "category_id", rent, "item_id", rentItem, "amount_minor", 4_000)),
                 CASHIER);
 
         assertThat(r.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(r.getBody().get("business_date").asString())
-                .isEqualTo(LocalDate.now(com.rincoltech.bms.kernel.BusinessClock.DEFAULT_ZONE).toString());
+        assertThat(r.getBody().get("business_date").asString()).isEqualTo(today().toString());
         assertThat(cb.auditPayloads("retail.entry.backdated")).isEmpty();
     }
 
@@ -160,7 +170,7 @@ class RetailEntryDatesIT extends IntegrationTest {
     void savingsAreDatedTodayUnlessTheOwnerGivesAReason() {
         LocalDate earlier = daysAgo(2);
         assertThat(cb.sale(hq, "cash", product, "10", earlier).getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(cb.sale(hq, "cash", product, "10", daysAgo(0)).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(cb.sale(hq, "cash", product, "10", today()).getStatusCode()).isEqualTo(HttpStatus.CREATED);
         provesTheRule(
                 "/savings",
                 "business_date",

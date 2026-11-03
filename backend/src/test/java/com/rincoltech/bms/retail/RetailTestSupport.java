@@ -90,7 +90,8 @@ public final class RetailTestSupport {
                 || map.containsKey("date_reason")
                 || ENTRY_DATES.stream()
                         .map(map::get)
-                        .noneMatch(v -> v != null && v.toString().matches("\\d{4}-\\d{2}-\\d{2}")
+                        .noneMatch(v -> v != null
+                                && v.toString().matches("\\d{4}-\\d{2}-\\d{2}")
                                 && java.time.LocalDate.parse(v.toString()).isBefore(today))) {
             return body;
         }
