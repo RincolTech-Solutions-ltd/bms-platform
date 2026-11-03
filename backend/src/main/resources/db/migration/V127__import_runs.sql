@@ -87,8 +87,9 @@ CREATE TABLE import_runs (
     CHECK (allow_trading_tenant = (allow_trading_set_by IS NOT NULL)),
     CHECK (NOT allow_trading_tenant OR btrim(coalesce(allow_trading_reason, '')) <> ''),
     CHECK (allow_trading_approved_by IS NULL OR allow_trading_tenant),
-    -- The checker is never the maker (AGENTS.md rule 4).
-    CHECK (allow_trading_approved_by IS NULL OR allow_trading_approved_by <> allow_trading_set_by)
+    -- The checker is never the maker (AGENTS.md rule 4). Named, so a refusal says which rule it broke.
+    CONSTRAINT import_runs_checker_not_maker
+        CHECK (allow_trading_approved_by IS NULL OR allow_trading_approved_by <> allow_trading_set_by)
 );
 -- One committing run per business (spec section 5.4).
 CREATE UNIQUE INDEX import_runs_one_committing ON import_runs (tenant_id) WHERE status = 'committing';

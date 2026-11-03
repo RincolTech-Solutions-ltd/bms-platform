@@ -340,6 +340,100 @@ class ImportRunsIT extends IntegrationTest {
         });
     }
 
+    // JUSTIFICATION-A3: the review of #736 asks for these cases (a failing writer, a late halt, a resume mid batch).
+    // They are tests, not mechanism.
+    @Test
+    void aWriterThatFailsMidBatchRollsTheBatchBackIsAuditedAndTheRunGoesOnLater() {
+        Run run = readyRun(1);
+        AtomicBoolean failed = new AtomicBoolean();
+        BatchWriter writer = (runId, batchId, seq, checkpoint) -> {
+            postJournal("lending");
+            for (int row = 1; row <= 1_000; row++) {
+                if (row == 700 && failed.compareAndSet(false, true)) {
+                    // First pass only: a row the business's tables refuse, as a constraint would.
+                    throw new IllegalStateException("fabricated row 700 refused");
+                }
+                checkpoint.rowWritten();
+            }
+            return Map.of("written", 1_000);
+        };
+        assertThatThrownBy(() -> as(t, () -> runs.commit(run.id(), writer))).isInstanceOf(IllegalStateException.class);
+        assertThat(journals()).as("nothing of the failed batch is visible").isZero();
+        assertThat(batchStatus(run.id(), 1)).isEqualTo("pending");
+        assertThat(as(t, () -> runs.get(run.id())).status()).isEqualTo("committing");
+        assertThat(audits("core.import_run.batch_failed")).isEqualTo(1);
+
+        assertThat(as(t, () -> runs.resume(run.id(), writer))).isEqualTo(CommitOutcome.COMMITTED);
+        assertThat(journals()).isEqualTo(1);
+        assertThat(as(t, () -> runs.get(run.id())).status()).isEqualTo("committed");
+    }
+
+    @Test
+    void aHaltPressedDuringTheLastBatchIsClearedWhenTheRunEnds() {
+        Run run = readyRun(1);
+        BatchWriter writer = (runId, batchId, seq, checkpoint) -> {
+            postJournal("lending");
+            // The halt lands after the batch's last checkpoint: fewer than 1,000 rows follow it.
+            TestDatabase.owner()
+                    .sql("UPDATE import_runs SET halt_requested = true WHERE id = ?")
+                    .param(runId)
+                    .update();
+            for (int row = 1; row <= 10; row++) {
+                checkpoint.rowWritten();
+            }
+            return Map.of("written", 10);
+        };
+        assertThat(as(t, () -> runs.commit(run.id(), writer))).isEqualTo(CommitOutcome.COMMITTED);
+        Run done = as(t, () -> runs.get(run.id()));
+        assertThat(done.status()).isEqualTo("committed");
+        assertThat(done.haltRequested()).as("a finished run is not stopping").isFalse();
+    }
+
+    @Test
+    void aResumeWhileABatchIsBeingWrittenIsRefusedAndTheHaltHolds() throws Exception {
+        Run run = readyRun(1);
+        CountDownLatch writing = new CountDownLatch(1);
+        CountDownLatch answered = new CountDownLatch(1);
+        BatchWriter slow = (runId, batchId, seq, checkpoint) -> {
+            writing.countDown();
+            try {
+                answered.await(20, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            // The operator's halt set while the batch was held is still there at the next checkpoint.
+            for (int row = 1; row <= 1_000; row++) {
+                checkpoint.rowWritten();
+            }
+            return Map.of();
+        };
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            Future<CommitOutcome> commit = pool.submit(() -> as(t, () -> runs.commit(run.id(), slow)));
+            assertThat(writing.await(20, TimeUnit.SECONDS)).isTrue();
+            TestDatabase.owner()
+                    .sql("UPDATE import_runs SET halt_requested = true WHERE id = ?")
+                    .param(run.id())
+                    .update();
+            try {
+                as(t, () -> {
+                    assertCode(() -> runs.resume(run.id(), slow), "IMPORT_IN_PROGRESS");
+                    return null;
+                });
+                assertThat(as(t, () -> runs.get(run.id())).haltRequested())
+                        .as("the refused resume leaves the halt set")
+                        .isTrue();
+            } finally {
+                answered.countDown();
+            }
+            assertThat(commit.get(60, TimeUnit.SECONDS)).isEqualTo(CommitOutcome.HALTED);
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(batchStatus(run.id(), 1)).isEqualTo("pending");
+        assertThat(audits("core.import_run.resumed")).isZero();
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Trading tenant guard.
     // ---------------------------------------------------------------------------------------------
@@ -396,7 +490,7 @@ class ImportRunsIT extends IntegrationTest {
                                 """)
                         .params(maker, maker, run.id())
                         .update())
-                .hasMessageContaining("import_runs_check");
+                .hasMessageContaining("import_runs_checker_not_maker");
     }
 
     // ---------------------------------------------------------------------------------------------

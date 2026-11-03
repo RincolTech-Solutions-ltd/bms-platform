@@ -49,6 +49,22 @@ final class RunStates {
         return NEXT.getOrDefault(from, Set.of()).contains(to);
     }
 
+    private static final Map<String, String> WORDS = Map.of(
+            DRAFT, "a draft",
+            UPLOADED, "uploaded",
+            IN_REVIEW, "in review",
+            READY, "ready",
+            COMMITTING, "being imported",
+            COMMITTED, "imported",
+            SIGNED_OFF, "signed off",
+            PURGED, "purged",
+            CANCELLED, "cancelled");
+
+    /** A state in plain words for a message a person reads, for example "in review"; an unknown state as given. */
+    static String words(String status) {
+        return WORDS.getOrDefault(status, status);
+    }
+
     /** The stage time column a state stamps, for example {@code ready_at}. */
     static String stampColumn(String status) {
         return status + "_at";

@@ -665,11 +665,17 @@ The commit is a sequence of transactions:
    and gets `IMPORT_IN_PROGRESS`, as does a second commit of the same run.
 2. **One transaction per batch, in `seq` order.** Each takes `pg_advisory_xact_lock` on the business's import key and skips
    a batch already committed. It checks the kill switch and the run's halt before the batch and every 1,000 rows through the
-   `BatchWriter` checkpoint. A stop rolls the batch back and leaves the run `committing` (`HALTED`).
-3. **Finish.** The run moves to `committed`.
+   `BatchWriter` checkpoint. A stop rolls the batch back and leaves the run `committing` (`HALTED`). Any other failure of
+   the writer does the same, is audited as `core.import_run.batch_failed` (the batch and the kind of failure, never the
+   message, which may quote a row) and is rethrown.
+3. **Finish.** The run moves to `committed`, and a halt pressed during the last batch, after its last checkpoint, is cleared.
 
-`resume` continues a committing run from its first pending batch and clears the halt. It does not ask the trading guard
+`resume` continues a committing run from its first pending batch and clears the halt. While a batch is being written it
+holds the business's lock, so `resume` asks for that lock with `pg_try_advisory_xact_lock` and answers `IMPORT_IN_PROGRESS`
+when it is taken: a resume never clears a halt under a writer that is still running. It does not ask the trading guard
 again: the batches already committed are the business's records now. The override is set by one platform operator with a
-reason and approved by a different one (a CHECK, and `self_approval_forbidden`); both steps are audited. The maker-checker
+reason and approved by a different one (the CHECK `import_runs_checker_not_maker`, and `self_approval_forbidden`); both
+steps are audited. Branch limits are each template writer's: a writer checks that every row it writes falls in a branch
+the import may write to, first in the template of #136. The maker-checker
 `import_commit` request is #133; until then the commit is called by the operator's tooling. The operator screens and the
 stop button are #141.

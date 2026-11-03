@@ -39,6 +39,9 @@ class ImportRunService implements ImportRuns {
     /** Rows between two reads of the kill switch and the halt inside a batch (spec section 5.4). */
     static final int CHECKPOINT_ROWS = 1_000;
 
+    /** The business's import key: the advisory lock every batch takes, and that a resume must find free. */
+    private static final String LOCK_KEY = "hashtextextended('core.imports:' || current_setting('app.tenant_id'), 0)";
+
     private static final Pattern SHA256 = Pattern.compile("[0-9a-f]{64}");
 
     private static final String RUN_COLUMNS = """
@@ -93,12 +96,16 @@ class ImportRunService implements ImportRuns {
     @Override
     public Run transition(UUID runId, String status) {
         if (!RunStates.known(status) || RunStates.COMMIT_ONLY.contains(status)) {
-            throw invalidTransition("A run reaches " + status + " only through the commit.");
+            throw invalidTransition(
+                    RunStates.known(status)
+                            ? "A run is " + RunStates.words(status) + " only through the import itself."
+                            : "That is not a state an import can be in.");
         }
         return tx.execute(s -> {
             Run run = find(runId, true);
             if (!RunStates.allowed(run.status(), status)) {
-                throw invalidTransition("The run is " + run.status() + "; it cannot become " + status + ".");
+                throw invalidTransition("The import is " + RunStates.words(run.status()) + ", so it cannot be "
+                        + RunStates.words(status) + " now.");
             }
             setStatus(runId, status);
             audit(runId, "core.import_run.status_changed", Map.of("status", run.status()), Map.of("status", status));
@@ -262,7 +269,8 @@ class ImportRunService implements ImportRuns {
             throw importInProgress();
         }
         if (!RunStates.READY.equals(run.status())) {
-            throw invalidTransition("Only a ready run can be committed; this one is " + run.status() + ".");
+            throw invalidTransition(
+                    "Only an import that is ready can start; this one is " + RunStates.words(run.status()) + ".");
         }
         requireCommitPossible(run);
         List<String> trading = probes.stream()
@@ -295,7 +303,16 @@ class ImportRunService implements ImportRuns {
         tx.executeWithoutResult(s -> {
             Run run = find(runId, true);
             if (!RunStates.COMMITTING.equals(run.status())) {
-                throw invalidTransition("Only a committing run can be resumed; this one is " + run.status() + ".");
+                throw invalidTransition(
+                        "Only an import being imported can go on; this one is " + RunStates.words(run.status()) + ".");
+            }
+            // A writer still holds the business's lock while a batch is being written: going on now would clear the
+            // operator's halt under it, and the halt would be lost (review of #736).
+            Boolean free = jdbc.sql("SELECT pg_try_advisory_xact_lock(" + LOCK_KEY + ")")
+                    .query(Boolean.class)
+                    .single();
+            if (!Boolean.TRUE.equals(free)) {
+                throw importInProgress();
             }
             requireCommitPossible(run);
             // The trading guard is not asked again: it was passed when the run started, and the batches this run
@@ -326,6 +343,15 @@ class ImportRunService implements ImportRuns {
                         Map.of(),
                         Map.of("batch_seq", batch.seq(), "reason", e.reason)));
                 return CommitOutcome.HALTED;
+            } catch (RuntimeException e) {
+                // The batch rolled back as a whole and the run stays committing, so it can go on once fixed. The audit
+                // says which batch failed and the kind of failure, never the message, which may quote the row's data.
+                tx.executeWithoutResult(s -> audit(
+                        runId,
+                        "core.import_run.batch_failed",
+                        Map.of(),
+                        Map.of("batch_seq", batch.seq(), "error", e.getClass().getSimpleName())));
+                throw e;
             }
         }
         tx.executeWithoutResult(s -> {
@@ -337,6 +363,10 @@ class ImportRunService implements ImportRuns {
             // A concurrent resume may have finished the run first.
             if (RunStates.COMMITTING.equals(run.status()) && left == 0) {
                 setStatus(runId, RunStates.COMMITTED);
+                // A halt pressed during the last batch, which ended before its next checkpoint, means nothing now.
+                jdbc.sql("UPDATE import_runs SET halt_requested = false WHERE id = ? AND halt_requested")
+                        .param(runId)
+                        .update();
                 audit(
                         runId,
                         "core.import_run.status_changed",
@@ -348,10 +378,7 @@ class ImportRunService implements ImportRuns {
     }
 
     private void writeBatch(UUID runId, PendingBatch batch, BatchWriter writer) {
-        jdbc.sql(
-                        "SELECT pg_advisory_xact_lock(hashtextextended('core.imports:' || current_setting('app.tenant_id'), 0))")
-                .query()
-                .singleRow();
+        jdbc.sql("SELECT pg_advisory_xact_lock(" + LOCK_KEY + ")").query().singleRow();
         String status = jdbc.sql("SELECT status FROM import_batches WHERE id = ? FOR UPDATE")
                 .param(batch.id())
                 .query(String.class)
@@ -465,7 +492,8 @@ class ImportRunService implements ImportRuns {
     private void requireBeforeCommit(Run run) {
         if (!List.of(RunStates.DRAFT, RunStates.UPLOADED, RunStates.IN_REVIEW, RunStates.READY)
                 .contains(run.status())) {
-            throw invalidTransition("The run is " + run.status() + "; it can no longer be changed.");
+            throw invalidTransition(
+                    "The import is " + RunStates.words(run.status()) + ", so it can no longer be changed.");
         }
     }
 
