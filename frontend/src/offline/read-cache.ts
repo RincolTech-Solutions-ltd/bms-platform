@@ -186,6 +186,11 @@ export interface ReadKeeper {
   settled(): Promise<void>;
   /** At sign-out: stops writing, waits for a write under way, removes the copy and the kept reads in memory. */
   forget(): Promise<void>;
+  /**
+   * Removes the copy only while it is still one made under other rights, in turn with this keeper's writes, so a fresh copy
+   * the keeper has just written is never removed in its place (review of #784).
+   */
+  dropOther(): Promise<void>;
 }
 
 /**
@@ -210,7 +215,8 @@ export function keepReads(
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
   let writing: Promise<void> = Promise.resolve();
-  // Whether a ping has confirmed the network, so a copy made under other rights may be replaced; asked once it is needed.
+  // Whether a ping has confirmed the network, so a copy made under other rights may be replaced. Asked by each save that
+  // meets such a copy until one ping answers; after that it is not asked again.
   let confirmed = false;
   const take = (entry: ReadEntry, raw?: unknown) => {
     const before = mine.get(entry.queryHash);
@@ -225,7 +231,8 @@ export function keepReads(
         const before = await store.readCache(scope);
         if (before !== null && !usable(before, access) && !confirmed) {
           confirmed = await confirm().catch(() => false);
-          if (!confirmed) return;
+          // The ping can take seconds: a keeper stopped meanwhile (sign-out, the layout left) writes nothing.
+          if (!confirmed || stopped) return;
         }
         const kept = usable(before, access) ? before.entries : [];
         const sizes = new Map([...mine.values()].map((m) => [m.entry, m.size]));
@@ -259,6 +266,15 @@ export function keepReads(
       forgetInMemory(client);
       await writing;
       await store.deleteReadCache(scope);
+    },
+    dropOther: () => {
+      const drop = writing.then(async () => {
+        if (stopped) return;
+        const now = await store.readCache(scope);
+        if (now !== null && !usable(now, access) && !stopped) await store.deleteReadCache(scope);
+      });
+      writing = drop.catch(() => undefined);
+      return drop;
     },
   };
 }

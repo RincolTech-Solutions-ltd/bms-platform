@@ -293,7 +293,9 @@ export function useOfflineSupport(me: Me | undefined, signedIn: boolean, service
             // Online the rights are the server's own, so a copy made under others goes, once a ping confirms the server
             // answers (Wi-Fi with no internet says online). Opened offline they come from the profile saved on the phone,
             // which may lag the copy: it is not shown, and not destroyed either.
-            if ((await svc.connectivity.check().catch(() => false)) && live) await svc.store.deleteReadCache(scope);
+            // In turn with the keeper's writes, and only while the copy is still the other rights' one: a fresh copy the
+            // keeper wrote during a slow ping is never removed.
+            if ((await svc.connectivity.check().catch(() => false)) && live) await keeper.dropOther();
             return;
           }
           keeper.adopt(restore(client, c, now(), access));

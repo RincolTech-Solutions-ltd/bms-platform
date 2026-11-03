@@ -391,6 +391,28 @@ describe('a link to a section of Set-up (issue #783)', () => {
     }
   });
 
+  // JUSTIFICATION-A3: the cases the review of #784 asks for (a malformed hash, a new hash after load).
+  it('shows the page for a malformed hash, and follows a new hash after the page has loaded (review of #784)', async () => {
+    const scrolled: string[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this.id);
+    } as never;
+    window.location.hash = '#50%';
+    try {
+      show({ modules: ['retail'] });
+      const box = await screen.findByLabelText(/Let staff run reports/);
+      expect(scrolled).toEqual([]);
+      window.location.hash = '#reports';
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+      await waitFor(() => expect(document.activeElement).toBe(box));
+      expect(scrolled).toEqual(['reports']);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+      window.location.hash = '';
+    }
+  });
+
   it('stays at the top with no section in the address', async () => {
     const scrollIntoView = vi.fn();
     const original = Element.prototype.scrollIntoView;

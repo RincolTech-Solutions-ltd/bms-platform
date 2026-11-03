@@ -36,10 +36,12 @@ describe('a scan found in a copy (issue #776)', () => {
   it.each([
     ['the phone copy', 'IN00007761', Date.parse(PHONE_AT)],
     ["a screen's answer", 'IN00007762', SCREEN_AT],
-  ])('dates an item found in %s by its id, as of that copy', async (_copy, code, at) => {
+    // The phone's copy holds the item from before its new barcode; the screen's answer holds it with it (review of #784).
+    ["a screen's answer, the phone copy holding the same item without the barcode", 'IN00007763', SCREEN_AT],
+  ])('dates an item found in %s as of the copy that matched', async (_copy, code, at) => {
     vi.spyOn(retail, 'findByBarcode').mockRejectedValue(new TypeError('Failed to fetch'));
     const client = new QueryClient();
-    client.setQueryData(['retail', 'products', BRANCH, 'item'], [labelled('s1', 'IN00007762')], { updatedAt: SCREEN_AT });
+    client.setQueryData(['retail', 'products', BRANCH, 'item'], [labelled('s1', 'IN00007762'), labelled('p1', 'IN00007763')], { updatedAt: SCREEN_AT });
     const offline = { catalogue: { pricesAsOf: PHONE_AT, products: { [BRANCH]: [labelled('p1', 'IN00007761')] }, customers: [] } } as unknown as Offline;
     const onFound = vi.fn(() => undefined);
     render(

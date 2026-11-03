@@ -38,7 +38,9 @@ sometimes twice: the banner under the bar and the screen's own red error. The ow
    taken away, signed out). Opened with no network, the rights come from the profile saved on the phone, which may lag the
    copy: a copy that does not match is then not shown, and not deleted either; it is deleted only once a ping of `/healthz`
    confirms the server answers (the browser alone says online on Wi-Fi with no internet). Until that ping, no new read is
-   written over it either (issue #774). A write of the old rights still under way finishes before the copy is read again.
+   written over it either (issue #774): each write that meets such a copy asks the ping again until one answers. The
+   removal runs in turn with these writes and only while the copy is still the other rights' one, so a fresh copy written
+   during a slow ping stays. A write of the old rights still under way finishes before the copy is read again.
 4. **Cap.** Sales older than 30 days by their sale date are cut from the kept sales lists, and a single sale that old is not
    kept, apart from credit sales still owing; any kept read older than 30 days is dropped; the whole copy is held under
    2,000,000 JSON characters, newest reads first. A read is written about two seconds after it loads, merged with what was

@@ -70,7 +70,8 @@ export function ApprovalRulesScreen() {
   const saved: ApprovalRules | undefined = read.data;
   // A link to one rule (Retail settings' returns Hint, #575) names its row in the hash; the rows exist only once the rules have
   // loaded, so the page scrolls to it then, not on arrival (the helper Set-up's section links use too, issue #783).
-  useHashSection(saved !== undefined);
+  // The row itself takes the focus, not its amount field, so a phone's keyboard never opens over it on arrival.
+  useHashSection(saved !== undefined, 'section');
   const draft: Draft | null = edited ?? (saved ? draftOf(saved.rules ?? []) : null);
 
   if (!allowed) {
