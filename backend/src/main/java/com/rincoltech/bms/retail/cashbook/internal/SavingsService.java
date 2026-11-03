@@ -390,6 +390,10 @@ class SavingsService {
         List<UUID> filter;
         if (caller == Caller.SALES_STAFF) {
             setting.requireOnForSalesStaff();
+            // A named branch outside the selling scope is 404 unknown_branch, as on the suggestion and the save (FR-RET-18).
+            if (branchIds != null) {
+                branchIds.forEach(b -> branchContext.resolve(CashbookSupport.SALE_CREATE, b));
+            }
             filter = CurrentPrincipal.require().branchFilter(CashbookSupport.SALE_CREATE, branchIds);
             since = from == null || from.isBefore(monthStart) ? monthStart : from;
         } else {
