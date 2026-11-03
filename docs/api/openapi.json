@@ -35490,6 +35490,16 @@
               }
             },
             "description" : "A module's link that is wrong or has expired, such as a receipt link (issue #760)"
+          },
+          "429" : {
+            "content" : {
+              "text/html" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            },
+            "description" : "Too many names no shop has from this address in ten minutes: a plain page"
           }
         },
         "summary" : "Follow a short link: 302 to the shop, to its new address while an old name forwards, or to the page 'No shop uses this link' (ADR-108)",
@@ -35520,6 +35530,16 @@
               }
             },
             "description" : "A module's link that is wrong or has expired, such as a receipt link (issue #760)"
+          },
+          "429" : {
+            "content" : {
+              "text/html" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            },
+            "description" : "Too many names no shop has from this address in ten minutes: a plain page"
           }
         },
         "summary" : "Follow a short link: 302 to the shop, to its new address while an old name forwards, or to the page 'No shop uses this link' (ADR-108)",

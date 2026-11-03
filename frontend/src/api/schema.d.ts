@@ -27555,6 +27555,15 @@ export interface operations {
                     "text/html": string;
                 };
             };
+            /** @description Too many names no shop has from this address in ten minutes: a plain page */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
         };
     };
     followShortLink_1: {
@@ -27577,6 +27586,15 @@ export interface operations {
             };
             /** @description A module's link that is wrong or has expired, such as a receipt link (issue #760) */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Too many names no shop has from this address in ten minutes: a plain page */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

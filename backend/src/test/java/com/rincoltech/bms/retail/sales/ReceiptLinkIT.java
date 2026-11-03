@@ -195,7 +195,8 @@ class ReceiptLinkIT extends IntegrationTest {
         assertThat(String.valueOf(row.get("token_hash"))).hasSize(64).isNotEqualTo(token);
 
         // JUSTIFICATION-A3: second review of #762, item 1: one live link per sale, given again until it expires.
-        // A second call, a second device (another person), and a call after 6 minutes give the same link and write no row.
+        // A second call, a second device (another person), and a call after 6 minutes give the same link and write no
+        // row.
         assertThat(token(makeLink(seller, sale, SALES))).isEqualTo(token);
         assertThat(token(makeLink(other, sale, SaleReceiptPdfIT.SUPERVISOR))).isEqualTo(token);
         shift(sale, "6 minutes");
