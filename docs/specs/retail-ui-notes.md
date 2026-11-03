@@ -1904,7 +1904,7 @@ in words, as the old app did.
 
 - **In the item picker** each match whose stock here is zero or below says **Out of stock**, and one at or below its low stock
   level says **Only N left** (for example "Only 4 left"); an item above its level says nothing more. The level is the one the
-  Low tab of My stock uses: the shop's own minimum, else the item's, else the low stock threshold of ADR-029 (5 today).
+  Low tab of My stock uses: the shop's own minimum, else the item's, else the low stock threshold of ADR-029 (10 since issue #830).
 - **On the sale line** the same words sit beside the item's name, from the stock read when the item was picked or scanned.
 - **How it looks:** a tinted badge with an icon and the words (the circle with an exclamation mark for Out of stock on the
   danger tint, the triangle for Only N left on the warning tint). Never colour alone, no stripe, no gradient.

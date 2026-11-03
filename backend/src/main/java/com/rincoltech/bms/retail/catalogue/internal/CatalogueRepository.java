@@ -479,7 +479,7 @@ class CatalogueRepository {
      * The low stock level of ADR-029 for an item with no minimum. It is the stock list's {@code low_stock_threshold}
      * (retail.stock, which this module may not depend on); {@code RetailSaleStockWarningIT} proves the two agree.
      */
-    static final String LOW_STOCK_DEFAULT = "5.000";
+    static final String LOW_STOCK_DEFAULT = "10.000";
 
     /**
      * Issue #815: the select-list column of the level at or below which the item is low at {@code branch} (a parameter), as
