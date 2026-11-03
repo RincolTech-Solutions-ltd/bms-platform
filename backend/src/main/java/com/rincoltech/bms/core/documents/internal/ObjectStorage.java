@@ -31,6 +31,12 @@ interface ObjectStorage {
     java.util.stream.Stream<Listed> list(String prefix);
 
     /**
+     * Removes up to 1000 objects in one request (S3 {@code DeleteObjects}) and answers the keys it could not remove; a
+     * key that was already gone counts as removed. Used by the orphan sweep (issue #39).
+     */
+    java.util.List<String> deleteAll(java.util.List<String> keys);
+
+    /**
      * A URL that serves the object until {@code ttl} passes, and refuses it after. It is always served
      * as a download ({@code Content-Disposition: attachment}) named {@code downloadName}, with
      * {@code contentType} (the sniffed type) and {@code Cache-Control: private, no-store}, so a stored

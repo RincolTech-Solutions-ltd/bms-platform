@@ -43,6 +43,22 @@ class FakeObjectStorage implements ObjectStorage {
         objects.put(key, new StoredObject(bytes.clone(), contentType, at));
     }
 
+    /** For tests: keys that {@link #deleteAll} reports as failed and keeps, like an object store that refuses some. */
+    final java.util.Set<String> failDeletes = ConcurrentHashMap.newKeySet();
+
+    @Override
+    public java.util.List<String> deleteAll(java.util.List<String> keys) {
+        java.util.List<String> failed = new java.util.ArrayList<>();
+        for (String key : keys) {
+            if (failDeletes.contains(key)) {
+                failed.add(key);
+            } else {
+                objects.remove(key);
+            }
+        }
+        return failed;
+    }
+
     /** For tests: whether the fake holds an object under this key. */
     boolean has(String key) {
         return objects.containsKey(key);

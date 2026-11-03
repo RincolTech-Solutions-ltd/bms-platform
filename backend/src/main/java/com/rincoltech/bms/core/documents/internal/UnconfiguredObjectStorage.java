@@ -38,6 +38,11 @@ class UnconfiguredObjectStorage implements ObjectStorage {
     }
 
     @Override
+    public java.util.List<String> deleteAll(java.util.List<String> keys) {
+        return java.util.List.of();
+    }
+
+    @Override
     public String signedGetUrl(String key, Duration ttl, String downloadName, String contentType) {
         throw unavailable();
     }
