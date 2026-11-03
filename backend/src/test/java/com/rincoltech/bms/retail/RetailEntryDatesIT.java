@@ -68,6 +68,11 @@ class RetailEntryDatesIT extends IntegrationTest {
 
     /** A keyed POST with the body exactly as given. */
     ResponseEntity<JsonNode> send(String path, Map<String, Object> body, String permissions) {
+        return send(path, body, permissions, "*");
+    }
+
+    /** As above, with every permission scoped to {@code branches}. */
+    ResponseEntity<JsonNode> send(String path, Map<String, Object> body, String permissions, String branches) {
         return http.exchange(
                 RetailTestSupport.BASE + path,
                 HttpMethod.POST,
@@ -75,7 +80,7 @@ class RetailEntryDatesIT extends IntegrationTest {
                         body,
                         cb.api.headers(
                                 permissions,
-                                "*",
+                                branches,
                                 Map.of("Idempotency-Key", UUID.randomUUID().toString()))),
                 JsonNode.class);
     }
@@ -102,6 +107,7 @@ class RetailEntryDatesIT extends IntegrationTest {
             String notOwner) {
         LocalDate earlier = daysAgo(2);
         int auditsBefore = cb.auditPayloads("retail.entry.backdated").size();
+        int createdBefore = cb.auditPayloads(entityType + ".created").size();
 
         ResponseEntity<JsonNode> refused = send(path, with(bodyFor.apply(earlier), dateField, earlier), notOwner);
         assertThat(refused.getStatusCode()).as(path).isEqualTo(HttpStatus.FORBIDDEN);
@@ -111,6 +117,8 @@ class RetailEntryDatesIT extends IntegrationTest {
         // A reason does not stand in for the permission.
         Map<String, Object> withReason = with(with(bodyFor.apply(earlier), dateField, earlier), "date_reason", REASON);
         assertThat(send(path, withReason, notOwner).getStatusCode()).as(path).isEqualTo(HttpStatus.FORBIDDEN);
+        // Nothing was written by either refusal.
+        assertThat(cb.auditPayloads(entityType + ".created")).as(path).hasSize(createdBefore);
 
         ResponseEntity<JsonNode> today = send(path, bodyFor.apply(today()), notOwner);
         assertThat(today.getStatusCode()).as(path + " " + today.getBody()).isEqualTo(HttpStatus.CREATED);
@@ -119,6 +127,8 @@ class RetailEntryDatesIT extends IntegrationTest {
         assertThat(noReason.getStatusCode()).as(path).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(noReason.getBody().get("errors").get(0).get("field").asString())
                 .isEqualTo("date_reason");
+        // Today's entry only: the owner's refusal wrote nothing either.
+        assertThat(cb.auditPayloads(entityType + ".created")).as(path).hasSize(createdBefore + 1);
 
         ResponseEntity<JsonNode> backdated = send(path, withReason, ALL);
         assertThat(backdated.getStatusCode())
@@ -196,19 +206,53 @@ class RetailEntryDatesIT extends IntegrationTest {
     }
 
     @Test
-    void aBankingTimeOnAnEarlierDayIsTheOwnersToo() {
+    void aBankingOrWithdrawalTimeOnAnEarlierDayIsTheOwnersAndIsAudited() {
+        java.time.Instant twoDaysAgo = java.time.Instant.now().minus(java.time.Duration.ofDays(2));
+        LocalDate thatDay = twoDaysAgo
+                .atZone(com.rincoltech.bms.kernel.BusinessClock.DEFAULT_ZONE)
+                .toLocalDate();
+        for (String[] form : List.of(
+                new String[] {"/bankings", "banked_at", "retail.banking", CASHIER},
+                new String[] {"/withdrawals", "withdrawn_at", "retail.withdrawal", NOT_OWNER})) {
+            Map<String, Object> body =
+                    new LinkedHashMap<>(Map.of("branch_id", hq, "amount_minor", 1_000, form[1], twoDaysAgo.toString()));
+
+            ResponseEntity<JsonNode> refused = send(form[0], body, form[3]);
+            assertThat(refused.getStatusCode()).as(form[0]).isEqualTo(HttpStatus.FORBIDDEN);
+            assertThat(refused.getBody().get("errors").get(0).get("field").asString())
+                    .isEqualTo(form[1]);
+
+            // The owner, no business date (so today), the time two days ago: allowed with a reason, and audited.
+            ResponseEntity<JsonNode> made = send(form[0], with(body, "date_reason", REASON), ALL);
+            assertThat(made.getStatusCode()).as(form[0] + " " + made.getBody()).isEqualTo(HttpStatus.CREATED);
+            assertThat(cb.auditPayloads("retail.entry.backdated"))
+                    .as(form[0])
+                    .anyMatch(a -> a.contains("\"entry\": \"" + form[2] + "\"")
+                            && a.contains("\"date\": \"" + thatDay + "\"")
+                            && a.contains(REASON));
+        }
+    }
+
+    @Test
+    void aMoveThatCompletesNowNeedsTheOwnersDateAtTheDestinationToo() {
         Map<String, Object> body = new LinkedHashMap<>(Map.of(
-                "branch_id",
+                "from_branch_id",
                 hq,
-                "amount_minor",
-                1_000,
-                "banked_at",
-                java.time.Instant.now().minus(java.time.Duration.ofDays(2)).toString()));
+                "to_branch_id",
+                t.secondBranch(),
+                "transfer_date",
+                daysAgo(2).toString(),
+                "date_reason",
+                REASON,
+                "lines",
+                List.of(Map.of("product_id", product, "qty", "1"))));
 
-        ResponseEntity<JsonNode> r = send("/bankings", body, CASHIER);
+        // Every permission, the owner's date included, at the head office only: the second shop's day is not theirs.
+        ResponseEntity<JsonNode> r = send("/transfers", body, ALL, hq.toString());
 
-        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
-        assertThat(r.getBody().get("errors").get(0).get("field").asString()).isEqualTo("banked_at");
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(r.getBody().get("code").asString()).isEqualTo("date_not_today");
+        assertThat(send("/transfers", body, ALL).getStatusCode()).isEqualTo(HttpStatus.CREATED);
     }
 
     @Test

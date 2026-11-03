@@ -212,8 +212,10 @@ class TransferService implements ModuleSettingsChangeGuard {
         if (!problems.isEmpty()) {
             throw ApiException.validation(problems);
         }
-        // ADR-120: an earlier date needs the owner's permission at the source branch, and a reason.
-        EntryDates.Backdate backdate = entryDates.check(on, "transfer_date", r.dateReason(), from);
+        // ADR-120: an earlier date needs the owner's permission and a reason at each branch the move dates that day:
+        // the source, and the destination when the move completes now (a dispatch is received later, on its own day).
+        EntryDates.Backdate backdate = entryDates.check(
+                on, "transfer_date", r.dateReason(), dispatchOnly ? List.of(from) : List.of(from, to.id()));
         Map<UUID, java.math.BigDecimal> quantities = new java.util.LinkedHashMap<>();
         lines.forEach(l -> quantities.put(l.productId(), l.qty()));
         guards.orderedStream().forEach(g -> g.check(from, quantities));

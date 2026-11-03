@@ -133,6 +133,15 @@ class CashbookSupport {
         return new Dated(date, entryDates.check(date, field, reason, branch));
     }
 
+    /**
+     * ADR-120: the time of a banking or a withdrawal is part of its date. A time on an earlier day is gated like the date,
+     * and audited when the business date itself is today (review of #831), so either earlier day leaves its audit row.
+     */
+    Dated withTime(Dated dated, Instant at, String field, String reason, UUID branch) {
+        EntryDates.Backdate time = entryDates.check(dayOf(at), field, reason, branch);
+        return dated.backdate() != null || time == null ? dated : new Dated(dated.date(), time);
+    }
+
     /** The {@code retail.entry.backdated} audit row of an entry dated before today; nothing otherwise. */
     void auditBackdate(Dated dated, String entityType, UUID id, UUID branch) {
         entryDates.audit(dated.backdate(), entityType, id, branch);

@@ -131,7 +131,7 @@ class BankingService {
                     List.of(new FieldProblem("banked_at", "future_date", "A date cannot be in the future.")));
         }
         // ADR-120: the time of the banking is the app's too; an earlier day is the owner's, with the same reason.
-        support.entryDates().check(support.dayOf(bankedAt), "banked_at", r.dateReason(), branch);
+        dated = support.withTime(dated, bankedAt, "banked_at", r.dateReason(), branch);
         long amount = r.amountMinor();
         boolean profit = mayProfit(branch);
         // The snapshot: what the screen showed, computed here and never taken from the client.
@@ -290,7 +290,7 @@ class BankingService {
             throw ApiException.validation(
                     List.of(new FieldProblem("withdrawn_at", "future_date", "A date cannot be in the future.")));
         }
-        support.entryDates().check(support.dayOf(at), "withdrawn_at", r.dateReason(), branch);
+        dated = support.withTime(dated, at, "withdrawn_at", r.dateReason(), branch);
         long amount = r.amountMinor();
         List<String> warnings = new ArrayList<>();
         if (figures.bankBalance(branch, support.today()) - amount < 0) {
