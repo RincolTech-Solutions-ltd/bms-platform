@@ -354,7 +354,8 @@ of the screens under it; the Catalogue home lists only those it may use (a sales
   history** of the item lists each change with the date and time in the business's time zone (`showWhen`,
   Africa/Kampala like `businessToday`), what changed, why, and the cost only when the server sent it. A new item
   asks for a selling price; its cost is asked only with `retail.profit.read` (else 0, and a restock sets it).
-- **Categories and Units** (`catalogue-lists.tsx`, one component twice): Add, Rename, Switch off or Switch on,
+- **Categories and Units** (`catalogue-lists.tsx`, one component twice): Add, Rename, Switch off or Switch on (issue #830: the
+  buttons say Delete, asked first, and Bring back; a deleted row is hidden until Show deleted),
   with "Used by N items". Nothing is deleted. A switched-off row stays on the items that use it and is not offered
   for a new item (the server refuses it with 422 `inactive_category`, `inactive_unit`). A switched-on unit also has
   Usual pack (issue #637), offered unless another unit's usual pack counts it (one level only): a Sheet
@@ -808,7 +809,7 @@ again under the sale's lock; the screens only save a round trip and say each ref
   `sale_voided` make the lists and the sale load again. In Mark as fully paid the message is "The balance has changed; check the new amount."; a typed amount above
   the new balance goes back to the balance. Record payment and Mark as fully paid keep separate drafts and keys, so a lost answer on one never blocks the other; Cancel
   forgets the form unless a request went out and its answer may have been lost; `idempotency_key_reused` resets the form with a new key instead of asking for a reload.
-- **Void this sale** (an opened sale only). Shown on a completed sale to a holder of `retail.sale.void` at the sale's branch. A credit sale that has had a payment or a return shows
+- **Void this sale** (an opened sale only; issue #830: the button says Delete this sale, see "Edit and delete buttons as in the old app"). Shown on a completed sale to a holder of `retail.sale.void` at the sale's branch. A credit sale that has had a payment or a return shows
   "A credit sale that has had a payment or a return cannot be voided." instead of the button (the server refuses it as `sale_has_payments`), and an imported sale
   shows a short note instead (its stock and entries predate this system). A void that already went through (`sale_voided`) counts as done, and the button stays away
   until the reloaded sale reads Voided. The form needs a reason of at least five
@@ -958,6 +959,41 @@ An item that is no longer sold is switched off, never deleted.
 - **Refusals.** Through the API a sale, restock, purchase order line or transfer of an inactive item is 422 `product_inactive` in plain words.
 - **Tour.** `page-catalogue` is version 2 with an Items you stopped selling step.
 - **Tests.** `catalogue.test.tsx` (the warning, the lists), `RetailProductInactiveIT` (backend, CI only).
+- **Issue #830.** The Inactive tick is now **Delete this item** (see the next section); the badge and the filter say Deleted.
+
+## Edit and delete buttons as in the old app (issue #830)
+
+The owner's old app let people edit and delete records directly. BMS still corrects by voiding and switching off (the void model,
+ADR-044 and ADR-045, is unchanged); the screens now use the old app's buttons and words, and every one keeps the record and the audit
+trail underneath. No endpoint and no migration changed.
+
+- **Delete this sale** (`VoidSaleAction`, an opened sale; `retail.sale.void` at the sale's branch, the owner's, as before). It asks
+  "Delete this sale? The stock goes back to <branch>." with a line that the sale stays in the lists marked Deleted, and an optional
+  reason; Yes, delete it sends the void (`POST /retail/sales/{id}/void`) with the typed reason or, when none is typed, "Deleted from the
+  sale screen". Toast: "Sale deleted. The stock went back." A voided sale reads **Deleted** in the lists and "Deleted because" on the
+  sale; the refusals say deleted (`sale_voided`, `sale_has_payments`).
+- **Mark as paid** (was Mark as fully paid) on an unpaid credit sale: the whole balance, dated today, in cash unless another way is
+  picked; it is the same payment as Record payment (`POST /retail/sales/{id}/payments`).
+- **Edit a delivery** (Past purchases, beside Correct this purchase, for the same people). Edit goes to `/staff/retail/restock?edit=<id>`:
+  Buy stock opens filled in with that delivery, its own date kept (the date warning says when that day may be banked), under "You are
+  editing delivery RP...". **Save changes** first voids the old one through the correct-this-purchase path with the reason "Edited:
+  entered again with the changes", then saves the form as a new delivery whose note is "Replaces RP..., edited", and goes back to Past
+  purchases with the toast "Delivery updated". A refused void (its stock moved) saves nothing new and says why; a void found already
+  done is the same end state. The card shows the note, so the new delivery names the old one, which stays marked Voided.
+- **Edit or delete an expense** (Expense records, in place of Void, where the expense may be voided: `retail.cashbook.void`, the
+  owner's). **Delete** asks "Delete this expense? It stops counting in the cash book and the reports." with an optional reason (default
+  "Deleted from the expenses screen") and voids it; the screen says "Expense deleted." **Edit** (also needs `retail.expense.record` there)
+  opens the expense form filled in; Save changes voids the old one ("Edited: entered again with the changes") and saves the new one with
+  "Replaces the <item> entry of <date>, edited." after any explanation, and says "Expense updated".
+- **Delete an item, category or unit.** Categories and Units say **Delete** (asked first: "Delete <name>? It is hidden from lists and
+  pickers. Items, history and reports keep it, and Show deleted brings it back.") and **Bring back**; the item's edit form says **Delete
+  this item** (asked first, with the stock warning when it holds stock) and Bring back. Underneath each is the switch off
+  (`PATCH ... {active: false}`). A deleted row is hidden from the list until **Show deleted (N)** is ticked, and from the category and
+  unit pickers unless it is the row already chosen; the Items filter offers On sale, Deleted only and Show deleted too.
+- **Low stock.** The default level for an item with no minimum of its own is 10, the old app's rule (ADR-029 amended); an item's own
+  minimum still wins.
+- **Tests.** `sale-actions.dom.test.tsx`, `sales-wiring.dom.test.tsx`, `edit-delivery.dom.test.tsx`, `edit-expense.dom.test.tsx`,
+  `delete-catalogue.dom.test.tsx`, `expenses.test.tsx`; `RetailOldAppWordsIT` (backend, CI only) proves the safe effects through the API.
 
 ## Left to do
 
