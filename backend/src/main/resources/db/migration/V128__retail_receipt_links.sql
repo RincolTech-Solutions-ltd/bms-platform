@@ -1,5 +1,5 @@
 -- V128: a short link to one sale's receipt, for a receipt sent to a typed WhatsApp number (issue #760, ADR-116).
--- Claimed after V124 to V127 (pull requests #318, #735, #743 and #736); renumbered at merge if that order changes.
+-- Directly after V124 to V127 (pull requests #318, #735, #778 and #736).
 --
 -- A wa.me link cannot carry a file, so the message sent to a number that is not a saved contact carries a short link,
 -- rincoltech.com/<token> (the short link host of V119, ADR-108), that opens the receipt PDF of that one sale: read only,
