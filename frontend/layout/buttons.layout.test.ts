@@ -55,7 +55,7 @@ const SCREENS: { screen: string; ready: string; main?: string; secondary?: strin
 ];
 
 type Box = { left: number; top: number; right: number; bottom: number };
-type Target = Box & { name: string; width: number; height: number; group: number; cover: (Box & { floating: boolean }) | null };
+type Target = Box & { name: string; index: number; width: number; height: number; group: number; cover: (Box & { floating: boolean }) | null };
 
 async function open(screen: string, ready: string, size: { width: number; height: number }, phone: boolean): Promise<Page> {
   const page = await browser.newPage({ viewport: size, hasTouch: phone, isMobile: phone });
@@ -107,11 +107,19 @@ async function targets(page: Page): Promise<Target[]> {
     ].join(', ');
     const labels = [...document.querySelectorAll<HTMLLabelElement>('label[for]')].filter((l) => l.control && labelled(l.control));
     // A link inside running text (a sentence in a paragraph) is left out, as WCAG 2.5.8 does; a link standing on its own is not.
-    // Running text: an inline link in a paragraph, list item or span that has words of its own beside the link (a text node of
-    // the same parent, not the text of other elements in it, such as the rest of a card).
-    const inText = (el: HTMLElement) => getComputedStyle(el).display === 'inline'
-      && !!el.parentElement?.matches('p, li, span')
-      && [...el.parentElement.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? '').trim() !== '');
+    // Running text: an inline link whose nearest block is a paragraph or list item that holds words of its own, outside any link
+    // or button (a card of a name and one link is not running text).
+    const inText = (el: HTMLElement) => {
+      if (getComputedStyle(el).display !== 'inline') return false;
+      let block = el.parentElement;
+      while (block && /^inline/.test(getComputedStyle(block).display)) block = block.parentElement;
+      if (!block?.matches('p, li')) return false;
+      const words = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+      for (let n = words.nextNode(); n; n = words.nextNode()) {
+        if ((n.textContent ?? '').trim() !== '' && !n.parentElement?.closest('a, button')) return true;
+      }
+      return false;
+    };
     return [...new Set([...document.querySelectorAll<HTMLElement>(`:is(main, .staff-bar, .sheet-panel, .tab-bar) :is(${tappable})`), ...labels])]
       .filter((el) => {
         const r = el.getBoundingClientRect();
@@ -124,15 +132,16 @@ async function targets(page: Page): Promise<Target[]> {
           // The one box that holds targets and is focusable only to pass focus on: a Segmented's group (Radix ToggleGroup).
           && !el.matches('.segmented');
       })
-      .map((el) => {
+      .map((el, index) => {
         const r = el.getBoundingClientRect();
+        el.dataset.measured = String(index);
         const name = `${el.tagName.toLowerCase()}.${[...el.classList].join('.')} "${(el.textContent || el.getAttribute('aria-label') || '').trim().slice(0, 30)}"`;
         const control = el.matches('.row-list > li > .list-row, .row-list > .list-row') ? el.closest('.row-list')
           : el.matches('.segmented > button, .stepper > *') ? el.parentElement
             : el.closest('.tab-bar');
         if (control && !groups.has(control)) groups.set(control, groups.size);
         return {
-          name, left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height,
+          name, index, left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height,
           group: control ? (groups.get(control) as number) : -1, cover: coverOf(el),
         };
       });
@@ -163,29 +172,53 @@ function pinnedInset(all: Target[], screen: { width: number; height: number }): 
 
 /**
  * The pairs of targets nearer than 8px, measured where they are drawn, and the targets of the page a bar hides for good. Two parts
- * of one control touch by design. A bar in its own place is measured against the page like any target, overlap included: the top
- * bar against the first target of the page at the top, the ActionBar put back in the flow against Clear this purchase. While a bar
- * floats over the page (the fixed tabs, the top bar or the ActionBar stuck away from its place) the page scrolls under it, so a
- * target of the page 0 to 8px from it, or under it, is in passing and `pinnedInset` keeps the bar's own targets clear; but a
- * target under a floating bar where the page cannot scroll any further to bring it out (under the tabs or a stuck ActionBar at the
- * foot of the page, under the top bar at its top) can never be tapped, and that is a failure.
+ * of one control touch by design. Any two boxes that meet fail, a floating bar's target over a target of the page included. While
+ * a bar floats over the page (the fixed tabs, the top bar or the ActionBar stuck away from its place) the page scrolls past it, so
+ * only a target of the page 0 to 8px from one of its targets is left, and `pinnedInset` keeps the bar's own targets clear of its
+ * edges. A target of the page under a floating bar where the page cannot scroll any further to bring it out (under the tabs or a
+ * stuck ActionBar at the foot, under the top bar at the top) can never be tapped, and fails too.
  */
-function tooClose(all: Target[], scroll: { atTop: boolean; atFoot: boolean; height: number }): string[] {
+function tooClose(all: Target[]): { close: string[]; under: number[] } {
   const close: string[] = [];
+  const under = new Set<number>();
+  const floats = (t: Target) => !!t.cover?.floating;
   all.forEach((a, i) => all.slice(i + 1).forEach((b) => {
     if (a.group >= 0 && a.group === b.group) return;
-    if (!a.cover !== !b.cover && (a.cover ?? b.cover)?.floating) return;
     const gap = apart(a, b);
-    if (gap < GAP - 0.5) close.push(`${a.name} and ${b.name}: ${Math.round(gap)}px`);
+    const passing = !a.cover !== !b.cover && (floats(a) || floats(b));
+    // A target of the page met by a floating bar is brought clear of the bars and measured again (`underBars`); any other meeting
+    // fails at once, and only the 0 to 8px band of a floating bar against the page it passes over is left.
+    if (gap < 0 && passing) under.add((a.cover ? b : a).index);
+    else if (gap < 0 || (gap < GAP - 0.5 && !passing)) close.push(`${a.name} and ${b.name}: ${Math.round(gap)}px`);
   }));
-  const floating = all.flatMap((t) => (t.cover?.floating ? [t.cover] : []));
   for (const t of all.filter((x) => !x.cover)) {
-    for (const bar of floating) {
-      const atBottom = (bar.top + bar.bottom) / 2 > scroll.height / 2;
-      if (apart(t, bar) < 0 && (atBottom ? scroll.atFoot : scroll.atTop)) close.push(`${t.name} under a bar it cannot scroll out of`);
-    }
+    if (all.some((b) => b.cover?.floating && apart(t, b.cover) < 0)) under.add(t.index);
   }
-  return [...new Set(close)];
+  return { close: [...new Set(close)], under: [...under] };
+}
+
+/**
+ * Each target of the page found under a floating bar, scrolled into the middle of the screen (the root's scroll padding keeps it
+ * above a stuck bar) and measured again: still under a bar, it can never be tapped, and that is a failure.
+ */
+async function underBars(page: Page, under: number[]): Promise<string[]> {
+  const failed: string[] = [];
+  for (const index of under) {
+    const hidden = await page.locator(`[data-measured="${index}"]`).evaluate((el) => {
+      el.scrollIntoView({ block: 'center' });
+      const r = el.getBoundingClientRect();
+      const bars = [...document.querySelectorAll<HTMLElement>('*')].filter((b) => {
+        const p = getComputedStyle(b).position;
+        if (p !== 'fixed' && p !== 'sticky') return false;
+        if (b.contains(el) || b.matches('.sheet-layer, .sheet-layer *')) return false;
+        const box = b.getBoundingClientRect();
+        return box.width > 0 && box.height > 0 && box.left < r.right && r.left < box.right && box.top < r.bottom && r.top < box.bottom;
+      });
+      return bars.length > 0 ? `${el.tagName.toLowerCase()} "${(el.textContent ?? '').trim().slice(0, 30)}" stays under ${bars.map((b) => b.className).join(', ')}` : '';
+    });
+    if (hidden) failed.push(hidden);
+  }
+  return failed;
 }
 
 /** The buttons of each ActionBar and sheet: their boxes in the order of the page, which is the primary, and the bar's inner box. */
@@ -237,13 +270,12 @@ describe.each(SCREENS)('the buttons of $screen (#825)', ({ screen, ready, main, 
       const all = await targets(page);
       expect(all.length, 'targets found').toBeGreaterThan(0);
       expect(all.filter((t) => t.width < TAP - 0.5 || t.height < TAP - 0.5).map((t) => `${t.name} ${Math.round(t.width)}x${Math.round(t.height)}`), at).toEqual([]);
-      const scroll = await page.evaluate(() => ({
-        atTop: window.scrollY <= 0.5,
-        atFoot: window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 1,
-        height: window.innerHeight,
-      }));
-      expect(tooClose(all, scroll), `measured at the ${at}`).toEqual([]);
+      const { close, under } = tooClose(all);
+      expect(close, `measured at the ${at}`).toEqual([]);
       expect(pinnedInset(all, PHONE), `measured at the ${at}`).toEqual([]);
+      const scrolled = await page.evaluate(() => window.scrollY);
+      expect(await underBars(page, under), `brought out from under a bar at the ${at}`).toEqual([]);
+      await page.evaluate((y) => window.scrollTo(0, y), scrolled);
       await flow?.evaluate((el) => (el as Element).remove());
     }
     await page.evaluate(() => window.scrollTo(0, 0));
@@ -329,6 +361,36 @@ describe.each(SCREENS)('the buttons of $screen (#825)', ({ screen, ready, main, 
       expect(Math.abs(bar.inner.right - (bar.boxes.at(-1)?.right ?? bar.inner.right))).toBeLessThanOrEqual(1);
       if (bar.boxes.length > 1 || bar.primaries.length > 0) expect(bar.primaries, 'one primary, the last').toEqual([bar.boxes.length - 1]);
     }
+    await page.close();
+  });
+});
+
+// JUSTIFICATION-A3: the lead's note on the review of a4cc489 asks for these two fixtures of the measuring itself.
+describe('the measuring itself (#825)', () => {
+  // The page's room for the tabs taken away, so the last rows of Money end under the fixed tab bar: the suite must fail it.
+  it('fails a list row left under the tab bar', async () => {
+    const page = await open('money', '.list-row', PHONE, true);
+    await page.addStyleTag({ content: 'body, .app-shell, .app-content, .nav-layout, .nav-layout-main, main { padding-bottom: 0 !important; margin-bottom: 0 !important; min-height: 0 !important; } main { padding-top: 300px !important; }' });
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await settle(page.locator('main'));
+    const { under } = tooClose(await targets(page));
+    expect(under.length, 'a row under the tabs is found').toBeGreaterThan(0);
+    expect((await underBars(page, under)).join('\n')).toMatch(/stays under tab-bar/);
+    await page.close();
+  });
+
+  // A card of a name and one link drawn as a button is measured; a link inside a sentence is not, as WCAG 2.5.8 leaves it out.
+  it('measures a link standing in a card and leaves out a link in running text', async () => {
+    const page = await browser.newPage({ viewport: PHONE, hasTouch: true, isMobile: true });
+    await page.setContent(`<main>
+      <ul><li class="card"><strong>Test item</strong><a class="open" href="#item" style="display: inline-flex; min-height: 48px">Open the item</a></li></ul>
+      <p>Read <a class="prose" href="#guide">the guide</a> before you start.</p>
+      <div class="card"><a class="lonely" href="#alone">Open</a></div>
+    </main>`);
+    const names = (await targets(page)).map((t) => t.name);
+    expect(names.some((n) => n.startsWith('a.open'))).toBe(true);
+    expect(names.some((n) => n.startsWith('a.lonely'))).toBe(true);
+    expect(names.some((n) => n.startsWith('a.prose'))).toBe(false);
     await page.close();
   });
 });

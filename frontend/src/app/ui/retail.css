@@ -206,6 +206,16 @@
   margin: 0 var(--tap-gap) var(--tap-gap) 0;
 }
 
+/* Open the item and the Items ways to add sizes and colours are links drawn as buttons: a 48px target wherever they stand, even
+   should .btn change (#825). */
+.item-page-link,
+[data-tour='product-add-sizes'],
+[data-tour='product-join-sizes'] {
+  display: inline-flex;
+  min-width: var(--tap);
+  min-height: var(--tap);
+}
+
 /* Issue #728: "0 here. 456 at Test Store" and its switch, under the quantity; in a table cell it reads from the left. */
 .stock-elsewhere {
   display: flex;
