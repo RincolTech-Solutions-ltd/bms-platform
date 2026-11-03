@@ -197,12 +197,11 @@ class SmsEventsService implements SmsEvents {
     static String plainName(String name, int maxLength) {
         StringBuilder out = new StringBuilder();
         for (char c : (name == null ? "" : name).toCharArray()) {
-            char k = switch (c) {
-                case '-', '‐', '‑', '‒', '–', '—', '―', '−', '\n', '\r', '\t' -> ' ';
-                case '‘', '’', 'ʼ' -> '\'';
-                case '“', '”' -> '"';
-                default -> c;
-            };
+            // The dashes and quotes by code point (hyphens, figure, en and em dashes, the bar, minus; curly quotes), so
+            // this file carries none of them.
+            char k = c == '-' || (c >= 0x2010 && c <= 0x2015) || c == 0x2212 || Character.isWhitespace(c)
+                    ? ' '
+                    : c == 0x2018 || c == 0x2019 || c == 0x02bc ? '\'' : c == 0x201c || c == 0x201d ? '"' : c;
             if (SmsSegments.basic(k)) {
                 out.append(k);
             }

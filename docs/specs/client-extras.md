@@ -716,8 +716,20 @@ Built in slice #231 (no migration). Where the build sharpens the text above:
   branch. It queues through `SmsEvents` like the money events; the member for the opt-out comes from the purpose handler's new
   `memberOf` (a loan's borrower, an account's holder), so the payments core still names no vertical.
 - **Once per intent.** The outbox key is per intent and member; a repeat answers `already_sent: true` and writes nothing.
+- **The real status (issue #772).** Every answer carries `text_status`: `queued` (still in the outbox, or at the sender), `sent`
+  (the provider or, on staging, the sink took it), `failed` (the provider failed, refused or blocked it, its outcome is
+  `unknown`, or the channel dropped it before its time was up) or `expired` (it never reached the provider before the intent
+  expired or its hour ran out, or its payment closed). `already_sent` alone only proves the audit row. The status is read
+  through `SmsEvents.status`: an SMS outbox row's id is a name based UUID of its idempotency key, so the row of an event is
+  found without storing anything (no migration); `notification_outbox_is_pending` says whether it waits, and the tenant's
+  `sms_deliveries` row (row-level security) says what the provider did. The screen says "queued earlier" while it waits, "sent"
+  only when sent, and after `failed` or `expired` offers "Make a new payment link" (it cancels this payment first).
+- **Withdrawn when the payment closes (issue #772).** When an intent leaves `pending` (paid, cancelled, failed, expired), its
+  link text still waiting in the outbox and held by no sender is withdrawn (`cancelled_settled`), as a reversal withdraws a
+  receipt, so a dead or already paid link never goes.
 - **Open only, and it expires with the intent.** `pending` with a link and before `expires_at`; a transactional message now
-  takes the earlier of its own expiry and its usual hour.
+  takes the earlier of its own expiry and its usual hour. No other transactional caller passes an expiry:
+  `SmsExpiryCallersTest` pins the callers of the forms that take one (the loan reminders and arrears notices, and this link).
 - **Polite refusals, nothing written.** `collections_disabled`, `sms_off` (either switch off, or a cap of 0),
   `member_opted_out` (an opt-out of all SMS; a reminders-only opt-out does not block a link), and 429 `too_many_link_texts`
   above 3 link texts per member in an hour and 429 `link_text_daily_limit` above 200 per business in 24 hours (a user who
@@ -730,7 +742,10 @@ Built in slice #231 (no migration). Where the build sharpens the text above:
 - **The wording.** `{tenant_name}: Pay {currency} {amount} for {reference} at {link}`, where `reference` is `loan <loan_no>` or
   `savings account <account_no>` with any dash written as a space (`loan LN HQ 000123`), so the words of the text carry
   no dash; only the provider's address may. No name, no balance. The hosted address is about 113 characters, so the text is two GSM-7
-  segments; it is not one of the wordings a tenant can override (section 4.16).
+  segments; it is not one of the wordings a tenant can override (section 4.16). The business name is made plain for it
+  (issue #772, `SmsEvents.plainTenantName`): every dash is written as a space, a curly quote as a straight one, any other
+  character outside the GSM-7 default alphabet is dropped (one would make the text UCS-2, and the address alone would then
+  take two segments), and it is cut to 40 characters after a whole word, so the text stays within two segments.
 
 ### 4.14 Threat model (SMS)
 

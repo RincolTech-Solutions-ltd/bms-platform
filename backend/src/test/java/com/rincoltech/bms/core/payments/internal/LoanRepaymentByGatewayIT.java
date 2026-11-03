@@ -974,7 +974,7 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
             assertThat(textLink(i).getStatusCode().value()).isEqualTo(200);
         }
         pay(paid, 100_000, "CONF-772-PAID");
-        poller.tick();
+        tick(Duration.ofMinutes(3));
         assertThat(row(paid).get("status")).isIn("paid", "booked");
         ResponseEntity<JsonNode> c = call(
                 HttpMethod.POST,

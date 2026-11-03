@@ -109,11 +109,15 @@ class SmsPureTest {
      */
     @Test
     void frNtf02_aLongDashedBusinessNameIsMadePlainAndTheLinkTextStaysTwoSegments() {
-        String name = "Test’s Lending — Savings and Credit Co-operative Society of the Hills™ Branch";
+        // A curly apostrophe, an em dash, a hyphen and a trade mark sign, by code point so this file has no dash.
+        String em = String.valueOf((char) 0x2014);
+        String en = String.valueOf((char) 0x2013);
+        String name = "Test" + (char) 0x2019 + "s Lending " + em
+                + " Savings and Credit Co-operative Society of the Hills" + (char) 0x2122 + " Branch";
         String plain = SmsEventsService.plainName(name, 40);
         assertThat(plain).isEqualTo("Test's Lending Savings and Credit Co");
         assertThat(plain.length()).isLessThanOrEqualTo(40);
-        assertThat(plain).doesNotContain("-", "–", "—");
+        assertThat(plain).doesNotContain("-", en, em);
         String text = new OutboxTemplates()
                 .render(
                         "sms",
