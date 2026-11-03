@@ -48,7 +48,7 @@ export function matchCategories(categories: Category[], text: string): Category[
 /** What the list says when nothing matches. */
 export const noCategory = (term: string, canAdd: boolean) => `No category called "${term}".${canAdd ? ' Add it?' : ''}`;
 
-const nameOf = (c: Category) => `${c.name ?? ''}${c.active === false ? ' (switched off)' : ''}`;
+const nameOf = (c: Category) => `${c.name ?? ''}${c.active === false ? ' (deleted)' : ''}`;
 
 function AddCategory({ id, thing, initial, existing, onAdded, onChoose, onCancel }: {
   id: string;
@@ -154,7 +154,8 @@ function Choices({ id, thing, categories, value, noneLabel, canAdd, onPick, onAd
   const listId = `${id}-list`;
   const optionId = useId();
   const term = text.trim();
-  const matches = matchCategories(categories, text);
+  // Issue #830: a deleted (switched off) category is hidden from the picker, unless it is the one already chosen.
+  const matches = matchCategories(categories.filter((c) => c.active !== false || c.id === value), text);
   // The empty choice ("All categories" on a filter) is offered only while nothing is typed.
   const options: { id: string; label: string }[] = [
     ...(noneLabel !== undefined && term === '' ? [{ id: '', label: noneLabel }] : []),
