@@ -34,6 +34,18 @@ final class Parsing {
     /** The longest cell kept, Excel's own limit; a longer one is a file we cannot have been given by a spreadsheet. */
     static final int MAX_CELL_CHARS = 32_767;
 
+    /** The default of {@code bms.imports.max-file-size}. */
+    static final long DEFAULT_MAX_FILE_BYTES = 25L * 1024 * 1024;
+
+    /**
+     * Characters of header names and text a batch's rows may hold per byte of the file size limit (review of #790). A file
+     * can name a text once and use it many times: every cell may reference one XLSX shared string, and every row repeats
+     * each header name as a key. One 32,767 character shared string in every cell of a few KB of zipped sheet would
+     * otherwise stage gigabytes. Honest CSV and JSON Lines stay near one character per byte, and XLSX text near its
+     * inflated size, so eight times the limit (about 200 million characters at 25 MB) refuses no real file.
+     */
+    static final long EXPANSION_FACTOR = 8;
+
     private Parsing() {}
 
     /** One cell as read: its value (a String, a BigDecimal, a Boolean, or a JSON value) and its type. */
@@ -62,7 +74,12 @@ final class Parsing {
      * The limits of one batch and the mapping's say: the headers the header row must hold (empty: the first row that is not
      * blank) and the columns not to keep (spec section 6.1). Header names are compared trimmed and ignoring case.
      */
-    record Limits(int maxRows, int maxColumns, Set<String> requiredHeaders, Set<String> ignoredColumns) {
+    record Limits(
+            int maxRows, int maxColumns, Set<String> requiredHeaders, Set<String> ignoredColumns, long maxFileBytes) {
+
+        Limits(int maxRows, int maxColumns, Set<String> requiredHeaders, Set<String> ignoredColumns) {
+            this(maxRows, maxColumns, requiredHeaders, ignoredColumns, DEFAULT_MAX_FILE_BYTES);
+        }
 
         Limits {
             requiredHeaders = requiredHeaders.stream().map(Parsing::key).collect(Collectors.toUnmodifiableSet());
@@ -236,6 +253,17 @@ final class Parsing {
         return new Failure(
                 TOO_MANY_COLUMNS,
                 "The file is over the limit of " + limits.maxColumns() + " columns; remove the columns not needed.");
+    }
+
+    static long maxExpandedChars(Limits limits) {
+        return EXPANSION_FACTOR * limits.maxFileBytes();
+    }
+
+    static Failure tooMuchText(Limits limits) {
+        return new Failure(
+                FILE_TOO_LARGE,
+                "The file's cells expand to more than " + maxExpandedChars(limits) / 1_000_000
+                        + " million characters when read; split it and upload the parts.");
     }
 
     static Failure headerNotFound() {

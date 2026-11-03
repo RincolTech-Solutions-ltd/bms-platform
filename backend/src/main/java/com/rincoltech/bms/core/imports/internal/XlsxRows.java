@@ -366,6 +366,7 @@ final class XlsxRows {
             int style = 0;
             String value = null;
             StringBuilder inline = null;
+            int phonetic = 0;
             while (r.hasNext()) {
                 int ev = r.next();
                 if (ev == XMLStreamConstants.START_ELEMENT) {
@@ -389,8 +390,10 @@ final class XlsxRows {
                         }
                         case "v" -> value = readText(r, "on row " + rowNo);
                         case "is" -> inline = new StringBuilder();
+                        // A phonetic reading is not the cell's text, here as in the shared strings (review of #790).
+                        case "rPh" -> phonetic++;
                         case "t" -> {
-                            if (inline != null) {
+                            if (inline != null && phonetic == 0) {
                                 inline.append(readText(r, "on row " + rowNo));
                                 // Checked after every run, as shared strings are, so many runs cannot grow one cell.
                                 if (inline.length() > Parsing.MAX_CELL_CHARS) {
@@ -403,6 +406,7 @@ final class XlsxRows {
                     }
                 } else if (ev == XMLStreamConstants.END_ELEMENT) {
                     switch (r.getLocalName()) {
+                        case "rPh" -> phonetic--;
                         case "c" -> {
                             if (row == null) {
                                 throw Parsing.unreadable("The sheet has a cell outside a row.");

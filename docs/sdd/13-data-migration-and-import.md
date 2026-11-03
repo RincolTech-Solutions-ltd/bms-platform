@@ -745,16 +745,25 @@ tooling, as the commit is. Every call works on the bound business only: a run or
   one short statement, well inside it and the 60 second `idle_in_transaction_session_timeout`.
 - **Memory.** Besides the row chunk, the XLSX reader keeps only what its first pass needs (shared strings, styles, sheet
   list), charged at an estimate of its heap cost against 96 MiB, so many empty or short strings are stopped as surely as
-  long ones, and never more shared strings than the sheet can have cells (rows plus the header, times columns); every text is read in pieces and stopped at 32,767 characters, and a shared or inline string made of many runs is checked after each run; a part named twice is refused; and each pass may
-  unpack at most 1 GiB, skipped parts included. A sheet name over the 100 characters `sheet_name` holds is
+  long ones, and never more shared strings than the sheet can have cells (rows plus the header, times columns); every text is read in pieces and stopped at 32,767 characters, and a shared or inline string made of many runs is checked after each run, its phonetic readings (`rPh`) left out in both; a part named twice is refused; and each pass may
+  unpack at most 1 GiB, skipped parts included. A text used many times is charged at every use: the header names and
+  texts the rows hold may total at most eight times the file size limit in characters (200 million at 25 MB), past which
+  the batch is `FILE_TOO_LARGE` and its file deleted, so one 32,767 character shared string in every cell of a few KB of
+  zipped sheet is refused in about a second instead of staging gigabytes. A chunk is also written early once its JSON
+  reaches 8 million characters, so wide rows of long texts never fill the heap between writes. A sheet name over the 100
+  characters `sheet_name` holds is
   `FILE_UNREADABLE`. A NUL in a cell or anywhere in nested JSON, which PostgreSQL cannot store, is `FILE_UNREADABLE`, as is
-  any value the database refuses anywhere in the parse's write, the batch's own update included. A transient database
-  error (a lost connection, a lock timeout) stays a server error and the batch keeps its file for another try.
+  any value the database refuses anywhere in the parse's write, the batch's own update included. A write that passes the
+  `statement_timeout` (57014) would time out again on a retry, so it fails the batch with `FILE_TOO_LARGE`. Any other
+  transient database error (a lost connection, a lock timeout) stays a server error and the batch keeps its file for
+  another try. A failure reason is cut to 300 characters without splitting a character.
 - **Proven by** `ImportUploadsIT` (only `import_*` and the audit log change; the stored object opens with the run's key and
   not without; each refusal; isolation; a file at the row limit streamed in blocks; no file content, personal value or file
   name in the logs; the cleanup), `UploadMemoryTest` (a CSV and an XLSX of 100,000 rows parse in a child JVM at the staging
-  heap of 224 MB), `SourceParserTest`, `QuarantineCipherTest`, `ReaderLimitsTest` (the memory budget, a zip bomb in a
-  skipped part, texts over the cell limit, many runs in one inline cell, a sheet name over 100 characters, a part named
+  heap of 224 MB, and one long shared string in every cell is refused there in seconds), `SourceParserTest`,
+  `QuarantineCipherTest`, `UploadServiceTest` (the reason's cut, the timeout check), `ReaderLimitsTest` (the memory
+  budget, a zip bomb in a skipped part, texts over the cell limit, many runs in one inline cell, one long shared string in
+  every cell, a phonetic reading in an inline cell, a sheet name over 100 characters, a part named
   twice, a number format with a unit, NUL in every format and not in the text of an escaped backslash, headers renamed
   without collisions) and `ImportUploadReviewIT` (a cancel or a move to ready while a file is fetched writes nothing, a NUL,
   a long sheet name and a refused update of the batch fail the batch with a code, the daily job as the scheduler runs it);

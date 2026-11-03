@@ -26,6 +26,13 @@ final class SourceParser {
 
     static final int CHUNK = 1_000;
 
+    /**
+     * The JSON characters at which a chunk is handed on before it holds {@link #CHUNK} rows (review of #790): 8 million
+     * characters is 16 MB of heap at most, plus the one row that crossed it, so wide rows of long texts cannot fill the 224 MB
+     * staging heap between flushes.
+     */
+    static final long CHUNK_CHARS = 8_000_000;
+
     private static final Charset WINDOWS_1252 = Charset.forName("windows-1252");
 
     private SourceParser() {}
@@ -45,7 +52,7 @@ final class SourceParser {
             ObjectMapper mapper,
             Consumer<List<StagedRow>> flush)
             throws IOException {
-        Chunks chunks = new Chunks(mapper, flush);
+        Chunks chunks = new Chunks(mapper, flush, limits);
         List<String> warnings = new ArrayList<>();
         try {
             return read(type, utf8, source, sheetName, limits, mapper, chunks, warnings);
@@ -100,17 +107,25 @@ final class SourceParser {
         return new BufferedReader(new InputStreamReader(in, utf8 ? StandardCharsets.UTF_8 : WINDOWS_1252), 64 * 1024);
     }
 
-    /** Collects rows into chunks of {@link #CHUNK} as JSON and hands each full chunk on; nothing more is held. */
+    /**
+     * Collects rows into chunks of {@link #CHUNK} as JSON and hands each chunk on when full, or sooner once it holds
+     * {@link #CHUNK_CHARS} characters of JSON; nothing more is held. Charges every kept header name and text against the
+     * batch's {@link Parsing#EXPANSION_FACTOR} cap before the row is serialised.
+     */
     private static final class Chunks implements Parsing.Sink {
 
         private final ObjectMapper mapper;
         private final Consumer<List<StagedRow>> flush;
+        private final Parsing.Limits limits;
         private List<StagedRow> chunk = new ArrayList<>(CHUNK);
+        private long chunkChars;
+        private long chars;
         int rows;
 
-        Chunks(ObjectMapper mapper, Consumer<List<StagedRow>> flush) {
+        Chunks(ObjectMapper mapper, Consumer<List<StagedRow>> flush, Parsing.Limits limits) {
             this.mapper = mapper;
             this.flush = flush;
+            this.limits = limits;
         }
 
         @Override
@@ -126,14 +141,21 @@ final class SourceParser {
                         || (cell.value() instanceof JsonNode n && hasNul(n))) {
                     throw Parsing.unreadable("Row " + sourceRowNo + " holds a NUL character.");
                 }
+                // A text referenced again (a shared string, a header name as a key) is charged at every use.
+                chars += name.length() + (cell.value() instanceof String s ? s.length() : 0);
+                if (chars > Parsing.maxExpandedChars(limits)) {
+                    throw Parsing.tooMuchText(limits);
+                }
                 Map<String, Object> c = new LinkedHashMap<>();
                 c.put("value", cell.value());
                 c.put("type", cell.type());
                 json.put(name, c);
             });
-            chunk.add(new StagedRow(sourceRowNo, mapper.writeValueAsString(json)));
+            String rawJson = mapper.writeValueAsString(json);
+            chunk.add(new StagedRow(sourceRowNo, rawJson));
+            chunkChars += rawJson.length();
             rows++;
-            if (chunk.size() == CHUNK) {
+            if (chunk.size() == CHUNK || chunkChars >= CHUNK_CHARS) {
                 flush();
             }
         }
@@ -158,6 +180,7 @@ final class SourceParser {
             if (!chunk.isEmpty()) {
                 flush.accept(chunk);
                 chunk = new ArrayList<>(CHUNK);
+                chunkChars = 0;
             }
         }
     }

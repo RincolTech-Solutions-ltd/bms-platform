@@ -36,18 +36,32 @@ public final class UploadMemoryMain {
             }
             AtomicLong chunks = new AtomicLong();
             AtomicLong largest = new AtomicLong();
-            SourceParser.Parsed parsed = SourceParser.parse(
-                    type,
-                    written.utf8(),
-                    () -> QuarantineCipher.decrypt(
-                            new BufferedInputStream(Files.newInputStream(sealed), 64 * 1024), dataKey, batch),
-                    null,
-                    new Parsing.Limits(100_000, 200, Set.of(), Set.of()),
-                    JsonMapper.builder().build(),
-                    chunk -> {
-                        chunks.incrementAndGet();
-                        largest.accumulateAndGet(chunk.size(), Math::max);
-                    });
+            AtomicLong largestChars = new AtomicLong();
+            SourceParser.Parsed parsed;
+            try {
+                parsed = SourceParser.parse(
+                        type,
+                        written.utf8(),
+                        () -> QuarantineCipher.decrypt(
+                                new BufferedInputStream(Files.newInputStream(sealed), 64 * 1024), dataKey, batch),
+                        null,
+                        new Parsing.Limits(100_000, 200, Set.of(), Set.of()),
+                        JsonMapper.builder().build(),
+                        chunk -> {
+                            chunks.incrementAndGet();
+                            largest.accumulateAndGet(chunk.size(), Math::max);
+                            largestChars.accumulateAndGet(
+                                    chunk.stream()
+                                            .mapToLong(r -> r.rawJson().length())
+                                            .sum(),
+                                    Math::max);
+                        });
+            } catch (Parsing.Failure f) {
+                System.out.println(
+                        "refused=" + f.code + " chunks=" + chunks.get() + " largestChunkChars=" + largestChars.get()
+                                + " maxHeapMb=" + Runtime.getRuntime().maxMemory() / (1024 * 1024));
+                return;
+            }
             System.out.println("size=" + written.size() + " rows=" + parsed.rows() + " columns=" + parsed.columns()
                     + " chunks=" + chunks.get() + " largestChunk=" + largest.get() + " maxHeapMb="
                     + Runtime.getRuntime().maxMemory() / (1024 * 1024));

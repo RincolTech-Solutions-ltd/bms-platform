@@ -227,6 +227,58 @@ class ReaderLimitsTest {
         assertThat(sheetPass[0]).as("stopped early in the cell").isLessThan(book.length / 4);
     }
 
+    // JUSTIFICATION-A3: the tests the review of 339d6a2 asks for (must-fix 1, nice-to-have 1); no new mechanism.
+    /**
+     * One text at the cell limit in the shared strings, referenced by every cell of 1,000 rows of 200 columns below a
+     * header (review of 339d6a2): about 4 MB of sheet XML, small zipped, and 6.5 billion characters if every use expanded.
+     */
+    static byte[] oneLongTextInEveryCell() throws IOException {
+        StringBuilder texts = new StringBuilder("<si><t>" + "x".repeat(Parsing.MAX_CELL_CHARS) + "</t></si>");
+        StringBuilder sheet = new StringBuilder(SHEET.substring(0, SHEET.indexOf("<row")) + "<row r=\"1\">");
+        for (int c = 1; c <= 200; c++) {
+            texts.append("<si><t>H").append(c).append("</t></si>");
+            sheet.append("<c t=\"s\"><v>").append(c).append("</v></c>");
+        }
+        sheet.append("</row>");
+        String cells = "<c t=\"s\"><v>0</v></c>".repeat(200);
+        for (int r = 2; r <= 1_001; r++) {
+            sheet.append("<row r=\"").append(r).append("\">").append(cells).append("</row>");
+        }
+        return workbook(sst(texts.toString()), sheet + END, null, Map.of());
+    }
+
+    @Test
+    void oneLongSharedTextInEveryCellIsRefusedBeforeItExpands() throws IOException {
+        byte[] book = oneLongTextInEveryCell();
+        assertThat(book.length).as("small on disk").isLessThan(500_000);
+        long[] staged = new long[2];
+        assertThatThrownBy(() -> SourceParser.parse(
+                        FileType.XLSX, true, () -> new ByteArrayInputStream(book), null, LIMITS, JSON, chunk -> {
+                            staged[0] += chunk.size();
+                            staged[1] = Math.max(
+                                    staged[1],
+                                    chunk.stream()
+                                            .mapToLong(r -> r.rawJson().length())
+                                            .sum());
+                        }))
+                .isInstanceOfSatisfying(
+                        Parsing.Failure.class, f -> assertThat(f.code).isEqualTo(Parsing.FILE_TOO_LARGE));
+        long row = 200L * (Parsing.MAX_CELL_CHARS + 40);
+        assertThat(staged[0])
+                .as("refused at the cap, long before the 1,000th row")
+                .isLessThan(40);
+        assertThat(staged[1]).as("a chunk is handed on by its size").isLessThan(SourceParser.CHUNK_CHARS + row);
+    }
+
+    @Test
+    void aPhoneticReadingIsNotPartOfAnInlineText() throws IOException {
+        String sheet = SHEET + "<row r=\"2\"><c r=\"A2\" t=\"inlineStr\"><is><t>FAB</t>"
+                + "<rPh sb=\"0\" eb=\"3\"><t>fabu</t></rPh></is></c></row>" + END;
+        parse(FileType.XLSX, workbook(sst("<si><t>Code</t></si>"), sheet, null, Map.of()));
+        assertThat(JSON.readTree(rows.get(0).rawJson()).get("Code").get("value").asString())
+                .isEqualTo("FAB");
+    }
+
     @Test
     void aSheetNameLongerThanTheBatchRecordsIsUnreadable() throws IOException {
         String sheet = SHEET + "<row r=\"2\"><c r=\"A2\" t=\"inlineStr\"><is><t>FAB-1</t></is></c></row>" + END;

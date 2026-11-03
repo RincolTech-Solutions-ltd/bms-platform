@@ -31,8 +31,10 @@ import javax.sql.DataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -273,7 +275,11 @@ class UploadService implements ImportUploads {
             seams.afterFetch();
             Path copy = temp;
             Parsing.Limits limits = new Parsing.Limits(
-                    settings.maxRows(), settings.maxColumns(), opts.requiredHeaders(), opts.ignoredColumns());
+                    settings.maxRows(),
+                    settings.maxColumns(),
+                    opts.requiredHeaders(),
+                    opts.ignoredColumns(),
+                    settings.maxFileSize().toBytes());
             try {
                 SourceParser.Parsed parsed = tx.execute(s -> readInto(held, copy, dataKey, limits, opts));
                 log.info(
@@ -291,6 +297,19 @@ class UploadService implements ImportUploads {
                 // timeout) is not the file's fault: it stays a server error and the batch keeps its file for a retry.
                 log.info("import batch {}: the database refused a value from the file", batchId);
                 fail(held, Parsing.FILE_UNREADABLE, "The file holds a value that cannot be stored.");
+            } catch (DataAccessException e) {
+                // statement_timeout (57014) while the rows were written (review of #790): a retry of the same file
+                // would time out again, so the batch fails instead of staying uploaded behind a server error. Spring
+                // may give it as a QueryTimeoutException or as a transient error carrying the SQLState; anything
+                // else is rethrown.
+                if (!queryTimedOut(e)) {
+                    throw e;
+                }
+                log.info("import batch {}: writing its rows timed out", batchId);
+                fail(
+                        held,
+                        Parsing.FILE_TOO_LARGE,
+                        "Storing the file's rows took too long; split it and upload the parts.");
             }
         } finally {
             Arrays.fill(dataKey, (byte) 0);
@@ -404,9 +423,7 @@ class UploadService implements ImportUploads {
                             UPDATE import_batches SET status = 'failed', failure_code = ?, failure_reason = ?, failed_at = now(),
                                    row_count = 0
                              WHERE id = ?
-                            """)
-                    .params(code, reason.length() > 300 ? reason.substring(0, 300) : reason, held.id())
-                    .update();
+                            """).params(code, truncate(reason, 300), held.id()).update();
             audit.record(new AuditLog.Entry(
                     "core.import_batch.failed",
                     "import_batch",
@@ -628,6 +645,24 @@ class UploadService implements ImportUploads {
         String name = fileName.strip().replace('\\', '/');
         name = name.substring(name.lastIndexOf('/') + 1).replaceAll("\\p{Cntrl}", "");
         return name.length() > 255 ? name.substring(name.length() - 255) : name;
+    }
+
+    static boolean queryTimedOut(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof QueryTimeoutException
+                    || (t instanceof SQLException s && "57014".equals(s.getSQLState()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** At most {@code max} characters, never ending on half of a surrogate pair. */
+    static String truncate(String s, int max) {
+        if (s.length() <= max) {
+            return s;
+        }
+        return s.substring(0, Character.isHighSurrogate(s.charAt(max - 1)) ? max - 1 : max);
     }
 
     private void auditRun(UUID runId, Map<String, Object> before, Map<String, Object> after) {
