@@ -2,8 +2,9 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { createLazyRoute, getRouteApi } from '@tanstack/react-router';
 import { useState } from 'react';
 import { type ItemShop, type ItemStock, itemPageApi } from '../../../api/item-page';
-import type { StockMovement } from '../../../api/retail';
+import { businessToday, type StockMovement } from '../../../api/retail';
 import { EmptyState } from '../../../app/ui/EmptyState';
+import { PeriodPicker } from '../../../app/ui/PeriodPicker';
 import { Hint } from '../../../app/ui/Hint';
 import { useCrumbLabel } from '../../../components/breadcrumbs';
 import { SkeletonList } from '../../../components/states';
@@ -88,20 +89,20 @@ export function ItemPageView({ item, productId }: { item: ItemStock; productId: 
   const { me } = useStaff();
   const shops = item.shops ?? [];
   const [branchId, setBranchId] = useState('');
+  // Every day to start with (an empty first day), as All sales does; the balances are those of the whole history anyway.
+  const today = businessToday();
   const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
-  const ranged = from === '' || to === '' || from <= to;
+  const [to, setTo] = useState(today);
   const moves = useInfiniteQuery({
     queryKey: ['retail', 'item-movements', productId, branchId || 'all', from, to],
     queryFn: ({ pageParam, signal }) =>
       itemPageApi.movements({ productId, ...(branchId ? { branchId } : {}), ...(from ? { from } : {}), ...(to ? { to } : {}), ...(pageParam ? { cursor: pageParam } : {}), signal }),
     initialPageParam: '',
     getNextPageParam: (last) => last.next_cursor || undefined,
-    enabled: ranged,
   });
   const items = (moves.data?.pages ?? []).flatMap((p) => p.items ?? []);
   const nameOf = (id: string | undefined) => shops.find((s) => s.branch_id === id)?.name ?? '';
-  const narrowed = branchId !== '' || from !== '' || to !== '';
+  const narrowed = branchId !== '' || from !== '' || to !== today;
   return (
     <>
       <p>
@@ -123,25 +124,24 @@ export function ItemPageView({ item, productId }: { item: ItemStock; productId: 
       <section aria-label="Every movement of this item" data-tour="item-page-moves">
         <h2>Every movement, newest first</h2>
         <Hint>Each line shows what the shop held just after it, so you can check the count.</Hint>
-        <div className="rt-row" data-tour="item-page-filters">
+        <div data-tour="item-page-filters">
           {shops.length > 1 && (
             <div>
               <label htmlFor="item-shop">Shop</label>
+              {/* empty: shown only with two shops or more, and Every shop is always there. */}
               <select id="item-shop" value={branchId} onChange={(e) => setBranchId(e.target.value)}>
                 <option value="">Every shop</option>
                 {shops.map((s) => <option key={s.branch_id} value={s.branch_id}>{s.name}</option>)}
               </select>
             </div>
           )}
-          <div><label htmlFor="item-from">From</label><input id="item-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
-          <div><label htmlFor="item-to">To</label><input id="item-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
+          <PeriodPicker from={from} to={to} openStart label="Days of the movements" onChange={(range) => { setFrom(range.from); setTo(range.to); }} />
         </div>
-        {!ranged && <p role="alert" className="rt-flag">The start date must not be after the end date.</p>}
-        {ranged && moves.isPending && <SkeletonList label="Loading the movements" />}
+        {moves.isPending && <SkeletonList label="Loading the movements" />}
         <Problem error={moves.error} />
         {moves.data && items.length === 0 && (
           narrowed
-            ? <EmptyState text="Nothing moved for this choice." action={{ label: 'Show everything', onClick: () => { setBranchId(''); setFrom(''); setTo(''); } }} />
+            ? <EmptyState text="Nothing moved for this choice." action={{ label: 'Show everything', onClick: () => { setBranchId(''); setFrom(''); setTo(today); } }} />
             : <EmptyState text="Nothing has moved for this item yet." {...(canUse(me, 'stocktake') ? { action: { label: 'Count it now', to: '/staff/retail/stocktake' } } : {})} />
         )}
         <ul className="item-moves">
