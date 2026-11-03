@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, createLazyRoute, useRouterState } from '@tanstack/react-router';
+import { Link, createLazyRoute, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
 import { RETAIL_CURRENCY, businessToday, retail, type Product, type Supplier, type Purchase, type PurchasePayment, type PurchaseRequest } from '../../../api/retail';
 import { branchLabel } from '../../../auth/branch';
@@ -192,7 +192,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false, replac
   const setLines = (f: (ls: RestockLine[]) => RestockLine[]) => setDraft((d) => ({ ...d, lines: f(d.lines) }));
   const suppliers = useQuery({ queryKey: ['retail', 'suppliers'], queryFn: () => retail.listSuppliers() });
 
-  // The purchase saved screen replaces the form; an edited delivery also says "Delivery updated" (issue #830).
+  // toast-exempt: success screen, the purchase saved screen replaces the form of a new purchase; an edited delivery goes back to Past purchases and its toast says Delivery updated (issue #830)
   const save = useMutation({
     mutationFn: async () => {
       const supplierName = (suppliers.data ?? []).find((x) => x.id === supplierId)?.name ?? '';
@@ -532,13 +532,15 @@ export function RestockPage() {
   const [done, setDone] = useState<{ purchase: Purchase; context: RestockContext } | null>(null);
   const [round, setRound] = useState(0);
   const { again, edit } = useRouterState({ select: (state) => state.location.search }) as { again?: string; edit?: string };
+  const navigate = useNavigate();
   return (
     <Gate screen="restock" title={WORDS.buyStock}>
       <Link className="link-row" data-tour="restock-past" to="/staff/retail/restocks">Past purchases, to correct a mistake<RowChevron /></Link>
       {done ? (
         <RestockSaved purchase={done.purchase} context={done.context} onNew={() => { setDone(null); setRound((n) => n + 1); }} />
       ) : typeof edit === 'string' && edit !== '' ? (
-        <Again purchaseId={edit} edit onSaved={(purchase, context) => setDone({ purchase, context })} />
+        // Issue #830: as in the old app, saving an edit goes back to the list, where the new delivery names the one it replaces.
+        <Again purchaseId={edit} edit onSaved={() => void navigate({ to: '/staff/retail/restocks' })} />
       ) : typeof again === 'string' && again !== '' ? (
         <Again purchaseId={again} onSaved={(purchase, context) => setDone({ purchase, context })} />
       ) : (
