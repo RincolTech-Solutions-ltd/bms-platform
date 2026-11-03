@@ -209,6 +209,20 @@ export function NoStockHere({ branchId }: { branchId: string }) {
   );
 }
 
+/**
+ * Opens the item page (issue #813): what each shop holds of the item and every movement of it. Shown only to whoever may read
+ * stock; a full size tap target.
+ */
+export function ItemPageLink({ productId, name }: { productId?: string; name?: string }) {
+  const { me } = useStaff();
+  if (!productId || !canUse(me, 'stock')) return null;
+  return (
+    <Link className="btn btn-ghost item-page-link" to="/staff/retail/items/$productId" params={{ productId }} aria-label={name ? `Open ${name}: stock in each shop and every movement` : undefined}>
+      Open the item
+    </Link>
+  );
+}
+
 /** The product's category as a small grey label under its name; nothing when the product has none. */
 export function CategoryLabel({ category }: { category?: string }) {
   return category ? <span className="hint">{category}</span> : null;
