@@ -201,6 +201,11 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* A card's Open the item link and its Correct button (#813) stand 8px apart, side by side or one under the other (#825). */
+.stock-card > .item-page-link {
+  margin: 0 var(--tap-gap) var(--tap-gap) 0;
+}
+
 /* Issue #728: "0 here. 456 at Test Store" and its switch, under the quantity; in a table cell it reads from the left. */
 .stock-elsewhere {
   display: flex;
