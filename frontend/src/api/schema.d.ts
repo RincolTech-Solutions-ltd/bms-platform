@@ -18076,11 +18076,11 @@ export interface components {
             existing_amount_minor?: number;
             /** Format: uuid */
             existing_id?: string;
-            /** @description True when this caller may save an amount different from the suggestion: with retail.savings.overwrite, or with salespeople_see_savings_amount on when no saved record of the day was voided (replacing a saved amount needs retail.savings.overwrite; ADR-115) */
+            /** @description True when this caller may save an amount different from the suggestion: with retail.savings.overwrite, or with salespeople_see_savings_amount on when no saved record of the day was voided (replacing a saved amount needs retail.savings.overwrite; ADR-115); false once the day has an active savings record (issue #799) */
             may_change_amount?: boolean;
             /**
              * Format: int64
-             * @description Present only with retail.profit.read in the record's branch
+             * @description Present only with retail.profit.read in the record's branch; absent for every caller once the day has an active savings record (issue #799)
              */
             suggested_minor?: number;
             /** @description Opaque; echo it on the create call */
