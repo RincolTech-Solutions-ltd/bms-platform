@@ -951,12 +951,11 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
         }
         linkTextOutcome(sent, "sent", null, "delivered");
         linkTextOutcome(failed, "failed", "rejected", "rejected");
-        // Never reached the provider: still queued while its time lasts (never "failed", so nobody cancels a payment
-        // whose text may yet go), and expired once the payment link's own time is up.
+        // Dropped before the provider: the row is known and no longer waiting, so it will never go. Expired at once.
         linkTextOutcome(expired, "failed", "expired", null);
         assertThat(textLink(sent).getBody().get("text_status").asString()).isEqualTo("sent");
         assertThat(textLink(failed).getBody().get("text_status").asString()).isEqualTo("failed");
-        assertThat(textLink(expired).getBody().get("text_status").asString()).isEqualTo("queued");
+        assertThat(textLink(expired).getBody().get("text_status").asString()).isEqualTo("expired");
         // A send whose outcome the provider left unknown is said as such, on another member's loan.
         JsonNode unknown = intentFor(activeLoan(), 100_000);
         assertThat(textLink(unknown).getStatusCode().value()).isEqualTo(200);

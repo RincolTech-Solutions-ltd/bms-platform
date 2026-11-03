@@ -716,10 +716,10 @@ Built in slice #231 (no migration). Where the build sharpens the text above:
   branch. It queues through `SmsEvents` like the money events; the member for the opt-out comes from the purpose handler's new
   `memberOf` (a loan's borrower, an account's holder), so the payments core still names no vertical.
 - **Once per intent.** The outbox key is per intent and member; a repeat answers `already_sent: true` and writes nothing.
-- **The real status (issue #772).** Every answer carries `text_status`: `queued` (it has not reached the provider and its
-  time is not up), `sent` (the provider or, on staging, the sink took it), `failed` (the provider failed, refused or blocked
-  it), `unconfirmed` (the send's outcome is `unknown`: it may have arrived) or `expired` (it never reached the provider before
-  the intent expired or its hour ran out, or its payment closed). `already_sent` alone only proves the audit row. The status
+- **The real status (issue #772).** Every answer carries `text_status`: `queued` (still waiting in the outbox or at the
+  sender), `sent` (the provider or, on staging, the sink took it), `failed` (the provider failed, refused or blocked
+  it), `unconfirmed` (the send's outcome is `unknown`: it may have arrived) or `expired` (its row is no longer waiting and never
+  reached the provider: its time ran out, it was dropped or withdrawn, so it will never go). `already_sent` alone only proves the audit row. The status
   is read through `SmsEvents.status` by the outbox row's id, which `SmsEvents.queueTracked` answers when the text is queued
   and the link text keeps in its audit row (`outbox_id`, never the number). Every outbox row keeps a random id, so only the
   idempotency key decides a repeat (`ON CONFLICT` on its index): two transactions queueing the same event at once write one

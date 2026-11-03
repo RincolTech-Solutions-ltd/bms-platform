@@ -221,21 +221,27 @@ class SmsEventsIT extends IntegrationTest {
             }));
             assertThat(firstQueued.await(30, java.util.concurrent.TimeUnit.SECONDS))
                     .isTrue();
-            java.util.concurrent.Future<List<Result>> second = pool.submit(() -> inTenant(
-                    t,
-                    () -> List.of(
-                            rig.events.queue(new MemberSms(
-                                    "loan.repayment_received", member, "+256700000772", RECEIPT, ref, null)),
-                            rig.events.queue(new MemberSms(
-                                    "loan.repayment_received", member, "+256700000772", RECEIPT, other, null)))));
+            // The second's own backend, so the wait is looked for on its connection and no other test's.
+            java.util.concurrent.atomic.AtomicInteger secondPid = new java.util.concurrent.atomic.AtomicInteger();
+            java.util.concurrent.Future<List<Result>> second = pool.submit(() -> inTenant(t, () -> {
+                secondPid.set(
+                        jdbc.sql("SELECT pg_backend_pid()").query(Integer.class).single());
+                return List.of(
+                        rig.events.queue(
+                                new MemberSms("loan.repayment_received", member, "+256700000772", RECEIPT, ref, null)),
+                        rig.events.queue(new MemberSms(
+                                "loan.repayment_received", member, "+256700000772", RECEIPT, other, null)));
+            }));
             // The second is held by the first's uncommitted row before the first commits.
             boolean waiting = false;
             for (int i = 0; i < 200 && !waiting; i++) {
-                waiting = TestDatabase.owner()
-                                .sql("SELECT count(*) FROM pg_locks WHERE NOT granted AND locktype = 'transactionid'")
-                                .query(Long.class)
-                                .single()
-                        > 0;
+                waiting = secondPid.get() != 0
+                        && TestDatabase.owner()
+                                        .sql("SELECT count(*) FROM pg_locks WHERE NOT granted AND pid = ?")
+                                        .param(secondPid.get())
+                                        .query(Long.class)
+                                        .single()
+                                > 0;
                 if (!waiting) {
                     Thread.sleep(50);
                 }

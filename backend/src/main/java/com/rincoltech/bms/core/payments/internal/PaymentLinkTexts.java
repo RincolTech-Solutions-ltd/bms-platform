@@ -272,10 +272,14 @@ class PaymentLinkTexts {
             case SENT -> "sent";
             case FAILED -> "failed";
             case UNCONFIRMED -> "unconfirmed";
-            // Not at the provider and its time not up: still "queued", never "failed", so staff are not led to cancel a
-            // payment whose text may yet go (a text queued before this release, whose audit row has no outbox id).
+            // A known row no longer waiting that never reached the provider will never go: expired. Only a text queued
+            // before this release (no outbox id in its audit row, so its row cannot be read) is "queued" while its time
+            // lasts, so staff are not led to cancel a payment whose text may yet go.
             case NOT_SENT ->
-                hourOver || !clock.now().isBefore(intent.expiresAt()) || !"pending".equals(intent.status())
+                texted.outboxId() != null
+                                || hourOver
+                                || !clock.now().isBefore(intent.expiresAt())
+                                || !"pending".equals(intent.status())
                         ? "expired"
                         : "queued";
         };

@@ -318,7 +318,8 @@ class IntentStore {
             params.add(from);
         }
         boolean updated = jdbc.sql(sql.toString()).params(params).update() == 1;
-        if (updated && "pending".equals(from) && to != null && !"pending".equals(to)) {
+        // A move with no expected status (from null) may close a pending intent too; otherwise it finds nothing.
+        if (updated && (from == null || "pending".equals(from)) && to != null && !"pending".equals(to)) {
             // The payment closed (paid, cancelled, failed or expired) before its link text went: withdraw the text, so
             // the payer never gets a dead or already paid link (issue #772, spec 4.13). Only a text no sender holds yet
             // is withdrawn. A row was updated, so this runs in a transaction bound to the intent's tenant: the binding
