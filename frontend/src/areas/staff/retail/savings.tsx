@@ -42,7 +42,7 @@ export const SALES_STAFF_KEY = 'sales-staff';
 export function showInRecords(client: QueryClient, saved: Savings) {
   const day = saved.business_date ?? '';
   // Only the records list itself: five parts, the branch ids (undefined for all) and a from and to date. A seller's grouped
-  // view (issue #827) is refetched after the save instead.
+  // view (issue #827, key ['retail', 'savings-groups', ...]) is refetched by the save's invalidation of the ['retail'] prefix.
   const holds = (key: readonly unknown[]): boolean => {
     if (key.length !== 5) return false;
     const [, , scope, from, to] = key;

@@ -1366,7 +1366,7 @@ Accepted (this list is the ADR index):
 - ADR-115 Salespeople may see and change the savings amount when the owner allows it (Accepted, #768, D124): the setting
   `salespeople_see_savings_amount` in the settings document, off by default, set by the Owner only (403 `owner_only`); when
   on, a caller without `retail.profit.read` sees the suggestion and may change it before the day is saved, and sees the amount
-  of records made while it is on if they hold `retail.savings.record`; the cap, the profit and the expenses stay hidden, and
+  of records made while it is on if they hold `retail.savings.record` (every month's since #827); the cap, the profit and the expenses stay hidden, and
   the profit can still be worked out from the suggestion; replacing a saved amount needs `retail.savings.overwrite` for
   everyone; the audit flags `salespeople_setting` (no migration). Amended by #799: while it is on, a seller
   (`retail.sale.create` at the branch) without the till records the branch's savings through

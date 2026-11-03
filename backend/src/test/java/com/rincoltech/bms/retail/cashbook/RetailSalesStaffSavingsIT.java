@@ -341,6 +341,14 @@ class RetailSalesStaffSavingsIT extends IntegrationTest {
         JsonNode ownGroups = api.get(SALES_STAFF + "/groups", hqSeller).getBody();
         assertThat(ownGroups.get("shops")).isEmpty();
         assertThat(ownGroups.get("total_minor").asLong()).isZero();
+        // With a record at the caller's own branch too: that one only, never the other branch's.
+        UUID atHq = tillRecords(hq, today);
+        JsonNode withOwn = api.get(SALES_STAFF + "/groups", hqSeller).getBody();
+        assertThat(withOwn.get("shops")).hasSize(1);
+        assertThat(withOwn.get("shops").get(0).get("branch_id").asString()).isEqualTo(hq.toString());
+        assertThat(withOwn.get("total_minor").asLong()).isEqualTo(2_500);
+        assertThat(withOwn.toString()).contains(atHq.toString()).doesNotContain(second.toString());
+        assertThat(api.get(SALES_STAFF, hqSeller).getBody().get("items")).hasSize(1);
         ResponseEntity<JsonNode> namedGroups = api.get(SALES_STAFF + "/groups?branch_id=" + second, hqSeller);
         assertThat(namedGroups.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(namedGroups.getBody().get("code").asString()).isEqualTo("unknown_branch");

@@ -458,7 +458,9 @@ class SavingsService {
                                                                     .stream()
                                                                     .map(SavingsService::person)
                                                                     .sorted(Comparator.comparing(
-                                                                            p -> String.valueOf(p.name())))
+                                                                            SavingsPerson::name,
+                                                                            Comparator.nullsLast(
+                                                                                    Comparator.naturalOrder())))
                                                                     .toList();
                                                     return new SavingsMonth(
                                                             m.getKey(), sum(people, SavingsPerson::totalMinor), people);
@@ -486,6 +488,7 @@ class SavingsService {
         return r.by() == null ? new UUID(0, 0) : r.by();
     }
 
+    /** The name is the user's current one (joined from {@code users}), so every row of the group carries the same. */
     private static SavingsPerson person(List<SavingsRow> rows) {
         SavingsRow first = rows.getFirst();
         return new SavingsPerson(

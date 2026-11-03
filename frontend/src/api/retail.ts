@@ -675,7 +675,7 @@ export interface RetailApi {
   createSavings(body: SavingsRequest, idempotencyKey: string, opts?: { salesStaff?: boolean }): Promise<Savings>;
   listSavings(q: CashQuery & { salesStaff?: boolean }): Promise<Savings[]>;
   /** Issue #827: a seller's savings of every month by shop, year, month and person, with the amount saved at each level. */
-  savingsGroups(q: { branchIds?: string[] }): Promise<SavingsGroups>;
+  savingsGroups(q: { branchIds?: string[]; from?: string; to?: string }): Promise<SavingsGroups>;
   voidSavings(id: string, reason: string, idempotencyKey: string): Promise<Savings>;
   bankingExpected(q: { branchId: string; date: string }): Promise<BankingExpected>;
   createBanking(body: BankingRequest, idempotencyKey: string): Promise<Banking>;
@@ -1576,8 +1576,8 @@ const realRetail: RetailApi = {
       : await api.POST('/api/v1/retail/savings', { body, params }));
   },
 
-  async savingsGroups({ branchIds }) {
-    const query = { branch_id: branchIds && branchIds.length > 0 ? branchIds : undefined };
+  async savingsGroups({ branchIds, from, to }) {
+    const query = { branch_id: branchIds && branchIds.length > 0 ? branchIds : undefined, from: from || undefined, to: to || undefined };
     return unwrap(await api.GET('/api/v1/retail/savings/sales-staff/groups', { params: { query } }));
   },
 

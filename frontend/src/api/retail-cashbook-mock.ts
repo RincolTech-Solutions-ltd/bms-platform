@@ -27,7 +27,7 @@ export interface CashbookEnv {
   waiting: (actionType: string, amountMinor: number) => ApprovalWaiting | null;
 }
 
-type Keys = 'savingsSuggestion' | 'createSavings' | 'listSavings' | 'savingsGroups' |'voidSavings' | 'bankingExpected' | 'createBanking' | 'listBankings' | 'voidBanking'
+type Keys = 'savingsSuggestion' | 'createSavings' | 'listSavings' | 'savingsGroups' | 'voidSavings' | 'bankingExpected' | 'createBanking' | 'listBankings' | 'voidBanking'
   | 'createWithdrawal' | 'listWithdrawals' | 'voidWithdrawal' | 'listExpenseCategories' | 'createExpenseCategory' | 'updateExpenseCategory'
   | 'createExpenseItem' | 'updateExpenseItem' | 'listCashParties' | 'createCashParty' | 'createExpense' | 'listExpenses' | 'voidExpense'
   | 'createAdvance' | 'listAdvances' | 'getAdvance' | 'voidAdvance' | 'createRepayment' | 'voidRepayment' | 'cashDaily' | 'bankingReport'
@@ -203,8 +203,8 @@ export function createCashbookMock(env: CashbookEnv): Pick<RetailApi, Keys> {
     listSavings: (q) => delay(newestFirst(savings.filter((r) => inWindow(r, q))).map(savingsRow)),
     // JUSTIFICATION-A3: RetailApi gained savingsGroups (issue #827); the mock must answer it with its four levels and totals.
     // The active records by shop, year, month and person (the mock has one person), newest day first, with totals.
-    savingsGroups: ({ branchIds }) => {
-      const live = savings.filter((r) => !r.voided && (!branchIds?.length || branchIds.includes(r.branch_id)))
+    savingsGroups: (q) => {
+      const live = savings.filter((r) => inWindow(r, { ...q, includeVoided: false }))
         .sort((a, b) => b.business_date.localeCompare(a.business_date));
       const sum = (xs: { total_minor: number }[]) => xs.reduce((n, x) => n + x.total_minor, 0);
       const by = <T,>(xs: T[], key: (x: T) => string): [string, T[]][] => {
