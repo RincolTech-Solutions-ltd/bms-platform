@@ -3,7 +3,7 @@ import { createLazyRoute } from '@tanstack/react-router';
 import { useState } from 'react';
 import { businessToday, retail, type Savings } from '../../../api/retail';
 import { useStaff } from '../context';
-import { DateField, RecordsByShop, Saved, WindowFields, useReadScope, useSavedFor, useWindow } from './cash-ui';
+import { DateField, RecordsByShop, Saved, WindowFields, useEntryDate, useReadScope, useSavedFor, useWindow } from './cash-ui';
 import { usePersistedDraft } from './idempotency';
 import { CASHBOOK_READ, SAVINGS_OVERWRITE, SAVINGS_RECORD, holds } from './permissions';
 import { SAVINGS_REASONS, afterSavingsConflict, nowAboveWords, planSavings, reasonText, seesAmounts } from './savings-state';
@@ -24,7 +24,7 @@ import { KeyFigure } from '../../../app/ui/KeyFigure';
 // The day may save at most its profit less its expenses (ADR-080): the screen shows the three figures and
 // says so under the amount before anything is sent. The reason for a changed amount is optional (#538).
 
-interface SavingsDraft { date: string; amount: string; reason: string; other: string }
+interface SavingsDraft { date: string; dateReason?: string; amount: string; reason: string; other: string }
 
 const EMPTY = { amount: '', reason: '', other: '' };
 
@@ -56,15 +56,16 @@ export function SavingsForm({ branchId, onSaved }: { branchId: string; onSaved?:
   // A draft restored with an amount shows its problem at once; a fresh form waits for blur (rule 10).
   const [touched, setTouched] = useState(() => draft.amount.trim() !== '');
   const [reasonOpen, setReasonOpen] = useState(false);
-  const suggestionKey = ['retail', 'savings-suggestion', branchId, draft.date];
-  const suggestion = useQuery({ queryKey: suggestionKey, queryFn: () => retail.savingsSuggestion({ branchId, date: draft.date }) });
+  const entry = useEntryDate(branchId, draft.date, draft.dateReason);
+  const suggestionKey = ['retail', 'savings-suggestion', branchId, entry.day];
+  const suggestion = useQuery({ queryKey: suggestionKey, queryFn: () => retail.savingsSuggestion({ branchId, date: entry.day }) });
   const s = suggestion.data;
   const profitView = seesAmounts(s);
   // ADR-115: the server says whether this caller may change the amount (the owner's setting before the day is saved, or the
   // overwrite permission); an older server without the flag leaves it to the permission.
   const canOverwrite = s?.may_change_amount ?? holds(me, SAVINGS_OVERWRITE);
   const reason = reasonText(draft.reason, draft.other ?? '');
-  const plan = s ? planSavings({ branchId, date: draft.date, suggestion: s, amount: draft.amount, reason, canOverwrite, today: businessToday() }) : null;
+  const plan = s ? planSavings({ branchId, date: entry.day, sent: entry.sent, suggestion: s, amount: draft.amount, reason, canOverwrite, today: businessToday() }) : null;
 
   // toast-exempt: success screen, the Saved panel replaces the form
   const save = useMutation({
@@ -84,25 +85,25 @@ export function SavingsForm({ branchId, onSaved }: { branchId: string; onSaved?:
       // and, when the figures changed, start a fresh key and ask the person to look again before saving.
       if (afterSavingsConflict(queryClient, suggestionKey, error) === 'look_again') {
         discard();
-        setDraft({ date: draft.date, ...EMPTY });
+        setDraft({ date: draft.date, dateReason: draft.dateReason, ...EMPTY });
       }
     },
   });
 
-  const blocked = !s || !plan || plan.problem !== null || s.existing_id != null || save.isPending;
+  const blocked = !s || !plan || plan.problem !== null || s.existing_id != null || entry.reasonMissing || save.isPending;
   const update = (patch: Partial<SavingsDraft>) => setDraft((d) => ({ ...d, ...patch }));
   // Validation shows on blur (docs/ui-rules.md rule 10) or when Save is pressed; the cap never waits for the server.
   const showProblem = touched && plan?.problem != null && draft.amount.trim() !== '' && !(plan.overwrite && !canOverwrite);
 
   return (
     <form onSubmit={(e) => { e.preventDefault(); setTouched(true); if (!blocked) save.mutate(); }}>
-      <DateField id="savings-date" label="Date" value={draft.date} onChange={(date) => { update({ date, ...EMPTY }); setTouched(false); }} />
+      <DateField id="savings-date" label="Date" entry={entry} value={entry.day} reason={draft.dateReason} onChange={(date) => { update({ date, ...EMPTY }); setTouched(false); }} onReason={(dateReason) => update({ dateReason })} />
       {suggestion.isError && <Problem error={suggestion.error} />}
       {suggestion.isPending && <p className="loading">Loading</p>}
       {s && (
         <>
           <p>
-            Sold on {showDate(s.business_date ?? draft.date)}: <strong>{money(s.total_sold_minor ?? 0)}</strong>
+            Sold on {showDate(s.business_date ?? entry.day)}: <strong>{money(s.total_sold_minor ?? 0)}</strong>
           </p>
           {s.existing_id != null && <Note>Savings are already recorded for this shop on this day. If that record is wrong, void it in the records below, then save again.</Note>}
           {nowAboveWords(s) && <Note>{nowAboveWords(s)}</Note>}

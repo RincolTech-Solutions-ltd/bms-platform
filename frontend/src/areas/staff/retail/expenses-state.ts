@@ -1,5 +1,5 @@
 import type { ExpenseCategory, ExpenseItem, ExpenseRequest } from '../../../api/retail';
-import { amountOrNull } from './cash-state';
+import { amountOrNull, type EntryDate } from './cash-state';
 
 // The expense form's rules (FR-RET-17, FR-RET-24): the items offered depend on the chosen category and only
 // active ones are offered, and an item flagged "needs an explanation" makes the explanation field appear and
@@ -28,7 +28,8 @@ export function needsExplanation(categories: ExpenseCategory[], categoryId: stri
 
 export interface ExpenseInput {
   branchId: string;
-  date: string;
+  /** ADR-120: the date the form decided; only an owner's earlier day is sent, with its reason. */
+  entry: EntryDate;
   categoryId: string;
   itemId: string;
   partyId: string;
@@ -47,7 +48,7 @@ export function planExpense(input: ExpenseInput, categories: ExpenseCategory[]):
   const explain = needsExplanation(categories, input.categoryId, input.itemId);
   const request: ExpenseRequest = {
     branch_id: input.branchId,
-    business_date: input.date,
+    ...(input.entry.sent ? { business_date: input.entry.sent.date, date_reason: input.entry.sent.reason } : {}),
     category_id: input.categoryId,
     item_id: input.itemId,
     amount_minor: minor ?? 0,
@@ -58,5 +59,6 @@ export function planExpense(input: ExpenseInput, categories: ExpenseCategory[]):
   if (!input.itemId || !itemsOf(categories, input.categoryId).some((i) => i.id === input.itemId)) return { problem: 'Choose an item.', request };
   if (minor === null) return { problem: 'Enter the amount in whole shillings.', request };
   if (explain && input.explanation.trim().length < MIN_EXPLANATION) return { problem: `Explain this expense in at least ${MIN_EXPLANATION} characters.`, request };
+  if (input.entry.reasonMissing) return { problem: 'Say why the date is earlier than today.', request };
   return { problem: null, request };
 }

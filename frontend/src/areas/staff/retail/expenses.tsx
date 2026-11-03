@@ -5,7 +5,7 @@ import { BusyButton } from '../../../app/ui/BusyButton';
 import { Segmented } from '../../../app/ui/Segmented';
 import { businessToday, isWaiting, retail, type Expense, type ExpenseCategory, type ExpenseGroup, type ExpenseItem } from '../../../api/retail';
 import { useStaff } from '../context';
-import { DateField, RecordsByShop, Saved, WindowFields, useReadScope, useSavedFor, useWindow } from './cash-ui';
+import { DateField, RecordsByShop, Saved, WindowFields, useEntryDate, useReadScope, useSavedFor, useWindow } from './cash-ui';
 import { MIN_EXPLANATION, activeCategories, itemsOf, needsExplanation, planExpense, withItem } from './expenses-state';
 import { usePersistedDraft } from './idempotency';
 import { PartyPicker, useCashParties } from './party-picker';
@@ -22,7 +22,7 @@ import { addOn } from './screen-link';
 // beneficiary, the amount, and an explanation when the item needs one. A receipt photo is not offered yet:
 // the frontend has no documents upload client to send a receipt_document_id with (skipped on purpose).
 
-interface ExpenseDraft { date: string; categoryId: string; itemId: string; partyId: string; amount: string; explanation: string }
+interface ExpenseDraft { date: string; dateReason?: string; categoryId: string; itemId: string; partyId: string; amount: string; explanation: string }
 
 export function ExpenseForm({ branchId, onSaved, onWaiting }: { branchId: string; onSaved?: (saved: Expense) => void; onWaiting?: (amountMinor: number) => void }) {
   const queryClient = useQueryClient();
@@ -35,7 +35,8 @@ export function ExpenseForm({ branchId, onSaved, onWaiting }: { branchId: string
   const list = categories.data ?? [];
   const items = itemsOf(list, draft.categoryId);
   const explain = needsExplanation(list, draft.categoryId, draft.itemId);
-  const plan = planExpense({ branchId, ...draft }, list);
+  const entry = useEntryDate(branchId, draft.date, draft.dateReason);
+  const plan = planExpense({ branchId, ...draft, entry }, list);
   // toast-exempt: success screen, the Saved panel replaces the form
   const save = useMutation({
     mutationFn: () => retail.createExpense(plan.request, key),
@@ -67,7 +68,7 @@ export function ExpenseForm({ branchId, onSaved, onWaiting }: { branchId: string
   const blocked = plan.problem !== null || save.isPending;
   return (
     <form onSubmit={(e) => { e.preventDefault(); if (!blocked) save.mutate(); }}>
-      <DateField id="expense-date" label="Date" value={draft.date} onChange={(date) => update({ date })} />
+      <DateField id="expense-date" label="Date" entry={entry} value={entry.day} reason={draft.dateReason} onChange={(date) => update({ date })} onReason={(dateReason) => update({ dateReason })} />
 
       {showsEmptyChoice(categories, categories.data && activeCategories(list)) ? (
         <EmptyChoice id="expense-category" label="Category" load={categories} text="No expense categories yet." ask="Ask the owner to add expense categories first."

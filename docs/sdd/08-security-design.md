@@ -415,6 +415,7 @@ platform API and holds no tenant permissions.
 | `retail.advance.create` | Y | | | | | | | | | | | |
 | `retail.advance.repay` | Y | | | | | | | | | | | |
 | `retail.cashbook.void` | Y | | | | | | | | | | | |
+| `retail.entry.backdate` | Y | | | | | | | | | | | |
 | `retail.branch_role.manage` | Y | | | | | | | | | | | |
 | `retail.pricelist.manage` | Y | | | | | | | | | | | |
 | `retail.pricelist.use` | Y | | | | | | | | | | | |
