@@ -262,11 +262,13 @@ describe('the savings screen for sales staff', () => {
 
     await screen.findByText('UGX 4,000', { selector: '.key-figure-value' });
     expect(savingsSuggestion).toHaveBeenCalledWith(expect.objectContaining({ salesStaff: true }));
+    expect((screen.getByLabelText('Date') as HTMLInputElement).min).toBe(monthStart);
     expect(document.body.textContent).not.toMatch(/Profit|Expenses for the day/);
     const records = await screen.findByRole('region', { name: 'Savings records' });
     expect(records.textContent).toContain('Savings this month');
     await waitFor(() => expect(records.textContent).toContain('Saved UGX 2,500'));
-    expect(listSavings).toHaveBeenCalledWith(expect.objectContaining({ salesStaff: true, from: monthStart, to: today }));
+    // The records ask for the branch the seller works in (the branch switcher's choice, not a cash book permission).
+    expect(listSavings).toHaveBeenCalledWith(expect.objectContaining({ salesStaff: true, branchIds: [branch], from: monthStart, to: today }));
     expect(screen.queryByRole('button', { name: /Void/ })).toBeNull();
 
     fireEvent.change(amount(), { target: { value: '3000' } });

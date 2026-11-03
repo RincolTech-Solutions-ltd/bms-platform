@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (issue #768, 2 Nov 2026; FR-RET-18, FR-RET-19). Relaxes ADR-022 decision 13 for the savings amount only, and only
+Accepted (issue #768, 2 Nov 2026, owner decision D124; FR-RET-18, FR-RET-19). Relaxes ADR-022 decision 13 for the savings amount only, and only
 when the Owner turns the new setting on; it answers ADR-022 open question 8 for one figure. ADR-022 decision 12 (the audit
 carries flags, never the amount) and ADR-080 (the cap) are unchanged. No migration. Renumbered at merge if needed.
 Amended by issue #799 (3 Nov 2026): the setting reaches sales staff, who hold `retail.sale.create` but not
@@ -50,7 +50,10 @@ want the person closing the till to set the savings aside by hand and to check t
    saved needs `retail.savings.record`, for a caller with profit read as much as for one without; no caller gets more by holding
    less. Replacing a saved amount (the day has a voided record, so the new amount takes the place of a saved one) needs
    `retail.savings.overwrite` for everyone, and so does any change while the setting is off. The suggestion carries
-   `may_change_amount`, so the screen follows the server instead of guessing.
+   `may_change_amount`, so the screen follows the server instead of guessing. **Since issue #799** the right to record a
+   branch's savings is `retail.savings.record` through the till's routes, or `retail.sale.create` through the sales staff
+   routes (decision 8); whichever route is used, changing the suggestion before the day is saved needs no more than that
+   right, and replacing a saved amount needs `retail.savings.overwrite`.
 5. **Still hidden**, setting on or off: the record's `suggested_minor` and every other profit-gated figure of ADR-022 decision 13
    (the savings report, the expected-to-bank answer, `savings_minor`, cash purchases). The screen shows no profit, no expenses
    and no cap to that caller.
@@ -69,13 +72,18 @@ want the person closing the till to set the savings aside by hand and to check t
    nothing changes for sales staff. With it on, after the branch is resolved by `retail.sale.create`, the checks run in the same
    order as on the till's route (token, amount, lock, token match, `may_change_amount`, `savings_exists`, then the cap), the same
    figures are sent (never `available_minor`, `daily_profit_minor` or `day_expenses_minor`), and replacing a saved amount still
-   needs `retail.savings.overwrite`. The list moves an earlier `from` to the first day of the business month and offers no
-   void. `/me` carries `salespeople_see_savings_amount`, and the PWA shows the Savings screen in Money to a seller without the
+   needs `retail.savings.overwrite`. The owner gave them the month, so the sales staff routes take only days of the current
+   business month: an earlier `date` or `business_date` is 422 `outside_this_month` ("Savings can be opened and saved for days
+   of this month only."), so no earlier day's suggestion reaches them and nothing they save falls outside what they see; the
+   till keeps every day. The list moves an earlier `from` to the first day of the business month and offers no void. The
+   switch is checked before an idempotent replay, so a key replayed after the Owner turned it off is 403. `/me` carries `salespeople_see_savings_amount`, and the PWA shows the Savings screen in Money to a seller without the
    till only while it is true. Whoever holds the till's savings permissions keeps the till's routes.
 9. **A saved day shows only what was saved (issue #799, the owner's request, as in the shop's old spreadsheet app).** Once a
    branch's savings for a day are recorded (an active record), the suggestion for that day is no longer sent to anyone, the
    Owner included, setting on or off: the suggestion answer leaves out `suggested_minor` and carries `may_change_amount` false,
-   and a 409 `suggestion_changed` for that day leaves out `suggested_minor` (the refusal order is unchanged). The Savings
+   and a 409 `suggestion_changed` for that day leaves out `suggested_minor` (the refusal order is unchanged). An active savings
+   record carries no `suggested_minor` either, in the create and void answers, the Savings records rows and the savings report,
+   for the Owner as for everyone; a voided record no longer saves its day and keeps it for `retail.profit.read`. The Savings
    screen then shows the note that the day is saved and the saved amount (`existing_amount_minor`, where the caller may see
    it), with no suggestion and no amount field. Voiding the record brings the suggestion back. The day's profit, expenses and
    available amount still reach a caller with `retail.profit.read`, and the ADR-080 note "Saved UGX X; profit less expenses is

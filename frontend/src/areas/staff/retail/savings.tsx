@@ -101,7 +101,8 @@ export function SavingsForm({ branchId, onSaved }: { branchId: string; onSaved?:
 
   return (
     <form onSubmit={(e) => { e.preventDefault(); setTouched(true); if (!blocked) save.mutate(); }}>
-      <DateField id="savings-date" label="Date" value={draft.date} onChange={(date) => { update({ date, ...EMPTY }); setTouched(false); }} />
+      {/* Issue #799: sales staff open days of this month only; the server refuses an earlier one too. */}
+      <DateField id="savings-date" label="Date" value={draft.date} min={salesStaff ? `${businessToday().slice(0, 8)}01` : undefined} onChange={(date) => { update({ date, ...EMPTY }); setTouched(false); }} />
       {suggestion.isError && <Problem error={suggestion.error} />}
       {suggestion.isPending && <p className="loading">Loading</p>}
       {s && (

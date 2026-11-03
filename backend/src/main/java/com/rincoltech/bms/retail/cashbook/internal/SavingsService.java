@@ -128,6 +128,19 @@ class SavingsService {
         return branchContext.resolve(CashbookSupport.SAVINGS_RECORD, requested);
     }
 
+    /**
+     * The business date of a request; sales staff (issue #799) are held to this business month, the scope the owner gave them,
+     * so no earlier day's suggestion (half its profit) reaches them and nothing they save falls outside the records they see.
+     */
+    private LocalDate businessDate(Caller caller, LocalDate requested, String field) {
+        LocalDate date = support.businessDate(requested, field);
+        if (caller == Caller.SALES_STAFF && date.isBefore(monthStart())) {
+            throw ApiException.validation(List.of(new FieldProblem(
+                    field, "outside_this_month", "Savings can be opened and saved for days of this month only.")));
+        }
+        return date;
+    }
+
     @Transactional(readOnly = true)
     SavingsSuggestion suggestion(UUID branchId, LocalDate date) {
         return suggestion(Caller.TILL, branchId, date);
@@ -140,7 +153,7 @@ class SavingsService {
         // cap never do, and the day's saved amount only as amountShown allows.
         SalespeopleSavings setting = support.salespeopleSavings();
         UUID branch = resolveBranch(caller, setting, branchId);
-        LocalDate on = support.businessDate(date, "date");
+        LocalDate on = businessDate(caller, date, "date");
         Day d = day(branch, on);
         boolean gate = mayProfit(branch);
         boolean sees = gate || setting.on();
@@ -187,18 +200,24 @@ class SavingsService {
     @Transactional
     Outcome<Savings> create(Caller caller, String key, SavingsRequest r) {
         String path = caller == Caller.SALES_STAFF ? SALES_STAFF_PATH : PATH;
-        return idempotency.once(key, "POST", path, r, Savings.class, () -> record(caller, r));
+        // ADR-115: the owner let salespeople see and change the amount; they still never see the profit or expenses.
+        // Read
+        // once, and for sales staff checked before the replay, so a key replayed after the switch was turned off is
+        // refused.
+        SalespeopleSavings setting = support.salespeopleSavings();
+        if (caller == Caller.SALES_STAFF) {
+            setting.requireOnForSalesStaff();
+        }
+        return idempotency.once(key, "POST", path, r, Savings.class, () -> record(caller, setting, r));
     }
 
     /** The sales staff routes (issue #799). */
     static final String SALES_STAFF_PATH = PATH + "/sales-staff";
 
-    private Savings record(Caller caller, SavingsRequest r) {
-        // ADR-115: the owner let salespeople see and change the amount; they still never see the profit or expenses.
-        SalespeopleSavings setting = support.salespeopleSavings();
+    private Savings record(Caller caller, SalespeopleSavings setting, SavingsRequest r) {
         UUID branch = resolveBranch(caller, setting, r.branchId());
         branchContext.requireSells(branch, "branch_id");
-        LocalDate date = support.businessDate(r.businessDate(), "business_date");
+        LocalDate date = businessDate(caller, r.businessDate(), "business_date");
         boolean profit = mayProfit(branch);
         boolean salesperson = !profit && setting.on();
         if (r.suggestionToken() == null || r.suggestionToken().isBlank()) {
@@ -434,7 +453,10 @@ class SavingsService {
                 r.businessDate(),
                 r.currency(),
                 amount ? r.amountMinor() : null,
-                profit ? r.suggestedMinor() : null,
+                // Issue #799: an active record is a saved day, whose suggestion is sent to no one, the Owner included;
+                // a
+                // voided record no longer saves its day and keeps it for profit read.
+                profit && r.voided().voided() ? r.suggestedMinor() : null,
                 amount ? r.overwritten() : null,
                 r.totalSoldMinor(),
                 r.by(),

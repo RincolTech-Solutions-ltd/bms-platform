@@ -109,6 +109,12 @@ class RetailSalesStaffSavingsIT extends IntegrationTest {
     }
 
     ResponseEntity<JsonNode> save(String token, UUID branch, LocalDate date, String suggestionToken, Long amount) {
+        return save(
+                token, branch, date, suggestionToken, amount, UUID.randomUUID().toString());
+    }
+
+    ResponseEntity<JsonNode> save(
+            String token, UUID branch, LocalDate date, String suggestionToken, Long amount, String key) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("branch_id", branch);
         body.put("business_date", date.toString());
@@ -116,12 +122,7 @@ class RetailSalesStaffSavingsIT extends IntegrationTest {
         if (amount != null) {
             body.put("amount_minor", amount);
         }
-        return api.call(
-                HttpMethod.POST,
-                SALES_STAFF,
-                body,
-                token,
-                Map.of("Idempotency-Key", UUID.randomUUID().toString()));
+        return api.call(HttpMethod.POST, SALES_STAFF, body, token, Map.of("Idempotency-Key", key));
     }
 
     /** The till records a day's savings with the suggested amount, as an administrator. */
@@ -249,9 +250,26 @@ class RetailSalesStaffSavingsIT extends IntegrationTest {
                 save(seller, hq, today, after.get("suggestion_token").asString(), 1_500L);
         assertThat(replaced.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(replaced.getBody().get("code").asString()).isEqualTo("permission_denied");
-        assertThat(save(seller, hq, today, after.get("suggestion_token").asString(), null)
-                        .getStatusCode())
-                .isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> resaved =
+                save(seller, hq, today, after.get("suggestion_token").asString(), null);
+        assertThat(resaved.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        // JUSTIFICATION-A3: review of 0669c82, must-fix 2: the Owner's list and report hold no saved day's suggestion.
+        // The Owner's records and savings report: the saved day carries no suggestion; only the voided record keeps it.
+        Map<String, JsonNode> ownerRows = new HashMap<>();
+        asOwner("/savings?include_voided=true&branch_id=" + hq)
+                .get("items")
+                .forEach(row -> ownerRows.put(row.get("id").asString(), row));
+        JsonNode active = ownerRows.get(RetailTestSupport.id(resaved).toString());
+        // Twelve sold by now (profit 6,000), so the default saved is 3,000; the voided record was suggested 2,500.
+        assertThat(active.get("amount_minor").asLong()).isEqualTo(3_000);
+        assertThat(active.has("suggested_minor")).isFalse();
+        assertThat(ownerRows.get(mine.toString()).get("suggested_minor").asLong())
+                .isEqualTo(2_500);
+        JsonNode report = asOwner("/reports/cash/savings?branch_id=" + hq + "&from=" + today + "&to=" + today);
+        assertThat(report.get("items")).isNotEmpty();
+        report.get("items")
+                .forEach(day -> assertThat(day.has("suggested_minor")).isFalse());
 
         // The till's own routes and the cash book stay closed to the seller.
         assertThat(api.get(R + "/savings/suggestion?branch_id=" + hq + "&date=" + today, seller)
@@ -295,10 +313,91 @@ class RetailSalesStaffSavingsIT extends IntegrationTest {
         tillRecords(second, today);
         String hqSeller = signIn("ss-hq-seller", new Role("retail_sales", hq));
         theSwitch(true);
-        assertThat(suggestion(hqSeller, hq, today).getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(suggestion(hqSeller, second, today).getStatusCode().value()).isIn(403, 404);
+        JsonNode own = suggestion(hqSeller, hq, today).getBody();
+        assertThat(own.get("suggested_minor").asLong()).isEqualTo(2_500);
+        // Another branch is 404 unknown_branch (FR-RET-18) on the suggestion and on a save, and an empty list when
+        // named.
+        ResponseEntity<JsonNode> elsewhere = suggestion(hqSeller, second, today);
+        assertThat(elsewhere.getStatusCode()).as("%s", elsewhere.getBody()).isEqualTo(HttpStatus.NOT_FOUND);
+        ResponseEntity<JsonNode> savedElsewhere =
+                save(hqSeller, second, today, own.get("suggestion_token").asString(), null);
+        assertThat(savedElsewhere.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(cb.accountMovement("savings_reserve", second)).isEqualTo(1_000);
         ResponseEntity<JsonNode> list = api.get(SALES_STAFF, hqSeller);
         assertThat(list.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(list.getBody().get("items")).isEmpty();
+        ResponseEntity<JsonNode> named = api.get(SALES_STAFF + "?branch_id=" + second, hqSeller);
+        assertThat(named.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(named.getBody().get("items")).isEmpty();
+    }
+
+    // JUSTIFICATION-A3: review of 0669c82, must-fix 1 and nice-to-haves 4 and 5, one test each.
+    @Test
+    void withTheSwitchOnASalesUserOpensAndSavesOnlyDaysOfThisMonth() {
+        theSwitch(true);
+        LocalDate lastMonth = today.withDayOfMonth(1).minusDays(1);
+        ResponseEntity<JsonNode> earlier = suggestion(seller, hq, lastMonth);
+        assertThat(earlier.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(earlier.getBody().get("errors").get(0).get("code").asString())
+                .isEqualTo("outside_this_month");
+        assertThat(earlier.getBody().has("suggested_minor")).isFalse();
+        String token =
+                suggestion(seller, hq, today).getBody().get("suggestion_token").asString();
+        ResponseEntity<JsonNode> backdated = save(seller, hq, lastMonth, token, null);
+        assertThat(backdated.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(backdated.getBody().get("errors").get(0).get("code").asString())
+                .isEqualTo("outside_this_month");
+        assertThat(cb.accountMovement("savings_reserve", hq)).isZero();
+        // The till keeps every day.
+        assertThat(cb.get("/savings/suggestion?branch_id=" + hq + "&date=" + lastMonth, ALL)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    void twoSalesStaffSavesForOneShopAndDayLeaveOneRecord() throws Exception {
+        theSwitch(true);
+        String other = signIn("ss-seller-2", new Role("retail_sales", null));
+        String token =
+                suggestion(seller, hq, today).getBody().get("suggestion_token").asString();
+        java.util.concurrent.CountDownLatch go = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        java.util.List<HttpStatus> statuses = new java.util.ArrayList<>();
+        try {
+            java.util.List<java.util.concurrent.Future<ResponseEntity<JsonNode>>> calls = new java.util.ArrayList<>();
+            for (String who : java.util.List.of(seller, other)) {
+                calls.add(pool.submit(() -> {
+                    go.await();
+                    return save(who, hq, today, token, null);
+                }));
+            }
+            go.countDown();
+            for (var call : calls) {
+                ResponseEntity<JsonNode> r = call.get();
+                statuses.add(HttpStatus.valueOf(r.getStatusCode().value()));
+                if (r.getStatusCode() == HttpStatus.CONFLICT) {
+                    assertThat(r.getBody().get("code").asString()).isEqualTo("savings_exists");
+                }
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(statuses).containsExactlyInAnyOrder(HttpStatus.CREATED, HttpStatus.CONFLICT);
+        assertThat(cb.accountMovement("savings_reserve", hq)).isEqualTo(2_500);
+    }
+
+    @Test
+    void aKeyReplayedAfterTheSwitchWasTurnedOffIsRefused() {
+        theSwitch(true);
+        String key = UUID.randomUUID().toString();
+        String token =
+                suggestion(seller, hq, today).getBody().get("suggestion_token").asString();
+        ResponseEntity<JsonNode> first = save(seller, hq, today, token, 2_000L, key);
+        assertThat(first.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        theSwitch(false);
+        ResponseEntity<JsonNode> replay = save(seller, hq, today, token, 2_000L, key);
+        assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(replay.getBody().get("code").asString()).isEqualTo("permission_denied");
+        assertThat(replay.getBody().has("amount_minor")).isFalse();
     }
 }
