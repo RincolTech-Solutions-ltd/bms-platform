@@ -16,7 +16,7 @@ vi.mock('../../api/onboarding', async (original) => {
   return { ...real, checkHostname: (slug: string) => checkHostname(slug) };
 });
 
-const { ActivateFormView, RUNBOOK_STEP } = await import('./application');
+const { ActivateFormView, RUNBOOK_STEP, hostnameWords } = await import('./application');
 const { OnboardingError } = await import('../../api/onboarding');
 
 const HOST = 'test-shop-155-bms-staging.example.test';
@@ -82,6 +82,9 @@ describe('the hostname check on the Activate form (#155)', () => {
   });
 
   it('uses plain words with no dashes as punctuation', () => {
-    expect(RUNBOOK_STEP).not.toMatch(/[–—]| - /);
+    const dashes = new RegExp('[\\u2013\\u2014]| - ');
+    for (const outcome of ['answers', 'not_found', 'no_answer', 'wrong_answer', 'later']) {
+      expect(hostnameWords({ host: 'test-shop-155-bms-staging.example.test', outcome, http_status: 404 }).text).not.toMatch(dashes);
+    }
   });
 });
