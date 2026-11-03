@@ -613,7 +613,7 @@ describe('Credit sales and All sales (#145)', () => {
     expect(saleState({ ...base, due_date: '2026-10-06' }, today).label).toBe('Unpaid');
     expect(saleState({ ...base, paid_minor: 12000, balance_minor: 0 }, today).label).toBe('Paid');
     expect(saleState({ ...base, payment_method: 'cash', paid_minor: 12000, balance_minor: 0 }, today).label).toBe('Paid');
-    expect(saleState({ ...base, status: 'voided' }, today).label).toBe('Voided');
+    expect(saleState({ ...base, status: 'voided' }, today).label).toBe('Deleted');
   });
 
   it('lists a credit sale with buyer, date, amount, due date and status', () => {
