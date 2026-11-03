@@ -52,7 +52,8 @@ class RetailCashbookSavingsIT extends IntegrationTest {
         hq = t.headOffice();
         product = cb.api.product("CABLE-2MM", 1_000, 1_500);
         cb.api.stockUp(hq, product, "100");
-        day = daysAgo(2);
+        // Today: the sellers and till people of these tests may not date savings earlier (ADR-120, RetailEntryDatesIT).
+        day = daysAgo(0);
         assertThat(cb.sale(hq, "cash", product, "10", day).getStatusCode()).isEqualTo(HttpStatus.CREATED);
     }
 
