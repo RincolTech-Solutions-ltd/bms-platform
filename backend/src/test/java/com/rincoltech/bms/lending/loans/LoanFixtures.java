@@ -40,26 +40,33 @@ public abstract class LoanFixtures extends IntegrationTest {
     // JUSTIFICATION-A3: both gateway test classes check one answer for every form of a payer's number (issue #314
     // review).
     /**
-     * Asserts that no form of the payer's number is in {@code body}: E.164 with and without the plus, the national form, the
-     * subscriber digits, any number ending in its last three digits, and any mask (asterisks, X or # standing for digits).
-     * Ids, times, receipt numbers and payment codes are taken out first, since a random id or a time can hold any three digits.
-     * No field name may speak of a phone, a payer or an msisdn.
+     * Asserts that no phone number is in {@code body}, whichever number it might be: no field named for a phone, a payer or an
+     * msisdn, and no run of 9 or more digits other than the payment code itself. Then, for the number the fake provider holds
+     * for the order ({@code payerE164}, read from the fake): E.164 with and without the plus, the national form, the subscriber
+     * digits, any number ending in its last three digits, and any mask (asterisks, X or # standing for digits). Ids and times
+     * are taken out first, since a random id or a time's fraction can hold any run of digits; the receipt number and the code
+     * are taken out for the last three digits check.
      */
-    protected static void assertNoPayerNumber(JsonNode body, String payerE164) {
+    protected static void assertNoPayerNumber(JsonNode body, String payerE164, String paymentCode) {
+        org.assertj.core.api.Assertions.assertThat(payerE164)
+                .as("the fake's payer number")
+                .startsWith("+256");
         String subscriber = payerE164.substring(4);
         String text = body.toString()
                 .replaceAll("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", "<id>")
                 .replaceAll("\\d{4}-\\d{2}-\\d{2}(T[0-9:.]+Z?)?", "<time>")
-                .replaceAll("RC-[A-Z0-9]+-\\d+", "<receipt>")
-                .replaceAll("CONF-[A-Z0-9-]+", "<code>");
+                .replace(paymentCode, "<code>");
+        org.assertj.core.api.Assertions.assertThat(text)
+                .doesNotContainPattern("(?i)\"[a-z_]*(phone|payer|msisdn)[a-z_]*\"\\s*:")
+                .doesNotContainPattern("\\d{9,}");
+        text = text.replaceAll("RC-[A-Z0-9]+-\\d+", "<receipt>");
         org.assertj.core.api.Assertions.assertThat(text)
                 .doesNotContain(payerE164)
                 .doesNotContain(payerE164.substring(1))
                 .doesNotContain("0" + subscriber)
                 .doesNotContain(subscriber)
                 .doesNotContainPattern("\\d*" + payerE164.substring(payerE164.length() - 3) + "(?!\\d)")
-                .doesNotContainPattern("[*Xx#]{2,}[\\s*Xx#]*\\d{2,4}")
-                .doesNotContainPattern("(?i)\"[a-z_]*(phone|payer|msisdn)[a-z_]*\"\\s*:");
+                .doesNotContainPattern("[*Xx#]{2,}[\\s*Xx#]*\\d{2,4}");
     }
 
     protected static String permissionsOf(String role) {

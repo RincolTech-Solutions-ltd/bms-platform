@@ -747,14 +747,9 @@ class SavingsDepositByGatewayIT extends LoanFixtures {
         assertThat(items.get(0).get("payment_code").asString()).isEqualTo("CONF-314-0001");
         assertThat(items.get(1).get("payment_method_key").asString()).isEqualTo("cash");
         assertThat(items.get(1).get("payment_code").isNull()).isTrue();
-        // Only the code. The one payer number the system ever holds for this payment is the one the intent was made
-        // with
-        // (PAYER, stored as E.164): pay() reports none, the provider's status answer has no payer field
-        // (PaymentGateway.StatusResult; Pesapal's payment_account is not read) and unallocated_receipts keeps none
-        // (V123).
-        String phone = (String) row(intent).get("payer_phone_e164");
-        assertThat(phone).isEqualTo("+256" + PAYER.substring(1));
-        assertNoPayerNumber(r.getBody(), phone);
+        // Only the code: no phone field, no long run of digits, and not the number the provider holds for the order.
+        String phone = fake.orderFor(intent.get("merchant_reference").asString()).payerPhoneE164;
+        assertNoPayerNumber(r.getBody(), phone, "CONF-314-0001");
 
         // A caller who may not read the account (another branch, or no savings read at all) gets no code.
         ResponseEntity<JsonNode> otherBranch = send(

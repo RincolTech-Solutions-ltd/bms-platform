@@ -804,13 +804,9 @@ class UnallocatedReceiptsIT extends LoanFixtures {
         assertThat(items.get(0).get("txn_type").asString()).isEqualTo("deposit");
         assertThat(items.get(0).get("payment_method_key").asString()).isEqualTo("gateway");
         assertThat(items.get(0).get("payment_code").asString()).isEqualTo("CONF-314-LATE");
-        // The one payer number the system holds for this payment is the one the intent was made with (PAYER): pay()
-        // reports
-        // none, the provider's status answer has no payer field (PaymentGateway.StatusResult) and the receipt keeps
-        // none (V123).
-        String phone = (String) row(intent).get("payer_phone_e164");
-        assertThat(phone).isEqualTo("+256" + PAYER.substring(1));
-        assertNoPayerNumber(list.getBody(), phone);
+        // No phone field, no long run of digits, and not the number the provider holds for the order.
+        String phone = fake.orderFor(intent.get("merchant_reference").asString()).payerPhoneE164;
+        assertNoPayerNumber(list.getBody(), phone, "CONF-314-LATE");
     }
 
     @Test
