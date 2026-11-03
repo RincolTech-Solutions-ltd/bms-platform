@@ -9,9 +9,9 @@ import { ToStock } from './analytics-ui';
 import { parseQty, showQty } from './maths';
 import { buildTransfer, lineMilli, linePack, transferLineHint, transferProblem, withPacks, type TransferDraft } from './transfer-state';
 import { milliOf } from './maths';
-import { TRANSFER, TRANSFER_RECEIPT, UNITS, capabilityOn, holdsAt, needsOf } from './permissions';
-import { dateFields } from './cash-state';
-import { DateField, useEntryDate } from './cash-ui';
+import { BACKDATE, TRANSFER, TRANSFER_RECEIPT, UNITS, capabilityOn, holdsAt, needsOf } from './permissions';
+import { dateFields, entryDate } from './cash-state';
+import { DateField } from './cash-ui';
 import { BranchRequired, Gate, NoStockHere, PacksAndPiecesFields, ProductPicker, Problem, money, useProfitAccess, useStockingBranch } from './ui';
 import { ScanBar } from './scan';
 import { NextSteps, mayCountAt } from './next-steps';
@@ -61,8 +61,11 @@ export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId:
     `transfer:${me.user_id ?? ''}:${fromBranchId}`,
     { toBranchId: '', transferDate: businessToday(), note: '', lines: [] },
   );
-  // ADR-120: only the owner at the source sees the date; nothing is sent for today and the server dates the move itself.
-  const dated = useEntryDate(fromBranchId, draft.transferDate, draft.dateReason);
+  // ADR-120: only the owner sees the date, at the source and, for a move that completes now, at the destination too; nothing
+  // is sent for today and the server dates the move itself.
+  const receivedLater = capabilityOn(me, 'retail', TRANSFER_RECEIPT);
+  const ownersHere = holdsAt(me, BACKDATE, fromBranchId) && (receivedLater || !draft.toBranchId || holdsAt(me, BACKDATE, draft.toBranchId));
+  const dated = entryDate(ownersHere, draft.transferDate, draft.dateReason, businessToday());
   // success-screen: Move stock shows the summary of the move in place of the form, and the toast says it too (#824)
   const save = useMutation({
     mutationFn: () => retail.createTransfer({ ...buildTransfer(fromBranchId, { ...draft, transferDate: dated.sent?.date ?? '' }), ...dateFields(dated, 'transfer_date') }, key),

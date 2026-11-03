@@ -7,6 +7,7 @@ import type { Me } from '../../../api/client';
 import { businessToday, daysBefore, retail } from '../../../api/retail';
 import { createMockRetail, mockMe } from '../../../api/retail-mock';
 import { offendingWords } from '../../../app/glossary';
+import { pickItem } from '../../../test-utils/item-picker';
 import { StaffContext } from '../context';
 import { AdvanceForm, RepaymentForm } from './advances';
 import { BankingForm } from './banking';
@@ -114,6 +115,56 @@ describe('what is sent', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save withdrawal' }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]?.[0]).toMatchObject({ business_date: earlier, date_reason: 'Slip found in the drawer' });
+  });
+
+  // Review of #831: the same on every form, since each wires the reason into its own save.
+  // JUSTIFICATION-A3: new test cases the review asked for, one row per form; no existing test covers them.
+  type Api = typeof retail;
+  const OTHER = owner.branches?.[1]?.id ?? '';
+  const forms: [string, () => ReactElement, string, string, string, keyof Api, () => Promise<void>][] = [
+    ['expenses', () => <ExpenseForm branchId={branch} />, 'expense-date', 'Save expense', 'business_date', 'createExpense', async () => {
+      await screen.findByRole('option', { name: 'Transport' });
+      fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'e0000000-0000-4000-8000-000000000001' } });
+      fireEvent.change(screen.getByLabelText('Item'), { target: { value: 'e1000000-0000-4000-8000-000000000001' } });
+      type('expense-amount', '5000');
+    }],
+    ['banking', () => <BankingForm branchId={branch} />, 'banking-date', 'Save banking', 'business_date', 'createBanking', async () => {
+      // The chosen day's expected figures have loaded (the form waits for them before it saves).
+      await screen.findByText(/Already banked on/);
+      type('banking-amount', '5000');
+    }],
+    ['advances', () => <AdvanceForm branchId={branch} />, 'advance-date', 'Save advance', 'business_date', 'createAdvance', async () => {
+      await screen.findAllByRole('option', { name: /Test Owner 01/ });
+      fireEvent.change(box('advance-party') as HTMLElement, { target: { value: 'a0000000-0000-4000-8000-000000000001' } });
+      type('advance-principal', '5000');
+    }],
+    ['Buy stock', () => <RestockForm />, 'bought-on', 'Save the purchase', 'purchased_on', 'createPurchase', async () => {
+      await pickItem('LED bulb 9W screw');
+      type(`q-0-${branch}`, '2');
+    }],
+    ['Move stock', () => <TransferForm fromBranchId={branch} />, 'transfer-date', 'Move stock', 'transfer_date', 'createTransfer', async () => {
+      fireEvent.change(screen.getByLabelText('To branch'), { target: { value: OTHER } });
+      await pickItem('LED bulb 9W screw');
+      type('tq-0', '1');
+    }],
+  ];
+
+  it.each(forms)('%s: the owner\'s earlier day saves only with a reason, which is sent with the date', async (_name, form, id, save, field, create, fill) => {
+    const sent = vi.spyOn(retail, create as 'createWithdrawal') as unknown as { mock: { calls: unknown[][] } } & Parameters<typeof expect>[0];
+    open(owner, form());
+    // The date first: a new day empties what depends on it (banking takes the new day's expected amount).
+    type(id, earlier);
+    await fill();
+    await screen.findByLabelText('Why an earlier date');
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: save }));
+    await settle();
+    expect(sent).not.toHaveBeenCalled();
+    type(`${id}-reason`, 'Slip found in the drawer');
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: save }));
+    await waitFor(() => expect(sent).toHaveBeenCalledTimes(1));
+    expect(sent.mock.calls[0]?.[0]).toMatchObject({ [field]: earlier, date_reason: 'Slip found in the drawer' });
   });
 
   it('the owner saving today sends no date and no reason', async () => {
