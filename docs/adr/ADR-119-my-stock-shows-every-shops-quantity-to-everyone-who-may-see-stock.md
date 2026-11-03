@@ -32,7 +32,7 @@ how a shop is doing. A plain count of an item at another shop of the same busine
 3. **One request, a fixed number of reads per page.** The quantities of the whole page come from one query on
    `retail_stock_balances` for the page's products and the listed shops (`StockRepository.balances`, the read the all-branches
    list already uses), never one per row or per shop; with the branch list and the settings group, also read once per page,
-   the cost of a page does not grow with its rows or shops. An empty page reads no balances. The page size and the cursor are as before. The screen no longer reads the all-branches list for the "0 here"
+   the cost of a page does not grow with its rows or shops. An empty page reads no balances (`RetailAllShopsStockReadsIT` counts the reads). The page size and the cursor are as before. The screen no longer reads the all-branches list for the "0 here"
    note when the rows carry `shops`.
 4. **The owner's switch.** `other_shops_stock` in the retail settings group (`GET` and `PUT /retail/settings/capabilities`,
    `core.settings.manage`, audited as `retail.capabilities.changed`), true unless switched off. It is not a capability and is

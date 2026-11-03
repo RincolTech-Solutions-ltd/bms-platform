@@ -158,6 +158,13 @@ class RetailAllShopsStockIT extends IntegrationTest {
                 .params(third, t.tenantId())
                 .update();
         api.importedBalance(third, product, "-3");
+        ResponseEntity<JsonNode> open =
+                api.call(HttpMethod.GET, "/stock?branch_id=" + third, null, SELLER, "*", Map.of());
+        assertThat(open.getStatusCode())
+                .as("readable while open: %s", open.getBody())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(row(open.getBody(), product).get("shops").get(0).get("qty").asString())
+                .isEqualTo("-3.000");
         TestDatabase.owner()
                 .sql("UPDATE branches SET status = 'inactive' WHERE id = ?")
                 .params(third)
@@ -165,7 +172,9 @@ class RetailAllShopsStockIT extends IntegrationTest {
         ResponseEntity<JsonNode> closed =
                 api.call(HttpMethod.GET, "/stock?branch_id=" + third, null, SELLER, "*", Map.of());
         assertThat(closed.getStatusCode()).as("%s", closed.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(closed.getBody().toString()).contains("unknown_branch");
+        assertThat(closed.getBody().get("errors").get(0).get("code").asString()).isEqualTo("unknown_branch");
+        assertThat(closed.getBody().get("errors").get(0).get("message").asString())
+                .isEqualTo("That branch is closed.");
         JsonNode shops = row(sellerStock(), product).get("shops");
         assertThat(shops).hasSize(2);
         for (JsonNode shop : shops) {

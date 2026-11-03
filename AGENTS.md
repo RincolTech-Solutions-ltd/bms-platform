@@ -879,7 +879,7 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   first), from one read of the stock balances per page, for everyone who may read stock at the listed shop; absent while the
   retail setting `other_shops_stock` (on by default, Retail settings, "Show other shops' stock to everyone") is off or
   fewer than two shops would be listed. My stock lists the shops on each card and in the In stock cell, "In stock here" first; the Switch to
-  button of #728 is gone. Tests: `RetailAllShopsStockIT`, `all-shops-stock.dom.test.tsx`, `where-is-my-stock.dom.test.tsx`,
+  button of #728 is gone. Tests: `RetailAllShopsStockIT`, `RetailAllShopsStockReadsIT`, `all-shops-stock.dom.test.tsx`, `where-is-my-stock.dom.test.tsx`,
   `layout/my-stock.layout.test.ts`.
 - **Built (Past usage and damage, issue #145, AppSheet "Damaged or used stock not sold"):** no migration and no permission.
   `GET /retail/stock/movements` takes a repeatable `kind` filter (422 for an unknown or blank kind) and each row carries the
