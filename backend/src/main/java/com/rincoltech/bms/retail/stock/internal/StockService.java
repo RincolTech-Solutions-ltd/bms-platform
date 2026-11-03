@@ -229,7 +229,7 @@ class StockService {
         boolean packs = capabilities.enabled(RetailCapabilities.UNITS);
         // Issue #807 (ADR-119): every active shop's quantity, this shop first, read for the whole page in one query.
         List<Branch> shops = shopsListed(branch);
-        Map<UUID, Map<UUID, BigDecimal>> held = shops.isEmpty()
+        Map<UUID, Map<UUID, BigDecimal>> held = shops.isEmpty() || items.isEmpty()
                 ? Map.of()
                 : repo.balances(
                         items.stream().map(StockRow::productId).toList(),
@@ -277,7 +277,9 @@ class StockService {
         if (!capabilities.showsOtherShopsStock()) {
             return List.of();
         }
-        List<Branch> active = branches.activeStocking();
+        // The listed branch is always in, so its own quantity is never dropped (a closed shop, or one that keeps no
+        // goods).
+        List<Branch> active = branches.activeStocking(here);
         List<Branch> out =
                 new ArrayList<>(active.stream().filter(b -> b.id().equals(here)).toList());
         active.stream().filter(b -> !b.id().equals(here)).forEach(out::add);

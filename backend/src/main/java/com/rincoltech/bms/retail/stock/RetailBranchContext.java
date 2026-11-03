@@ -38,12 +38,13 @@ public class RetailBranchContext {
     }
 
     /**
-     * Every active branch of the business that keeps goods, head office first, whatever the caller's scope: the shops whose
-     * quantities My stock lists to everyone who may read stock (issue #807, ADR-119). Never use it to read more than quantities.
+     * Every active branch of the business that keeps goods, and {@code listed} whatever its state, head office first, whatever
+     * the caller's scope: the shops whose quantities My stock lists to everyone who may read stock (issue #807, ADR-119). Never
+     * use it to read more than quantities.
      */
-    public List<Branches.Branch> activeStocking() {
+    public List<Branches.Branch> activeStocking(UUID listed) {
         return branches.all().stream()
-                .filter(b -> b.active() && b.stocksGoods())
+                .filter(b -> b.id().equals(listed) || (b.active() && b.stocksGoods()))
                 .toList();
     }
 

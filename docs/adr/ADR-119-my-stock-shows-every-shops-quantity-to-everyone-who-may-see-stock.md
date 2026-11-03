@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (issue #807, 3 Nov 2026; FR-RET-03, FR-RET-84). Builds on issue #728 (the "0 here. 456 at Test Store" note) and the
+Accepted (issue #807, asked for by the business owner on 3 Nov 2026; FR-RET-03, FR-RET-84). Builds on issue #728 (the "0 here. 456 at Test Store" note) and the
 ADR-017 branch scope, which it relaxes for stock quantities only. No migration. Renumbered at merge if needed.
 
 ## Context
@@ -21,20 +21,22 @@ how a shop is doing. A plain count of an item at another shop of the same busine
 ## Decision
 
 1. **Every row of `GET /retail/stock` carries `shops`**: one entry per active branch of the business that keeps goods
-   (`stocks_goods`), the branch listed first with `here: true`, then the others in the order of the branch list (head office
+   (`stocks_goods`), the branch listed first with `here: true` (always, even when it is closed or keeps no goods, so its own
+   quantity is never dropped), then the others in the order of the branch list (head office
    first). Each entry is `{branch_id, name, qty, negative, here}` and nothing else: no cost, no average buying price, no value,
    no movement. A shop with no balance row shows `0.000`; a balance below zero shows as it is, with `negative: true`.
 2. **Who gets it.** Whoever may read stock at the branch listed (`retail.stock.read` in its scope, as the route already
    checks) gets every shop's quantity, whatever their scope at the other shops. The cost fields of the row keep their own rule
    (`retail.profit.read` at the branch), and the selling price its own (ADR-055). The all-branches list, the grouped view, the
    valuation and every report keep the ADR-017 scope unchanged.
-3. **One read per page.** The quantities of the whole page come from one query on `retail_stock_balances` for the page's
-   products and the listed shops (`StockRepository.balances`, the read the all-branches list already uses), never one per row
-   or per shop. The page size and the cursor are as before. The screen no longer reads the all-branches list for the "0 here"
+3. **One request, a fixed number of reads per page.** The quantities of the whole page come from one query on
+   `retail_stock_balances` for the page's products and the listed shops (`StockRepository.balances`, the read the all-branches
+   list already uses), never one per row or per shop; with the branch list and the settings group, also read once per page,
+   the cost of a page does not grow with its rows or shops. An empty page reads no balances. The page size and the cursor are as before. The screen no longer reads the all-branches list for the "0 here"
    note when the rows carry `shops`.
 4. **The owner's switch.** `other_shops_stock` in the retail settings group (`GET` and `PUT /retail/settings/capabilities`,
    `core.settings.manage`, audited as `retail.capabilities.changed`), true unless switched off. It is not a capability and is
-   never listed in `/me`. A business with one shop that keeps goods gets no `shops` whatever the switch says, so the default is
+   never listed in `/me`. A value that is not true or false is 400 (the request body is read as a boolean). A business with one shop that keeps goods gets no `shops` whatever the switch says, so the default is
    in effect "on for a business with more than one shop". Off, the rows carry no `shops` and My stock is as before issue #807,
    with the "0 here" note still cut to the shops the person may read.
 5. **No Switch button.** The "Switch to" button of issue #728 is removed from My stock and the item's page. Changing the shop in

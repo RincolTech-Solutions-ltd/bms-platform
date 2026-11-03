@@ -118,7 +118,63 @@ class RetailAllShopsStockIT extends IntegrationTest {
         // Another business's shop cannot be asked for by its id.
         ResponseEntity<JsonNode> theirShop =
                 api.call(HttpMethod.GET, "/stock?branch_id=" + other.secondBranch(), null, SELLER, "*", Map.of());
-        assertThat(theirShop.getStatusCode()).isNotEqualTo(HttpStatus.OK);
+        assertThat(theirShop.getStatusCode()).as("%s", theirShop.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(theirShop.getBody().toString()).doesNotContain(theirs.toString());
+    }
+
+    // JUSTIFICATION-A3: the three cases the review of #809 asks for; tests, not a mechanism.
+    @Test
+    void theListedShopIsAlwaysFirstEvenWhenItKeepsNoGoods() {
+        // Review of #809: a listed branch outside the stocking filter keeps its own quantity, with two other shops to
+        // list.
+        UUID third = UUID.randomUUID();
+        TestDatabase.owner()
+                .sql("INSERT INTO branches (id, tenant_id, code, name) VALUES (?, ?, 'BR3', 'Test Branch Three')")
+                .params(third, t.tenantId())
+                .update();
+        api.stockUp(third, product, "2");
+        TestDatabase.owner()
+                .sql("UPDATE branches SET stocks_goods = false WHERE id = ?")
+                .params(t.headOffice())
+                .update();
+        JsonNode shops = row(sellerStock(), product).get("shops");
+        assertThat(shops).hasSize(3);
+        assertThat(shops.get(0).get("branch_id").asString())
+                .isEqualTo(t.headOffice().toString());
+        assertThat(shops.get(0).get("here").asBoolean()).isTrue();
+    }
+
+    @Test
+    void anEmptyPageWithTheListOnIsFine() {
+        ResponseEntity<JsonNode> r = api.call(
+                HttpMethod.GET,
+                "/stock?query=NOTHING-MATCHES-THIS&branch_id=" + t.headOffice(),
+                null,
+                SELLER,
+                t.headOffice().toString(),
+                Map.of());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(r.getBody().get("items")).isEmpty();
+    }
+
+    @Test
+    void aReaderOfCostHereStillGetsQuantitiesOnlyForEveryShop() {
+        ResponseEntity<JsonNode> r = api.call(
+                HttpMethod.GET,
+                "/stock?branch_id=" + t.headOffice(),
+                null,
+                SELLER,
+                "*",
+                Map.of("X-Dev-Scopes", "retail.profit.read=" + t.headOffice()));
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+        JsonNode item = row(r.getBody(), product);
+        assertThat(item.has("cost_minor"))
+                .as("cost of the listed shop for its reader")
+                .isTrue();
+        for (JsonNode shop : item.get("shops")) {
+            List<String> fields = new ArrayList<>(shop.propertyNames());
+            assertThat(fields).containsExactlyInAnyOrder("branch_id", "name", "qty", "negative", "here");
+        }
     }
 
     @Test

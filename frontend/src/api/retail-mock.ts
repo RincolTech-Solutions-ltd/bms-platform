@@ -1062,7 +1062,8 @@ export function createMockRetail(): RetailApi {
       delay([...products.values()].filter((p) => (includeInactive || p.active !== false) && matches(p, query) && (!category || categoryId(p.category) === category)).map((p): StockRow => {
         const milli = bal(branchId, p.id);
         // Issue #807: every shop's quantity, this one first, while the owner's switch is on (the server's rule, StockService).
-        const shops = caps.value.other_shops_stock === false ? undefined : [...MOCK_BRANCHES].sort((a, b) => Number(b.id === branchId) - Number(a.id === branchId))
+        // Every mock branch is active and keeps goods; with one there is no list, as on the server.
+        const shops = caps.value.other_shops_stock === false || MOCK_BRANCHES.length < 2 ? undefined : [...MOCK_BRANCHES].sort((a, b) => Number(b.id === branchId) - Number(a.id === branchId))
           .map((b) => ({ branch_id: b.id, name: b.name, qty: fromMilli(bal(b.id, p.id)), negative: bal(b.id, p.id) < 0, here: b.id === branchId }));
         return cost({ product_id: p.id, code: p.code, description: p.description, category_id: categoryId(p.category), category: p.category, unit: p.unit, qty: fromMilli(milli), negative: milli < 0, sell_minor: p.sellMinor, ...stockPack(p.id), ...(shops ? { shops } : {}) }, { cost_minor: p.costMinor });
       }).filter((r) => (!negativeOnly || r.negative) && atLevel(Number(r.qty), level))),

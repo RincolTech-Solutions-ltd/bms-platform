@@ -104,6 +104,14 @@ describe('My stock lists every shop (issue #807)', () => {
     expect(card.textContent).not.toMatch(/buying price/i);
   });
 
+  it('keeps the row\'s own quantity and Negative flag when the list holds no entry for this shop (review of #809)', () => {
+    const odd: StockRow = { ...row('L-8', '-3.000', '2.000'), shops: shops('-3.000', '2.000').filter((s) => !s.here) };
+    show(<StockTable rows={[odd]} showCost={false} />);
+    expect(screen.queryByTestId('shops-L-8')).toBeNull();
+    expect(screen.getByText('In stock:', { exact: false }).textContent).toContain('-3 pieces');
+    expect(screen.getByText('Negative')).toBeTruthy();
+  });
+
   it('lists every shop on a wide screen too', () => {
     phone = false;
     show(<StockTable rows={[row('L-5', '2.000', '5.000')]} showCost={false} />);

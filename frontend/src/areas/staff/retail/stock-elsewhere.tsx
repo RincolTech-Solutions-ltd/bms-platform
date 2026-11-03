@@ -33,6 +33,9 @@ export function stockElsewhere(data: AllBranchesStock | undefined, here: string,
   return out;
 }
 
+/** Issue #807: a row's every-shop list, only when it holds the shop listed, so the row's own quantity is never lost. */
+export const shopsOf = (r: StockRow) => (r.shops?.some((s) => s.here) ? r.shops : undefined);
+
 /** True for a quantity of exactly none, the one "0 here" speaks of; a negative balance keeps its own flag. */
 export const noneHere = (qty: string | undefined) => milliOf(qty ?? '0') === 0;
 
@@ -54,7 +57,7 @@ export function useStockElsewhere(branchId: string | null, rows: StockRow[] | un
     queryKey: allBranchesKey({ ...f, negativeOnly: false, level: '', includeClosed: false }),
     queryFn: ({ signal }) => retail.listStockAllBranches({ query: f.query, categoryId: f.categoryId, includeInactive: f.includeInactive, signal }),
     // Issue #807: rows that carry every shop's quantity need no second read.
-    enabled: enabled && branchId !== null && shops.length > 0 && (rows ?? []).some((r) => noneHere(r.qty) && !r.shops),
+    enabled: enabled && branchId !== null && shops.length > 0 && (rows ?? []).some((r) => noneHere(r.qty) && !shopsOf(r)),
   });
   return branchId === null ? undefined : stockElsewhere(read.data, branchId, shops);
 }

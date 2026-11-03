@@ -1371,9 +1371,9 @@ Accepted (this list is the ADR index):
   "Messages not sent" page; a hard bounce, a complaint or `email.suppressed` stores a keyed hash of the address
   (`EmailSuppressions`, never the address), both senders then refuse it with `recipient_suppressed`, and
   `POST /api/v1/platform/outbox/unsuppress` clears it (#333; no migration, no new column)
-- ADR-119 My stock shows every shop's quantity to everyone who may see stock (Proposed, #807): each row of `GET /retail/stock`
-  carries `shops`, the quantity in every active shop that keeps goods, the listed shop first and marked `here`, read for the
-  page in one query; quantities only, whatever the caller's scope at the other shops; the owner's switch `other_shops_stock`
+- ADR-119 My stock shows every shop's quantity to everyone who may see stock (#807, asked for by the owner): each row of
+  `GET /retail/stock` carries `shops`, the quantity in every active shop that keeps goods, the listed shop always first and
+  marked `here`, the balances read for the page in one query; quantities only, whatever the caller's scope at the other shops; the owner's switch `other_shops_stock`
   in the retail settings group, on unless switched off; the Switch to button of #728 is gone (no migration)
 
 Pending (cite only as "pending ADR-NNN"):
