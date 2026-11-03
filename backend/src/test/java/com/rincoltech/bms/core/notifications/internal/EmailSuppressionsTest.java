@@ -28,7 +28,8 @@ class EmailSuppressionsTest {
     static EmailSuppressions build(String dataKey, String... profiles) {
         MockEnvironment environment = new MockEnvironment();
         environment.setActiveProfiles(profiles);
-        return new EmailSuppressions(null, null, dataKey, environment);
+        return new EmailSuppressions(
+                null, null, dataKey, environment, new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
     }
 
     @Test

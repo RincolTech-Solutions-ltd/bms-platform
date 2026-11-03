@@ -18,8 +18,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -410,6 +413,23 @@ class OutboxIT extends IntegrationTest {
         } finally {
             server.stop(0);
         }
+    }
+
+    /** Issue #777: the value sent to the clear is an address or a typo of one, so a refusal never repeats it. */
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void anUnsuppressOfANonAddressAnswers400WithoutEchoingIt(CapturedOutput output) {
+        Api platform = Api.platform(http);
+        String opEmail = Api.email("operator");
+        UUID opId = Api.platformUser(opEmail);
+        Session op = platform.signIn(opId, opEmail, Api.PASSWORD, null);
+        String typed = "staff-777-at-fabricated.example.test";
+
+        var answer = platform.post("/api/v1/platform/outbox/unsuppress", Map.of("email", typed), op.accessToken());
+
+        assertThat(answer.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(String.valueOf(answer.getBody())).contains("email").doesNotContain(typed);
+        assertThat(output.getAll()).doesNotContain(typed);
     }
 
     /**

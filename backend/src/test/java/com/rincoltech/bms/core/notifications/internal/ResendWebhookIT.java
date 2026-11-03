@@ -361,8 +361,15 @@ class ResendWebhookIT extends IntegrationTest {
                     o -> audit.record(EmailSuppressions.UNSUPPRESSED, null, null, Map.of(EmailSuppressions.KEY, hash)));
             audit.record(ResendWebhookController.BOUNCED, null, null, Map.of(EmailSuppressions.KEY, hash));
         });
+        long checks = meters.get(EmailSuppressions.CHECK_METRIC).timer().count();
         assertThat(suppressions.suppressed(to))
                 .as("the bounce was written after the clear, so it decides")
                 .isTrue();
+        assertThat(meters.get(EmailSuppressions.CHECK_METRIC).timer().count())
+                .as("each check is timed, so its growing cost shows")
+                .isGreaterThan(checks);
     }
+
+    @Autowired
+    io.micrometer.core.instrument.MeterRegistry meters;
 }
