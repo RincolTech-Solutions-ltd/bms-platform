@@ -452,7 +452,10 @@ class ImportRunService implements ImportRuns {
             if (lost != null) {
                 log.warn("import commit loop lost its claim before batch {}: {}", batch.seq(), lost);
                 tx.executeWithoutResult(s -> audit(
-                        runId, "core.import_run.claim_lost", Map.of(), Map.of("batch_seq", batch.seq(), "reason", lost)));
+                        runId,
+                        "core.import_run.claim_lost",
+                        Map.of(),
+                        Map.of("batch_seq", batch.seq(), "reason", lost)));
                 return CommitOutcome.HALTED;
             }
             try {
