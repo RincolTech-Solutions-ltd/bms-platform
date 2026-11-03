@@ -47,7 +47,11 @@ back to what opened it.
     first missing field. The kit's `Field` does all of this, and the lending forms (`form-fields.tsx`) follow it.
 11. Amounts open the numeric keypad (`inputmode="numeric"`), quantities use steppers, and a choice of 2 to 5 options is a
     segmented control.
-12. Touch targets are at least 48px.
+12. Touch targets are at least 48 by 48px. On a phone (up to 600px) two targets stand at least 8px apart (`--tap-gap`) and the
+    screen's main action is full width in the stuck `ActionBar`. On a laptop (from 1024px) a button is as wide as its label,
+    never wider than `--button-max` (320px), the main action at least `--button-min-wide` (160px) and at the right of its form,
+    still 48px tall for a touch laptop (issue #825). `layout/buttons.layout.test.ts` measures the daily screens at 412 by 900
+    and 1366 by 800, and the design guard lists every button class.
 
 ## Motion
 

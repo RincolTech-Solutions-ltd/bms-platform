@@ -1,6 +1,6 @@
 /*
  * Form controls. Labels sit above their input (a label may wrap its input, as the sign-in forms
- * do, or point at it with htmlFor, as the retail forms do). Inputs are 44px tall with 16px text
+ * do, or point at it with htmlFor, as the retail forms do). Inputs are 48px tall (--tap) with 16px text
  * so a phone does not zoom. A radio or checkbox inside a label becomes a full-width choice row.
  */
 
