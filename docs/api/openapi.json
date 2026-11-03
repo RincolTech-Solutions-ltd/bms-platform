@@ -7599,6 +7599,10 @@
           "intent_id" : {
             "format" : "uuid",
             "type" : "string"
+          },
+          "text_status" : {
+            "enum" : [ "queued", "sent", "failed", "unconfirmed", "expired" ],
+            "type" : "string"
           }
         }
       },
