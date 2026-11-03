@@ -56,6 +56,7 @@ vi.mock('@tanstack/react-router', async (original) => ({
 
 const { Setup, brandDone, hasRetail, reportsWording } = await import('./setup');
 const { ICON_VERSION_KEY, NewLogoCard } = await import('../../install/NewIcon');
+const { hashId } = await import('../../app/ui/useHashSection');
 
 const REAL_AGENT = navigator.userAgent;
 const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1';
@@ -411,6 +412,13 @@ describe('a link to a section of Set-up (issue #783)', () => {
       Element.prototype.scrollIntoView = original;
       window.location.hash = '';
     }
+  });
+
+  it('reads a malformed hash as typed, and a well formed one decoded', () => {
+    expect(hashId('#%E0')).toBe('%E0');
+    expect(hashId('#50%')).toBe('50%');
+    expect(hashId('#reports')).toBe('reports');
+    expect(hashId('#rule%20one')).toBe('rule one');
   });
 
   it('stays at the top with no section in the address', async () => {
