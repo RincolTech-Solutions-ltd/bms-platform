@@ -10,7 +10,6 @@ import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
 import io.swagger.v3.oas.annotations.media.Schema;
-import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -149,9 +148,9 @@ class PaymentLinkTexts {
                 .param("payments:link-text:" + intent.tenantId())
                 .query((rs, n) -> 0)
                 .list();
-        Optional<Instant> textedAt = textedAt(intentId);
-        if (textedAt.isPresent()) {
-            return new LinkText(intentId, true, textStatus(intent, member, textedAt.get()), intent.expiresAt());
+        Optional<Boolean> texted = texted(intentId);
+        if (texted.isPresent()) {
+            return new LinkText(intentId, true, textStatus(intent, member, texted.get()), intent.expiresAt());
         }
         // Read again under the intent's row lock: a payment confirmed since the first read is not texted.
         intent = store.lock(intentId).orElseThrow(ApiException::notFound);
@@ -235,17 +234,19 @@ class PaymentLinkTexts {
         return new LinkText(intentId, false, "queued", intent.expiresAt());
     }
 
-    /** When this intent's link was texted, from its audit row; empty when it never was. */
-    private Optional<Instant> textedAt(UUID intentId) {
+    /**
+     * Whether this intent's link was texted, from its audit row: empty when it never was, otherwise whether the text's
+     * hour has run out, on the database's clock, the one the audit row is stamped with.
+     */
+    private Optional<Boolean> texted(UUID intentId) {
         return jdbc.sql("""
-                        SELECT created_at FROM audit_log
+                        SELECT min(created_at) <= now() - CAST(? AS interval) FROM audit_log
                         WHERE entity_type = 'payment_intent' AND entity_id = ? AND action = ?
-                        ORDER BY created_at LIMIT 1
+                        HAVING count(*) > 0
                         """)
-                .params(intentId, ACTION)
-                .query(Timestamp.class)
-                .optional()
-                .map(Timestamp::toInstant);
+                .params(TEXT_LIFETIME.toMinutes() + " minutes", intentId, ACTION)
+                .query(Boolean.class)
+                .optional();
     }
 
     /**
@@ -253,16 +254,15 @@ class PaymentLinkTexts {
      * (the intent's expiry or the transactional hour) or its payment closed; before that it was refused by the channel
      * (a switch or a cap at send time), which is a failure.
      */
-    private String textStatus(Intent intent, UUID member, Instant textedAt) {
+    private String textStatus(Intent intent, UUID member, boolean hourOver) {
         return switch (sms.status(TEMPLATE, intent.id().toString(), member)) {
             case PENDING -> "queued";
             case SENT -> "sent";
             case FAILED -> "failed";
-            case NOT_SENT -> {
-                Instant now = clock.now();
-                boolean timeUp = !now.isBefore(intent.expiresAt()) || !now.isBefore(textedAt.plus(TEXT_LIFETIME));
-                yield timeUp || !"pending".equals(intent.status()) ? "expired" : "failed";
-            }
+            case NOT_SENT ->
+                hourOver || !clock.now().isBefore(intent.expiresAt()) || !"pending".equals(intent.status())
+                        ? "expired"
+                        : "failed";
         };
     }
 
