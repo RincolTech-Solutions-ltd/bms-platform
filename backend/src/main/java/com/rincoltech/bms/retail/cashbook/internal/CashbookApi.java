@@ -23,6 +23,8 @@ final class CashbookApi {
 
     static final String PROFIT_ONLY = "Present only with retail.profit.read in the record's branch";
     static final long MAX_MINOR = 10_000_000_000_000L;
+    static final String DATE_REASON = "Why the entry has a date before today; needed then, and only a holder of"
+            + " retail.entry.backdate may send such a date (ADR-120). Leave the date out and the server dates it today";
 
     private CashbookApi() {}
 
@@ -132,7 +134,10 @@ final class CashbookApi {
             Long amountMinor,
 
             @Size(max = 300) @Schema(description = "Optional, even when the amount differs from the suggestion")
-            String overwriteReason) {}
+            String overwriteReason,
+
+            @Size(max = 300) @Schema(description = DATE_REASON)
+            String dateReason) {}
 
     @Schema(name = "RetailSavings")
     record Savings(
@@ -203,7 +208,10 @@ final class CashbookApi {
             LocalDate businessDate,
             @NotNull @Positive @Max(MAX_MINOR) Long amountMinor,
             Instant bankedAt,
-            @Size(max = 100) String reference) {}
+            @Size(max = 100) String reference,
+
+            @Size(max = 300) @Schema(description = DATE_REASON)
+            String dateReason) {}
 
     @Schema(name = "RetailBanking")
     record Banking(
@@ -250,7 +258,10 @@ final class CashbookApi {
             LocalDate businessDate,
             @NotNull @Positive @Max(MAX_MINOR) Long amountMinor,
             Instant withdrawnAt,
-            @Size(max = 300) String purpose) {}
+            @Size(max = 300) String purpose,
+
+            @Size(max = 300) @Schema(description = DATE_REASON)
+            String dateReason) {}
 
     @Schema(name = "RetailWithdrawal")
     record Withdrawal(
@@ -284,7 +295,10 @@ final class CashbookApi {
             UUID partyId,
             @NotNull @Positive @Max(MAX_MINOR) Long amountMinor,
             @Size(max = 500) String explanation,
-            UUID receiptDocumentId) {}
+            UUID receiptDocumentId,
+
+            @Size(max = 300) @Schema(description = DATE_REASON)
+            String dateReason) {}
 
     @Schema(name = "RetailExpense")
     record Expense(
@@ -321,7 +335,10 @@ final class CashbookApi {
             @NotNull UUID partyId,
             UUID takenByPartyId,
             @NotNull @Positive @Max(MAX_MINOR) Long principalMinor,
-            @Size(max = 300) String purpose) {}
+            @Size(max = 300) String purpose,
+
+            @Size(max = 300) @Schema(description = DATE_REASON)
+            String dateReason) {}
 
     @Schema(name = "RetailRepaymentRequest")
     record RepaymentRequest(
@@ -333,7 +350,10 @@ final class CashbookApi {
             @NotBlank @Schema(allowableValues = {"cash", "mobile_money", "bank"})
             String method,
 
-            LocalDate paidOn) {}
+            LocalDate paidOn,
+
+            @Size(max = 300) @Schema(description = DATE_REASON)
+            String dateReason) {}
 
     @Schema(name = "RetailRepayment")
     record Repayment(

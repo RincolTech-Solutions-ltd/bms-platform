@@ -160,7 +160,8 @@ class SavingsService {
     private Savings record(SavingsRequest r) {
         UUID branch = branchContext.resolve(CashbookSupport.SAVINGS_RECORD, r.branchId());
         branchContext.requireSells(branch, "branch_id");
-        LocalDate date = support.businessDate(r.businessDate(), "business_date");
+        CashbookSupport.Dated dated = support.entryDate(r.businessDate(), "business_date", r.dateReason(), branch);
+        LocalDate date = dated.date();
         boolean profit = mayProfit(branch);
         // ADR-115: the owner let salespeople see and change the amount; they still never see the profit or expenses.
         SalespeopleSavings setting = support.salespeopleSavings();
@@ -260,6 +261,7 @@ class SavingsService {
             after.put("salespeople_setting", true);
         }
         audit.record(AuditLog.Entry.created("retail.savings.created", "retail.savings", id, branch, after));
+        support.auditBackdate(dated, "retail.savings", id, branch);
         return view(repo.savings(id, false).orElseThrow(), setting);
     }
 
