@@ -77,6 +77,9 @@ class EmailLayoutTest {
         // The Owner's own plan (issue #472): the module asked for and the decision, with the operator's reason.
         p.put("module", "Shop");
         p.put("decision", "declined. The platform operator wrote: Test reason <i>typed</i> & sent.");
+        // A report pack is ready (issue #229).
+        p.put("name", "Test Staff 02");
+        p.put("report_title", "monthly report pack");
         return p;
     }
 
@@ -402,6 +405,27 @@ class EmailLayoutTest {
         ByteArrayOutputStream raw = new ByteArrayOutputStream();
         message.writeTo(raw);
         assertThat(raw.toString(StandardCharsets.UTF_8)).contains("multipart/alternative");
+    }
+
+    // JUSTIFICATION-A3: a new test the fourth #759 review asked for (SMTP email carries no tags).
+    @Test
+    void anSmtpMessageCarriesNoTagsSoItsBouncesAreNotTrackedOrSuppressed() throws Exception {
+        // ADR-117 decision 8: Resend's SMTP documentation names no header that carries tags, so an email sent by SMTP
+        // has no env, outbox_id or tenant_id tag, and the webhook drops its events (ResendWebhookIT pins that half).
+        OutboxChannel.Delivery delivery = delivery("identity.password_reset", params());
+        SmtpEmailChannel.Body body = SmtpEmailChannel.body(templates, delivery, platform(), "", TRUSTED);
+        MimeMessage message = SmtpEmailChannel.compose(
+                Session.getInstance(new Properties()), "BMS by Rincol Tech <no-reply@example.test>", delivery, body);
+        message.saveChanges();
+        String outboxId = delivery.context().outboxId().toString();
+        java.util.Enumeration<jakarta.mail.Header> headers = message.getAllHeaders();
+        List<String> names = new java.util.ArrayList<>();
+        while (headers.hasMoreElements()) {
+            jakarta.mail.Header header = headers.nextElement();
+            names.add(header.getName().toLowerCase(java.util.Locale.ROOT));
+            assertThat(header.getValue()).doesNotContain(outboxId);
+        }
+        assertThat(names).noneMatch(name -> name.contains("tag") || name.startsWith("x-resend"));
     }
 
     @Test
