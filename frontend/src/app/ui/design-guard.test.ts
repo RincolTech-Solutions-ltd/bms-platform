@@ -794,7 +794,14 @@ function sheetActionProblems(source: string): string[] {
       if (rest[i] === '{') depth++;
       else if (rest[i] === '}' && --depth === 0) break;
     }
-    const tags = [...rest.slice(start, i).matchAll(/<(?:button|BusyButton|Link)\b([^>]*)>/g)].map(([, attrs]) => (attrs as string).match(PRIMARY_CLASS)?.[0] ?? 'plain');
+    const actions = rest.slice(start, i);
+    // Each button tag's attributes run to the first > outside braces, so an onClick={() => ...} does not end them.
+    const tags = [...actions.matchAll(/<(?:button|BusyButton|Link)\b/g)].map((t) => {
+      let braces = 0;
+      let j = (t.index ?? 0) + t[0].length;
+      for (; j < actions.length && !(actions[j] === '>' && braces === 0); j++) braces += actions[j] === '{' ? 1 : actions[j] === '}' ? -1 : 0;
+      return actions.slice(t.index, j).match(PRIMARY_CLASS)?.[0] ?? 'plain';
+    });
     if (tags.length < 2) return [];
     const primaries = tags.filter((t) => t !== 'plain').length;
     if (primaries === 0) return [`no primary among ${tags.length} buttons`];
@@ -865,6 +872,9 @@ describe('design guard, every button class keeps the 48px target (issue #825)', 
     expect(sheetActionProblems('<Sheet open actions={<><button>A</button><button>B</button></>}>')).toEqual(['no primary among 2 buttons']);
     expect(sheetActionProblems('<Sheet open actions={<>{x && <BusyButton type="button">Remove</BusyButton>}<BusyButton className="rt-primary">Save</BusyButton></>}>')).toEqual([]);
     expect(sheetActionProblems('<Sheet open actions={<button className="rt-primary">Done</button>}>')).toEqual([]);
+    // A class after an arrow function handler is still read (the fourth review of #833).
+    expect(sheetActionProblems('<Sheet open actions={<><button onClick={() => go()} className="btn-primary">Go</button><button onClick={() => x > 1}>No</button></>}>')).toEqual(['the primary is not last: btn-primary, plain']);
+    expect(sheetActionProblems('<Sheet open actions={<><button onClick={() => no()}>No</button><BusyButton onClick={() => go()} className="rt-primary">Go</BusyButton></>}>')).toEqual([]);
   });
 
   it.each(components.filter((f) => /<Sheet\b/.test(readFileSync(f, 'utf8'))).map((f) => relative(SRC, f)))('%s puts the primary button of every sheet last', (file) => {

@@ -35,16 +35,19 @@ const GUTTER = 16;
 // The classes of a main action (buttons.css).
 const PRIMARY = '.rt-primary, .btn-primary, .btn-brand, .btn-danger';
 
-/** The screens, the selector of the main action of the ones that have one, and of a secondary action under it. */
-const SCREENS: { screen: string; ready: string; main?: string; secondary?: string }[] = [
+/**
+ * The screens, the selector of the main action of the ones that have one, of a secondary action under it, and of links drawn as
+ * buttons that must be found and measured by name (`sized`): the stock card's Open the item, the Items ways to add sizes.
+ */
+const SCREENS: { screen: string; ready: string; main?: string; secondary?: string; sized?: string }[] = [
   { screen: 'sell', ready: '.sale-bar-action', main: '.sale-bar-action' },
-  { screen: 'stock', ready: '.stock-card, .cat-head' },
+  { screen: 'stock', ready: '.stock-card, .cat-head', sized: '.stock-card .item-page-link' },
   { screen: 'buy', ready: 'main .rt-primary', main: 'main .rt-primary', secondary: 'main .action-bar + button' },
   { screen: 'money', ready: '.list-row' },
   { screen: 'expenses', ready: '.action-bar .rt-primary', main: '.action-bar .rt-primary' },
   { screen: 'savings', ready: '.action-bar .rt-primary', main: '.action-bar .rt-primary' },
   { screen: 'setup', ready: 'main fieldset label', main: '.action-bar .rt-primary' },
-  { screen: 'items', ready: 'main [data-tour="product-list"] :is(.list-row, li)' },
+  { screen: 'items', ready: 'main [data-tour="product-list"] :is(.list-row, li)', sized: 'main a[href*="/sizes/"]' },
   { screen: 'labels', ready: '.action-bar .rt-primary', main: '.action-bar .rt-primary' },
   { screen: 'period', ready: '.period-picker' },
   { screen: 'signout', ready: '.sheet-actions button' },
@@ -104,7 +107,11 @@ async function targets(page: Page): Promise<Target[]> {
     ].join(', ');
     const labels = [...document.querySelectorAll<HTMLLabelElement>('label[for]')].filter((l) => l.control && labelled(l.control));
     // A link inside running text (a sentence in a paragraph) is left out, as WCAG 2.5.8 does; a link standing on its own is not.
-    const inText = (el: HTMLElement) => getComputedStyle(el).display === 'inline' && ((el.parentElement?.textContent ?? '').trim().length > (el.textContent ?? '').trim().length);
+    // Running text: an inline link in a paragraph, list item or span that has words of its own beside the link (a text node of
+    // the same parent, not the text of other elements in it, such as the rest of a card).
+    const inText = (el: HTMLElement) => getComputedStyle(el).display === 'inline'
+      && !!el.parentElement?.matches('p, li, span')
+      && [...el.parentElement.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? '').trim() !== '');
     return [...new Set([...document.querySelectorAll<HTMLElement>(`:is(main, .staff-bar, .sheet-panel, .tab-bar) :is(${tappable})`), ...labels])]
       .filter((el) => {
         const r = el.getBoundingClientRect();
@@ -114,8 +121,8 @@ async function targets(page: Page): Promise<Target[]> {
           && !el.closest('details:not([open]) > :not(summary), [aria-hidden="true"], [inert], .visually-hidden')
           // A control inside another target (a field inside its label, a button inside a summary) is part of that target.
           && !el.parentElement?.closest('label, summary, button, a[href]')
-          // A focusable box that holds targets (a Segmented's group, which passes focus to its choices) is not one itself.
-          && !(el.matches(':not(button, a, input, select, textarea, summary, label)') && el.querySelector(tappable));
+          // The one box that holds targets and is focusable only to pass focus on: a Segmented's group (Radix ToggleGroup).
+          && !el.matches('.segmented');
       })
       .map((el) => {
         const r = el.getBoundingClientRect();
@@ -135,11 +142,14 @@ async function targets(page: Page): Promise<Target[]> {
 /** How far apart two boxes stand: the larger of the gaps across and down, below zero when they overlap. */
 const apart = (a: Box, b: Box) => Math.max(b.left - a.right, a.left - b.right, b.top - a.bottom, a.top - b.bottom);
 
-/** The targets of a floating bar nearer than 8px to an edge of the bar that faces the page (not an edge of the screen). */
-function floatingInset(all: Target[], screen: { width: number; height: number }): string[] {
+/**
+ * The targets of a stuck or fixed bar nearer than 8px to an edge of the bar that faces the page (not an edge of the screen),
+ * whether the bar floats or stands in its own place: the top bar at every pass, the tabs, a stuck ActionBar.
+ */
+function pinnedInset(all: Target[], screen: { width: number; height: number }): string[] {
   return all.flatMap((t) => {
     const bar = t.cover;
-    if (!bar?.floating) return [];
+    if (!bar) return [];
     const edges = [
       bar.left > 0.5 ? t.left - bar.left : Infinity,
       bar.top > 0.5 ? t.top - bar.top : Infinity,
@@ -152,23 +162,30 @@ function floatingInset(all: Target[], screen: { width: number; height: number })
 }
 
 /**
- * The pairs of targets nearer than 8px, measured where they are drawn. Two parts of one control touch by design. While a bar
- * floats over the page (the fixed tabs, the top bar or the ActionBar stuck away from its place) the page scrolls under it, so its
- * targets are measured against the other pinned ones only, and `floatingInset` keeps them 8px inside every edge of the bar that
- * faces the page. A bar in its own place is measured against the page like any target, overlap included: the top bar against the
- * first target of the page at the top, and the ActionBar put back in the flow against Clear this purchase.
+ * The pairs of targets nearer than 8px, measured where they are drawn, and the targets of the page a bar hides for good. Two parts
+ * of one control touch by design. A bar in its own place is measured against the page like any target, overlap included: the top
+ * bar against the first target of the page at the top, the ActionBar put back in the flow against Clear this purchase. While a bar
+ * floats over the page (the fixed tabs, the top bar or the ActionBar stuck away from its place) the page scrolls under it, so a
+ * target of the page 0 to 8px from it, or under it, is in passing and `pinnedInset` keeps the bar's own targets clear; but a
+ * target under a floating bar where the page cannot scroll any further to bring it out (under the tabs or a stuck ActionBar at the
+ * foot of the page, under the top bar at its top) can never be tapped, and that is a failure.
  */
-function tooClose(all: Target[]): string[] {
+function tooClose(all: Target[], scroll: { atTop: boolean; atFoot: boolean; height: number }): string[] {
   const close: string[] = [];
   all.forEach((a, i) => all.slice(i + 1).forEach((b) => {
     if (a.group >= 0 && a.group === b.group) return;
-    // A floating bar's own inset (checked in the test) keeps whatever of the page shows beside it clear; a bar in its place is
-    // measured against the page like any target, overlap included.
     if (!a.cover !== !b.cover && (a.cover ?? b.cover)?.floating) return;
     const gap = apart(a, b);
     if (gap < GAP - 0.5) close.push(`${a.name} and ${b.name}: ${Math.round(gap)}px`);
   }));
-  return close;
+  const floating = all.flatMap((t) => (t.cover?.floating ? [t.cover] : []));
+  for (const t of all.filter((x) => !x.cover)) {
+    for (const bar of floating) {
+      const atBottom = (bar.top + bar.bottom) / 2 > scroll.height / 2;
+      if (apart(t, bar) < 0 && (atBottom ? scroll.atFoot : scroll.atTop)) close.push(`${t.name} under a bar it cannot scroll out of`);
+    }
+  }
+  return [...new Set(close)];
 }
 
 /** The buttons of each ActionBar and sheet: their boxes in the order of the page, which is the primary, and the bar's inner box. */
@@ -187,11 +204,23 @@ async function bars(page: Page) {
   }), PRIMARY);
 }
 
-describe.each(SCREENS)('the buttons of $screen (#825)', ({ screen, ready, main, secondary }) => {
+describe.each(SCREENS)('the buttons of $screen (#825)', ({ screen, ready, main, secondary, sized }) => {
   it('on a phone 412 by 900: every target 48 by 48px and 8px apart, the main action full width in the stuck bar', async () => {
     const page = await open(screen, ready, PHONE, true);
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/${screen}-after-412.png`, fullPage: false });
     expect(await page.evaluate(() => document.documentElement.scrollWidth), 'page width').toBeLessThanOrEqual(PHONE.width);
+    if (sized) {
+      // These links are drawn as buttons (.btn in buttons.css: inline-flex, 48 by 48px at least), never as text links.
+      const links = await page.locator(sized).evaluateAll((els) => els.map((el) => {
+        const r = el.getBoundingClientRect();
+        return { text: (el.textContent ?? '').trim(), width: r.width, height: r.height, display: getComputedStyle(el).display };
+      }));
+      expect(links.length, `${sized} found`).toBeGreaterThan(0);
+      for (const l of links) {
+        expect(l.display, l.text).toMatch(/flex/);
+        expect(Math.min(l.width, l.height), l.text).toBeGreaterThanOrEqual(TAP - 0.5);
+      }
+    }
     // Measured at the top of the page, at its foot, and with the ActionBar put back in the flow of the form, where it stands on a
     // page short enough not to stick: there its buttons are measured against the page around it (Clear this purchase under it).
     // On a screen with a main action, once more after a press of it while its fields are not ready (Buy: the cost is empty), when
@@ -208,8 +237,13 @@ describe.each(SCREENS)('the buttons of $screen (#825)', ({ screen, ready, main, 
       const all = await targets(page);
       expect(all.length, 'targets found').toBeGreaterThan(0);
       expect(all.filter((t) => t.width < TAP - 0.5 || t.height < TAP - 0.5).map((t) => `${t.name} ${Math.round(t.width)}x${Math.round(t.height)}`), at).toEqual([]);
-      expect(tooClose(all), `measured at the ${at}`).toEqual([]);
-      expect(floatingInset(all, PHONE), `measured at the ${at}`).toEqual([]);
+      const scroll = await page.evaluate(() => ({
+        atTop: window.scrollY <= 0.5,
+        atFoot: window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 1,
+        height: window.innerHeight,
+      }));
+      expect(tooClose(all, scroll), `measured at the ${at}`).toEqual([]);
+      expect(pinnedInset(all, PHONE), `measured at the ${at}`).toEqual([]);
       await flow?.evaluate((el) => (el as Element).remove());
     }
     await page.evaluate(() => window.scrollTo(0, 0));
