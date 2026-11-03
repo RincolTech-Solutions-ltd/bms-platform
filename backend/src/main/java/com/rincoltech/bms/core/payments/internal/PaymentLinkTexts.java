@@ -80,7 +80,7 @@ class PaymentLinkTexts {
             UUID intentId,
             boolean alreadySent,
 
-            @Schema(allowableValues = {"queued", "sent", "failed", "expired"})
+            @Schema(allowableValues = {"queued", "sent", "failed", "unconfirmed", "expired"})
             String textStatus,
 
             Instant expiresAt) {}
@@ -250,19 +250,21 @@ class PaymentLinkTexts {
     }
 
     /**
-     * Where the earlier text stands (issue #772). One that never reached the provider expired when its time ran out
-     * (the intent's expiry or the transactional hour) or its payment closed; before that it was refused by the channel
-     * (a switch or a cap at send time), which is a failure.
+     * Where the earlier text stands (issue #772). One that has not reached the provider is queued until its time runs out
+     * (the intent's expiry or the transactional hour) or its payment closes, and expired after.
      */
     private String textStatus(Intent intent, UUID member, boolean hourOver) {
         return switch (sms.status(TEMPLATE, intent.id().toString(), member)) {
             case PENDING -> "queued";
             case SENT -> "sent";
             case FAILED -> "failed";
+            case UNCONFIRMED -> "unconfirmed";
+            // Not at the provider and its time not up: still "queued", never "failed", so staff are not led to cancel a
+            // payment whose text may yet go (a row queued before this release, whose id is not the derived one).
             case NOT_SENT ->
                 hourOver || !clock.now().isBefore(intent.expiresAt()) || !"pending".equals(intent.status())
                         ? "expired"
-                        : "failed";
+                        : "queued";
         };
     }
 

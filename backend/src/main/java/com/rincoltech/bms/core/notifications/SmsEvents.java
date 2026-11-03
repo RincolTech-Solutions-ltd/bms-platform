@@ -203,8 +203,10 @@ public interface SmsEvents {
         PENDING,
         /** The provider took it (on staging, the sink did). */
         SENT,
-        /** It reached the provider and failed, was refused or blocked, or its outcome is unknown: it may not have arrived. */
+        /** It reached the provider and failed, was refused or blocked: it did not arrive. */
         FAILED,
+        /** It went to the provider but the outcome is unknown (no automatic retry): it may or may not have arrived. */
+        UNCONFIRMED,
         /** It never reached the provider: it expired, was withdrawn or dropped, or no row was ever written. */
         NOT_SENT
     }

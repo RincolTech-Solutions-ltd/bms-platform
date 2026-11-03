@@ -191,6 +191,71 @@ class SmsEventsIT extends IntegrationTest {
 
     // ---- What is queued, once ----------------------------------------------------------------------
 
+    /**
+     * Issue #772: a member SMS row's id follows from its key, so two transactions that queue the same event at once meet
+     * on the primary key as well as on the key. The second waits for the first, then is refused (or no-ops) inside its
+     * savepoint: one row, the second caller's transaction unharmed, and a later write in it commits.
+     * JUSTIFICATION-A3: the concurrency test the review of #781 asked for; the anchor is the insertion point.
+     */
+    @Test
+    void twoTransactionsQueueingTheSameEventAtOnceWriteOneRowAndNeitherIsHarmed() throws Exception {
+        Rig rig = new Rig(BASE);
+        TestDatabase.Fixture t = tenant(1000);
+        UUID member = UUID.randomUUID();
+        String ref = UUID.randomUUID().toString();
+        String other = UUID.randomUUID().toString();
+        java.util.concurrent.CountDownLatch firstQueued = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            java.util.concurrent.Future<Result> first = pool.submit(() -> inTenant(t, () -> {
+                Result r = rig.events.queue(
+                        new MemberSms("loan.repayment_received", member, "+256700000772", RECEIPT, ref, null));
+                firstQueued.countDown();
+                try {
+                    release.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return r;
+            }));
+            assertThat(firstQueued.await(30, java.util.concurrent.TimeUnit.SECONDS))
+                    .isTrue();
+            java.util.concurrent.Future<List<Result>> second = pool.submit(() -> inTenant(
+                    t,
+                    () -> List.of(
+                            rig.events.queue(new MemberSms(
+                                    "loan.repayment_received", member, "+256700000772", RECEIPT, ref, null)),
+                            rig.events.queue(new MemberSms(
+                                    "loan.repayment_received", member, "+256700000772", RECEIPT, other, null)))));
+            // The second is held by the first's uncommitted row before the first commits.
+            boolean waiting = false;
+            for (int i = 0; i < 200 && !waiting; i++) {
+                waiting = TestDatabase.owner()
+                                .sql("SELECT count(*) FROM pg_locks WHERE NOT granted AND locktype = 'transactionid'")
+                                .query(Long.class)
+                                .single()
+                        > 0;
+                if (!waiting) {
+                    Thread.sleep(50);
+                }
+            }
+            assertThat(waiting).as("the second enqueue waits on the first").isTrue();
+            release.countDown();
+            assertThat(first.get(30, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(Result.QUEUED);
+            List<Result> seconds = second.get(30, java.util.concurrent.TimeUnit.SECONDS);
+            assertThat(seconds.get(0)).isIn(Result.NOT_QUEUED, Result.FAILED);
+            assertThat(seconds.get(1)).isEqualTo(Result.QUEUED);
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+        assertThat(rows(t).stream().map(r -> (String) r.get("idempotency_key")))
+                .containsExactlyInAnyOrder(
+                        SmsEventsService.key("loan.repayment_received", t.tenantId(), ref, member),
+                        SmsEventsService.key("loan.repayment_received", t.tenantId(), other, member));
+    }
+
     @Test
     void frNtf02_aQueuedEventIsOneRowForTheMembersNumberAndTheSameEventNeverQueuesTwice() {
         Rig rig = new Rig(BASE);

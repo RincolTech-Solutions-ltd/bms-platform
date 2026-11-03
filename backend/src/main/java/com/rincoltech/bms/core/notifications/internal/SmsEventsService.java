@@ -178,11 +178,15 @@ class SmsEventsService implements SmsEvents {
         });
     }
 
-    /** A delivery log status as the port says it: {@code queued} is a send in flight, {@code unknown} may not have gone. */
+    /**
+     * A delivery log status as the port says it: {@code queued} is a send in flight, {@code unknown} may or may not have
+     * gone. One row per outbox row: {@code UNIQUE (tenant_id, outbox_id)} (V50), a retry updates it.
+     */
     static TextStatus textStatus(String delivery) {
         return switch (delivery) {
             case "queued" -> TextStatus.PENDING;
             case "sent", "delivered", "sunk" -> TextStatus.SENT;
+            case "unknown" -> TextStatus.UNCONFIRMED;
             default -> TextStatus.FAILED;
         };
     }

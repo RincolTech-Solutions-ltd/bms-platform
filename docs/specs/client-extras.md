@@ -716,17 +716,23 @@ Built in slice #231 (no migration). Where the build sharpens the text above:
   branch. It queues through `SmsEvents` like the money events; the member for the opt-out comes from the purpose handler's new
   `memberOf` (a loan's borrower, an account's holder), so the payments core still names no vertical.
 - **Once per intent.** The outbox key is per intent and member; a repeat answers `already_sent: true` and writes nothing.
-- **The real status (issue #772).** Every answer carries `text_status`: `queued` (still in the outbox, or at the sender), `sent`
-  (the provider or, on staging, the sink took it), `failed` (the provider failed, refused or blocked it, its outcome is
-  `unknown`, or the channel dropped it before its time was up) or `expired` (it never reached the provider before the intent
-  expired or its hour ran out, or its payment closed). `already_sent` alone only proves the audit row. The status is read
-  through `SmsEvents.status`: an SMS outbox row's id is a name based UUID of its idempotency key, so the row of an event is
-  found without storing anything (no migration); `notification_outbox_is_pending` says whether it waits, and the tenant's
-  `sms_deliveries` row (row-level security) says what the provider did. The screen says "queued earlier" while it waits, "sent"
-  only when sent, and after `failed` or `expired` offers "Make a new payment link" (it cancels this payment first).
-- **Withdrawn when the payment closes (issue #772).** When an intent leaves `pending` (paid, cancelled, failed, expired), its
-  link text still waiting in the outbox and held by no sender is withdrawn (`cancelled_settled`), as a reversal withdraws a
-  receipt, so a dead or already paid link never goes.
+- **The real status (issue #772).** Every answer carries `text_status`: `queued` (it has not reached the provider and its
+  time is not up), `sent` (the provider or, on staging, the sink took it), `failed` (the provider failed, refused or blocked
+  it), `unconfirmed` (the send's outcome is `unknown`: it may have arrived) or `expired` (it never reached the provider before
+  the intent expired or its hour ran out, or its payment closed). `already_sent` alone only proves the audit row. The status
+  is read through `SmsEvents.status`: a member SMS row's id (key `sms:...`, written only by `SmsEventsService`) is a name based
+  UUID of its idempotency key, so the row of an event is found without storing anything (no migration);
+  `notification_outbox_is_pending` says whether it waits, and the tenant's one `sms_deliveries` row (unique per outbox row,
+  row-level security) says what the provider did. Two transactions queueing the same event at once also meet on that
+  primary key, which `ON CONFLICT (idempotency_key)` does not absorb: the second is refused inside the port's savepoint, the
+  first row stands and the caller's transaction is unharmed (`SmsEventsIT`). Other SMS rows (an owner's, billing) keep a
+  random id. The screen says "queued earlier" while it waits, "sent" only when sent, after `failed` or `expired` offers "Make a
+  new payment link" (it cancels this payment first, only while it can be cancelled), and after `unconfirmed` asks staff to
+  check with the payer or copy the link, without pushing a new one.
+- **Withdrawn when the payment closes (issue #772).** When an intent leaves `pending` (paid, cancelled, failed or expired
+  through `IntentStore.update`, or handed to a person when the payment account changes), its link text still waiting in the
+  outbox and held by no sender is withdrawn (`cancelled_settled`), as a reversal withdraws a receipt, so a dead or already
+  paid link never goes.
 - **Open only, and it expires with the intent.** `pending` with a link and before `expires_at`; a transactional message now
   takes the earlier of its own expiry and its usual hour. No other transactional caller passes an expiry:
   `SmsExpiryCallersTest` pins the callers of the forms that take one (the loan reminders and arrears notices, and this link).

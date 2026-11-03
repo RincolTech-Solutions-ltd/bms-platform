@@ -7584,7 +7584,7 @@
             "type" : "string"
           },
           "text_status" : {
-            "enum" : [ "queued", "sent", "failed", "expired" ],
+            "enum" : [ "queued", "sent", "failed", "unconfirmed", "expired" ],
             "type" : "string"
           }
         }

@@ -11630,7 +11630,7 @@ export interface components {
             /** Format: uuid */
             intent_id?: string;
             /** @enum {string} */
-            text_status?: "queued" | "sent" | "failed" | "expired";
+            text_status?: "queued" | "sent" | "failed" | "unconfirmed" | "expired";
         };
         PaymentMethodMapping: {
             account_code?: string;

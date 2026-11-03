@@ -133,6 +133,23 @@ class SmsPureTest {
         assertThat(count.encoding()).isEqualTo(SmsSegments.Encoding.GSM7);
         assertThat(count.segments()).isLessThanOrEqualTo(2);
         assertThat(text.replace(PAYMENT_LINK, "")).doesNotContain("-");
+        // At the bound itself: a GSM-7 name of exactly 40 characters, the largest amount and a long reference.
+        String forty = "Test Lender and Savings Society of Hills";
+        assertThat(forty).hasSize(40);
+        assertThat(SmsEventsService.plainName(forty, 40)).isEqualTo(forty);
+        String widest = new OutboxTemplates()
+                .render(
+                        "sms",
+                        "payment.link",
+                        Map.of(
+                                "tenant_name", forty,
+                                "currency", "UGX",
+                                "amount", "9,223,372,036,854,775,807",
+                                "reference", "savings account SV HQ 000001",
+                                "link", PAYMENT_LINK))
+                .text();
+        assertThat(SmsSegments.count(widest).encoding()).isEqualTo(SmsSegments.Encoding.GSM7);
+        assertThat(SmsSegments.count(widest).segments()).isEqualTo(2);
         // A name of one long word is cut at the bound, and a name with nothing a text can carry still names someone.
         assertThat(SmsEventsService.plainName("A".repeat(60), 40)).hasSize(40);
         assertThat(SmsEventsService.plainName("中文", 40)).isEqualTo("BMS");

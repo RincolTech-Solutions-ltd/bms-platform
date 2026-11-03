@@ -111,6 +111,9 @@ export function linkTextWords(
       return { words: 'The text message with the link did not reach the payer. Make a new payment link to send it again.', renew: true, pending: false };
     case 'expired':
       return { words: 'The text message with the link ran out of time before it went. Make a new payment link to send it again.', renew: true, pending: false };
+    // It may have arrived: no new link is pushed, so a link the payer may hold is not cancelled.
+    case 'unconfirmed':
+      return { words: 'We could not confirm that the text message reached the payer. Ask the payer, or copy the link and send it another way.', renew: false, pending: false };
     default:
       return {
         words: text.already_sent

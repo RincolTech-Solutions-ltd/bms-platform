@@ -47,10 +47,22 @@ class JdbcOutbox implements Outbox {
     /**
      * The id of an SMS row, from its idempotency key (issue #772): the key names one event for one member in one tenant
      * and is unique, so the id is too, and {@link SmsEventsService#status} can find the row of an event without
-     * storing anything. Other channels keep a random id.
+     * storing anything. Only a member SMS of {@link SmsEventsService} gets it ({@link #memberSms}); every other row
+     * keeps a random id.
      */
     static UUID smsRowId(String idempotencyKey) {
         return UUID.nameUUIDFromBytes(("outbox:" + idempotencyKey).getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * A member SMS: its key is {@link SmsEventsService#key} ({@code sms:<template>:<tenant>:<event>:<member>}), and it is
+     * only ever written inside that service's savepoint. A concurrent duplicate of it can therefore meet the primary key
+     * as well as the key's unique index, which {@code ON CONFLICT (idempotency_key)} does not absorb; that error is
+     * caught by the savepoint, answered as a failure of the duplicate, and the first row stands. Direct writers
+     * (an owner's or the billing texts) are not in a savepoint, so they keep a random id and the plain no-op.
+     */
+    private static boolean memberSms(Message message) {
+        return SMS.equals(message.channel()) && message.idempotencyKey().startsWith("sms:");
     }
 
     @Override
@@ -81,7 +93,7 @@ class JdbcOutbox implements Outbox {
         return Boolean.TRUE.equals(
                 jdbc.sql("SELECT notification_outbox_enqueue(?, ?, ?, ?, CAST(? AS jsonb), ?, ?, ?, ?, ?, ?, ?, ?)")
                         .params(
-                                SMS.equals(message.channel()) ? smsRowId(message.idempotencyKey()) : UUID.randomUUID(),
+                                memberSms(message) ? smsRowId(message.idempotencyKey()) : UUID.randomUUID(),
                                 message.channel(),
                                 message.recipient(),
                                 message.templateKey(),

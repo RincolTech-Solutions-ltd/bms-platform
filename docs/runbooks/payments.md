@@ -199,7 +199,8 @@ default, and on staging the SMS mode is `sink` against the provider's sandbox.
 1. **Once per payment.** A second press, or a second person, sends nothing. The screen says where the text stands, read from
    the outbox (`text_status`, issue #772): "queued" while it waits ("Check the text message" asks again), "sent" only once the
    provider took it, and plainly when it failed or ran out of time, with "Make a new payment link", which cancels this payment
-   and starts a new one. To send again, make a new payment link.
+   and starts a new one. When the provider's answer was unknown it says the text may not have arrived and offers no new link:
+   ask the payer, or copy the link. To send again, make a new payment link.
 2. **Only while open.** A link that expired, or a payment that was paid or cancelled, is refused (`intent_not_open`); the text
    itself expires with the payment, so the outbox never sends a lapsed link. A text still waiting in the outbox when the payment
    is paid, cancelled, failed or expired is withdrawn (outbox row `failed`, `last_error = 'cancelled_settled'`, issue #772); one

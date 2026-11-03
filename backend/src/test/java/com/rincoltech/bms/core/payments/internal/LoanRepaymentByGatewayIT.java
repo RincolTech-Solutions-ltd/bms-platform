@@ -951,10 +951,17 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
         }
         linkTextOutcome(sent, "sent", null, "delivered");
         linkTextOutcome(failed, "failed", "rejected", "rejected");
-        // Never reached the provider, and the payment link's own time is up.
+        // Never reached the provider: still queued while its time lasts (never "failed", so nobody cancels a payment
+        // whose text may yet go), and expired once the payment link's own time is up.
         linkTextOutcome(expired, "failed", "expired", null);
         assertThat(textLink(sent).getBody().get("text_status").asString()).isEqualTo("sent");
         assertThat(textLink(failed).getBody().get("text_status").asString()).isEqualTo("failed");
+        assertThat(textLink(expired).getBody().get("text_status").asString()).isEqualTo("queued");
+        // A send whose outcome the provider left unknown is said as such, on another member's loan.
+        JsonNode unknown = intentFor(activeLoan(), 100_000);
+        assertThat(textLink(unknown).getStatusCode().value()).isEqualTo(200);
+        linkTextOutcome(unknown, "failed", "unknown", "unknown");
+        assertThat(textLink(unknown).getBody().get("text_status").asString()).isEqualTo("unconfirmed");
         clock.set(Instant.parse(expired.get("expires_at").asString()).plusSeconds(60));
         ResponseEntity<JsonNode> late = textLink(expired);
         assertThat(late.getStatusCode().value()).isEqualTo(200);
@@ -1005,6 +1012,17 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
                         .query(String.class)
                         .single())
                 .isEqualTo("pending");
+        // Until the poller expires it, in its own tenant bound job: then its text is withdrawn too.
+        clock.set(Instant.parse(open.get("expires_at").asString()).plusSeconds(60));
+        poller.tick();
+        assertThat(row(open).get("status")).isEqualTo("expired");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT last_error FROM notification_outbox WHERE template_key = 'payment.link'"
+                                + " AND idempotency_key LIKE ?")
+                        .param("sms:payment.link:%:" + open.get("id").asString() + ":%")
+                        .query(String.class)
+                        .single())
+                .isEqualTo("cancelled_settled");
     }
 
     @Test

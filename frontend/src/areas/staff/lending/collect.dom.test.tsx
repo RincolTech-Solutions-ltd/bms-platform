@@ -142,6 +142,14 @@ describe('sending the link by text message (issue #231)', () => {
     expect(await screen.findByText('The link was queued earlier to go by text message to ********0216. It has not gone yet.')).toBeTruthy();
   });
 
+  it('says plainly when the text may or may not have arrived, and does not push a new link', async () => {
+    pay.textLink.mockResolvedValue({ intent_id: pending.id, already_sent: true, text_status: 'unconfirmed', expires_at: '2026-11-02T10:00:00Z' });
+    fireEvent.click(await linkShown());
+    expect(await screen.findByText(/could not confirm that the text message reached the payer/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Make a new payment link' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Copy the link' })).toBeTruthy();
+  });
+
   it.each([
     ['failed', 'The text message with the link did not reach the payer. Make a new payment link to send it again.'],
     ['expired', 'The text message with the link ran out of time before it went. Make a new payment link to send it again.'],

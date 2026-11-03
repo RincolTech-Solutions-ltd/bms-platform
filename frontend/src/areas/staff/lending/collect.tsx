@@ -249,7 +249,7 @@ export function CollectStatus({ target, initial, onNew }: { target: CollectTarge
               Check the text message
             </BusyButton>
           )}
-          {textWords?.renew && (
+          {textWords?.renew && isCancellable(status) && (
             <BusyButton busy={renew.isPending} type="button" className="rt-primary" onClick={() => renew.mutate()}>
               Make a new payment link
             </BusyButton>

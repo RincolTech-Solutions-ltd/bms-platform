@@ -321,7 +321,9 @@ class IntentStore {
         if (updated && "pending".equals(from) && to != null && !"pending".equals(to)) {
             // The payment closed (paid, cancelled, failed or expired) before its link text went: withdraw the text, so
             // the payer never gets a dead or already paid link (issue #772, spec 4.13). Only a text no sender holds yet
-            // is withdrawn; the call is guarded and never harms this transaction.
+            // is withdrawn. A row was updated, so this runs in a transaction bound to the intent's tenant: the binding
+            // is transaction local and payment_intents has forced row-level security, so outside one no row matches.
+            // Inside it the withdrawal runs in a savepoint and a failure there never harms this transaction.
             sms.cancelSettled(id.toString());
         }
         return updated;
