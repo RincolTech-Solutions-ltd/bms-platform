@@ -195,6 +195,35 @@ public interface SmsEvents {
             Supplier<Map<String, String>> params);
 
     /**
+     * Where one member message stands (issue #772), read from its outbox row and the delivery log, never guessed.
+     * JUSTIFICATION-A3: the port had no way to read a message's status; the anchor is only the insertion point.
+     */
+    enum TextStatus {
+        /** Waiting in the outbox or held by the sender: it has not reached the provider yet. */
+        PENDING,
+        /** The provider took it (on staging, the sink did). */
+        SENT,
+        /** It reached the provider and failed, was refused or blocked, or its outcome is unknown: it may not have arrived. */
+        FAILED,
+        /** It never reached the provider: it expired, was withdrawn or dropped, or no row was ever written. */
+        NOT_SENT
+    }
+
+    /**
+     * Where the message of {@code templateKey} about the event {@code eventRef} for {@code memberId} of the bound tenant
+     * stands. Guarded: a failure answers {@link TextStatus#PENDING}, which never claims that a text went.
+     */
+    TextStatus status(String templateKey, String eventRef, UUID memberId);
+
+    /**
+     * The bound business's name as a short plain text carries it (issue #772): every dash written as a space, a curly
+     * quote as a straight one, any other character outside the GSM-7 default alphabet dropped (one would make the whole
+     * text UCS-2 and more than double its segments), spaces collapsed, and at most {@code maxLength} characters, cut
+     * after a whole word when one ends in the second half. Not guarded.
+     */
+    String plainTenantName(int maxLength);
+
+    /**
      * Withdraws the messages of the event {@code eventRef} of the bound tenant that nobody has claimed yet, as a reversal
      * must: a receipt for an entry made on the wrong account would tell the wrong person. A message already claimed by the
      * sender may be at the provider and is left. Guarded like the rest; returns how many were withdrawn (0 on a failure).

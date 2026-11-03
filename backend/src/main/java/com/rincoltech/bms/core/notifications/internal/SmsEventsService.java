@@ -153,6 +153,68 @@ class SmsEventsService implements SmsEvents {
         return guarded("cancel", 0, () -> outbox.cancelUnclaimed(eventRef, "cancelled_settled"));
     }
 
+    /**
+     * The row is found by its id, which follows from the event's key ({@link JdbcOutbox#smsRowId}): still pending, it
+     * has not reached the provider; otherwise the delivery log (row-level security keeps it to the bound tenant) says
+     * what the provider did, and no delivery row means it never got there. JUSTIFICATION-A3: a new read on the port.
+     */
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public TextStatus status(String templateKey, String eventRef, UUID memberId) {
+        return guarded("status", TextStatus.PENDING, () -> {
+            UUID row = JdbcOutbox.smsRowId(key(templateKey, tenant.profile().id(), eventRef, memberId));
+            if (Boolean.TRUE.equals(jdbc.sql("SELECT notification_outbox_is_pending(?)")
+                    .param(row)
+                    .query(Boolean.class)
+                    .single())) {
+                return TextStatus.PENDING;
+            }
+            return jdbc.sql("SELECT status FROM sms_deliveries WHERE outbox_id = ?")
+                    .param(row)
+                    .query(String.class)
+                    .optional()
+                    .map(SmsEventsService::textStatus)
+                    .orElse(TextStatus.NOT_SENT);
+        });
+    }
+
+    /** A delivery log status as the port says it: {@code queued} is a send in flight, {@code unknown} may not have gone. */
+    static TextStatus textStatus(String delivery) {
+        return switch (delivery) {
+            case "queued" -> TextStatus.PENDING;
+            case "sent", "delivered", "sunk" -> TextStatus.SENT;
+            default -> TextStatus.FAILED;
+        };
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public String plainTenantName(int maxLength) {
+        return plainName(tenant.profile().name(), maxLength);
+    }
+
+    /** See {@link SmsEvents#plainTenantName}. Pure, so a test pins it; an empty result reads {@code BMS}. */
+    static String plainName(String name, int maxLength) {
+        StringBuilder out = new StringBuilder();
+        for (char c : (name == null ? "" : name).toCharArray()) {
+            char k = switch (c) {
+                case '-', '‐', '‑', '‒', '–', '—', '―', '−', '\n', '\r', '\t' -> ' ';
+                case '‘', '’', 'ʼ' -> '\'';
+                case '“', '”' -> '"';
+                default -> c;
+            };
+            if (SmsSegments.basic(k)) {
+                out.append(k);
+            }
+        }
+        String plain = out.toString().replaceAll(" {2,}", " ").strip();
+        if (plain.length() > maxLength) {
+            int cut = plain.lastIndexOf(' ', maxLength);
+            plain = (cut > maxLength / 2 ? plain.substring(0, cut) : plain.substring(0, maxLength)).strip();
+        }
+        return plain.isEmpty() ? "BMS" : plain;
+    }
+
     /** Runs {@code body} in a savepoint; on any failure rolls back to it, logs the label and the error class, answers {@code onFailure}. */
     private <T> T guarded(String label, T onFailure, Supplier<T> body) {
         try {

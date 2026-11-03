@@ -102,6 +102,39 @@ class SmsPureTest {
                 .isEqualTo(2);
     }
 
+    /**
+     * Issue #772: the business name in the payment link text carries no dash and is bounded, so a long name with dashes,
+     * curly quotes and a character outside GSM-7 still gives a GSM-7 text of at most two segments with no dash in its
+     * words. 40 is {@code PaymentLinkTexts.NAME_MAX}. JUSTIFICATION-A3: a new test case; the anchor is the insertion point.
+     */
+    @Test
+    void frNtf02_aLongDashedBusinessNameIsMadePlainAndTheLinkTextStaysTwoSegments() {
+        String name = "Test’s Lending — Savings and Credit Co-operative Society of the Hills™ Branch";
+        String plain = SmsEventsService.plainName(name, 40);
+        assertThat(plain).isEqualTo("Test's Lending Savings and Credit Co");
+        assertThat(plain.length()).isLessThanOrEqualTo(40);
+        assertThat(plain).doesNotContain("-", "–", "—");
+        String text = new OutboxTemplates()
+                .render(
+                        "sms",
+                        "payment.link",
+                        Map.of(
+                                "tenant_name", plain,
+                                "currency", "UGX",
+                                "amount", "999,999,999,999",
+                                "reference", "savings account SV HQ 000001",
+                                "link", PAYMENT_LINK))
+                .text();
+        SmsSegments.Count count = SmsSegments.count(text);
+        assertThat(count.encoding()).isEqualTo(SmsSegments.Encoding.GSM7);
+        assertThat(count.segments()).isLessThanOrEqualTo(2);
+        assertThat(text.replace(PAYMENT_LINK, "")).doesNotContain("-");
+        // A name of one long word is cut at the bound, and a name with nothing a text can carry still names someone.
+        assertThat(SmsEventsService.plainName("A".repeat(60), 40)).hasSize(40);
+        assertThat(SmsEventsService.plainName("中文", 40)).isEqualTo("BMS");
+        assertThat(SmsEventsService.plainName("  Test - Lender  ", 40)).isEqualTo("Test Lender");
+    }
+
     @Test
     void everyDefaultTemplateFitsOneSegmentOrDeclaresTwo() {
         OutboxTemplates templates = new OutboxTemplates();

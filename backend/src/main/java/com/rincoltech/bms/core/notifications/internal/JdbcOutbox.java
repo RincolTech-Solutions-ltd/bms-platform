@@ -3,6 +3,7 @@ package com.rincoltech.bms.core.notifications.internal;
 import com.rincoltech.bms.core.notifications.Outbox;
 import com.rincoltech.bms.core.tenancy.TenantSettings;
 import com.rincoltech.bms.kernel.BusinessClock;
+import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Set;
@@ -43,6 +44,15 @@ class JdbcOutbox implements Outbox {
         this.settings = settings;
     }
 
+    /**
+     * The id of an SMS row, from its idempotency key (issue #772): the key names one event for one member in one tenant
+     * and is unique, so the id is too, and {@link SmsEventsService#status} can find the row of an event without
+     * storing anything. Other channels keep a random id.
+     */
+    static UUID smsRowId(String idempotencyKey) {
+        return UUID.nameUUIDFromBytes(("outbox:" + idempotencyKey).getBytes(StandardCharsets.UTF_8));
+    }
+
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public boolean enqueue(Message message) {
@@ -71,7 +81,7 @@ class JdbcOutbox implements Outbox {
         return Boolean.TRUE.equals(
                 jdbc.sql("SELECT notification_outbox_enqueue(?, ?, ?, ?, CAST(? AS jsonb), ?, ?, ?, ?, ?, ?, ?, ?)")
                         .params(
-                                UUID.randomUUID(),
+                                SMS.equals(message.channel()) ? smsRowId(message.idempotencyKey()) : UUID.randomUUID(),
                                 message.channel(),
                                 message.recipient(),
                                 message.templateKey(),
