@@ -161,7 +161,7 @@ class ApplicationsController {
     @Operation(
             summary = "Does the business's own address already answer? Asks that host for /version (issue #155)",
             operationId = "platformHostnameCheck")
-    HostnameCheck.Result hostnameCheck(@RequestParam("slug") @Size(max = 63) String slug) {
+    HostnameCheck.Result hostnameCheck(@RequestParam("slug") String slug) {
         return hostnames.check(slug);
     }
 

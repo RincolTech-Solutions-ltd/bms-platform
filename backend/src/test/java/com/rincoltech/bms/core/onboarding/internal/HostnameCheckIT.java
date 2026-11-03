@@ -44,7 +44,7 @@ class HostnameCheckIT extends IntegrationTest {
 
         assertThat(check.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(check.getBody().path("host").asString()).isEqualTo("test-shop-155-bms-staging.rincoltech.test");
-        assertThat(check.getBody().path("outcome").asString()).isIn("not_found", "no_answer");
+        assertThat(check.getBody().path("outcome").asString()).isEqualTo("not_found");
     }
 
     @Test

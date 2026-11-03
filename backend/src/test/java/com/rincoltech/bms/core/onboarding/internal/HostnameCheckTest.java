@@ -16,6 +16,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
@@ -140,7 +142,37 @@ class HostnameCheckTest {
         HostnameCheck.Result result = check.check("test-shop-one");
 
         assertThat(result.host()).isEqualTo("test-shop-one-bms-staging.invalid");
-        assertThat(result.outcome()).isIn("not_found", "no_answer");
+        assertThat(result.outcome()).isEqualTo("not_found");
+    }
+
+    // JUSTIFICATION-A3: a new test case for must-fix 1 of the #787 review, a stalled body cut off by the one deadline.
+    @Test
+    void headersThenAStalledBodyIsNoAnswerWithinTheDeadline() throws IOException {
+        ExecutorService handlers = Executors.newCachedThreadPool();
+        server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        server.setExecutor(handlers);
+        server.createContext("/", exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, 1000);
+            exchange.getResponseBody().write("{\"git_sha\":".getBytes(StandardCharsets.UTF_8));
+            exchange.getResponseBody().flush();
+            try {
+                Thread.sleep(30_000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        server.start();
+        hosts.origin = "http://127.0.0.1:" + server.getAddress().getPort();
+        HostnameCheck quick = new HostnameCheck(hosts, new ObjectMapper(), Duration.ofSeconds(1));
+
+        long start = System.nanoTime();
+        HostnameCheck.Result result = quick.check("test-shop-one");
+        Duration took = Duration.ofNanos(System.nanoTime() - start);
+
+        assertThat(result.outcome()).isEqualTo("no_answer");
+        assertThat(took).isLessThan(Duration.ofSeconds(5));
+        handlers.shutdownNow();
     }
 
     @Test

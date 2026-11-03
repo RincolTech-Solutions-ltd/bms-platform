@@ -3,8 +3,7 @@ package com.rincoltech.bms.core.onboarding.internal;
 import com.rincoltech.bms.core.tenancy.PlatformHost;
 import com.rincoltech.bms.kernel.ApiException;
 import io.swagger.v3.oas.annotations.media.Schema;
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.net.http.HttpClient;
@@ -13,6 +12,10 @@ import java.net.http.HttpResponse;
 import java.nio.channels.UnresolvedAddressException;
 import java.time.Duration;
 import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -24,7 +27,8 @@ import tools.jackson.databind.ObjectMapper;
  * by hand (docs/runbooks/onboard-tenant.md, "Make the tenant host reachable"); this asks that host for the public
  * {@code GET /version}, which is tenant free, so it answers before the tenant exists. Nothing in DNS or the tunnel is changed
  * here. The host is built from the slug and the tenant host pattern only, never from the request, redirects are not followed,
- * at most a few kilobytes of the answer are read, and only the outcome is kept (no exception text, no body).
+ * the whole exchange has one deadline, at most a few kilobytes of the answer are kept, and only the outcome is returned (no
+ * exception text, no body).
  */
 @Component
 class HostnameCheck {
@@ -62,6 +66,11 @@ class HostnameCheck {
         this.timeout = timeout;
         this.http = HttpClient.newBuilder()
                 .connectTimeout(timeout)
+                // HTTP/1.1 as the tunnel and the proxy serve it: no h2c upgrade on a plain http origin (review of
+                // #787).
+                .version(HttpClient.Version.HTTP_1_1)
+                // Straight to the host, never through a JVM proxy setting, so a missing DNS record reads as one.
+                .proxy(HttpClient.Builder.NO_PROXY)
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .build();
     }
@@ -86,23 +95,44 @@ class HostnameCheck {
                 .header("Accept", "application/json")
                 .GET()
                 .build();
-        HttpResponse<InputStream> response;
+        // One deadline for the whole exchange, body included (review of #787): a host that sends headers and then
+        // stalls or
+        // trickles the body is cut off at the timeout and cancelled, never holding the request thread. Only the first
+        // MAX_BODY bytes are kept, whatever the host sends.
+        ByteArrayOutputStream head = new ByteArrayOutputStream();
+        CompletableFuture<HttpResponse<Void>> exchange = http.sendAsync(
+                request,
+                HttpResponse.BodyHandlers.ofByteArrayConsumer(chunk -> chunk.ifPresent(bytes -> keep(head, bytes))));
+        HttpResponse<Void> response;
         try {
-            response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
-        } catch (IOException e) {
-            return new Result(host, unresolved(e) ? "not_found" : "no_answer", null);
+            response = exchange.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            exchange.cancel(true);
+            return new Result(host, "no_answer", null);
+        } catch (ExecutionException e) {
+            return new Result(host, unresolved(e.getCause()) ? "not_found" : "no_answer", null);
         } catch (InterruptedException e) {
+            exchange.cancel(true);
             Thread.currentThread().interrupt();
             return new Result(host, "no_answer", null);
         }
-        try (InputStream body = response.body()) {
-            if (response.statusCode() == 200 && isVersion(body.readNBytes(MAX_BODY))) {
-                return new Result(host, "answers", null);
-            }
-        } catch (IOException e) {
-            return new Result(host, "no_answer", null);
+        byte[] body;
+        synchronized (head) {
+            body = head.toByteArray();
+        }
+        if (response.statusCode() == 200 && isVersion(body)) {
+            return new Result(host, "answers", null);
         }
         return new Result(host, "wrong_answer", response.statusCode());
+    }
+
+    private static void keep(ByteArrayOutputStream head, byte[] bytes) {
+        synchronized (head) {
+            int room = MAX_BODY - head.size();
+            if (room > 0) {
+                head.write(bytes, 0, Math.min(room, bytes.length));
+            }
+        }
     }
 
     /** This app's {@code /version}: a JSON object with a git_sha. */

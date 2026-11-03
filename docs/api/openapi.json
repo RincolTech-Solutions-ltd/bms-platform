@@ -34370,8 +34370,6 @@
           "name" : "slug",
           "required" : true,
           "schema" : {
-            "maxLength" : 63,
-            "minLength" : 0,
             "type" : "string"
           }
         } ],
