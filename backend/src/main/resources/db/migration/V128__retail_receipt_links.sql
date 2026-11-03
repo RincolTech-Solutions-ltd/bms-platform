@@ -42,10 +42,12 @@ CREATE TABLE retail_receipt_links (
 -- One current link per sale; also the index the share reads it by.
 CREATE UNIQUE INDEX retail_receipt_links_one_current ON retail_receipt_links (tenant_id, sale_id) WHERE revoked_at IS NULL;
 SELECT bms_apply_tenant_rls('retail_receipt_links');
-SELECT bms_grant_app('retail_receipt_links', 'SELECT, INSERT, UPDATE');
+SELECT bms_grant_app('retail_receipt_links', 'SELECT, INSERT');
+-- revoked_at is the one column the application may update (as V38 and V124 grant one column).
+GRANT UPDATE (revoked_at) ON retail_receipt_links TO bms_app;
 
--- The only change a row takes: revoked_at, from null to a time, once. The owner may change more only with
--- bms.allow_mutation on, as reject_mutation (V1) allows for restores and the tests.
+-- And only once, from null to a time. The owner may change more only with bms.allow_mutation on, as reject_mutation (V1)
+-- allows for restores and the tests.
 CREATE FUNCTION retail_receipt_links_guard() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN

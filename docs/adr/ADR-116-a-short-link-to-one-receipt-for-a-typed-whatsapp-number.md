@@ -39,7 +39,8 @@ typed so the receipt shows it instead of Cash customer.
    inserts the new link, valid 90 days, in one transaction; only a new link is audited. Two shares at once meet at the
    index: the second's insert does nothing and it reads the first one's link. Liveness for the index is `revoked_at`,
    not the clock, since an index predicate may not read the time. `revoked_at` is the only column the application may
-   change, once, from null (a guard trigger); a revoked link never opens again. The hash is a `text` column checked to
+   update (a column grant), and only once, from null (a guard trigger). There is no advisory lock: the index alone keeps
+   one current link per sale; a revoked link never opens again. The hash is a `text` column checked to
    64 hex digits, so the lookups, bound as text, use its unique index and a stream of wrong links never scans the table.
 4. **The platform forwards, the shop's host renders.** The short link endpoint asks the shops first, then each module's
    `ShortLinkTarget` (a hook in `core.tenancy`, so the core names no vertical). Retail answers a token-shaped name: a live
