@@ -5266,8 +5266,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Add an item to a category
-         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         * Add an item to a category, in set-up or in place while recording an expense (ADR-118)
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied. ADR-118: without retail.expense.manage the category must be active (422 category_inactive) and requires_explanation may not be true (403). With reuse_existing an active item of the same name is answered with 200 instead of 409 duplicate_item; a switched off one is 409 item_switched_off
          */
         post: operations["createRetailExpenseItem"];
         delete?: never;
@@ -13407,6 +13407,7 @@ export interface components {
         RetailCashItemRequest: {
             name: string;
             requires_explanation?: boolean;
+            reuse_existing?: boolean;
         };
         RetailCashParty: {
             active?: boolean;
@@ -17988,7 +17989,7 @@ export interface components {
             overwritten?: boolean;
             /**
              * Format: int64
-             * @description Present only with retail.profit.read in the record's branch
+             * @description Present only with retail.profit.read in the record's branch and only on a voided record: an active record is a saved day, whose suggestion is sent to no one (issue #799)
              */
             suggested_minor?: number;
             /** Format: int64 */
@@ -18017,7 +18018,7 @@ export interface components {
             overwritten?: boolean;
             /**
              * Format: int64
-             * @description Present only with retail.profit.read in the record's branch
+             * @description Present only with retail.profit.read in the record's branch and only on a voided record: an active record is a saved day, whose suggestion is sent to no one (issue #799)
              */
             suggested_minor?: number;
             /** Format: int64 */
