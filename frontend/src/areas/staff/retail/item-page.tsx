@@ -22,8 +22,10 @@ import { Gate, Money, Problem } from './ui';
 /** What a movement was, in plain words. */
 export function movementWords(m: Pick<StockMovement, 'kind' | 'source_type' | 'reverses_movement_id' | 'correction'>): string {
   if (m.correction) return 'Correction';
-  if (m.kind === 'return' && m.source_type === 'retail.sale_void') return 'Sale cancelled';
-  if (m.reverses_movement_id) return m.source_type === 'retail.purchase_void' || m.source_type === 'retail.goods_receipt_void' ? 'Delivery cancelled' : 'Cancelled';
+  if (m.source_type === 'retail.sale_void') return 'Sale cancelled';
+  if (m.source_type === 'retail.purchase_void' || m.source_type === 'retail.goods_receipt_void') return 'Delivery cancelled';
+  if (m.source_type === 'retail.sale_return_void') return 'Customer return cancelled';
+  if (m.reverses_movement_id) return 'Cancelled';
   switch (m.kind) {
     case 'opening': return 'Opening stock';
     case 'purchase': return 'Delivery';
