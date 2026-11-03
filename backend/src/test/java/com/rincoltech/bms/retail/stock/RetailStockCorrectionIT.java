@@ -227,13 +227,14 @@ class RetailStockCorrectionIT extends IntegrationTest {
         assertThat(done.getBody().get("old_qty").asString()).isEqualTo("-1.000");
         assertThat(done.getBody().get("new_qty").asString()).isEqualTo("0.000");
         assertThat(stockAt(hq)).isEqualByComparingTo("0");
-        // One adjustment of plus one at the branch's average, and the books follow: the imported balance carried no
-        // value, so inventory goes from none to one piece at its cost.
+        // One adjustment of plus one at the branch's average, as a count that finds more pieces adds them (ADR-079
+        // decision 3: a correction and a count's difference move at the average, up or down). The imported balance
+        // carried no value, so inventory goes from none to one piece at the average.
         assertThat(scalar("""
                                 SELECT count(*) FROM retail_stock_movements
-                                 WHERE tenant_id = ? AND kind = 'adjustment' AND source_type = 'retail.stock_correction'
-                                   AND qty = 1 AND unit_cost_minor = 1000
-                                """, t.tenantId())).isEqualTo(1);
+                                 WHERE tenant_id = ? AND branch_id = ? AND kind = 'adjustment'
+                                   AND source_type = 'retail.stock_correction' AND qty = 1 AND unit_cost_minor = 1000
+                                """, t.tenantId(), hq)).isEqualTo(1);
         assertThat(account("inventory")).isEqualTo(1_000);
 
         // From below zero to a positive count, with the shown quantity written with three decimals.
@@ -246,7 +247,10 @@ class RetailStockCorrectionIT extends IntegrationTest {
         assertThat(scalar("""
                                 SELECT count(*) FROM retail_stock_movements
                                  WHERE tenant_id = ? AND branch_id = ? AND kind = 'adjustment' AND qty = 3
+                                   AND unit_cost_minor = 1000
                                 """, t.tenantId(), br2)).isEqualTo(1);
+        // The second branch's own average, three pieces at it: inventory gains 3,000 on top of the 1,000 above.
+        assertThat(account("inventory")).isEqualTo(4_000);
     }
 
     @Test
