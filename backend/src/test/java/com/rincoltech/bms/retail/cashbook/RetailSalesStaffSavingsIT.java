@@ -315,23 +315,24 @@ class RetailSalesStaffSavingsIT extends IntegrationTest {
         theSwitch(true);
         JsonNode own = suggestion(hqSeller, hq, today).getBody();
         assertThat(own.get("suggested_minor").asLong()).isEqualTo(2_500);
-        // Another branch is 404 unknown_branch (FR-RET-18) on the suggestion and on a save, and an empty list when
-        // named.
+        // Another branch is 404 unknown_branch (FR-RET-18) on the suggestion, on a save and on the list when named.
         ResponseEntity<JsonNode> elsewhere = suggestion(hqSeller, second, today);
         assertThat(elsewhere.getStatusCode()).as("%s", elsewhere.getBody()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(elsewhere.getBody().get("code").asString()).isEqualTo("unknown_branch");
         ResponseEntity<JsonNode> savedElsewhere =
                 save(hqSeller, second, today, own.get("suggestion_token").asString(), null);
         assertThat(savedElsewhere.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(savedElsewhere.getBody().get("code").asString()).isEqualTo("unknown_branch");
         assertThat(cb.accountMovement("savings_reserve", second)).isEqualTo(1_000);
+        // Without a branch named, the list is the caller's own branches: nothing from the other branch.
         ResponseEntity<JsonNode> list = api.get(SALES_STAFF, hqSeller);
         assertThat(list.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(list.getBody().get("items")).isEmpty();
         ResponseEntity<JsonNode> named = api.get(SALES_STAFF + "?branch_id=" + second, hqSeller);
         assertThat(named.getStatusCode()).as("%s", named.getBody()).isEqualTo(HttpStatus.NOT_FOUND);
-        for (ResponseEntity<JsonNode> r : java.util.List.of(elsewhere, savedElsewhere, named)) {
-            assertThat(r.getBody().get("code").asString()).isEqualTo("unknown_branch");
-        }
+        assertThat(named.getBody().get("code").asString()).isEqualTo("unknown_branch");
         assertThat(named.toString()).doesNotContain("amount_minor");
+        // Naming the caller's own branch is fine.
         assertThat(api.get(SALES_STAFF + "?branch_id=" + hq, hqSeller).getStatusCode())
                 .isEqualTo(HttpStatus.OK);
     }
