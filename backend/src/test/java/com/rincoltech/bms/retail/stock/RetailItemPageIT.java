@@ -167,11 +167,14 @@ class RetailItemPageIT extends IntegrationTest {
     // JUSTIFICATION-A3: a new test case the review of #829 asks for; no existing test narrows by dates and still
     // returns rows.
     /**
-     * The balances under a date filter or a shop with a cursor are those of the whole history: a balance brought in 40 days
-     * ago at the head office is left out of the rows by the dates, yet every balance after it still counts it.
+     * The balances under a date filter or a shop with a cursor are those of the whole history: a balance brought in at the
+     * head office, recorded last but dated 40 days back, is placed first by its date, left out of the rows by the dates, and
+     * still counted in every balance after it; the newest balance is the shop's stock now.
      */
     @Test
     void frRet85_aDateFilterOrAShopWithACursorKeepsTheBalancesOfTheWholeHistory() {
+        history();
+        // Backdated: recorded after everything else, dated 40 days before it (an imported history).
         TestDatabase.owner()
                 .sql("""
                         INSERT INTO retail_stock_movements (id, tenant_id, occurred_at, business_date, branch_id, product_id, kind, qty,
@@ -183,27 +186,33 @@ class RetailItemPageIT extends IntegrationTest {
                 .update();
         TestDatabase.owner()
                 .sql("""
-                        INSERT INTO retail_stock_balances (tenant_id, branch_id, product_id, qty, avg_cost_minor)
-                        SELECT ?, ?, p.id, 7, p.cost_minor FROM retail_products p WHERE p.id = ?
+                        UPDATE retail_stock_balances SET qty = qty + 7
+                         WHERE tenant_id = ? AND branch_id = ? AND product_id = ?
                         """)
                 .params(t.tenantId(), t.headOffice(), product)
                 .update();
-        history();
         Map<String, String> whole = new HashMap<>();
         List<JsonNode> all = allRows(ADMIN);
         assertThat(all).hasSize(9);
         all.forEach(
                 m -> whole.put(m.get("id").asString(), m.get("balance_after").asString()));
-        // The head office's count of 10 is what it held; the 7 brought in before stays in every later balance.
+        // The backdated 7 takes its place by its date: first, and in every later balance; the newest is the shop's
+        // stock now.
         assertThat(inShop(all, t.headOffice(), "balance_after"))
-                .containsExactly("10.000", "13.000", "17.000", "20.000", "7.000");
+                .containsExactly("17.000", "20.000", "24.000", "27.000", "7.000");
+        JsonNode item = api.get("/stock/items/" + product, ADMIN).getBody();
+        item.get("shops").forEach(s -> {
+            if (s.get("branch_id").asString().equals(t.headOffice().toString())) {
+                assertThat(s.get("qty").asString()).isEqualTo("17.000");
+            }
+        });
 
         LocalDate from = LocalDate.now(ZoneId.of("Africa/Kampala")).minusDays(30);
         List<JsonNode> dated = new ArrayList<>();
         page("?from=" + from, ADMIN, "*").getBody().get("items").forEach(dated::add);
         assertThat(dated).hasSize(8);
         assertThat(inShop(dated, t.headOffice(), "balance_after"))
-                .containsExactly("10.000", "13.000", "17.000", "20.000");
+                .containsExactly("17.000", "20.000", "24.000", "27.000");
         dated.forEach(m -> assertThat(m.get("balance_after").asString())
                 .as("%s", m)
                 .isEqualTo(whole.get(m.get("id").asString())));
