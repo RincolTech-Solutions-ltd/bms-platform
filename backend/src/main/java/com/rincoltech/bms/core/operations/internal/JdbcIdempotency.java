@@ -20,8 +20,12 @@ import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Chapter 7 section 7.8 on {@code idempotency_keys}. The insert of the key row waits on a
- * concurrent request holding the same key; {@code lock_timeout} bounds that wait at 5 seconds.
+ * Chapter 7 section 7.8 on {@code idempotency_keys}. Every request with a key first takes a transaction lock on the
+ * business and the key, whoever sends it, so a concurrent request with the same key waits for the first to commit or
+ * roll back; {@code lock_timeout} bounds that wait at 5 seconds (409 {@code idempotency_in_progress}). Under the lock it
+ * reads the key's row in this business: the caller's own row is replayed or refused as before; a row of anyone else is
+ * refused with 422 {@code idempotency_key_other_user} and its stored answer is never read into the response (issue #852,
+ * ADR-026 decision 5).
  */
 @Service
 class JdbcIdempotency implements Idempotency {
@@ -34,7 +38,14 @@ class JdbcIdempotency implements Idempotency {
         this.mapper = mapper;
     }
 
-    private record Stored(String requestHash, String status, String body) {}
+    private record Stored(boolean mine, String requestHash, String body) {}
+
+    /**
+     * The transaction lock of one key in the bound business. A test that holds a key in progress takes the same lock
+     * (IdempotencyPerPersonIT).
+     */
+    static final String LOCK_SQL =
+            "SELECT pg_advisory_xact_lock(hashtextextended(current_setting('app.tenant_id') || ':idempotency:' || ?, 0))";
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
@@ -54,6 +65,26 @@ class JdbcIdempotency implements Idempotency {
         jdbc.sql("SET LOCAL lock_timeout = '5s'").update();
         int inserted;
         try {
+            // Whoever sends the key: a second person's request waits for the first one's answer like a retry does.
+            jdbc.sql(LOCK_SQL).param(key).query(rs -> {});
+            // The caller's own row first; a business may hold one key under two people from before issue #852, and each
+            // of them still replays their own.
+            Stored found = jdbc.sql("""
+                            SELECT principal_id = ? AS mine, request_hash FROM idempotency_keys
+                             WHERE tenant_id = current_setting('app.tenant_id')::uuid AND key = ?
+                             ORDER BY (principal_id = ?) DESC LIMIT 1
+                            """)
+                    .params(principal, key, principal)
+                    .query((rs, n) -> new Stored(rs.getBoolean(1), rs.getString(2), null))
+                    .optional()
+                    .orElse(null);
+            if (found != null && !found.mine()) {
+                // Neither the other person's answer nor whether their request matched this one is told.
+                throw ApiException.rule(
+                        Idempotency.OTHER_USER,
+                        "Someone else in this business already used this Idempotency-Key. Nothing was saved; send the"
+                                + " request again with a new key.");
+            }
             inserted = jdbc.sql("""
                             INSERT INTO idempotency_keys (tenant_id, principal_id, key, method, path, request_hash, status)
                             VALUES (current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, 'in_progress')
@@ -71,11 +102,11 @@ class JdbcIdempotency implements Idempotency {
         }
         if (inserted == 0) {
             Stored stored = jdbc.sql("""
-                            SELECT request_hash, status, response_body::text AS body FROM idempotency_keys
+                            SELECT request_hash, response_body::text AS body FROM idempotency_keys
                              WHERE principal_id = ? AND key = ?
                             """)
                     .params(principal, key)
-                    .query((rs, n) -> new Stored(rs.getString(1), rs.getString(2), rs.getString(3)))
+                    .query((rs, n) -> new Stored(true, rs.getString(1), rs.getString(2)))
                     .single();
             if (!stored.requestHash().equals(hash)) {
                 throw ApiException.rule(
