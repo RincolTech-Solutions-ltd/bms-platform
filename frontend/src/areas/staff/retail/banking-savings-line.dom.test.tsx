@@ -34,6 +34,8 @@ vi.mock('../../../api/retail', async (original) => {
 
 const { businessToday } = await import('../../../api/retail');
 const { BankingForm } = await import('./banking');
+const { OfflineProvider } = await import('../../../offline/offline-context');
+const { testOffline } = await import('../../../offline/test-kit');
 
 afterEach(() => {
   cleanup();
@@ -87,5 +89,22 @@ describe('Banking for the Till role and the savings switch (#814)', () => {
     expect(screen.queryByText('Expected to bank')).toBeNull();
     expect(screen.queryByText(/Stock bought with cash/)).toBeNull();
     expect((screen.getByLabelText('Amount banked') as HTMLInputElement).value).toBe('140000');
+  });
+
+  it('offline, from the answer kept on the phone with the switch on, shows the same lines and fills the amount (#812)', async () => {
+    api.bankingExpected.mockReturnValue(new Promise(() => undefined));
+    const queries = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queries.setQueryData(['retail', 'banking-expected', branch, today], on);
+    render(
+      <QueryClientProvider client={queries}>
+        <StaffContext.Provider value={{ me: till, branch }}>
+          <OfflineProvider value={testOffline(till, { online: false })}><BankingForm branchId={branch} /></OfflineProvider>
+        </StaffContext.Provider>
+      </QueryClientProvider>,
+    );
+    await screen.findByText('Savings set aside');
+    expect(row('Expected to bank')).toContain('UGX 130,000');
+    expect(screen.queryByText(/Stock bought with cash/)).toBeNull();
+    expect((screen.getByLabelText('Amount banked') as HTMLInputElement).value).toBe('120000');
   });
 });
