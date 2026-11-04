@@ -358,7 +358,8 @@ class StockService {
                                         m.correction(),
                                         m.balanceAfter(),
                                         null,
-                                        m.undone()))
+                                        m.undone(),
+                                        m.entryLines()))
                         .toList(),
                 next);
     }

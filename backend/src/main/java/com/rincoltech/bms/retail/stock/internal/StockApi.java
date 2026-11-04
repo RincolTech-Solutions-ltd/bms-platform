@@ -222,7 +222,13 @@ final class StockApi {
                             "The item page (issue #813), on a sale: the sale line's total less its cost; " + COST_ONLY)
             Long profitMinor,
 
-            @JsonInclude(JsonInclude.Include.NON_NULL) MovementUndone undone) {}
+            @JsonInclude(JsonInclude.Include.NON_NULL) MovementUndone undone,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description = "On a usage or damage movement (issue #818): how many lines its entry has, all of"
+                            + " which an undo puts back, whatever the list's filter or page")
+            Integer entryLines) {}
 
     @Schema(
             name = "RetailStockMovementUndone",

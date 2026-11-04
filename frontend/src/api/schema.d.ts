@@ -18730,6 +18730,11 @@ export interface components {
             code?: string;
             correction?: components["schemas"]["RetailStockMovementCorrection"];
             description?: string;
+            /**
+             * Format: int32
+             * @description On a usage or damage movement (issue #818): how many lines its entry has, all of which an undo puts back, whatever the list's filter or page
+             */
+            entry_lines?: number;
             historical?: boolean;
             /** Format: uuid */
             id?: string;

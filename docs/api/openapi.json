@@ -20770,6 +20770,11 @@
           "description" : {
             "type" : "string"
           },
+          "entry_lines" : {
+            "description" : "On a usage or damage movement (issue #818): how many lines its entry has, all of which an undo puts back, whatever the list's filter or page",
+            "format" : "int32",
+            "type" : "integer"
+          },
           "historical" : {
             "type" : "boolean"
           },

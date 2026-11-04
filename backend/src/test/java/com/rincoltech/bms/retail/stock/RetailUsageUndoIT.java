@@ -170,6 +170,7 @@ class RetailUsageUndoIT extends IntegrationTest {
                 .getBody()
                 .get("items");
         assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).get("entry_lines").asInt()).isEqualTo(1);
         JsonNode undone = rows.get(0).get("undone");
         assertThat(undone.get("reason").asString()).isEqualTo("Counted twice by mistake");
         assertThat(undone.get("by").asString()).isEqualTo(api.userId().toString());
@@ -211,6 +212,14 @@ class RetailUsageUndoIT extends IntegrationTest {
                 ADMIN,
                 "*",
                 UUID.randomUUID().toString());
+        // Filtered to one of its items, the list still says the entry has two lines.
+        JsonNode filtered = api.get(
+                        "/stock/movements?kind=usage&kind=damage&from=2026-10-01&to=2026-10-31&product_id=" + brush,
+                        ADMIN)
+                .getBody()
+                .get("items");
+        assertThat(filtered).hasSize(1);
+        assertThat(filtered.get(0).get("entry_lines").asInt()).isEqualTo(2);
         ResponseEntity<JsonNode> done = undo(RetailTestSupport.id(r), "Wrong entry", ADMIN);
         assertThat(done.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(done.getBody().get("items_back").asInt()).isEqualTo(2);

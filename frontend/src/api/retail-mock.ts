@@ -1305,6 +1305,8 @@ export function createMockRetail(): RetailApi {
           // The business day, as the server's from and to (StockService.movements, the tenant's time zone), never the UTC day.
           .filter((m) => (m.kind === 'usage' || m.kind === 'damage') && businessToday(new Date(m.at ?? '')) >= from && businessToday(new Date(m.at ?? '')) <= to
             && (!branchId || m.branch_id === branchId) && (!productId || m.product_id === productId))
+          // Issue #818: the entry's whole line count, as the server counts it, whatever the filter.
+          .map((m) => (m.source_type === 'retail.usage' ? { ...m, entry_lines: stockLog.filter((x) => x.source_type === 'retail.usage' && x.source_id === m.source_id).length } : m))
           .reverse(),
       })),
 

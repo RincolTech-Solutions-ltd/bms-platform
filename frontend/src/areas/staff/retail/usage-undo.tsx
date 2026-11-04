@@ -39,19 +39,22 @@ export function UndoneMark() {
 }
 
 /**
- * What the form says goes back. The list may be filtered to one item or split across pages, so it never knows how many lines
- * an entry has; the form names no number, and the toast takes the server's count.
+ * What the form says goes back, from the server's count of the entry's lines (`entry_lines`): the list may be filtered to one
+ * item or split across pages, so it never counts them itself. Without a count it names no number.
  */
-export const UNDO_WHAT = 'Every item of this entry goes back into stock, on every line.';
+export function undoWhat(entryLines: number | undefined): string {
+  if (entryLines === undefined) return 'Every item of this entry goes back into stock.';
+  return entryLines > 1 ? `All ${entryLines} items of this entry go back into stock.` : 'This item goes back into stock.';
+}
 
-/** The toast, from the server's count of the items that went back. */
-export function undoneToast(m: StockMovement, itemsBack: number | undefined): string {
+/** The toast, only from the server's count of the items that went back (`items_back`). */
+export function undoneToast(itemsBack: number | undefined): string {
   const n = itemsBack ?? 1;
-  return n > 1 ? `Entry undone, ${n} items put back` : `${m.description ? `${m.description} entry` : 'Entry'} undone, 1 item put back`;
+  return `Entry undone, ${n === 1 ? '1 item' : `${n} items`} put back`;
 }
 
 /** The reason form: what will happen in plain words, a required reason, and one clear button. */
-export function UndoFormView({ busy, error, onUndo, onCancel }: { busy?: boolean; error?: unknown; onUndo: (reason: string) => void; onCancel: () => void }) {
+export function UndoFormView({ entryLines, busy, error, onUndo, onCancel }: { entryLines?: number; busy?: boolean; error?: unknown; onUndo: (reason: string) => void; onCancel: () => void }) {
   const [reason, setReason] = useState('');
   const id = useId();
   const ready = reason.trim();
@@ -64,7 +67,7 @@ export function UndoFormView({ busy, error, onUndo, onCancel }: { busy?: boolean
         if (ready !== '' && !busy) onUndo(ready);
       }}
     >
-      <p className="hint" data-testid="undo-what">{UNDO_WHAT}</p>
+      <p className="hint" data-testid="undo-what">{undoWhat(entryLines)}</p>
       <p className="hint">The entry stays here, marked Undone.</p>
       <label htmlFor={id}>Why is this entry wrong?</label>
       <input id={id} value={reason} maxLength={300} required onChange={(e) => setReason(e.target.value)} />
@@ -101,11 +104,11 @@ export function UndoUsageAction({ m }: { m: StockMovement }) {
       }
     },
     onSettled: () => { sending.current = false; },
-    meta: { success: (done: UsageUndone) => undoneToast(m, done.items_back) },
+    meta: { success: (done: UsageUndone) => undoneToast(done.items_back) },
   });
   if (gone || !undoOffered(me, m)) return null;
   if (!open) return <p><button type="button" className="btn-sm" onClick={() => { send.reset(); setOpen(true); }}>Undo this entry</button></p>;
-  return <UndoFormView busy={send.isPending} error={send.error} onUndo={(reason) => {
+  return <UndoFormView entryLines={m.entry_lines} busy={send.isPending} error={send.error} onUndo={(reason) => {
     if (sending.current) return;
     sending.current = true;
     send.mutate(reason);
