@@ -12,9 +12,15 @@ import com.rincoltech.bms.testsupport.MovableClockConfig;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
@@ -23,6 +29,7 @@ import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import tools.jackson.databind.JsonNode;
 
@@ -193,6 +200,56 @@ class RetailUsageUndoIT extends IntegrationTest {
         assertThat(twice.getBody().get("code").asString()).isEqualTo("usage_undone");
         // The stock went back once, not twice.
         assertThat(balance()).isEqualByComparingTo("10");
+    }
+
+    // JUSTIFICATION-A3: the review of #843 asks for two new cases, two undos at once and another business's entry.
+    @Test
+    void twoUndosAtOnceTakeTheStockBackOnceOneAnswered409() throws Exception {
+        UUID report = usage("damaged", "4");
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<HttpStatusCode>> both = new ArrayList<>();
+            for (int i = 0; i < 2; i++) {
+                both.add(pool.submit(() -> {
+                    start.await();
+                    return undo(report, "Test undo at once", ADMIN).getStatusCode();
+                }));
+            }
+            start.countDown();
+            List<Integer> codes = new ArrayList<>();
+            for (Future<HttpStatusCode> f : both) {
+                codes.add(f.get(60, TimeUnit.SECONDS).value());
+            }
+            assertThat(codes).containsExactlyInAnyOrder(200, 409);
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(balance()).isEqualByComparingTo("10");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM retail_stock_movements WHERE tenant_id = ?"
+                                + " AND source_type = 'retail.usage_undo' AND source_id = ?")
+                        .params(t.tenantId(), report)
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
+    }
+
+    @Test
+    void anotherBusinessCannotUndoThisBusinessesEntry() {
+        UUID report = usage("used", "2");
+        TestDatabase.Fixture other = TestDatabase.tenant("retail-usage-undo-other", false, true);
+        RetailTestSupport elsewhere = new RetailTestSupport(http, other);
+        ResponseEntity<JsonNode> refused = elsewhere.call(
+                HttpMethod.POST, "/usage/" + report + "/undo", Map.of("reason", "Test reason"), ADMIN, "*", Map.of());
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(balance()).isEqualByComparingTo("8");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM retail_usage_undos WHERE report_id = ?")
+                        .param(report)
+                        .query(Long.class)
+                        .single())
+                .isZero();
     }
 
     @Test

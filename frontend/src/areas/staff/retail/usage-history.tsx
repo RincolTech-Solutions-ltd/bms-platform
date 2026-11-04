@@ -38,7 +38,12 @@ export function costOf(m: StockMovement): number | null {
   return m.line_cost_minor ?? null;
 }
 
-function UsageRow({ m, branch, where }: { m: StockMovement; branch?: string; where?: EntryDistance }) {
+/** How many lines of `m`'s entry the list holds, so the undo can say all of them go back (issue #818). */
+export function linesOfEntry(items: StockMovement[], m: StockMovement): number {
+  return m.source_id ? items.filter((x) => x.source_type === m.source_type && x.source_id === m.source_id).length : 1;
+}
+
+function UsageRow({ m, branch, where, lines }: { m: StockMovement; branch?: string; where?: EntryDistance; lines?: number }) {
   const cost = costOf(m);
   return (
     <li className="rt-card" data-testid="usage-row">
@@ -54,7 +59,7 @@ function UsageRow({ m, branch, where }: { m: StockMovement; branch?: string; whe
       {m.note && <p className="hint">Reason: {m.note}</p>}
       {m.undone && <p className="hint" data-testid="usage-undone-words">{undoneWords(m)}. The stock went back.</p>}
       {where && <p className="hint" data-testid="usage-where">Where: {whereWords(where)}</p>}
-      <UndoUsageAction m={m} />
+      <UndoUsageAction m={m} lines={lines} />
     </li>
   );
 }
@@ -103,7 +108,7 @@ function UsageRows({ sel, all, nameOf }: { sel: ListSelection; all: boolean; nam
       {page.isPending && <p className="loading">Loading</p>}
       <Problem error={page.error} />
       <ul style={{ listStyle: 'none', padding: 0 }}>
-        {items.map((m) => <UsageRow key={m.id} m={m} branch={all && !sel.branchId ? nameOf(m.branch_id) : undefined} />)}
+        {items.map((m) => <UsageRow key={m.id} m={m} branch={all && !sel.branchId ? nameOf(m.branch_id) : undefined} lines={linesOfEntry(items, m)} />)}
       </ul>
       {page.hasNextPage && <button type="button" onClick={() => void page.fetchNextPage()} disabled={page.isFetchingNextPage}>{page.isFetchingNextPage ? 'Loading' : 'Show older records'}</button>}
     </>
@@ -174,7 +179,7 @@ export function UsageHistoryPage() {
         />
       )}
       <ul style={{ listStyle: 'none', padding: 0 }} data-tour="usage-history-list">
-        {items.map((m) => <UsageRow key={m.id} m={m} branch={all ? nameOf(m.branch_id) : undefined} where={where.get(usage(m))} />)}
+        {items.map((m) => <UsageRow key={m.id} m={m} branch={all ? nameOf(m.branch_id) : undefined} where={where.get(usage(m))} lines={linesOfEntry(items, m)} />)}
       </ul>
       {page.hasNextPage && <button type="button" onClick={() => void page.fetchNextPage()} disabled={page.isFetchingNextPage}>{page.isFetchingNextPage ? 'Loading' : 'Show older records'}</button>}
       </>}

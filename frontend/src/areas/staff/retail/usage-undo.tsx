@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import type { Me } from '../../../api/client';
 import { RetailError, businessToday, retail, type StockMovement } from '../../../api/retail';
 import { BusyButton } from '../../../app/ui/BusyButton';
@@ -38,9 +38,15 @@ export function UndoneMark() {
   );
 }
 
+/** What the form says goes back: every line of the entry, with how many when the list shows more than one. */
+export function undoWhat(lines: number): string {
+  return lines > 1 ? `All ${lines} items of this entry go back into stock, not only this one.` : 'Every item of this entry goes back into stock.';
+}
+
 /** The reason form: what will happen in plain words, a required reason, and one clear button. */
-export function UndoFormView({ busy, error, onUndo, onCancel }: { busy?: boolean; error?: unknown; onUndo: (reason: string) => void; onCancel: () => void }) {
+export function UndoFormView({ lines = 1, busy, error, onUndo, onCancel }: { lines?: number; busy?: boolean; error?: unknown; onUndo: (reason: string) => void; onCancel: () => void }) {
   const [reason, setReason] = useState('');
+  const id = useId();
   const ready = reason.trim();
   return (
     <form
@@ -51,9 +57,10 @@ export function UndoFormView({ busy, error, onUndo, onCancel }: { busy?: boolean
         if (ready !== '' && !busy) onUndo(ready);
       }}
     >
-      <p className="hint">Every item goes back into stock and the entry stays here, marked Undone.</p>
-      <label htmlFor="undo-usage-reason">Why is this entry wrong?</label>
-      <input id="undo-usage-reason" value={reason} maxLength={300} required onChange={(e) => setReason(e.target.value)} />
+      <p className="hint" data-testid="undo-what">{undoWhat(lines)}</p>
+      <p className="hint">The entry stays here, marked Undone.</p>
+      <label htmlFor={id}>Why is this entry wrong?</label>
+      <input id={id} value={reason} maxLength={300} required onChange={(e) => setReason(e.target.value)} />
       <Problem error={error} />
       <p className="cluster">
         <BusyButton type="submit" busy={busy === true} notReady={ready === ''}>Yes, undo it</BusyButton>
@@ -64,7 +71,7 @@ export function UndoFormView({ busy, error, onUndo, onCancel }: { busy?: boolean
 }
 
 /** Undo this entry, for whoever may delete a sale at the entry's shop; nothing shows for anyone else or once it is undone. */
-export function UndoUsageAction({ m }: { m: StockMovement }) {
+export function UndoUsageAction({ m, lines = 1 }: { m: StockMovement; lines?: number }) {
   const { me } = useStaff();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -87,11 +94,11 @@ export function UndoUsageAction({ m }: { m: StockMovement }) {
       }
     },
     onSettled: () => { sending.current = false; },
-    meta: { success: `${m.description ? `${m.description} entry` : 'Entry'} undone, stock put back` },
+    meta: { success: lines > 1 ? `Entry of ${lines} items undone, stock put back` : `${m.description ? `${m.description} entry` : 'Entry'} undone, stock put back` },
   });
   if (gone || !undoOffered(me, m)) return null;
   if (!open) return <p><button type="button" className="btn-sm" onClick={() => { send.reset(); setOpen(true); }}>Undo this entry</button></p>;
-  return <UndoFormView busy={send.isPending} error={send.error} onUndo={(reason) => {
+  return <UndoFormView lines={lines} busy={send.isPending} error={send.error} onUndo={(reason) => {
     if (sending.current) return;
     sending.current = true;
     send.mutate(reason);

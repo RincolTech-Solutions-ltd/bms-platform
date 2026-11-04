@@ -399,19 +399,17 @@ class StockRepository {
                        (SELECT p.description FROM retail_products p WHERE p.id = retail_stock_movements.product_id) AS product_description,
                        (SELECT u.name FROM retail_products p JOIN retail_units u ON u.id = p.unit_id
                          WHERE p.id = retail_stock_movements.product_id) AS product_unit,
-                       (SELECT d.created_at FROM retail_usage_undos d WHERE retail_stock_movements.source_type
-                         = 'retail.usage' AND d.report_id = retail_stock_movements.source_id) AS undone_at,
-                       (SELECT d.undone_by FROM retail_usage_undos d WHERE retail_stock_movements.source_type
-                         = 'retail.usage' AND d.report_id = retail_stock_movements.source_id) AS undone_by,
-                       (SELECT d.reason FROM retail_usage_undos d WHERE retail_stock_movements.source_type
-                         = 'retail.usage' AND d.report_id = retail_stock_movements.source_id) AS undo_reason,
-                       (SELECT uu.full_name FROM retail_usage_undos d JOIN users uu ON uu.id = d.undone_by
-                         WHERE retail_stock_movements.source_type = 'retail.usage'
-                           AND d.report_id = retail_stock_movements.source_id) AS undone_by_name
+                       undo.undone_at, undo.undone_by, undo.undo_reason, undo.undone_by_name
                 """)
                 .append(extra)
                 .append(" FROM ")
                 .append(source)
+                // Issue #818: an entry undone, read once per row; the lateral names only its own columns.
+                .append(" LEFT JOIN LATERAL (SELECT d.created_at AS undone_at, d.undone_by, d.reason AS undo_reason,"
+                        + " uu.full_name AS undone_by_name FROM retail_usage_undos d LEFT JOIN users uu ON uu.id ="
+                        + " d.undone_by WHERE retail_stock_movements.source_type = 'retail.usage'"
+                        + " AND d.tenant_id = retail_stock_movements.tenant_id"
+                        + " AND d.report_id = retail_stock_movements.source_id) undo ON true")
                 .append(" WHERE true");
         Map<String, Object> params = new LinkedHashMap<>();
         if (branchIds != null) {

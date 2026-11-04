@@ -910,8 +910,10 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   source type `retail.usage_undo` at the same unit cost and reverses the shrinkage entry, both on the day of the undo; 409
   `usage_undone` the second time, 422 `usage_imported` for imported history, audit `retail.usage.undone`. Movements carry
   `undone`; Past usage and damage shows Undone in words with an icon and an Undo this entry button with a reason
-  (`usage-undo.tsx`), and its grouped totals leave undone entries out; Controls gains `usage_undos`. Tests:
-  `RetailUsageUndoIT`, `usage-undo.dom.test.tsx`, `controls-state.test.ts`, `layout/usage-undo.layout.test.ts`.
+  (`usage-undo.tsx`), and its grouped totals, the daily profit's usage and the stock health's usage leave undone entries
+  out; Controls gains `usage_undos`. Tests: `RetailUsageUndoIT` (also two undos at once and another business's entry),
+  `MigrationOrderIT.usageUndoMigrationAddsOneEmptyAppendOnlyTableAfterV132`, `usage-undo.dom.test.tsx`,
+  `controls-state.test.ts`, `layout/usage-undo.layout.test.ts`.
 - **Built (Past usage and damage, issue #145, AppSheet "Damaged or used stock not sold"):** no migration and no permission.
   `GET /retail/stock/movements` takes a repeatable `kind` filter (422 for an unknown or blank kind) and each row carries the
   item's `code`, `description` and `unit`, and for a profit reader `line_cost_minor`, the value the screen shows as is. The page `/staff/retail/usage-history` (`usage-history.tsx`, `retail.stock.read`), linked

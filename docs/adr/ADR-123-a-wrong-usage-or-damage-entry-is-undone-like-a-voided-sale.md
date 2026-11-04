@@ -38,7 +38,8 @@ voided with who, when and why, and shows on Controls.
 6. **Audited and shown.** The audit entry `retail.usage.undone` records the reason, as `retail.sale.voided` does. The movements
    list carries `undone` (`at`, `by`, `by_name`, `reason`) on each movement of an undone entry; Past usage and damage shows
    "Undone" in words with an icon and who, when and why, and its grouped totals leave undone entries out, as a voided sale counts
-   in no sales total. Controls gains the card `usage_undos` (who entered it, who undid it, the reason, the item kind, the value at
+   in no sales total; so do the daily profit's usage and the stock health's usage, which read the entries. The item page names
+   the stock that came back "Usage or damage undone", never a customer return. Controls gains the card `usage_undos` (who entered it, who undid it, the reason, the item kind, the value at
    the selling price now, never the cost; no rate, as the other stock cards).
 
 ## Consequences
