@@ -64,6 +64,21 @@ questions are not settled by chapters 3 and 6 as written:
    one core helper was a follow-up refactor that touches retail, kept out of this increment.
    Issue #177 did it: the one `Idempotency` in `core.operations` now serves retail and lending
    (see the note under Consequences).
+   **Amended by issue #852 (4 Nov 2026): a replay answers only the person who stored the key.** A
+   key is looked up in the whole business under a transaction lock on the business and the key,
+   whoever sends it. The caller's own row replays or is refused as before; a row another person
+   stored is refused with 422 `idempotency_key_other_user`, nothing is done, and neither their
+   stored answer nor whether their request matched is told. Before, the row was keyed by person
+   (`principal_id`, NOT NULL since V1) but looked up only by person, so another person's request
+   with the key ran its own work again; now it is refused. 422 because it is a rule refusal like
+   `idempotency_key_reused`, not a race. No row lacks a person, so nothing is backfilled; V135
+   adds the index `(tenant_id, key)` for the lookup, not unique because rows stored before it may
+   hold one key under two people. Those rows stay safe: each of the two still replays only their
+   own answer and anyone else is refused; keys are kept 7 days, so they are gone a week after the
+   deploy. The in-progress wait is unchanged and applies to every person (409
+   `idempotency_in_progress` after 5 seconds). Tests: `RetailIdempotencyProtocolIT` and one
+   per module (`RetailSalesKeyPerPersonIT`, `RetailRestockKeyPerPersonIT`,
+   `RetailCashbookKeyPerPersonIT`, `RetailUsageKeyPerPersonIT`, `LoanServicingIT`, `SavingsIT`).
 
 Also decided here, within the rules of chapter 3:
 

@@ -238,6 +238,7 @@ Business rule codes used in chapter 3 (each is a 422 unless listed above):
 `already_reversed`, `insufficient_balance`, `collateral_secures_open_loan`,
 `branch_has_open_accounts`, `branch_close_needs_reason`, `branch_still_has_stock`, `lock_timeout` (409: a stock write or a branch change waited too long for the branch row; nothing was saved; send it again), `branch_does_not_sell` (retail refuses a sale, a quotation and its conversion, a price resolution, a payment taken on a credit sale or on account, a refund paid out of the till and the cash book savings, bankings, withdrawals and advance repayments at a Store; expenses are allowed, a branch marked with `sells_goods` false; restocks, goods receipts, transfers and stock-takes there are allowed; ADR-048), `refund_branch_required` (a refund for a sale made at a Store: the one shop the caller may sell at pays it; with several the caller names one in `refund_branch_id`, and with none the answer says no shop can pay it out and to credit the account or ask a shop), `store_must_stock` (a Store cannot also be a branch that keeps no goods), `branch_has_open_credit_sales` (marking a branch as a Store while a credit sale made there still has a balance owing; the problem carries `open_credit_sales`), `branch_not_stocking` (retail refuses a sale, price resolution, restock, purchase order, goods receipt, transfer into it or its receipt, stock-take or return restock at a branch marked as not stocking; goods may still leave it as a transfer source or a usage report; ADR-041), `account_has_open_items`, `next_of_kin_required`, `image_too_large`, `svg_not_allowed` (a logo that is an SVG), `image_too_small` (a logo under 128 px on the short side), `insufficient_contrast` (a theme colour with no readable text colour; a field error of `validation_failed`), `collateral_type_disabled`, `unknown_placeholder`,
 `blocking_issues_unresolved`, `system_account_not_allowed`, `idempotency_key_reused`,
+`idempotency_key_other_user` (another person in the business already used the key; nothing done, section 7.8),
 `idempotency_key_missing`, and from the ledger's posting operation (ADR-004):
 `unbalanced_entry`, `invalid_journal_line`, `account_not_postable`, `currency_mismatch`; and
 from identity, tenancy and approvals (increment 1): `weak_password`, `invitation_invalid`,
@@ -287,14 +288,22 @@ when the user first presses the button, and reuse it on retry). A missing key re
 Server behaviour:
 
 1. Compute `request_hash` = SHA-256 of the method, path and canonical JSON body.
-2. In the same transaction as the business write, insert
+2. In the same transaction as the business write, take a transaction lock on the business and the
+   key (whoever sends it), then insert
    `idempotency_keys (tenant_id, principal_id, key, ..., status = 'in_progress')`.
    Transaction `lock_timeout` is 5 seconds.
-3. If the insert conflicts (a concurrent or earlier request with the same key):
-   - waiting beyond the lock timeout returns 409 `idempotency_in_progress`;
-   - a stored row with a different `request_hash` returns 422 `idempotency_key_reused`;
-   - a stored `completed` row replays its stored status and body, with header
-     `Idempotent-Replayed: true`, and performs no work.
+3. If the key is already held or stored (a concurrent or earlier request with the same key):
+   - waiting beyond the lock timeout returns 409 `idempotency_in_progress`, whoever holds it;
+   - a key stored by another person in the business returns 422 `idempotency_key_other_user`
+     ("Someone else in this business already used this Idempotency-Key. Nothing was saved; send the
+     request again with a new key."), performs no work and never shows their stored answer, nor
+     whether their request matched this one (issue #852, ADR-026 decision 5);
+   - the caller's own stored row with a different `request_hash` returns 422 `idempotency_key_reused`;
+   - the caller's own stored `completed` row replays its stored status and body, with header
+     `Idempotent-Replayed: true`, and performs no work. A replay answers only the person who stored
+     the key: the stored row names them (`principal_id`, in the primary key since V1), and V135 indexes
+     `(tenant_id, key)` for the lookup. Rows stored before V135 may hold one key under two people;
+     each of them still replays only their own, and anyone else is refused.
 4. Otherwise perform the work, then update the row to `completed` with the response
    status and body, and commit. Key row and business write commit or roll back together,
    so a failed request (any 4xx or 5xx) leaves no key behind and may be retried with the

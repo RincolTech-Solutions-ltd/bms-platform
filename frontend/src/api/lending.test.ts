@@ -19,6 +19,7 @@ describe('lending problem details in plain words', () => {
 
   it('shares the retail messages for common codes', () => {
     expect(lendingMessage({ code: 'idempotency_key_reused' }, 422)).toMatch(/different entry/i);
+    expect(lendingMessage({ code: 'idempotency_key_other_user' }, 422)).toMatch(/someone else/i);
     expect(lendingMessage({ code: 'permission_denied' }, 403)).toMatch(/do not have permission/i);
   });
 
