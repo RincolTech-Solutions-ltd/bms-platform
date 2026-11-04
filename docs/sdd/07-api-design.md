@@ -303,7 +303,9 @@ Server behaviour:
      `Idempotent-Replayed: true`, and performs no work. A replay answers only the person who stored
      the key: the stored row names them (`principal_id`, in the primary key since V1), and V135 indexes
      `(tenant_id, key)` for the lookup. Rows stored before V135 may hold one key under two people;
-     each of them still replays only their own, and anyone else is refused.
+     each of them still replays only their own, and anyone else is refused. The key's person is the
+     signed-in person of the request; a job or a provider's callback, which has none, keys under a
+     stable principal of its own (`Idempotency.onceAsJob`), so its retry replays (ADR-026 decision 5).
 4. Otherwise perform the work, then update the row to `completed` with the response
    status and body, and commit. Key row and business write commit or roll back together,
    so a failed request (any 4xx or 5xx) leaves no key behind and may be retried with the
