@@ -136,6 +136,13 @@ describe('Past purchases (issue #821)', () => {
     expect(card.textContent).not.toContain('Total UGX');
   });
 
+  it('shows a voided delivery with its total alone, since it will never sell', () => {
+    screenOf(owner, <ul><RestockCard purchase={{ ...purchase, status: 'voided', voided_on: '2026-10-31', void_reason: 'Test wrong delivery' }} onDone={() => undefined} /></ul>);
+    const card = screen.getByTestId('restock-card');
+    expect(screen.queryByTestId('delivery-worth')).toBeNull();
+    expect(card.textContent).toContain('Total UGX 8,000.');
+  });
+
   it('says a loss as one', () => {
     screenOf(owner, <ul><RestockCard purchase={{ ...purchase, sell_worth_minor: 7_500, expected_profit_minor: -500 }} onDone={() => undefined} /></ul>);
     expect(figures(screen.getByTestId('restock-card'))).toContain('Expected loss: UGX 500');

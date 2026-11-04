@@ -13,6 +13,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import tools.jackson.databind.JsonNode;
@@ -26,6 +27,10 @@ class RetailDeliveryWorthIT extends IntegrationTest {
 
     /** Buys stock, with no profit permission and no permission to change prices. */
     static final String BUYER = "retail.purchase.create,retail.stock.read";
+
+    static final String SETTINGS = "core.settings.manage";
+    static final String CAPABILITIES = "/settings/capabilities";
+    static final HttpMethod PUT = HttpMethod.PUT;
 
     @Autowired
     TestRestTemplate http;
@@ -110,6 +115,112 @@ class RetailDeliveryWorthIT extends IntegrationTest {
         JsonNode made = buy(ADMIN, List.of(line(a, 1_200, 1_100L, "2.5"))).getBody();
         // Paid 2.5 x 1,200 = 3,000; worth 2.5 x 1,100 = 2,750.
         hasWorth(made, 2_750, -250);
+    }
+
+    // JUSTIFICATION-A3: the review of #850 asks for voids, replaces, replays and pack lines to be proven.
+    @Test
+    void aVoidedDeliveryHasNoWorthOnTheVoidTheDeliveryOrTheList() {
+        UUID a = api.product("DW-6", 400, 600);
+        UUID id = RetailTestSupport.id(buy(ADMIN, List.of(line(a, 400, null, "5"))));
+        ResponseEntity<JsonNode> voided = api.postKeyed(
+                "/purchases/" + id + "/void",
+                Map.of("reason", "Test wrong delivery"),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(voided.getStatusCode()).as("%s", voided.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(voided.getBody().get("status").asString()).isEqualTo("voided");
+        hasNoWorth(voided.getBody());
+        hasNoWorth(api.get("/purchases/" + id, ADMIN).getBody());
+        hasNoWorth(listed(id, ADMIN));
+    }
+
+    @Test
+    void aBuyersVoidAndReplaceAnswersCarryNeitherFieldAndTheOwnersReplaceDoes() {
+        UUID a = api.product("DW-7", 100, 150);
+        UUID first = RetailTestSupport.id(buy(BUYER, List.of(line(a, 100, null, "4"))));
+        ResponseEntity<JsonNode> replaced = api.postKeyed(
+                "/purchases/" + first + "/replace",
+                Map.of("payment_method", "cash", "lines", List.of(line(a, 100, null, "6"))),
+                BUYER,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(replaced.getStatusCode()).as("%s", replaced.getBody()).isEqualTo(HttpStatus.CREATED);
+        hasNoWorth(replaced.getBody());
+        UUID second = RetailTestSupport.id(replaced);
+        ResponseEntity<JsonNode> voided = api.postKeyed(
+                "/purchases/" + second + "/void",
+                Map.of("reason", "Test wrong delivery"),
+                BUYER,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(voided.getStatusCode()).as("%s", voided.getBody()).isEqualTo(HttpStatus.OK);
+        hasNoWorth(voided.getBody());
+
+        UUID third = RetailTestSupport.id(buy(ADMIN, List.of(line(a, 100, null, "2"))));
+        ResponseEntity<JsonNode> owners = api.postKeyed(
+                "/purchases/" + third + "/replace",
+                Map.of("payment_method", "cash", "lines", List.of(line(a, 100, null, "3"))),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(owners.getStatusCode()).as("%s", owners.getBody()).isEqualTo(HttpStatus.CREATED);
+        // The new delivery: 3 x 150 against 3 x 100.
+        hasWorth(owners.getBody(), 450, 150);
+    }
+
+    @Test
+    void theStoredAnswerHasNoWorthSoAReplayShowsItOnlyToAProfitReader() {
+        UUID a = api.product("DW-8", 250, 400);
+        Map<String, Object> body = Map.of("payment_method", "cash", "lines", List.of(line(a, 250, null, "4")));
+        String key = UUID.randomUUID().toString();
+        ResponseEntity<JsonNode> made = api.postKeyed("/purchases", body, ADMIN, "*", key);
+        assertThat(made.getStatusCode()).as("%s", made.getBody()).isEqualTo(HttpStatus.CREATED);
+        hasWorth(made.getBody(), 1_600, 600);
+
+        String stored = TestDatabase.owner()
+                .sql("SELECT response_body::text FROM idempotency_keys WHERE tenant_id = ? AND key = ?")
+                .params(t.tenantId(), key)
+                .query(String.class)
+                .single();
+        assertThat(stored).contains(RetailTestSupport.id(made).toString());
+        assertThat(stored).doesNotContain("sell_worth", "expected_profit");
+
+        ResponseEntity<JsonNode> again = api.postKeyed("/purchases", body, ADMIN, "*", key);
+        assertThat(again.getHeaders().getFirst("Idempotent-Replayed")).isEqualTo("true");
+        hasWorth(again.getBody(), 1_600, 600);
+        ResponseEntity<JsonNode> asBuyer = api.postKeyed("/purchases", body, BUYER, "*", key);
+        assertThat(asBuyer.getHeaders().getFirst("Idempotent-Replayed")).isEqualTo("true");
+        assertThat(RetailTestSupport.id(asBuyer)).isEqualTo(RetailTestSupport.id(made));
+        hasNoWorth(asBuyer.getBody());
+    }
+
+    @Test
+    void aPackLineCountsItsBaseQuantityWithThisDeliverysPackSize() {
+        String etag = api.get(CAPABILITIES, SETTINGS).getHeaders().getETag();
+        Map<String, String> ifMatch = etag == null ? Map.of() : Map.of("If-Match", etag);
+        ResponseEntity<JsonNode> on = api.call(PUT, CAPABILITIES, Map.of("units", true), SETTINGS, "*", ifMatch);
+        assertThat(on.getStatusCode()).as("%s", on.getBody()).isEqualTo(HttpStatus.OK);
+        UUID soap = api.product("DW-9", 300, 500);
+        UUID box = api.unit("dw-box");
+        assertThat(api.post("/products/" + soap + "/units", Map.of("unit_id", box, "factor", "12"), ADMIN)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        Map<String, Object> packed = line(soap, 4_000, null, "2");
+        packed.put("unit_id", box);
+        // This delivery's boxes held 10, not the usual 12.
+        packed.put("pack_size", "10");
+        JsonNode made = buy(ADMIN, List.of(packed)).getBody();
+        // Paid 2 x 4,000 = 8,000; 20 bars at 500 = 10,000.
+        assertThat(made.get("lines").get(0).get("qty_total").asString()).isEqualTo("20.000");
+        hasWorth(made, 10_000, 2_000);
+        hasWorth(listed(RetailTestSupport.id(ResponseEntity.ok(made)), ADMIN), 10_000, 2_000);
+
+        // With a price per bar set on the line: 20 x 450.
+        Map<String, Object> priced = line(soap, 4_000, 450L, "2");
+        priced.put("unit_id", box);
+        priced.put("pack_size", "10");
+        hasWorth(buy(ADMIN, List.of(priced)).getBody(), 9_000, 1_000);
     }
 
     // JUSTIFICATION-A3: one more test case of the branch rule of ADR-017 for the new fields.

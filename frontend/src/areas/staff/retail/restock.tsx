@@ -127,7 +127,7 @@ export function DeliveryWorth({ paid, worth, label }: { paid: number; worth: num
   );
 }
 
-export function buildPurchase(input:{ supplierId: string; purchasedOn?: string; dateReason?: string; method: PurchasePayment; lines: RestockLine[] }): PurchaseRequest {
+export function buildPurchase(input: { supplierId: string; purchasedOn?: string; dateReason?: string; method: PurchasePayment; lines: RestockLine[] }): PurchaseRequest {
   return {
     ...(input.supplierId ? { supplier_id: input.supplierId } : {}),
     // ADR-120: no date for today, so the server dates the purchase itself; an owner's earlier day goes with its reason.
