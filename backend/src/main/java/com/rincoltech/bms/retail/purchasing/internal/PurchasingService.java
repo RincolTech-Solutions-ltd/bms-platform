@@ -665,7 +665,8 @@ class PurchasingService implements QuickAddPurchase {
                         items.getLast().createdAt() + "|" + items.getLast().id())
                 : null;
         Map<UUID, Long> prices = new HashMap<>();
-        return new PurchasePage(withReceiptPhotos(items).stream().map(p -> shown(p, prices)).toList(), next);
+        return new PurchasePage(
+                withReceiptPhotos(items).stream().map(p -> shown(p, prices)).toList(), next);
     }
 
     /** Issue #819 (ADR-124): marks the restocks that have a receipt photo, in one query. */
