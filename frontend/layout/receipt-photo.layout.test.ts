@@ -32,9 +32,10 @@ describe('receipt photo at 412px (#819)', () => {
     ];
     for (const target of targets) {
       const box = await target.boundingBox();
-      expect(box && box.x >= 0 && box.x + box.width <= WIDTH, await target.textContent()).toBe(true);
+      const name = (await target.textContent()) ?? '';
+      expect(box && box.x >= 0 && box.x + box.width <= WIDTH, name).toBe(true);
       // docs/ui-rules.md rule 12: every tap target is at least 48px high.
-      expect(box!.height, await target.textContent()).toBeGreaterThanOrEqual(48);
+      expect(box!.height, name).toBeGreaterThanOrEqual(48);
     }
     const preview = await chosen.getByRole('img', { name: 'The receipt photo chosen' }).boundingBox();
     expect(preview!.width).toBe(64);
