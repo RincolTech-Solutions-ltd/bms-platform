@@ -42,7 +42,7 @@ class JdbcIdempotency implements Idempotency {
 
     /**
      * The transaction lock of one key in the bound business. A test that holds a key in progress takes the same lock
-     * (IdempotencyPerPersonIT).
+     * (HeldIdempotencyKey).
      */
     static final String LOCK_SQL =
             "SELECT pg_advisory_xact_lock(hashtextextended(current_setting('app.tenant_id') || ':idempotency:' || ?, 0))";
