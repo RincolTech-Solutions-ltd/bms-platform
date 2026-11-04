@@ -29,6 +29,8 @@ export interface OutboxEntry {
   words: string;
   /** Where to fix a refused entry: the form's route, and its draft as it was saved, put back under the form's draft name. */
   fix?: { to: string; search?: Record<string, string>; draftName: string; draft: unknown };
+  /** Sent online first and its answer lost: the server may record it under its key yet, so a first refusal is not final. */
+  lost?: boolean;
 }
 
 export interface OutboxItem {
@@ -60,6 +62,8 @@ export interface OutboxItem {
   firstServerTryAt?: number;
   /** Not sent before this time (epoch ms). */
   nextAttemptAt: number;
+  /** How many times the server refused this item under its key (issue #812: a lost entry is Fixed only after two). */
+  refusals?: number;
   /** The server's refusal of a failed item, or the last reason a try did not go through. */
   error?: { code?: string; message: string };
   /** A failed item reported to the server (POST /retail/offline-failures), and what a manager decided there. */
@@ -221,7 +225,7 @@ export function applyOutcome(item: OutboxItem, outcome: SendOutcome, now: number
       return { ...item, state: 'queued' };
     case 'refused':
       if (outcome.code === DISCARDED_CODE) return markDiscarded(item, now, outcome.message);
-      return { ...item, state: 'failed', attempts: item.attempts + 1, error: { code: outcome.code, message: outcome.message }, decision: undefined, failureId: undefined };
+      return { ...item, state: 'failed', attempts: item.attempts + 1, refusals: (item.refusals ?? 0) + 1, error: { code: outcome.code, message: outcome.message }, decision: undefined, failureId: undefined };
   }
 }
 

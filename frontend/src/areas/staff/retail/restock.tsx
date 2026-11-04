@@ -170,9 +170,11 @@ export function supplierOptions(all: Supplier[], chosenId: string): Supplier[] {
   return all.filter((s) => s.active !== false || s.id === chosenId);
 }
 
-export function RestockForm({ onSaved, draftName, fixSearch, initial, again = false, replaces }: {
+export function RestockForm({ onSaved, draftName, fixSearch, fromEdit = false, initial, again = false, replaces }: {
   onSaved?: (p: Purchase, context: RestockContext) => void;
   draftName?: string;
+  /** Opened from Edit (issue #830): online only, like an edit, even when the delivery was voided already. */
+  fromEdit?: boolean;
   /** Where Fix finds this form again for an entry kept on the phone (issue #812): Buy again opens on its purchase. */
   fixSearch?: Record<string, string>;
   initial?: RestockDraft;
@@ -303,7 +305,9 @@ export function RestockForm({ onSaved, draftName, fixSearch, initial, again = fa
     });
   });
   const entry = useEntryChecks('buy', here, warnings, () => save.mutate(), lines);
-  const editOffline = replaces !== undefined && entries.offlineMode;
+  // An edit is never kept on the phone (PR #832), also one of a delivery voided already that Edit enters again (lead's
+  // decision on the fourth review of #839): offline it never becomes a new purchase in the outbox.
+  const editOffline = (replaces !== undefined || fromEdit) && entries.offlineMode;
 
   if (entries.kept) return <KeptOnPhone item={entries.kept} onNew={entries.another} newLabel="Record another delivery" />;
   return (
@@ -562,7 +566,7 @@ export function Again({ purchaseId, onSaved, edit = false, onEdited }: {
       <Note>
         You are entering purchase {purchase.purchase_no} again{purchase.status === 'voided' ? ', which you voided' : ''}. Check each quantity, unit and price, then save.
       </Note>
-      <RestockForm draftName={`restock-again:${me.user_id ?? ''}:${purchaseId}`} fixSearch={edit ? { edit: purchaseId } : { again: purchaseId }} initial={loaded.data.draft} onSaved={onSaved} again />
+      <RestockForm draftName={`restock-again:${me.user_id ?? ''}:${purchaseId}`} fixSearch={edit ? { edit: purchaseId } : { again: purchaseId }} fromEdit={edit} initial={loaded.data.draft} onSaved={onSaved} again />
     </>
   );
 }

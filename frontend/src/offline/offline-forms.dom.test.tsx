@@ -266,12 +266,52 @@ describe('a daily form with no network', () => {
     mount(<EntryState item={gaveUp} />, offline);
     expect(screen.queryByRole('button', { name: 'Fix' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Discard' })).toBeNull();
+    expect(screen.getByText('This may already be recorded. Send again to check; it is never recorded twice.')).toBeTruthy();
     // Send again goes under the same key: the server answers that key once, never a second record.
     answer = { status: 201, body: { id: 'rec-1' } };
     sends.length = 0;
     fireEvent.click(screen.getByRole('button', { name: 'Send again' }));
     await waitFor(() => expect(sends).toEqual(['k-closed']));
     await waitFor(() => expect(offline?.engine.snapshot().items[0]?.state).toBe('sent'));
+  });
+
+  it('never keeps a delivery opened from Edit on the phone, even one voided already that Edit enters again', async () => {
+    seed(`restock-again:${uid}:r1`, 'k-edit', { supplierId: '', purchasedOn: today, method: 'cash', lines: [{ product: cable, cost: '100', sell: '150', qtyByBranch: { [branch]: '5' } }] });
+    const offline = testOffline(admin, { online: false });
+    mount(<RestockForm draftName={`restock-again:${uid}:r1`} fixSearch={{ edit: 'r1' }} fromEdit again />, offline);
+    expect(screen.getByTestId('edit-needs-internet')).toBeTruthy();
+    const save = screen.getAllByRole('button').find((b) => b.getAttribute('type') === 'submit') as HTMLButtonElement;
+    fireEvent.click(save);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(offline?.engine.snapshot().items).toEqual([]);
+    expect(online).not.toHaveBeenCalled();
+  });
+
+  // JUSTIFICATION-A3: the lead's decision on the fourth review of #839 for a lost entry; one test of both refusals.
+  it('offers a lost entry only Send again on its first refusal, and Fix once the server refuses its key again', async () => {
+    const { EntryState } = await import('./entry-state');
+    const { offlineEntry } = await import('./entries');
+    const refusal = { status: 422, body: { code: 'validation_failed', detail: 'One or more fields are invalid.', errors: [{ field: 'amount_minor', message: 'Check the amount.' }] } };
+    const sends: string[] = [];
+    const offline = testOffline(admin, { online: true, deps: { send: async (i: OutboxItem) => { sends.push(i.key); return refusal; } } });
+    const fix = { to: '/staff/retail/withdrawals', draftName: `withdrawal:${uid}:${branch}`, draft: { date: today, amount: '700', purpose: '' } };
+    await offline?.engine.queue(offlineEntry({ kind: 'withdrawal', key: 'k-lost-2', scope: offline?.scope ?? '', branchId: branch, branchName: 'Test Shop A', body: { amount_minor: 700 }, now: new Date(), fix, lost: true }));
+    await act(async () => {
+      await offline?.engine.syncNow();
+    });
+    const once = offline?.engine.snapshot().items[0] as OutboxItem;
+    mount(<EntryState item={once} />, offline);
+    expect(screen.getByText('This may already be recorded. Send again to check; it is never recorded twice.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Fix' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Discard' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Send again' }));
+    await waitFor(() => expect(sends).toEqual(['k-lost-2', 'k-lost-2']));
+    await waitFor(() => expect(offline?.engine.snapshot().items[0]?.refusals).toBe(2));
+    cleanup();
+    mount(<EntryState item={offline?.engine.snapshot().items[0] as OutboxItem} />, offline);
+    expect(screen.getByText('Not recorded: Check the amount.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Fix' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeTruthy();
   });
 
   it('keeps an entry whose answer was lost online under the same key and body, so the server records it once', async () => {

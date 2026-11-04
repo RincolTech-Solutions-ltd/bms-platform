@@ -84,6 +84,7 @@ export function offlineEntry(spec: EntrySpec & { scope: string; now: Date; onlin
       body: spec.lost ? lostBody(spec.body, occurredAt, spec.onlineAsOf) : offlineBody(spec.body, occurredAt, spec.onlineAsOf),
       words: spec.detail ? `${name}, ${spec.detail}` : name,
       ...(spec.fix ? { fix: spec.fix } : {}),
+      ...(spec.lost ? { lost: true } : {}),
     },
     occurredAt,
     branchId: spec.branchId,

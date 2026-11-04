@@ -250,8 +250,11 @@ left, the branch, the period, the person's roles.
     not hold up the entries behind it and is never reported to a manager (the server has no record of it): its maker taps Fix
     (its form opens on it with a new key), Send again, or Discard (asked first). Fix and Discard are not offered when the
     server may hold the entry (it gave up after its tries, or was still recording it): a new key, or the entry discarded
-    and typed again, could record it twice, so only Send again, under its own key, is; Fix and Discard are offered once
-    the server has refused that key. Fix opens the form the entry was
+    and typed again, could record it twice, so only Send again, under its own key, is, with "This may already be
+    recorded. Send again to check; it is never recorded twice."; Fix and Discard are offered once the server has refused
+    that key. An entry sent online first whose answer was lost is treated so after its first refusal too (the request that
+    went online may still arrive and record it under the key, lead's decision on the fourth review of #839): Fix and
+    Discard appear once the server has refused the key again, after Send again. Fix opens the form the entry was
     made in, under that form's own draft name (Buy again on its purchase). (f) **Who.** Whoever records one of these
     forms has offline support now, not only a seller: the outbox, the dot, the sign-out warning and the kept reads (ADR-116).
     Only a seller's phone fills the catalogue copy, which the item pickers of Buy stock, Move stock and usage search while
