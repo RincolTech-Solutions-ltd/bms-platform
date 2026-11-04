@@ -19,6 +19,9 @@ export const RECEIPT_OFFLINE = 'No network. The entry saves without the photo. A
 /** The owner's words (review of #846) when the photo did not go after the entry was saved: it is added from the record. */
 export const RECEIPT_LATER = 'Saved. The photo did not go; add it from the record.';
 
+/** The owner's words (second review of #846) when an expense with a photo is kept on the phone: the photo stays behind. */
+export const RECEIPT_KEPT = 'Saved on this phone. Add the photo from the record once it is sent.';
+
 /** The same, after the expense's own saved words. */
 export const RECEIPT_LATER_NOTE = 'The photo did not go; add it from the record.';
 

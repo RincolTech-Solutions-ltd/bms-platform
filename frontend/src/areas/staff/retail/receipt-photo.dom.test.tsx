@@ -172,6 +172,37 @@ describe('a form with a receipt photo', () => {
     await waitFor(() => expect(calls).toHaveBeenCalledWith('createExpense', expect.not.objectContaining({ receipt_document_id: expect.anything() }), 'k-exp2'));
   });
 
+  // JUSTIFICATION-A3: the lead's decision on the second review of #846 asks for a test of the kept expense's copy and words.
+  it('keeps an expense whose answer was lost on the phone without its photo, and says to add it from the record', async () => {
+    sessionStorage.setItem(`retail-draft:expense:${uid}:${branch}`, JSON.stringify({ key: 'k-lost', draft: { date: businessToday(), categoryId: 'c1', itemId: 'i1', partyId: '', amount: '7000', explanation: '' } }));
+    const { markDropped } = await import('../../../api/client');
+    const { DoneToast, doneToasts } = await import('./toast');
+    calls.mockImplementation((name: string) => (name === 'sendExpenseReceiptPhoto' ? Promise.resolve({ photo_id: 'doc-7' }) : Promise.reject(markDropped(new TypeError('Failed to fetch')))));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } }, mutationCache: doneToasts() });
+    client.setQueryData(['retail', 'expense-categories', true], [
+      { id: 'c1', name: 'Test Transport', active: true, version: 1, items: [{ id: 'i1', name: 'Test Fuel', requires_explanation: false, active: true, version: 1 }] },
+    ]);
+    client.setQueryData(['retail', 'cash-parties'], []);
+    const offline = testOffline(admin, { online: true });
+    render(
+      <QueryClientProvider client={client}>
+        <StaffContext.Provider value={{ me: admin, branch }}>
+          <OfflineProvider value={offline}><ExpenseForm branchId={branch} /></OfflineProvider>
+          <DoneToast />
+        </StaffContext.Provider>
+      </QueryClientProvider>,
+    );
+    choose('Add receipt photo', photo());
+    fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
+    await screen.findByTestId('kept-on-phone');
+    // The online try named the photo; the copy kept on the phone does not.
+    expect(calls).toHaveBeenCalledWith('createExpense', expect.objectContaining({ receipt_document_id: 'doc-7' }), 'k-lost');
+    const [item] = offline?.engine.snapshot().items ?? [];
+    expect(item?.entry?.body).not.toHaveProperty('receipt_document_id');
+    expect(item?.entry?.body).toMatchObject({ amount_minor: 7000 });
+    await waitFor(() => expect(document.querySelector('.toast-success')?.textContent).toBe('Saved on this phone. Add the photo from the record once it is sent.'));
+  });
+
   it('never carries a photo to the next entry after one kept on the phone when the network dropped (review of #846)', async () => {
     sessionStorage.setItem(`retail-draft:usage:${uid}:${branch}`, JSON.stringify({ key: 'k-drop', draft: { kind: 'used', reason: 'Test fitting', lines: [{ product: cable, qty: '1' }] } }));
     const { markDropped } = await import('../../../api/client');

@@ -235,7 +235,7 @@ class ExpenseService {
                     .orElseThrow(() -> ApiException.validation(
                             List.of(new FieldProblem("party_id", "unknown_party", "No such active beneficiary."))));
         }
-        UUID receipt = checkReceipt(r.receiptDocumentId(), approved, replacing, r.offline() != null);
+        UUID receipt = checkReceipt(r.receiptDocumentId(), approved, replacing);
         return new Checked(branch, date, backdate, category, item, party, explanation, receipt);
     }
 
@@ -244,7 +244,7 @@ class ExpenseService {
      * by the person who sent it, so a photo id never makes a receipt readable anywhere else: 409 {@code receipt_taken}
      * otherwise. An edit keeps the receipt of the expense it replaces; an approval names the receipt its maker sent.
      */
-    private UUID checkReceipt(UUID documentId, boolean approved, UUID replacing, boolean keptOnPhone) {
+    private UUID checkReceipt(UUID documentId, boolean approved, UUID replacing) {
         if (documentId == null) {
             return null;
         }
@@ -271,17 +271,12 @@ class ExpenseService {
                     "This receipt photo belongs to another expense or was sent by someone else. Add the photo again.");
         }
         if (!documents.stored(documentId)) {
-            // Review of #846: a photo no expense named for a day lost its file to the nightly sweep. An expense kept
-            // on a phone, or approved, is recorded without it (the money is the record; the photo is added again from
-            // it); an expense typed now is told to send the photo again.
-            if (keptOnPhone || approved) {
-                return null;
-            }
-            throw new ApiException(
-                    org.springframework.http.HttpStatus.CONFLICT,
+            // The lead's decision on the second review of #846: an expense is never recorded naming a photo whose
+            // file is gone (a photo no expense named for a day loses it to the nightly sweep); 422 in words.
+            throw ApiException.validation(List.of(new FieldProblem(
+                    "receipt_document_id",
                     "receipt_gone",
-                    "Receipt photo gone",
-                    "This receipt photo is no longer kept. Add the photo again.");
+                    "This receipt photo is no longer kept. Add the photo again.")));
         }
         return documentId;
     }

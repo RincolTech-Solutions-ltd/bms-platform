@@ -15,7 +15,7 @@ import { newIdempotencyKey, usePersistedDraft } from './idempotency';
 import { PartyPicker, useCashParties } from './party-picker';
 import { CASHBOOK_READ, EXPENSE_RECORD, holds, holdsAt, needsOf } from './permissions';
 import { ScreenLink } from './screen-link';
-import { useToast } from './toast';
+import { sayDone, useToast } from './toast';
 import { BranchRequired, Gate, Problem, WaitingForApproval, money, useBranchName, useSingleBranch } from './ui';
 import { showDate } from './transfers';
 import { ActionBar } from '../../../app/ui/ActionBar';
@@ -23,7 +23,7 @@ import { AddByName, EmptyChoice, showsEmptyChoice, type AddInline, type ChoiceAd
 import { addOn } from './screen-link';
 import type { Kept } from '../../../offline/entries';
 import { EditNeedsInternet, KeptOnPhone, OfflineFormNote, isKept, useEntrySave } from '../../../offline/keep-entry';
-import { RECEIPT_LATER_NOTE, ReceiptPhoto, ReceiptPhotoChoice, bounded, withPhotoNote } from './receipt-photo';
+import { RECEIPT_KEPT, RECEIPT_LATER_NOTE, ReceiptPhoto, ReceiptPhotoChoice, bounded, withPhotoNote } from './receipt-photo';
 
 // Company expenses (FR-RET-24): shop, date, category, then an item of that category, an optional
 // beneficiary, the amount, and an explanation when the item needs one. An optional receipt photo (issue #819, ADR-124) is
@@ -61,6 +61,7 @@ export function ExpenseForm({ branchId, onSaved, onWaiting, replaces, onCancel }
   const [receipt, setReceipt] = useState<File | null>(null);
   const sentReceipt = useRef<{ file: File; id?: string } | null>(null);
   const photoNote = useRef<string | null>(null);
+  const keptPhoto = useRef(false);
   const withReceipt = async () => {
     photoNote.current = null;
     let id = replaces?.receipt_document_id;
@@ -79,8 +80,12 @@ export function ExpenseForm({ branchId, onSaved, onWaiting, replaces, onCancel }
     // refusal (an amount that would wait for an administrator, an item switched off) leaves the old expense as it was.
     mutationFn: async (): Promise<Expense | ApprovalWaiting | Kept> => {
       const request = await withReceipt();
+      // The lead's decision on the second review of #846: an expense kept on the phone never carries its photo (the server's
+      // key covers the expense without it, so the copy sent later is the same expense); the photo is added from the record.
+      const { receipt_document_id: photoId, ...kept } = request;
+      keptPhoto.current = photoId != null;
       return replaces?.id ? retail.replaceExpense(replaces.id, request, key) : entries.save(
-        { kind: 'expense', body: request, key, branchId, detail, amountMinor: request.amount_minor, fix: { to: '/staff/retail/expenses', draftName: name, draft } },
+        { kind: 'expense', body: kept, key, branchId, detail, amountMinor: request.amount_minor, fix: { to: '/staff/retail/expenses', draftName: name, draft } },
         () => retail.createExpense(request, key),
       );
     },
@@ -89,6 +94,8 @@ export function ExpenseForm({ branchId, onSaved, onWaiting, replaces, onCancel }
       setReceipt(null);
       sentReceipt.current = null;
       if (isKept(saved)) {
+        // After the kept words of the app's toast: the photo stayed behind and is added from the record.
+        if (keptPhoto.current) sayDone(RECEIPT_KEPT);
         discard();
         return;
       }

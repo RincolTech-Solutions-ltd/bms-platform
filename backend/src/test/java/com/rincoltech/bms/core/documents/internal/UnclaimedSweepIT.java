@@ -157,11 +157,22 @@ class UnclaimedSweepIT extends IntegrationTest {
         assertThat(cb.auditPayloads("core.document.unclaimed_removed")).hasSize(1);
         // A second run finds the file gone and removes nothing more.
         assertThat(TenantContext.callAs(t.tenantId(), sweep::sweep)).isZero();
-        // An expense typed now that names the swept photo is told to send it again (review of #846).
+        // The lead's decision on the second review of #846: an expense naming the swept photo is refused in words
+        // (422), never recorded naming a dead photo.
         body.put("amount_minor", 500);
         body.put("receipt_document_id", unclaimed);
         ResponseEntity<JsonNode> gone = cb.post("/expenses", body, CashbookTestSupport.CASHBOOK_ADMIN);
-        assertThat(gone.getStatusCode()).as("%s", gone.getBody()).isEqualTo(HttpStatus.CONFLICT);
-        assertThat(gone.getBody().get("code").asString()).isEqualTo("receipt_gone");
+        assertThat(gone.getStatusCode()).as("%s", gone.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        JsonNode problem = gone.getBody().get("errors").get(0);
+        assertThat(problem.get("code").asString()).isEqualTo("receipt_gone");
+        assertThat(problem.get("message").asString())
+                .isEqualTo("This receipt photo is no longer kept. Add the photo again.");
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM retail_expenses WHERE tenant_id = ? AND receipt_document_id = ?::uuid")
+                        .params(t.tenantId(), unclaimed)
+                        .query(Long.class)
+                        .single())
+                .isZero();
     }
 }

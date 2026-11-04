@@ -364,6 +364,28 @@ class RetailReceiptPhotosIT extends IntegrationTest {
         UUID expense = RetailTestSupport.id(recorded);
         assertThat(cb.auditPayloads("retail.expense.receipt_photo_sent")).hasSize(1);
 
+        // JUSTIFICATION-A3: the lead's decision on the second review of #846 asks for a test of the kept copy.
+        // A phone that keeps an expense whose answer was lost sends it later without the photo, under the same key; the
+        // key covers the expense without its photo, so it is the same expense, never refused as a reused key.
+        String key = UUID.randomUUID().toString();
+        String kept = upload(api, "/expenses/receipt-photos", png(300, 200), "retail.expense.record", "*")
+                .getBody()
+                .get("photo_id")
+                .asString();
+        Map<String, Object> withPhoto = new LinkedHashMap<>(body);
+        withPhoto.put("amount_minor", 4_000);
+        withPhoto.put("receipt_document_id", kept);
+        ResponseEntity<JsonNode> first =
+                api.postKeyed("/expenses", withPhoto, CashbookTestSupport.CASHBOOK_ADMIN, "*", key);
+        assertThat(first.getStatusCode()).as("%s", first.getBody()).isEqualTo(HttpStatus.CREATED);
+        Map<String, Object> withoutPhoto = new LinkedHashMap<>(withPhoto);
+        withoutPhoto.remove("receipt_document_id");
+        ResponseEntity<JsonNode> again =
+                api.postKeyed("/expenses", withoutPhoto, CashbookTestSupport.CASHBOOK_ADMIN, "*", key);
+        assertThat(again.getStatusCode()).as("%s", again.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(again.getBody().get("id").asString())
+                .isEqualTo(first.getBody().get("id").asString());
+
         // The lead's decision on #846: one expense per photo, named only by the person who sent it; 409 otherwise.
         ResponseEntity<JsonNode> twice = cb.post("/expenses", body, CashbookTestSupport.CASHBOOK_ADMIN);
         assertThat(twice.getStatusCode()).as("%s", twice.getBody()).isEqualTo(HttpStatus.CONFLICT);

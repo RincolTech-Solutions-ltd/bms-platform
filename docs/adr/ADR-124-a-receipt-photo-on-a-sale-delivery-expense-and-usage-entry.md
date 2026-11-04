@@ -56,8 +56,11 @@ yes. A second storage or a second image check would be one more thing to keep sa
    replaces; an approved expense names the photo its maker sent. While an expense waits for an administrator (ADR-091) its
    request names the photo (`Approvals.pendingWith`): another expense may not name it, the photo counts as claimed however
    long the approval takes, and the cash book readers and the deciders (`core.settings.manage`) at its branch see it while
-   deciding. An expense naming a photo whose file is gone is refused with 409 `receipt_gone` when typed now; one kept on a
-   phone, or approved, is recorded without it, since the money is the record and the photo is added again from it.
+   deciding. An expense is never recorded naming a photo whose file is gone: 422 `receipt_gone`, in words (the lead's
+   decision on the second review of #846). An expense kept on the phone never carries its photo: the phone drops
+   `receipt_document_id` from the copy it keeps and says "Saved on this phone. Add the photo from the record once it is
+   sent." The Idempotency-Key covers the expense without its photo, as it covers a sale without its location (ADR-122), so
+   the copy sent later is the same expense as an online try whose answer was lost.
 7. **Never required, never blocking.** The record is saved first and said; the photo follows, sent after the form is free,
    and stopped after 30 seconds, so a weak link never holds the form or the next entry. The expense form's photo, sent
    before the expense, has the same limit; when it fails the expense is saved without it. A photo that is not saved leaves
@@ -92,5 +95,6 @@ earlier one stays in storage with the record.
 
 **Watch for:** A business that photographs every sale grows its storage by about 300 KB per sale; the documents of a removed
 business go with the rest of its files (ADR-090). If the owner asks to remove a wrong photo, that is a new decision, since
-documents are never deleted. A photo sent before an expense stays at most a day and a night unclaimed before its file goes;
-an expense kept on a phone for longer is recorded without it, and the photo is added again from the expense.
+documents are never deleted. A photo sent before an expense stays at most a day and a night unclaimed before its file goes.
+An online try whose answer was lost and that the server did record keeps its photo; the copy sent later is answered from
+the key with that expense.
