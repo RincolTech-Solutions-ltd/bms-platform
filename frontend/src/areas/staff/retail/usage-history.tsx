@@ -1,7 +1,7 @@
 import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
-import { businessToday, daysBefore, retail, type StockMovement, type UsageLevel, type UsageSummaryGroup } from '../../../api/retail';
+import { businessToday, daysBefore, retail, type EntryDistance, type StockMovement, type UsageLevel, type UsageSummaryGroup } from '../../../api/retail';
 import { ListChain, ViewSwitch, useListView, type TreeKind } from './list-chain';
 import { USAGE_ORDER, USAGE_PLURALS, listUser, type ListSelection } from './list-chain-state';
 import { periodTitle } from './sales-grouped-state';
@@ -11,7 +11,8 @@ import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { Hint } from '../../../app/ui/Hint';
 import { EmptyState } from '../../../app/ui/EmptyState';
 import { useStaff } from '../context';
-import { canUse } from './permissions';
+import { ENTRY_LOCATION, canUse, holds } from './permissions';
+import { useEntryDistances, whereWords } from './entry-location';
 import { showDate, showQty } from './maths';
 import { Gate, Money, Problem, useBranchName, useBranchView } from './ui';
 
@@ -36,7 +37,7 @@ export function costOf(m: StockMovement): number | null {
   return m.line_cost_minor ?? null;
 }
 
-function UsageRow({ m, branch }: { m: StockMovement; branch?: string }) {
+function UsageRow({ m, branch, where }: { m: StockMovement; branch?: string; where?: EntryDistance }) {
   const cost = costOf(m);
   return (
     <li className="rt-card" data-testid="usage-row">
@@ -49,6 +50,7 @@ function UsageRow({ m, branch }: { m: StockMovement; branch?: string }) {
         {cost !== null && <> Worth <Money minor={cost} /> at buying price.</>}
       </p>
       {m.note && <p className="hint">Reason: {m.note}</p>}
+      {where && <p className="hint" data-testid="usage-where">Where: {whereWords(where)}</p>}
     </li>
   );
 }
@@ -129,6 +131,9 @@ export function UsageHistoryPage() {
     enabled: ready && !grouped,
   });
   const items = (page.data?.pages ?? []).flatMap((p) => p.items ?? []);
+  // ADR-122: how far from the shop each entry was made, for the owner only (asked for the entries, not the lines).
+  const usage = (m: StockMovement) => (m.source_type === 'retail.usage' ? (m.source_id ?? '') : '');
+  const where = useEntryDistances('usage', items.map(usage), holds(me, ENTRY_LOCATION));
   return (
     <Gate screen="stock" title="Past usage and damage">
       <Hint>Every item taken out of stock as used in the shop or damaged. Choose the days, the branch at the top of the page, or one item.</Hint>
@@ -165,7 +170,7 @@ export function UsageHistoryPage() {
         />
       )}
       <ul style={{ listStyle: 'none', padding: 0 }} data-tour="usage-history-list">
-        {items.map((m) => <UsageRow key={m.id} m={m} branch={all ? nameOf(m.branch_id) : undefined} />)}
+        {items.map((m) => <UsageRow key={m.id} m={m} branch={all ? nameOf(m.branch_id) : undefined} where={where.get(usage(m))} />)}
       </ul>
       {page.hasNextPage && <button type="button" onClick={() => void page.fetchNextPage()} disabled={page.isFetchingNextPage}>{page.isFetchingNextPage ? 'Loading' : 'Show older records'}</button>}
       </>}
