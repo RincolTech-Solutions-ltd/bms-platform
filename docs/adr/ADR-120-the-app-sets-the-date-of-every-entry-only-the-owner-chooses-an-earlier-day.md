@@ -20,7 +20,8 @@ asked, months ago, that the app set the date, and that only the owner may put an
 
 1. **The server dates the entry.** On `POST /retail/expenses`, `/savings`, `/bankings`, `/withdrawals`, `/advances`,
    `/advances/{advance_id}/repayments`, `/purchases` and `/transfers` (and the sales staff's `POST /retail/savings/sales-staff`,
-   which keeps its own refusal of a day before this month), a date left out is today on the business clock in the
+   which keeps its own refusal of a day before this month, and the Edit routes of issue #830, `POST /retail/expenses/{id}/replace`
+   and `POST /retail/purchases/{id}/replace`, whose new entry is dated like any other), a date left out is today on the business clock in the
    tenant's time zone. `purchased_on` is no longer required. A future date is refused as before.
 2. **An earlier day is the owner's.** A date before today is taken only from a holder of the new permission
    `retail.entry.backdate` at every branch the entry dates on that day: the entry's branch; for a repayment, the branch that

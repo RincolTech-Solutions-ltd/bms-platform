@@ -232,7 +232,6 @@ describe('the savings screen for a salesperson', () => {
 describe('the savings screen for sales staff', () => {
   const sales = mockMe('sales');
   const shown: SavingsSuggestion = { branch_id: branch, business_date: today, total_sold_minor: 50000, suggestion_token: 'tok-1', suggested_minor: 4000, may_change_amount: true };
-  const monthStart = `${today.slice(0, 8)}01`;
 
   // The owner's request on PR #800: a saved day shows only what was saved, for the seller and for the owner, never its suggestion.
   it.each([

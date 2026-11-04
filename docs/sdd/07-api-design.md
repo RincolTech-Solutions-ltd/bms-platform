@@ -1338,7 +1338,8 @@ Advances and repayments (FR-RET-26):
 | POST | `/retail/advances/{advance_id}/repayments/{repayment_id}/void` | `retail.cashbook.void` | |
 
 **The entry date rule (issue #811, ADR-120).** The app sets the date of every entry, as a sale's: on the savings, banking,
-withdrawal, expense, advance and repayment routes above and on `POST /retail/purchases` and `POST /retail/transfers`, a date
+withdrawal, expense, advance and repayment routes above, on `POST /retail/purchases` and `POST /retail/transfers`, and on the
+Edit routes `POST /retail/expenses/{expense_id}/replace` and `POST /retail/purchases/{purchase_id}/replace` (issue #830), a date
 left out is today on the business clock. A date before today is taken only from a holder of `retail.entry.backdate` at every
 branch the entry touches (the entry's branch, for a repayment the branch that receives the money; a purchase's line
 branches; a transfer's source, and its destination when the move completes now), with `date_reason` of 3 to
