@@ -122,8 +122,14 @@ class RetailReceiptPhotosIT extends IntegrationTest {
         return RetailTestSupport.id(r);
     }
 
+    UUID[] item;
+
+    /** The expense category and item, made once per test: a second category of the same name is refused. */
     UUID[] expenseItem() {
-        return cb.categoryWithItem("Test Transport", "Test Boda", false);
+        if (item == null) {
+            item = cb.categoryWithItem("Test Transport", "Test Boda", false);
+        }
+        return item;
     }
 
     UUID expense() {
