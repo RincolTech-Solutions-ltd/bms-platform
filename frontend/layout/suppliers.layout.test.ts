@@ -42,9 +42,10 @@ describe('suppliers at 412px (#820)', () => {
     ];
     for (const target of targets) {
       const box = await target.boundingBox();
-      expect(box && box.x >= 0 && box.x + box.width <= WIDTH, await target.textContent()).toBe(true);
+      const what = (await target.textContent()) ?? '';
+      expect(box && box.x >= 0 && box.x + box.width <= WIDTH, what).toBe(true);
       // docs/ui-rules.md rule 12: every tap target is at least 48px high.
-      expect(box!.height, await target.textContent()).toBeGreaterThanOrEqual(48);
+      expect(box!.height, what).toBeGreaterThanOrEqual(48);
     }
     // Rule 12: Email and Website, and Edit and Switch off, stand at least 8px apart, side by side or stacked.
     for (const [a, b] of [[6, 7], [8, 9]] as const) {
