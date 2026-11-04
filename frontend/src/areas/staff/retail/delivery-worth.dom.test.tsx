@@ -19,12 +19,20 @@ vi.mock('@tanstack/react-router', async (original) => {
   return { ...real, useNavigate: () => vi.fn(), Link: ({ children, to }: { children: unknown; to: string }) => <a href={to}>{children as never}</a> };
 });
 
+/** The two reads of Past purchases and of a purchase alone, counted so a test sees them read again (issue #852 item 7). */
+const reads = vi.hoisted(() => ({
+  list: vi.fn(() => Promise.resolve({ items: [], next_cursor: '' })),
+  one: vi.fn((id: string) => Promise.resolve({ id, purchase_no: 'RP-TEST-1', status: 'posted', lines: [], total_minor: 0, currency: 'UGX' })),
+}));
+
 vi.mock('../../../api/retail', async (original) => {
   const real = await original<typeof import('../../../api/retail')>();
   return {
     ...real,
     retail: {
       ...real.retail,
+      listPurchases: reads.list,
+      getPurchase: reads.one,
       listProducts: () => Promise.resolve([]),
       listSuppliers: () => Promise.resolve([]),
       priceHistory: () => Promise.resolve([]),
@@ -35,7 +43,7 @@ vi.mock('../../../api/retail', async (original) => {
 
 const { RestockForm, restockWorth } = await import('./restock');
 const { PriceForm } = await import('./catalogue-products');
-const { RestockCard } = await import('./restocks');
+const { RestockCard, PurchasePage, Route: RestocksRoute } = await import('./restocks');
 const { PROFIT } = await import('./permissions');
 
 afterEach(() => {
@@ -232,5 +240,28 @@ describe('a price edit (issue #852)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save the new price' }));
     await waitFor(() => expect(client.getQueryState(list)?.isInvalidated).toBe(true));
     expect(client.getQueryState(one)?.isInvalidated).toBe(true);
+  });
+
+  // JUSTIFICATION-A3: review item 7 of PR #853 asks to prove the real screens, which needs them rendered beside the form.
+  it('reads the real Past purchases and a purchase alone again, so the keys above are theirs', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const RestocksPage = RestocksRoute.options.component as () => ReactElement;
+    render(
+      <QueryClientProvider client={client}>
+        <StaffContext.Provider value={{ me: owner, branch }}>
+          <RestocksPage />
+          <PurchasePage purchaseId="purchase-1" />
+          <PriceForm product={{ ...soap, version: 1 }} onSaved={() => undefined} onCancel={() => undefined} />
+        </StaffContext.Provider>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(reads.one).toHaveBeenCalledWith('purchase-1'));
+    await waitFor(() => expect(reads.list).toHaveBeenCalled());
+    const before = { list: reads.list.mock.calls.length, one: reads.one.mock.calls.length };
+    fireEvent.change(document.getElementById('price-sell') as HTMLInputElement, { target: { value: '600' } });
+    fireEvent.change(document.getElementById('price-reason') as HTMLInputElement, { target: { value: 'Test new price' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save the new price' }));
+    await waitFor(() => expect(reads.one.mock.calls.length).toBeGreaterThan(before.one));
+    await waitFor(() => expect(reads.list.mock.calls.length).toBeGreaterThan(before.list));
   });
 });
