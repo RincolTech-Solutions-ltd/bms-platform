@@ -296,6 +296,7 @@ describe('a daily form with no network', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(screen.queryByTestId('kept-on-phone')).toBeNull();
     expect(connected?.engine.snapshot().items).toEqual([]);
+    expect(screen.getAllByRole('alert').some((a) => a.classList.contains('alert-danger'))).toBe(true);
   });
 
   // JUSTIFICATION-A3: the lead's decision on the fourth review of #839 for a lost entry; one test of both refusals.
