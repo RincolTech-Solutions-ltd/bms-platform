@@ -33,7 +33,9 @@ sometimes twice: the banner under the bar and the screen's own red error. The ow
    same phone has another host, so another key and another origin; another person on the same business has another user id.
    Only a person who may sell in retail has offline support (ADR-067), so only they get the copy. The copy carries what the
    person was allowed to see when it was made (their permissions with the branches each covers, their branches, modules and
-   capabilities); when that changes (a manager made a seller, a branch taken away) the copy is thrown away, never shown, and
+   capabilities, and since issue #847 whether the Owner's setting `salespeople_see_savings_amount` is on, which decides
+   whether the kept Banking answer carries the savings, ADR-115 decision 11); when that changes (a manager made a seller, a
+   branch taken away, the savings switch turned off) the copy is thrown away, never shown, and
    the kept reads already in memory leave the query cache too, whether or not the person still has offline support (selling
    taken away, signed out). Opened with no network, the rights come from the profile saved on the phone, which may lag the
    copy: a copy that does not match is then not shown, and not deleted either; it is deleted only once a ping of `/healthz`
