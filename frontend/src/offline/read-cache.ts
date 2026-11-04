@@ -74,15 +74,17 @@ export function keptForReading(key: QueryKey): boolean {
 
 /**
  * What a person may see, as one string: their permissions with the branches each covers, their branches, modules and
- * capabilities. A kept copy made under another value (a manager made a seller, a branch taken away) is thrown away.
+ * capabilities, and whether the owner's savings switch is on (it decides whether Banking's kept answer carries the savings,
+ * issue #847). A kept copy made under another value (a manager made a seller, a branch taken away, the switch turned off) is
+ * thrown away.
  */
-export function accessOf(me: Pick<Me, 'permissions' | 'permission_scopes' | 'all_branches' | 'branches' | 'modules' | 'module_capabilities'>): string {
+export function accessOf(me: Pick<Me, 'permissions' | 'permission_scopes' | 'all_branches' | 'branches' | 'modules' | 'module_capabilities' | 'salespeople_see_savings_amount'>): string {
   const sorted = (list: readonly unknown[] | undefined | null) => [...(list ?? [])].map(String).sort();
   const scopes = Object.entries(me.permission_scopes ?? {})
     .map(([p, s]) => `${p}:${(s as { all_branches?: boolean })?.all_branches ? '*' : sorted((s as { branch_ids?: string[] })?.branch_ids).join(',')}`)
     .sort();
   const caps = Object.entries(me.module_capabilities ?? {}).map(([m, c]) => `${m}:${sorted(c as string[]).join(',')}`).sort();
-  return JSON.stringify([sorted(me.permissions), scopes, me.all_branches === true, sorted((me.branches ?? []).map((b) => b.id)), sorted(me.modules), caps]);
+  return JSON.stringify([sorted(me.permissions), scopes, me.all_branches === true, sorted((me.branches ?? []).map((b) => b.id)), sorted(me.modules), caps, me.salespeople_see_savings_amount === true]);
 }
 
 const lendingReport = (r: unknown) => {

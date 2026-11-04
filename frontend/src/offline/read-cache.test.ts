@@ -145,6 +145,24 @@ describe('keeping and restoring', () => {
     }
   });
 
+  // JUSTIFICATION-A3: a new test case issue #847 asks for (the kept Banking answer goes with the savings switch).
+  it('drops the kept Banking answer that carried the savings once the owner turns the savings switch off (issue #847)', async () => {
+    const on = accessOf({ ...mockMe('cashier'), salespeople_see_savings_amount: true });
+    const off = accessOf({ ...mockMe('cashier'), salespeople_see_savings_amount: false });
+    const key = ['retail', 'banking-expected', 'b1', '2026-11-02'];
+    const store = memoryStore();
+    const client = new QueryClient();
+    const keeping = keepReads(client, store, SHOP, on, () => Date.now(), 0);
+    await fetched(client, key, { cash_expected_minor: 150000, savings_minor: 20000, expected_after_savings_minor: 130000 });
+    await expect.poll(async () => (await store.readCache(SHOP)) !== null).toBe(true);
+    keeping.stop();
+
+    const afterOff = new QueryClient();
+    expect(restore(afterOff, await store.readCache(SHOP), Date.now(), off)).toEqual([]);
+    expect(afterOff.getQueryData(key)).toBeUndefined();
+    expect(restore(new QueryClient(), await store.readCache(SHOP), Date.now(), on)).toHaveLength(1);
+  });
+
   // JUSTIFICATION-A3: a new test case the #774 follow-up asks for (no write over a copy of other rights before a ping).
   it('never writes over a copy made under other rights before a ping confirms the network, then replaces it (issue #774)', async () => {
     const store = memoryStore();
