@@ -219,6 +219,9 @@ export function RestockForm({ onSaved, draftName, fixSearch, fromEdit = false, i
       // any refusal (its stock moved, an item switched off) leaves the old delivery as it was. The draft's key covers a retry.
       const request = buildPurchase({ supplierId, purchasedOn: dated.sent?.date, dateReason: dated.sent?.reason, method, lines });
       if (replaces?.id) return { saved: await retail.replacePurchase(replaces.id, request, key), context: { supplierName, before } };
+      // Opened from Edit (a delivery voided already, entered again): online only like an edit, so a dropped connection is an
+      // error on the form, never an entry kept on the phone (fifth review of #839). The draft's key covers a retry.
+      if (fromEdit) return { saved: await retail.createPurchase(request, key), context: { supplierName, before } };
       const saved = await entries.save(
         {
           kind: 'purchase', body: request, key, branchId: here ?? branches[0]?.id ?? '',

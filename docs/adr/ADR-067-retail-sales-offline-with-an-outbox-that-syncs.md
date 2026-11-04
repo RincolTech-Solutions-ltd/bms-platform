@@ -254,7 +254,10 @@ left, the branch, the period, the person's roles.
     recorded. Send again to check; it is never recorded twice."; Fix and Discard are offered once the server has refused
     that key. An entry sent online first whose answer was lost is treated so after its first refusal too (the request that
     went online may still arrive and record it under the key, lead's decision on the fourth review of #839): Fix and
-    Discard appear once the server has refused the key again, after Send again. Fix opens the form the entry was
+    Discard appear once the server has refused the key again, after Send again. Two refusals is the accepted bound: the
+    server stores no refused answer under a key, so in theory the request that went online could arrive later still, but
+    by the second refusal it has been on the network for the 8 second wait, the outbox's first try and the person's Send
+    again, and a request that late is not expected. Fix opens the form the entry was
     made in, under that form's own draft name (Buy again on its purchase). (f) **Who.** Whoever records one of these
     forms has offline support now, not only a seller: the outbox, the dot, the sign-out warning and the kept reads (ADR-116).
     Only a seller's phone fills the catalogue copy, which the item pickers of Buy stock, Move stock and usage search while

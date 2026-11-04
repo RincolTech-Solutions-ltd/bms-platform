@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { lastOnline, rememberOnline } from './connectivity';
 import { ENTRY_PATHS, isKept, lostBody, offlineBody, offlineEntry, sentWords } from './entries';
-import { classifyEntry, failedCount, provisionalNumber, sentEntries, waiting, waitingWords, type OutboxItem } from './outbox';
+import { GAVE_UP_CODE, MAX_SERVER_TRIES, classifyEntry, failedCount, provisionalNumber, sentEntries, waiting, waitingWords, type OutboxItem } from './outbox';
 import { memoryStore } from './store';
 import { SyncEngine, type Answer } from './sync-engine';
 import { statusWords } from './sync-status';
@@ -129,5 +129,34 @@ describe('an entry kept on the phone', () => {
     expect(classifyEntry(409, { code: 'suggestion_changed', detail: 'The day changed. Look again.' })).toEqual({ kind: 'refused', code: 'suggestion_changed', message: 'The day changed. Look again.' });
     expect(classifyEntry(409, { code: 'idempotency_in_progress' }).kind).toBe('retry');
     expect(classifyEntry(503, {}).kind).toBe('retry');
+  });
+
+  // JUSTIFICATION-A3: a new test the fifth review of #839 asks for (gave-up reached through real retries), not a mechanism.
+  it('gives up on an entry the server keeps answering without taking it, never reports it, and Send again keeps its key', async () => {
+    let now = AT;
+    let busy = true;
+    const sent: string[] = [];
+    const report = vi.fn();
+    const engine = new SyncEngine({
+      store: memoryStore(), scope: SCOPE, refreshSession: async () => false, decisions: async () => [], report,
+      now: () => now, later: () => () => {},
+      send: async (i) => {
+        sent.push(i.key);
+        return busy ? { status: 503, body: { detail: 'Busy.' } } : { status: 201, body: { id: 'rec-1' } };
+      },
+    });
+    await engine.queue(entry('expense', 'k-busy', 0));
+    for (let n = 0; n < MAX_SERVER_TRIES; n++) {
+      await engine.syncNow();
+      now += 3_600_000;
+    }
+    const [item] = engine.snapshot().items;
+    expect(item).toMatchObject({ state: 'failed', error: { code: GAVE_UP_CODE } });
+    expect(sent).toEqual(Array(MAX_SERVER_TRIES).fill('k-busy'));
+    expect(report).not.toHaveBeenCalled();
+    busy = false;
+    await engine.sendAgain('k-busy');
+    expect(sent.at(-1)).toBe('k-busy');
+    expect(engine.snapshot().items[0]?.state).toBe('sent');
   });
 });

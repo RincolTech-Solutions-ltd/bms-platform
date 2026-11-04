@@ -100,7 +100,8 @@ export function sellsOffline(me: Pick<Me, 'permissions' | 'modules'>): boolean {
 
 // JUSTIFICATION-A3: issue #812 widens offline support from sellers to whoever records a daily form; one list and one check.
 /** The permissions of the daily forms kept on the phone while offline (issue #812, ADR-067 decision 13). */
-export const ENTRY_PERMISSIONS = ['retail.expense.record', 'retail.savings.record', 'retail.banking.record', 'retail.till.close',
+// Each saves one of the forms; retail.till.close is only a second gate on savings and banking, never enough alone.
+export const ENTRY_PERMISSIONS = ['retail.expense.record', 'retail.savings.record', 'retail.banking.record',
   'retail.withdrawal.record', 'retail.purchase.create', 'retail.stock.transfer', 'retail.usage.report'];
 
 /** Offline support: the person sells, or records a daily form kept on the phone with no network (issue #812). */

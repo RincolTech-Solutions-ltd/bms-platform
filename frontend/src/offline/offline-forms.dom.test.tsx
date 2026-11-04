@@ -285,6 +285,17 @@ describe('a daily form with no network', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(offline?.engine.snapshot().items).toEqual([]);
     expect(online).not.toHaveBeenCalled();
+    cleanup();
+    // Online, and the connection drops during the save (fifth review of #839): an error on the form, nothing kept.
+    const { markDropped } = await import('../api/client');
+    online.mockImplementation(() => Promise.reject(markDropped(new TypeError('Failed to fetch'))));
+    const connected = testOffline(admin, { online: true });
+    mount(<RestockForm draftName={`restock-again:${uid}:r1`} fixSearch={{ edit: 'r1' }} fromEdit again />, connected);
+    fireEvent.click(screen.getAllByRole('button', { name: /^Save/ }).find((b) => b.getAttribute('type') === 'submit') as HTMLButtonElement);
+    await waitFor(() => expect(online).toHaveBeenCalledWith('createPurchase', expect.anything(), 'k-edit'));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByTestId('kept-on-phone')).toBeNull();
+    expect(connected?.engine.snapshot().items).toEqual([]);
   });
 
   // JUSTIFICATION-A3: the lead's decision on the fourth review of #839 for a lost entry; one test of both refusals.
