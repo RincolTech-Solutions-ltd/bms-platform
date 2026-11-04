@@ -1,0 +1,320 @@
+package com.rincoltech.bms.retail;
+
+import static com.rincoltech.bms.retail.RetailTestSupport.ADMIN;
+import static com.rincoltech.bms.retail.RetailTestSupport.SALES;
+import static com.rincoltech.bms.retail.cashbook.CashbookTestSupport.ALL;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.rincoltech.bms.IntegrationTest;
+import com.rincoltech.bms.TestDatabase;
+import com.rincoltech.bms.retail.cashbook.CashbookTestSupport;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import javax.imageio.ImageIO;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import tools.jackson.databind.JsonNode;
+
+/**
+ * FR-RET-89 (issue #819, ADR-124): a photo of the paper receipt on a sale, a delivery, a usage or damage entry and an
+ * expense, through the item photo's checks and storage. For each record: the photo is added and read by a person who sees
+ * the record, refused to another business and to a person without access, and a file of the wrong type or too large is
+ * refused. Every file, name and amount is fabricated.
+ */
+class RetailReceiptPhotosIT extends IntegrationTest {
+
+    @Autowired
+    TestRestTemplate http;
+
+    TestDatabase.Fixture t;
+    RetailTestSupport api;
+    CashbookTestSupport cb;
+    UUID hq;
+    UUID product;
+
+    @BeforeEach
+    void setUp() {
+        t = TestDatabase.tenant("retail-receipts", false, true);
+        api = new RetailTestSupport(http, t);
+        cb = new CashbookTestSupport(http, t);
+        hq = t.headOffice();
+        product = api.product("RCPT-1", 1_000, 2_000);
+        api.stockUp(hq, product, "20");
+    }
+
+    static byte[] png(int width, int height) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ImageIO.write(new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB), "png", out);
+        return out.toByteArray();
+    }
+
+    ResponseEntity<JsonNode> upload(
+            RetailTestSupport as, String path, byte[] bytes, String permissions, String branches) {
+        MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
+        form.add("file", new ByteArrayResource(bytes) {
+            @Override
+            public String getFilename() {
+                return "receipt.png";
+            }
+        });
+        HttpHeaders h = as.headers(permissions, branches, Map.of());
+        h.setContentType(MediaType.MULTIPART_FORM_DATA);
+        return http.exchange(RetailTestSupport.BASE + path, HttpMethod.POST, new HttpEntity<>(form, h), JsonNode.class);
+    }
+
+    ResponseEntity<byte[]> image(RetailTestSupport as, String path, String permissions, String branches) {
+        return http.exchange(
+                RetailTestSupport.BASE + path,
+                HttpMethod.GET,
+                new HttpEntity<>(as.headers(permissions, branches, Map.of())),
+                byte[].class);
+    }
+
+    UUID sale() {
+        ResponseEntity<JsonNode> r = api.sell(hq, "cash", product, "1");
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        return RetailTestSupport.id(r);
+    }
+
+    /** A restock made by the same person as the reads below: without retail.profit.read one reads only one's own (ADR-055). */
+    UUID delivery() {
+        Map<String, Object> line = new LinkedHashMap<>();
+        line.put("product_id", product);
+        line.put("cost_minor", 1_000);
+        line.put("sell_minor", 2_000);
+        line.put("qty_by_branch", List.of(Map.of("branch_id", hq, "qty", "3")));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("payment_method", "cash");
+        body.put("lines", List.of(line));
+        ResponseEntity<JsonNode> r =
+                api.postKeyed("/purchases", body, ALL, "*", UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        return RetailTestSupport.id(r);
+    }
+
+    UUID usage() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("kind", "damaged");
+        body.put("reason", "Test water damage");
+        body.put("lines", List.of(Map.of("product_id", product, "qty", "1")));
+        ResponseEntity<JsonNode> r =
+                api.postKeyed("/usage", body, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        return RetailTestSupport.id(r);
+    }
+
+    UUID[] expenseItem() {
+        return cb.categoryWithItem("Test Transport", "Test Boda", false);
+    }
+
+    UUID expense() {
+        UUID[] item = expenseItem();
+        ResponseEntity<JsonNode> r = cb.expense(hq, item[0], item[1], 5_000, null);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        return RetailTestSupport.id(r);
+    }
+
+    /** The shared checks of one record: added, read, kept to the business and to whoever may see the record. */
+    void addedAndReadOnlyByWhoeverSeesTheRecord(String path, String adds, String reads) throws IOException {
+        ResponseEntity<JsonNode> added = upload(api, path, png(2400, 1600), adds, "*");
+        assertThat(added.getStatusCode()).as("%s", added.getBody()).isEqualTo(HttpStatus.CREATED);
+        String photo = added.getBody().get("photo_id").asString();
+
+        // Stored as an item photo is: under the tenant's own prefix, as an upload of the record's subject type.
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT object_key FROM documents WHERE id = ?::uuid")
+                        .param(photo)
+                        .query(String.class)
+                        .single())
+                .startsWith("tenants/" + t.tenantId() + "/upload/");
+
+        // A person who sees the record sees the photo, scaled to 1200 px as an item photo is, kept privately.
+        ResponseEntity<byte[]> seen = image(api, path, reads, "*");
+        assertThat(seen.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(seen.getHeaders().getContentType().toString()).isEqualTo("image/png");
+        assertThat(seen.getHeaders().getCacheControl()).contains("private");
+        assertThat(ImageIO.read(new ByteArrayInputStream(seen.getBody())).getWidth())
+                .isEqualTo(1200);
+
+        // Another business never reads or adds it.
+        RetailTestSupport stranger = new RetailTestSupport(http, TestDatabase.tenant("retail-receipts-b", false, true));
+        assertThat(image(stranger, path, ALL, "*").getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(upload(stranger, path, png(100, 100), ALL, "*").getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+
+        // A person without the record's read permission is refused; one scoped to another shop does not find it.
+        assertThat(image(api, path, "retail.catalogue.manage", "*").getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(image(api, path, reads, t.secondBranch().toString()).getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(upload(api, path, png(100, 100), adds, t.secondBranch().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+
+        // The generic document route applies the same rule: the photo of a record out of reach is not found.
+        assertThat(http.exchange(
+                                "/api/v1/documents/" + photo,
+                                HttpMethod.GET,
+                                new HttpEntity<>(
+                                        api.headers(reads, t.secondBranch().toString(), Map.of())),
+                                JsonNode.class)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+
+        // A file that is not a picture, an SVG or one over 5 MB is refused and nothing is stored.
+        long before = documents(path);
+        byte[] svg = "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>"
+                .getBytes(StandardCharsets.UTF_8);
+        assertThat(upload(api, path, svg, adds, "*").getStatusCode().is4xxClientError())
+                .isTrue();
+        assertThat(upload(api, path, "not an image".getBytes(StandardCharsets.UTF_8), adds, "*")
+                        .getStatusCode()
+                        .is4xxClientError())
+                .isTrue();
+        assertThat(upload(api, path, new byte[5 * 1024 * 1024 + 1], adds, "*")
+                        .getStatusCode()
+                        .is4xxClientError())
+                .isTrue();
+        assertThat(documents(path)).isEqualTo(before);
+
+        // A record that does not exist takes no photo.
+        String missing =
+                path.replaceAll("[0-9a-f]{8}-[0-9a-f-]{27}", UUID.randomUUID().toString());
+        assertThat(upload(api, missing, png(100, 100), adds, "*").getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    long documents(String path) {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM documents WHERE tenant_id = ? AND subject_type LIKE 'retail.%receipt%'")
+                .param(t.tenantId())
+                .query(Long.class)
+                .single();
+    }
+
+    @Test
+    void frRet89ASaleTakesAReceiptPhotoThatWhoeverSeesTheSaleSees() throws IOException {
+        UUID sale = sale();
+        assertThat(api.get("/sales/" + sale, ADMIN)
+                        .getBody()
+                        .get("has_receipt_photo")
+                        .asBoolean())
+                .isFalse();
+
+        addedAndReadOnlyByWhoeverSeesTheRecord("/sales/" + sale + "/receipt-photo", SALES, "retail.sale.read");
+
+        assertThat(api.get("/sales/" + sale, ADMIN)
+                        .getBody()
+                        .get("has_receipt_photo")
+                        .asBoolean())
+                .isTrue();
+        // ADR-055: another seller, who sees only their own sales, does not see this one's photo either.
+        RetailTestSupport otherSeller = new RetailTestSupport(http, t);
+        assertThat(image(otherSeller, "/sales/" + sale + "/receipt-photo", SALES, "*")
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(cb.auditPayloads("retail.sale.receipt_photo_added")).hasSize(1);
+    }
+
+    @Test
+    void frRet89ADeliveryTakesAReceiptPhotoThatWhoeverReadsTheRestockSees() throws IOException {
+        UUID delivery = delivery();
+        addedAndReadOnlyByWhoeverSeesTheRecord(
+                "/purchases/" + delivery + "/receipt-photo", "retail.purchase.create", "retail.purchase.create");
+
+        JsonNode read = api.get("/purchases/" + delivery, ADMIN).getBody();
+        assertThat(read.get("has_receipt_photo").asBoolean()).isTrue();
+        assertThat(api.get("/purchases", ADMIN)
+                        .getBody()
+                        .get("items")
+                        .get(0)
+                        .get("has_receipt_photo")
+                        .asBoolean())
+                .isTrue();
+    }
+
+    @Test
+    void frRet89AUsageOrDamageEntryTakesAReceiptPhotoThatStockReadersSee() throws IOException {
+        UUID entry = usage();
+        addedAndReadOnlyByWhoeverSeesTheRecord("/usage/" + entry + "/receipt-photo", SALES, "retail.stock.read");
+
+        JsonNode rows = api.get("/stock/movements?kind=damage", ADMIN).getBody().get("items");
+        assertThat(rows.get(0).get("source_id").asString()).isEqualTo(entry.toString());
+        assertThat(rows.get(0).get("has_receipt_photo").asBoolean()).isTrue();
+    }
+
+    @Test
+    void frRet89AnExpenseTakesAReceiptPhotoAddedLaterThatCashBookReadersSee() throws IOException {
+        UUID expense = expense();
+        addedAndReadOnlyByWhoeverSeesTheRecord(
+                "/expenses/" + expense + "/receipt-photo", "retail.expense.record", "retail.cashbook.read");
+
+        JsonNode listed = cb.get("/expenses", ALL).getBody().get("items").get(0);
+        assertThat(listed.get("id").asString()).isEqualTo(expense.toString());
+        assertThat(listed.hasNonNull("receipt_document_id")).isTrue();
+    }
+
+    @Test
+    void frRet89TheExpenseFormSendsThePhotoFirstAndTheExpenseNamesIt() throws IOException {
+        ResponseEntity<JsonNode> sent =
+                upload(api, "/expenses/receipt-photos", png(800, 600), "retail.expense.record", "*");
+        assertThat(sent.getStatusCode()).as("%s", sent.getBody()).isEqualTo(HttpStatus.CREATED);
+        String photo = sent.getBody().get("photo_id").asString();
+        // Nobody reads a photo no expense names yet.
+        assertThat(http.exchange(
+                                "/api/v1/documents/" + photo,
+                                HttpMethod.GET,
+                                new HttpEntity<>(api.headers(ALL, "*", Map.of())),
+                                JsonNode.class)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+
+        UUID[] item = expenseItem();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("category_id", item[0]);
+        body.put("item_id", item[1]);
+        body.put("amount_minor", 3_000);
+        body.put("receipt_document_id", photo);
+        ResponseEntity<JsonNode> recorded = cb.post("/expenses", body, CashbookTestSupport.CASHBOOK_ADMIN);
+        assertThat(recorded.getStatusCode()).as("%s", recorded.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(recorded.getBody().get("receipt_document_id").asString()).isEqualTo(photo);
+        UUID expense = RetailTestSupport.id(recorded);
+
+        ResponseEntity<byte[]> seen =
+                image(api, "/expenses/" + expense + "/receipt-photo", "retail.cashbook.read", "*");
+        assertThat(seen.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(ImageIO.read(new ByteArrayInputStream(seen.getBody())).getWidth())
+                .isEqualTo(800);
+        assertThat(image(
+                                api,
+                                "/expenses/" + expense + "/receipt-photo",
+                                "retail.cashbook.read",
+                                t.secondBranch().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        // An expense without a photo answers not found, so the screen offers to add one.
+        assertThat(image(api, "/expenses/" + expense() + "/receipt-photo", "retail.cashbook.read", "*")
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+}
