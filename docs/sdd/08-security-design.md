@@ -562,7 +562,10 @@ Notes:
   unless the caller holds `retail.profit.read`, and the profit routes refuse without it. On a
   branch-bound row the permission must cover that row's branch (`principal.may`, ADR-017), so a
   user with profit read at branch A only sees no cost on branch B's stock, movements, sales or
-  valuation (review F5); tenant-wide products and price history need it in any branch. The item page
+  valuation (review F5); tenant-wide products and price history need it in any branch. The damage and use share of Stock
+  health (issue #822, ADR-127) is its own route, `GET /retail/reports/stock-health/damage-share`, guarded by
+  `retail.profit.read`: anyone else gets 403 and no figures, and it answers only the branches where the caller holds it (a
+  branch outside them, or of another business, is 404). The item page
   (issue #813, ADR-121: `GET /retail/stock/items/{product_id}` and its `/movements`) declares `retail.stock.read` and shows
   every quantity and running balance to whoever holds it, in the branches it covers; a shop's average buying price, a
   movement's cost and a sale's `profit_minor` follow the same per-branch `retail.profit.read` rule, and a `branch_id` outside
