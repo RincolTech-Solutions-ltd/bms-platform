@@ -1,8 +1,8 @@
--- V135: an Idempotency-Key is read across the people of a business, so a replay answers only the person who stored it
+-- V136: an Idempotency-Key is read across the people of a business, so a replay answers only the person who stored it
 -- (issue #852, ADR-026 decision 5).
 --
--- V135 is the highest number on main plus one (AGENTS.md: Flyway runs with outOfOrder off); the merger renumbers at
--- merge time if the order changes.
+-- V136 is the highest number on main plus one (AGENTS.md: Flyway runs with outOfOrder off; V135 is the staff email
+-- spaces of #823, merged first); the merger renumbers at merge time if the order changes.
 --
 -- Every stored row already names its person: principal_id is NOT NULL and part of the primary key since V1, so nothing
 -- is filled in and no row changes. What changes is the read: JdbcIdempotency now looks a key up in the whole business,
@@ -16,7 +16,7 @@
 --
 -- Built CONCURRENTLY, so keyed writes in every business go on while it builds; a plain CREATE INDEX would hold a SHARE
 -- lock that turns them into 409 idempotency_in_progress after 5 seconds. CONCURRENTLY cannot run in a transaction, so
--- V135__idempotency_key_lookup.sql.conf sets executeInTransaction=false for this script alone. The build waits for
+-- V136__idempotency_key_lookup.sql.conf sets executeInTransaction=false for this script alone. The build waits for
 -- transactions already open on the table to end, without blocking anyone. If it fails part way, Postgres leaves an
 -- INVALID index behind; the DROP first means that, after `flyway repair`, running the migration again builds it afresh.
 

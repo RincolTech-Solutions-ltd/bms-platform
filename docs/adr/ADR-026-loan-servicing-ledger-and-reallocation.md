@@ -71,7 +71,7 @@ questions are not settled by chapters 3 and 6 as written:
    stored answer nor whether their request matched is told. Before, the row was keyed by person
    (`principal_id`, NOT NULL since V1) but looked up only by person, so another person's request
    with the key ran its own work again; now it is refused. 422 because it is a rule refusal like
-   `idempotency_key_reused`, not a race. No row lacks a person, so nothing is backfilled; V135
+   `idempotency_key_reused`, not a race. No row lacks a person, so nothing is backfilled; V136
    adds the index `(tenant_id, key)` for the lookup, not unique because rows stored before it may
    hold one key under two people. Those rows stay safe: each of the two still replays only their
    own answer and anyone else is refused; keys are kept 7 days, so they are gone a week after the
@@ -79,8 +79,8 @@ questions are not settled by chapters 3 and 6 as written:
    `idempotency_in_progress` after 5 seconds). Tests: `RetailIdempotencyProtocolIT` and one
    per module (`RetailSalesKeyPerPersonIT`, `RetailRestockKeyPerPersonIT`,
    `RetailCashbookKeyPerPersonIT`, `RetailUsageKeyPerPersonIT`, `LoanServicingIT`, `SavingsIT`).
-   V135 builds the index `CONCURRENTLY` in a script of its own run outside a transaction
-   (`executeInTransaction=false` in `V135__idempotency_key_lookup.sql.conf`), so keyed writes in
+   V136 builds the index `CONCURRENTLY` in a script of its own run outside a transaction
+   (`executeInTransaction=false` in `V136__idempotency_key_lookup.sql.conf`), so keyed writes in
    every business go on while it builds; a build that fails part way leaves an invalid index that
    the script drops before building again. **Rolling-deploy window:** while instances on the old
    code still serve requests, they neither take the key lock nor look across people, so until the

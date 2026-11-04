@@ -170,7 +170,7 @@ class RetailIdempotencyProtocolIT extends IntegrationTest {
     }
 
     /**
-     * Issue #852, V135: a business may hold one key under two people from before the fix. Each still replays their own
+     * Issue #852, V136: a business may hold one key under two people from before the fix. Each still replays their own
      * answer; a third person is refused.
      */
     @Test
