@@ -410,7 +410,7 @@ class RetailOfflineEntriesIT extends IntegrationTest {
                     .get(path.equals("/bankings") ? "banked_at" : "withdrawn_at")
                     .asString();
             assertThat(Instant.parse(at)).as(path).isEqualTo(made);
-            // Issue #856: the day the entry was made on the business clock, not today, which differs just after midnight.
+            // Issue #856: the day the entry was made on the business clock, not today (they differ after midnight).
             String madeOn = LocalDate.ofInstant(made, ZONE).toString();
             assertThat(r.getBody().get("business_date").asString()).as(path).isEqualTo(madeOn);
         }
