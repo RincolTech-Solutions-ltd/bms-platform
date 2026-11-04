@@ -55,7 +55,8 @@ class SaleReceiptPhotoController {
             // The lead's decision on the review of #846: the person who made the sale adds its photo, or someone
             // who may cancel sales at its branch; a seller who only sees a colleague's credit sale takes none. A
             // voided sale takes none.
-            SalesApi.Sale sale = rule.seen(principal, id)
+            // Under the row lock a void takes, so a void committing meanwhile is seen (review of #846).
+            SalesApi.Sale sale = rule.seen(principal, id, true)
                     .filter(s -> principal.may("retail.sale.create", s.branchId()))
                     .filter(s -> principal.may("retail.sale.void", s.branchId())
                             || Objects.equals(principal.userId(), s.createdBy()))
@@ -93,12 +94,12 @@ class SaleReceiptPhotoController {
 
         @Override
         public boolean canSee(Principal principal, UUID recordId, UUID photoId) {
-            return seen(principal, recordId).isPresent();
+            return seen(principal, recordId, false).isPresent();
         }
 
-        /** The sale when the caller sees it, as {@code GET /retail/sales/{sale_id}} does, else empty. */
-        Optional<SalesApi.Sale> seen(Principal principal, UUID saleId) {
-            return repo.find(saleId, false)
+        /** The sale when the caller sees it, as {@code GET /retail/sales/{sale_id}} does, else empty; locked when asked. */
+        Optional<SalesApi.Sale> seen(Principal principal, UUID saleId, boolean lock) {
+            return repo.find(saleId, lock)
                     .map(SalesRepository.Header::sale)
                     .filter(s -> principal.may("retail.sale.read", s.branchId()))
                     .filter(s -> principal.may(SalesSummaryService.ALL_SELLERS, s.branchId())

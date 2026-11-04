@@ -289,6 +289,16 @@ class DocumentService implements Documents {
     }
 
     @Override
+    public boolean stored(UUID documentId) {
+        return jdbc.sql("SELECT object_key FROM documents WHERE id = ?")
+                .param(documentId)
+                .query(String.class)
+                .optional()
+                .map(storage::exists)
+                .orElse(false);
+    }
+
+    @Override
     public Image readImageOf(String subjectType, UUID subjectId) {
         ImageRef ref = reads.execute(s -> imageRef(jdbc.sql("SELECT " + COLUMNS + " FROM documents"
                         + " WHERE subject_type = ? AND subject_id = ? ORDER BY created_at DESC, id LIMIT 1")

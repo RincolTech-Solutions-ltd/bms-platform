@@ -48,11 +48,16 @@ yes. A second storage or a second image check would be one more thing to keep sa
    person who made it or from someone who may cancel sales at its branch (`retail.sale.void`), so a seller who only sees a
    colleague's credit sale, to take a payment on it, adds none.
 5. **Never on a deleted entry.** A voided sale, delivery or expense and an undone usage entry take no photo: 409
-   `record_voided`. A photo added before the void stays with the record.
+   `record_voided`. A photo added before the void stays with the record. A sale or an expense is checked under the row lock
+   its void takes, so a void committing at the same moment is seen.
 6. **One photo, one expense, its sender's.** A receipt photo is named by one expense only, and only by the person who sent
    it: an expense naming a photo another expense names or was added to, or one someone else sent, is refused with 409
    `receipt_taken`, so a photo id never makes a receipt readable anywhere else. An edit keeps the photo of the expense it
-   replaces; an approved expense names the photo its maker sent.
+   replaces; an approved expense names the photo its maker sent. While an expense waits for an administrator (ADR-091) its
+   request names the photo (`Approvals.pendingWith`): another expense may not name it, the photo counts as claimed however
+   long the approval takes, and the cash book readers and the deciders (`core.settings.manage`) at its branch see it while
+   deciding. An expense naming a photo whose file is gone is refused with 409 `receipt_gone` when typed now; one kept on a
+   phone, or approved, is recorded without it, since the money is the record and the photo is added again from it.
 7. **Never required, never blocking.** The record is saved first and said; the photo follows, sent after the form is free,
    and stopped after 30 seconds, so a weak link never holds the form or the next entry. The expense form's photo, sent
    before the expense, has the same limit; when it fails the expense is saved without it. A photo that is not saved leaves
@@ -68,10 +73,13 @@ yes. A second storage or a second image check would be one more thing to keep sa
    (`ReceiptPhotos.CLAIM_WITHIN`) has its file deleted by a nightly job of core.documents, `core.documents.unclaimed-sweep`
    at 04:40 Kampala time, beside the orphan sweep of issue #39: a subject type's `DocumentAccess` gives the window and says
    whether an upload is claimed, the row stays as every document's does, and each removal is audited
-   `core.document.unclaimed_removed`. `bms.documents.unclaimed-sweep-enabled=false` turns it off.
+   `core.document.unclaimed_removed` in the transaction that deletes the file, so a delete that fails leaves no audit row.
+   It asks storage only whether a file is there (a HEAD request) and looks back 31 days past the window, so a month of
+   missed nights is caught up. `bms.documents.unclaimed-sweep-enabled=false` turns it off.
 9. **Read through a port, never the documents table.** Whether a record has a photo is asked of core.documents in one
    query per page (`Documents.newestOf`, through `ReceiptPhotos.newest`), after the record's own query, so no retail
-   module reads the `documents` table for this.
+   module reads the `documents` table for this. The read of a sale or a restock and the answer of its void say it too, as
+   does the answer of an expense's void with a photo added later; a new record has none.
 
 ## Consequences
 
@@ -85,4 +93,4 @@ earlier one stays in storage with the record.
 **Watch for:** A business that photographs every sale grows its storage by about 300 KB per sale; the documents of a removed
 business go with the rest of its files (ADR-090). If the owner asks to remove a wrong photo, that is a new decision, since
 documents are never deleted. A photo sent before an expense stays at most a day and a night unclaimed before its file goes;
-an expense that names it after its file went shows no photo, and the photo is added again from the expense.
+an expense kept on a phone for longer is recorded without it, and the photo is added again from the expense.

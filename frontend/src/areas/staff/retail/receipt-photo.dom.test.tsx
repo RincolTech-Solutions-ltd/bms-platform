@@ -231,4 +231,19 @@ describe('the receipt photo on a saved entry', () => {
     await screen.findByRole('button', { name: 'Open the receipt photo' });
     expect(calls).toHaveBeenCalledWith('receiptPhoto', 'sale', 's1', expect.anything());
   });
+
+  it('offers a seller Add receipt photo on their own sale, never on a colleague\'s credit sale they only see (review of #846)', () => {
+    const seller = mockMe('sales');
+    const sale = { id: 's2', sale_no: 'S-0002', branch_id: branch, sale_date: '2026-11-03', payment_method: 'credit', status: 'completed', total_minor: 1500, balance_minor: 1500, lines: [], has_receipt_photo: false } as Sale;
+    const show = (s: Sale) => render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <StaffContext.Provider value={{ me: seller, branch }}><SaleDetail sale={s} today="2026-11-03" /></StaffContext.Provider>
+      </QueryClientProvider>,
+    );
+    show({ ...sale, created_by: 'someone-else' });
+    expect(screen.queryByLabelText('Add receipt photo')).toBeNull();
+    cleanup();
+    show({ ...sale, created_by: seller.user_id });
+    expect(screen.getByLabelText('Add receipt photo')).toBeTruthy();
+  });
 });

@@ -1,5 +1,6 @@
 package com.rincoltech.bms.retail.cashbook.internal;
 
+import com.rincoltech.bms.core.approvals.Approvals;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
@@ -9,6 +10,7 @@ import com.rincoltech.bms.retail.catalogue.ReceiptPhotos.Kind;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.UUID;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -65,7 +67,8 @@ class ExpenseReceiptPhotoController {
     ReceiptPhotos.Added add(@PathVariable("expense_id") UUID id, @RequestPart("file") MultipartFile file) {
         Principal principal = CurrentPrincipal.require();
         return new ReceiptPhotos.Added(photos.attach(Kind.EXPENSE, id, ReceiptPhotos.bytes(file), () -> {
-            CashbookRepository.ExpenseRow e = repo.expense(id, false)
+            // Under the row lock a void takes, so a void committing meanwhile is seen (review of #846).
+            CashbookRepository.ExpenseRow e = repo.expense(id, true)
                     .filter(x -> principal.may(CashbookSupport.EXPENSE_RECORD, x.branchId()))
                     .orElseThrow(ApiException::notFound);
             if (e.voided().voided()) {
@@ -91,10 +94,16 @@ class ExpenseReceiptPhotoController {
     @Component
     static class ExpenseRule implements ReceiptPhotos.Rule {
 
-        private final JdbcClient jdbc;
+        /** Who decides an expense waiting for approval (ADR-091): an administrator at its branch. */
+        static final String DECIDES = "core.settings.manage";
 
-        ExpenseRule(JdbcClient jdbc) {
+        private final JdbcClient jdbc;
+        // Lazy: the approvals module runs the expense action, which calls back into this module.
+        private final Approvals approvals;
+
+        ExpenseRule(JdbcClient jdbc, @Lazy Approvals approvals) {
             this.jdbc = jdbc;
+            this.approvals = approvals;
         }
 
         @Override
@@ -102,9 +111,13 @@ class ExpenseReceiptPhotoController {
             return Kind.EXPENSE;
         }
 
+        /**
+         * Cash book readers at the expense's branch; and, while an expense that names the photo waits for an administrator
+         * (review of #846), its readers and its deciders at the branch it is fixed to, so the approver sees the receipt.
+         */
         @Override
         public boolean canSee(Principal principal, UUID recordId, UUID photoId) {
-            return jdbc
+            boolean recorded = jdbc
                     .sql("SELECT branch_id FROM retail_expenses WHERE id = :record OR receipt_document_id = :photo")
                     .param("record", recordId)
                     .param("photo", photoId)
@@ -112,17 +125,32 @@ class ExpenseReceiptPhotoController {
                     .list()
                     .stream()
                     .anyMatch(b -> principal.may(CashbookSupport.READ, b));
+            return recorded
+                    || waiting(photoId)
+                            .filter(b -> principal.may(CashbookSupport.READ, b) || principal.may(DECIDES, b))
+                            .isPresent();
         }
 
-        /** A photo sent before its expense is claimed once an expense names it; one added to an expense always is. */
+        /**
+         * A photo sent before its expense is claimed once an expense names it, and while an expense that names it waits for
+         * an administrator (review of #846: an approval may take days); one added to an expense always is.
+         */
         @Override
         public boolean claimed(UUID recordId, UUID photoId) {
-            return jdbc.sql(
+            boolean named = jdbc.sql(
                             "SELECT EXISTS (SELECT 1 FROM retail_expenses WHERE id = :record OR receipt_document_id = :photo)")
                     .param("record", recordId)
                     .param("photo", photoId)
                     .query(Boolean.class)
                     .single();
+            return named || waiting(photoId).isPresent();
+        }
+
+        /** The branch of an expense still waiting for an administrator that names this photo, if one does. */
+        private java.util.Optional<UUID> waiting(UUID photoId) {
+            return photoId == null
+                    ? java.util.Optional.empty()
+                    : approvals.pendingWith(ExpenseAction.TYPE, "receipt_document_id", photoId.toString());
         }
 
         /** The receipt the expense was recorded with, null when it had none; the route then reads a photo added later. */

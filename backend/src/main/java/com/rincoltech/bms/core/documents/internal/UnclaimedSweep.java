@@ -33,8 +33,8 @@ class UnclaimedSweep {
 
     static final String JOB = "core.documents.unclaimed-sweep";
 
-    /** How far past its window an upload is still looked at. */
-    static final Duration LOOK_BACK = Duration.ofDays(7);
+    /** How far past its window an upload is still looked at: a month of nights the job may have missed. */
+    static final Duration LOOK_BACK = Duration.ofDays(31);
 
     private final List<DocumentAccess> access;
     private final ObjectStorage storage;
@@ -113,20 +113,24 @@ class UnclaimedSweep {
         }
         int removed = 0;
         for (Unclaimed u : found) {
-            if (storage.get(u.key()).isEmpty()) {
+            if (!storage.exists(u.key())) {
                 continue;
             }
-            storage.delete(u.key());
+            // The audit row and the delete go together (review of #846): a delete that fails rolls the row back, so no
+            // removal is audited that did not happen; the object store is called last, inside the short transaction.
+            transaction.executeWithoutResult(s -> {
+                audit.record(
+                        AuditLog.Entry.created(
+                                "core.document.unclaimed_removed",
+                                "core.document",
+                                u.id(),
+                                u.branchId(),
+                                Map.of("subject_type", u.subjectType())),
+                        null,
+                        "system");
+                storage.delete(u.key());
+            });
             removed++;
-            transaction.executeWithoutResult(s -> audit.record(
-                    AuditLog.Entry.created(
-                            "core.document.unclaimed_removed",
-                            "core.document",
-                            u.id(),
-                            u.branchId(),
-                            Map.of("subject_type", u.subjectType())),
-                    null,
-                    "system"));
         }
         return removed;
     }

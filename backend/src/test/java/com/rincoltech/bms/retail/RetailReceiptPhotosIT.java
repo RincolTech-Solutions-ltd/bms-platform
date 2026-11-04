@@ -242,7 +242,8 @@ class RetailReceiptPhotosIT extends IntegrationTest {
         assertThat(upload(otherSeller, "/sales/" + sale + "/receipt-photo", png(100, 100), SALES, "*")
                         .getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
-        // The owner, who holds every permission in every branch, always sees it.
+        // The owner always sees it: the Owner of a business always holds the administrator role (ADR-062), whose column
+        // of the chapter 8 matrix is ALL in every branch; the retail tests have no separate Owner sign-in fixture.
         RetailTestSupport owner = new RetailTestSupport(http, t);
         assertThat(image(owner, "/sales/" + sale + "/receipt-photo", ALL, "*").getStatusCode())
                 .isEqualTo(HttpStatus.OK);
@@ -251,6 +252,14 @@ class RetailReceiptPhotosIT extends IntegrationTest {
                         .getStatusCode())
                 .isEqualTo(HttpStatus.CREATED);
         assertThat(cb.auditPayloads("retail.sale.receipt_photo_added")).hasSize(2);
+
+        // Review of #846: a colleague's credit sale that still owes is seen by another seller, to take a payment on it,
+        // but takes no photo from them.
+        UUID credit = RetailTestSupport.id(api.sell(hq, "credit", product, "1"));
+        assertThat(otherSeller.get("/sales/" + credit, SALES).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(upload(otherSeller, "/sales/" + credit + "/receipt-photo", png(100, 100), SALES, "*")
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
 
         // A voided sale takes no photo.
         assertThat(api.post("/sales/" + sale + "/void", Map.of("reason", "Test entered twice"), ADMIN)

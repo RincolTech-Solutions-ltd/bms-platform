@@ -83,6 +83,25 @@ class UnclaimedSweepIT extends IntegrationTest {
                 .single();
     }
 
+    /** Switches on the approval of an action from an amount, as RetailOldAppWordsIT does. */
+    static void approvalRule(TestDatabase.Fixture t, String action, long amount) {
+        TestDatabase.owner()
+                .sql("INSERT INTO tenant_settings (id, tenant_id) VALUES (?, ?) ON CONFLICT (tenant_id) DO NOTHING")
+                .params(UUID.randomUUID(), t.tenantId())
+                .update();
+        TestDatabase.owner()
+                .sql("""
+                        UPDATE tenant_settings SET settings = settings
+                               || jsonb_build_object('approval_switches',
+                                      coalesce(settings->'approval_switches', '{}'::jsonb) || jsonb_build_object(?::text, true))
+                               || jsonb_build_object('approval_thresholds_minor',
+                                      coalesce(settings->'approval_thresholds_minor', '{}'::jsonb) || jsonb_build_object(?::text, ?))
+                         WHERE tenant_id = ?
+                        """)
+                .params(action, action, amount, t.tenantId())
+                .update();
+    }
+
     void backdate(String documentId, Duration by) {
         TestDatabase.owner()
                 .sql("UPDATE documents SET created_at = ? WHERE id = ?::uuid")
@@ -108,8 +127,16 @@ class UnclaimedSweepIT extends IntegrationTest {
         assertThat(cb.post("/expenses", body, CashbookTestSupport.CASHBOOK_ADMIN)
                         .getStatusCode())
                 .isEqualTo(HttpStatus.CREATED);
+        // Review of #846: an expense waiting for an administrator names its photo in its request; the photo is kept
+        // however long the approval takes, and the approver sees it while deciding.
+        approvalRule(t, "retail_expense", 1_000);
+        String waiting = send(cb.api);
+        body.put("receipt_document_id", waiting);
+        ResponseEntity<JsonNode> waits = cb.post("/expenses", body, CashbookTestSupport.CASHBOOK_ADMIN);
+        assertThat(waits.getStatusCode()).as("%s", waits.getBody()).isEqualTo(HttpStatus.ACCEPTED);
         backdate(unclaimed, Duration.ofHours(25));
         backdate(named, Duration.ofHours(25));
+        backdate(waiting, Duration.ofHours(30));
 
         int removed = TenantContext.callAs(t.tenantId(), sweep::sweep);
 
@@ -117,9 +144,24 @@ class UnclaimedSweepIT extends IntegrationTest {
         assertThat(storage.get(key(unclaimed))).isEmpty();
         assertThat(storage.get(key(named))).isPresent();
         assertThat(storage.get(key(fresh))).isPresent();
+        assertThat(storage.get(key(waiting))).isPresent();
+        RetailTestSupport approver = new RetailTestSupport(http, t);
+        assertThat(http.exchange(
+                                "/api/v1/documents/" + waiting,
+                                HttpMethod.GET,
+                                new HttpEntity<>(approver.headers("core.settings.manage", "*", Map.of())),
+                                JsonNode.class)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
         // The row stays, as every document's does, and the removal is audited.
         assertThat(cb.auditPayloads("core.document.unclaimed_removed")).hasSize(1);
         // A second run finds the file gone and removes nothing more.
         assertThat(TenantContext.callAs(t.tenantId(), sweep::sweep)).isZero();
+        // An expense typed now that names the swept photo is told to send it again (review of #846).
+        body.put("amount_minor", 500);
+        body.put("receipt_document_id", unclaimed);
+        ResponseEntity<JsonNode> gone = cb.post("/expenses", body, CashbookTestSupport.CASHBOOK_ADMIN);
+        assertThat(gone.getStatusCode()).as("%s", gone.getBody()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(gone.getBody().get("code").asString()).isEqualTo("receipt_gone");
     }
 }

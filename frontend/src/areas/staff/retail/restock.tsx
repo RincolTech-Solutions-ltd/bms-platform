@@ -29,7 +29,7 @@ import { useEntryChecks, useEntryNorms } from './entry-checks';
 import { AddByName } from '../../../app/ui/EmptyChoice';
 import { PickerWithAdd } from '../../../app/ui/PickerWithAdd';
 import { EditNeedsInternet, KeptOnPhone, OfflineFormNote, isKept, useEntrySave } from '../../../offline/keep-entry';
-import { RECEIPT_LATER, ReceiptPhotoChoice, sendReceiptPhotoAfter } from './receipt-photo';
+import { RECEIPT_LATER, ReceiptPhotoChoice, bounded, sendReceiptPhotoAfter } from './receipt-photo';
 
 // Restock (FR-RET-06): supplier, lines with cost, sell price and a quantity per branch. Saving sets
 // the product's cost and sell price in the same transaction and leaves a price history row.
@@ -241,7 +241,7 @@ export function RestockForm({ onSaved, draftName, fixSearch, fromEdit = false, i
       if (!isKept(result)) {
         // Edit (issue #830): with no new photo chosen, the edited delivery keeps the photo of the one it replaces, as an expense does.
         if (receipt || !replaces?.id || !replaces.has_receipt_photo) sendReceiptPhotoAfter('delivery', result.saved.id, receipt);
-        else void retail.receiptPhoto('delivery', replaces.id).then((b) => sendReceiptPhotoAfter('delivery', result.saved.id, new File([b], 'receipt', { type: b.type })), () => sayDone(RECEIPT_LATER));
+        else void bounded((signal) => retail.receiptPhoto('delivery', replaces.id ?? '', signal)).then((b) => sendReceiptPhotoAfter('delivery', result.saved.id, new File([b], 'receipt', { type: b.type })), () => sayDone(RECEIPT_LATER));
       }
       entry.saved();
       if (isKept(result)) {

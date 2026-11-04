@@ -1303,12 +1303,19 @@ class SalesService {
                     rule);
             if (o.executed()) {
                 return new VoidOutcome(
-                        visible(repo.find(id, false).orElseThrow().sale()), null);
+                        withReceiptPhotos(List.of(visible(
+                                        repo.find(id, false).orElseThrow().sale())))
+                                .getFirst(),
+                        null);
             }
             return new VoidOutcome(
                     null, new ApprovalWaiting(o.approvalId(), SaleVoidAction.TYPE, s.totalMinor(), s.currency()));
         }
-        return new VoidOutcome(voidNow(h, reason, principal.userId()), null);
+        // Review of #846: the answer says whether the sale has a receipt photo, as its read does.
+        return new VoidOutcome(
+                withReceiptPhotos(List.of(voidNow(h, reason, principal.userId())))
+                        .getFirst(),
+                null);
     }
 
     /** On approval (ADR-091): the sale as it is now, checked again, voided in the name of the person who asked. */

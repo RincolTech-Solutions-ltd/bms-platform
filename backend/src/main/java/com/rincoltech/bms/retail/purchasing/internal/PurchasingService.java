@@ -840,7 +840,10 @@ class PurchasingService implements QuickAddPurchase {
                 null,
                 Map.of("status", "posted"),
                 Map.of("status", "voided", "reason", reason, "purchase_no", seen.purchaseNo())));
-        return repo.find(id, principal.branchFilter(PERMISSION, null)).orElseThrow();
+        // Review of #846: the answer says whether the restock has a receipt photo, as its read does.
+        return withReceiptPhotos(List.of(
+                        repo.find(id, principal.branchFilter(PERMISSION, null)).orElseThrow()))
+                .getFirst();
     }
 
     private static String plain(BigDecimal qty) {
