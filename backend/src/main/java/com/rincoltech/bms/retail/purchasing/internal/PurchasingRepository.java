@@ -489,6 +489,8 @@ class PurchasingRepository {
                 rs.getObject("voided_by", UUID.class),
                 rs.getDate("voided_on") == null ? null : rs.getDate("voided_on").toLocalDate(),
                 rs.getString("void_reason"),
+                null,
+                null,
                 null);
     }
 }

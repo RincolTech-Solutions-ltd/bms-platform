@@ -208,7 +208,8 @@ class PurchasingService implements QuickAddPurchase {
         // A purchase kept on the phone offline is dated the day it was made (ADR-067 decision 13); the key covers the
         // request without its offline block, so an online request whose answer was lost, sent again from the phone with
         // when it was made, is still the same purchase.
-        return idempotency.once(
+        // Issue #821: the stored answer carries no worth, so a replay shows it only to whoever may read profit.
+        return shown(idempotency.once(
                 idempotencyKey,
                 "POST",
                 PATH,
@@ -223,7 +224,7 @@ class PurchasingService implements QuickAddPurchase {
                         r.lines().stream()
                                 .flatMap(l -> l.qtyByBranch().stream().map(PurchasingApi.BranchQty::branchId))
                                 .distinct()
-                                .toList()))));
+                                .toList())))));
     }
 
     /**
@@ -656,7 +657,9 @@ class PurchasingService implements QuickAddPurchase {
                 ? Cursor.encode(
                         items.getLast().createdAt() + "|" + items.getLast().id())
                 : null;
-        return new PurchasePage(List.copyOf(items), next);
+        Map<UUID, Long> prices = new HashMap<>();
+        return new PurchasePage(
+                items.stream().map(p -> shown(p, prices)).toList(), next);
     }
 
     /** One restock with the quantities of the branches the caller may see; absent when it added stock to none of them. */
@@ -669,6 +672,7 @@ class PurchasingService implements QuickAddPurchase {
         UUID own = ownRecordsOnly();
         return repo.find(id, filter)
                 .filter(p -> own == null || own.equals(p.createdBy()))
+                .map(p -> shown(p, new HashMap<>()))
                 .orElseThrow(ApiException::notFound);
     }
 
@@ -681,6 +685,33 @@ class PurchasingService implements QuickAddPurchase {
         return principal.hasPermission("retail.profit.read") ? null : principal.userId();
     }
 
+    // JUSTIFICATION-A3: issue #821 adds one computed read to every restock response; no existing method carries it.
+    /**
+     * Issue #821 (ADR-126): for a holder of {@code retail.profit.read}, the restock with what its goods should sell for (each
+     * line's base quantity, as the caller sees it, times the selling price the line set, else the item's current one) and the
+     * expected profit; for anyone else the restock as it is, without either field.
+     */
+    private Outcome<Purchase> shown(Outcome<Purchase> o) {
+        return new Outcome<>(shown(o.body(), new HashMap<>()), o.replayed());
+    }
+
+    private Purchase shown(Purchase p, Map<UUID, Long> prices) {
+        if (!CurrentPrincipal.require().hasPermission("retail.profit.read")) {
+            return p;
+        }
+        long worth = 0;
+        for (PurchasingApi.PurchaseLine l : p.lines()) {
+            Long sell = l.sellMinor() != null
+                    ? l.sellMinor()
+                    : prices.computeIfAbsent(l.productId(), id -> catalogue
+                            .find(id)
+                            .map(ProductSnapshot::sellMinor)
+                            .orElse(0L));
+            worth = Math.addExact(worth, Quantities.value(new BigDecimal(l.qtyTotal()), sell));
+        }
+        return p.withWorth(worth);
+    }
+
     // ---- Void a restock (issue #351, ADR-044) -----------------------------------------------
 
     static final int MIN_REASON = 5;
@@ -688,8 +719,8 @@ class PurchasingService implements QuickAddPurchase {
 
     @Transactional
     Outcome<Purchase> voidPurchase(String idempotencyKey, UUID id, VoidPurchaseRequest r) {
-        return idempotency.once(
-                idempotencyKey, "POST", PATH + "/" + id + "/void", r, Purchase.class, () -> voidNow(id, r));
+        return shown(idempotency.once(
+                idempotencyKey, "POST", PATH + "/" + id + "/void", r, Purchase.class, () -> voidNow(id, r)));
     }
 
     /** The reason an edited restock is voided with (issue #830). */
@@ -703,7 +734,7 @@ class PurchasingService implements QuickAddPurchase {
      */
     @Transactional
     Outcome<Purchase> replace(String idempotencyKey, UUID id, PurchaseRequest r) {
-        return idempotency.once(idempotencyKey, "POST", PATH + "/" + id + "/replace", r, Purchase.class, () -> {
+        return shown(idempotency.once(idempotencyKey, "POST", PATH + "/" + id + "/replace", r, Purchase.class, () -> {
             Purchase old = voidNow(id, new VoidPurchaseRequest(EDIT_REASON));
             String link = "Replaces " + old.purchaseNo() + ", edited";
             String typed = blankToNull(r.note());
@@ -718,7 +749,7 @@ class PurchasingService implements QuickAddPurchase {
                     r.dateReason(),
                     // Edits stay online only (issue #812).
                     null));
-        });
+        }));
     }
 
     /**

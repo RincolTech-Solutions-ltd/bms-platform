@@ -16909,6 +16909,11 @@ export interface components {
             /** Format: uuid */
             created_by?: string;
             currency?: string;
+            /**
+             * Format: int64
+             * @description Issue #821 (ADR-126): sell_worth_minor less total_minor. Present only to a holder of retail.profit.read
+             */
+            expected_profit_minor?: number;
             /** Format: uuid */
             id?: string;
             lines?: components["schemas"]["RetailPurchaseLine"][];
@@ -16919,6 +16924,11 @@ export interface components {
             purchase_no?: string;
             /** Format: date */
             purchased_on?: string;
+            /**
+             * Format: int64
+             * @description Issue #821 (ADR-126): what the goods should sell for, each line's quantity in base units times the selling price the line set, else the item's current selling price. Present only to a holder of retail.profit.read
+             */
+            sell_worth_minor?: number;
             /** @description posted, or voided once corrected by a void (issue #351); a voided restock is never deleted */
             status?: string;
             /** Format: uuid */

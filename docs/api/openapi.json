@@ -17234,6 +17234,11 @@
           "currency" : {
             "type" : "string"
           },
+          "expected_profit_minor" : {
+            "description" : "Issue #821 (ADR-126): sell_worth_minor less total_minor. Present only to a holder of retail.profit.read",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "id" : {
             "format" : "uuid",
             "type" : "string"
@@ -17260,6 +17265,11 @@
           "purchased_on" : {
             "format" : "date",
             "type" : "string"
+          },
+          "sell_worth_minor" : {
+            "description" : "Issue #821 (ADR-126): what the goods should sell for, each line's quantity in base units times the selling price the line set, else the item's current selling price. Present only to a holder of retail.profit.read",
+            "format" : "int64",
+            "type" : "integer"
           },
           "status" : {
             "description" : "posted, or voided once corrected by a void (issue #351); a voided restock is never deleted",

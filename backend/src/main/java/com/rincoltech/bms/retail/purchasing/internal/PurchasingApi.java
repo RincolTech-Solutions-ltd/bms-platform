@@ -320,7 +320,20 @@ final class PurchasingApi {
 
             @JsonInclude(JsonInclude.Include.NON_NULL)
             @Schema(description = "True when the caller's branch scope hid other branches this restock added stock to")
-            Boolean partial) {
+            Boolean partial,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description = "Issue #821 (ADR-126): what the goods should sell for, each line's quantity in base units"
+                            + " times the selling price the line set, else the item's current selling price. Present only"
+                            + " to a holder of retail.profit.read")
+            Long sellWorthMinor,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description = "Issue #821 (ADR-126): sell_worth_minor less total_minor. Present only to a holder of"
+                            + " retail.profit.read")
+            Long expectedProfitMinor) {
 
         // JUSTIFICATION-A3: a restock gained the void fields of issue #351; the short constructor keeps the three
         // existing callers as they are.
@@ -354,7 +367,34 @@ final class PurchasingApi {
                     null,
                     null,
                     null,
+                    null,
+                    null,
                     null);
+        }
+
+        // JUSTIFICATION-A3: a record copy names every component; the worth is two new ones (issue #821).
+        /** This restock with what its goods should sell for and the expected profit (issue #821, ADR-126). */
+        Purchase withWorth(long sellWorth) {
+            return new Purchase(
+                    id,
+                    purchaseNo,
+                    supplierId,
+                    purchasedOn,
+                    paymentMethod,
+                    currency,
+                    totalMinor,
+                    note,
+                    lines,
+                    createdAt,
+                    createdBy,
+                    status,
+                    voidedAt,
+                    voidedBy,
+                    voidedOn,
+                    voidReason,
+                    partial,
+                    sellWorth,
+                    Math.subtractExact(sellWorth, totalMinor));
         }
 
         Purchase withLinesAndTotal(List<PurchaseLine> newLines, long newTotal, boolean hidden) {
@@ -375,7 +415,9 @@ final class PurchasingApi {
                     voidedBy,
                     voidedOn,
                     voidReason,
-                    hidden ? Boolean.TRUE : null);
+                    hidden ? Boolean.TRUE : null,
+                    sellWorthMinor,
+                    expectedProfitMinor);
         }
     }
 
