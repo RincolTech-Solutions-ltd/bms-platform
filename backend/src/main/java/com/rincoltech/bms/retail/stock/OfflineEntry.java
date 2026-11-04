@@ -88,6 +88,15 @@ public record OfflineEntry(
         return offline == null ? requested : LocalDate.ofInstant(offline.judged(now, branches), zone);
     }
 
+    /**
+     * The offline block a request is dated by (the lead's decision on the third review of #839): none when the request names
+     * an earlier day the owner chose online with its reason (ADR-120), which the server judges as it was sent online, the
+     * backdate permission included; otherwise the block as sent. The phone sends the block with every entry it kept.
+     */
+    public static OfflineEntry unlessChosen(OfflineEntry offline, String dateReason) {
+        return dateReason != null && !dateReason.isBlank() ? null : offline;
+    }
+
     private static ApiException refused(String code, String words) {
         return ApiException.validation(List.of(new FieldProblem("offline.occurred_at", code, words)));
     }

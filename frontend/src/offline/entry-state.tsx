@@ -39,7 +39,7 @@ export function EntryState({ item }: { item: OutboxItem }) {
     const back = await offline?.engine.takeBack(item.id);
     if (!back) return;
     restoreDraft(fix.draftName, fix.draft);
-    void router?.navigate({ to: fix.to });
+    void router?.navigate({ to: fix.to, ...(fix.search ? { search: fix.search } : {}) });
   };
   return (
     <>

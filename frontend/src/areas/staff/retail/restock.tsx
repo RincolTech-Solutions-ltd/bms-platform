@@ -170,9 +170,11 @@ export function supplierOptions(all: Supplier[], chosenId: string): Supplier[] {
   return all.filter((s) => s.active !== false || s.id === chosenId);
 }
 
-export function RestockForm({ onSaved, draftName, initial, again = false, replaces }: {
+export function RestockForm({ onSaved, draftName, fixSearch, initial, again = false, replaces }: {
   onSaved?: (p: Purchase, context: RestockContext) => void;
   draftName?: string;
+  /** Where Fix finds this form again for an entry kept on the phone (issue #812): Buy again opens on its purchase. */
+  fixSearch?: Record<string, string>;
   initial?: RestockDraft;
   again?: boolean;
   /** Edit a delivery (issue #830): saving voids this purchase (the correct-this-purchase path) and saves the form as a new one that names it. */
@@ -219,7 +221,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false, replac
         {
           kind: 'purchase', body: request, key, branchId: here ?? branches[0]?.id ?? '',
           detail: [supplierName, `${lines.length} ${lines.length === 1 ? 'item' : 'items'}`].filter(Boolean).join(', '),
-          fix: { to: '/staff/retail/restock', draftName: `restock:${me.user_id ?? ''}`, draft },
+          fix: { to: '/staff/retail/restock', ...(fixSearch ? { search: fixSearch } : {}), draftName: draftName ?? `restock:${me.user_id ?? ''}`, draft },
         },
         () => retail.createPurchase(request, key),
       );
@@ -560,7 +562,7 @@ export function Again({ purchaseId, onSaved, edit = false, onEdited }: {
       <Note>
         You are entering purchase {purchase.purchase_no} again{purchase.status === 'voided' ? ', which you voided' : ''}. Check each quantity, unit and price, then save.
       </Note>
-      <RestockForm draftName={`restock-again:${me.user_id ?? ''}:${purchaseId}`} initial={loaded.data.draft} onSaved={onSaved} again />
+      <RestockForm draftName={`restock-again:${me.user_id ?? ''}:${purchaseId}`} fixSearch={edit ? { edit: purchaseId } : { again: purchaseId }} initial={loaded.data.draft} onSaved={onSaved} again />
     </>
   );
 }

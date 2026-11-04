@@ -151,11 +151,10 @@ class ExpenseService {
                     r.receiptDocumentId(),
                     c.backdate() == null ? null : c.backdate().reason(),
                     // The approval keeps the resolved date c.date() above (for an entry kept offline, the day it was
-                    // made, issue #812), so the offline block is not sent again.
-                    null);
+                    // made, issue #812) and the offline block, so the approval checks the closed till again and the
+                    // expense is audited as dated by the phone when it is written.
+                    r.offline());
             UUID id = UUID.randomUUID();
-            // Dated by the phone: audited now, under the id the expense takes when it is approved.
-            support.entryDates().auditOffline(r.offline(), c.date(), "retail.expense", id, branch);
             Approvals.Outcome o = approvals.request(
                     new ActionRequest(
                             ExpenseAction.TYPE,
@@ -194,6 +193,9 @@ class ExpenseService {
         EntryDates.Backdate backdate;
         if (approved) {
             date = support.businessDate(r.businessDate(), "business_date");
+            // Kept offline: a till closed since it was asked is the owner's, judged with the approver's permissions
+            // (the lead's decision on the third review of #839).
+            support.requireOpen(r.offline(), date, support.today(), List.of(branch));
             backdate = support.entryDates().approved(date, r.dateReason());
         } else {
             CashbookSupport.Dated dated =
@@ -271,7 +273,7 @@ class ExpenseService {
         after.put("amount_minor", amount);
         audit.record(AuditLog.Entry.created("retail.expense.created", "retail.expense", id, branch, after));
         support.entryDates().audit(c.backdate(), "retail.expense", id, branch);
-        // Dated by the phone (issue #812); one that waited for approval was audited when it was asked, under this id.
+        // Dated by the phone (issue #812), audited once the expense exists, on approval for one that waited.
         support.entryDates().auditOffline(r.offline(), date, "retail.expense", id, branch);
         return view(repo.expense(id, false).orElseThrow());
     }

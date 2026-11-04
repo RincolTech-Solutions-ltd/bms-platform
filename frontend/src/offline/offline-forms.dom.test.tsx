@@ -132,6 +132,14 @@ const FORMS = [
     dateField: undefined,
   },
   {
+    // Buy again (third review of #839): Fix opens this form under its own draft name, on its purchase.
+    kind: 'purchase', save: /^Save/, path: '/api/v1/retail/purchases',
+    seed: () => seed(`restock-again:${uid}:r1`, 'k-purchase', { supplierId: '', purchasedOn: today, method: 'cash', lines: [{ product: cable, cost: '100', sell: '150', qtyByBranch: { [branch]: '5' } }] }),
+    form: () => <RestockForm draftName={`restock-again:${uid}:r1`} fixSearch={{ again: 'r1' }} again />,
+    dateField: undefined,
+    fix: { draftName: `restock-again:${uid}:r1`, search: { again: 'r1' } },
+  },
+  {
     kind: 'transfer', save: /^(Move|Send|Save)/, path: '/api/v1/retail/transfers',
     seed: () => seed(`transfer:${uid}:${branch}`, 'k-transfer', { toBranchId: other, transferDate: today, note: '', lines: [{ product: cable, qty: '2' }] }),
     form: () => <TransferForm fromBranchId={branch} />,
@@ -166,6 +174,7 @@ describe('a daily form with no network', () => {
     const body = item?.entry?.body as Record<string, unknown>;
     expect((body.offline as { occurred_at?: string }).occurred_at).toBe(item?.occurredAt);
     if (f.dateField) expect(body[f.dateField]).toBeUndefined();
+    if ('fix' in f) expect(item?.entry?.fix).toMatchObject(f.fix);
 
     // Back online: sent once under the form's key, and a second run sends nothing more.
     offline?.connectivity.set(true);

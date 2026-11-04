@@ -216,7 +216,9 @@ left, the branch, the period, the person's roles.
     not apply to it; past them it is the owner's. Within the 7 days a stock move or usage may land on a day already banked,
     as an offline sale may; it shows in that day's records. Offline the forms show no date box. Buy stock's
     `purchased_on` is still required by its route and not used for such an entry. A banking's or withdrawal's time sent with
-    it is not used either: it is the judged time. **A closed day** (the lead's decision on the second review of #839: a day
+    it is not used either: the server sets it, which means the server judges it (the lead's decision on the third review of
+    #839): the phone's `occurred_at`, a time ahead of the server made now and one behind refused, as above; a `banked_at`
+    or `withdrawn_at` from the client is never trusted for an entry kept offline. **A closed day** (the lead's decision on the second review of #839: a day
     whose till is closed for the branch): retail keeps no till-close record of its own; the holder of `retail.till.close`
     ("Can close the till and do the banking") closes a day's till by banking it, so the record of a closed till is an active
     banking record on that day at the branch. An entry kept offline that moves a day's cash, an expense, savings, banking, a
@@ -225,16 +227,18 @@ left, the branch, the period, the person's roles.
     a delivery stocks, and is otherwise refused (422 `offline_day_closed`, "That day's till is closed. Ask the owner to
     enter it."). The cash book answers the question (`ClosedTills` in `retail.stock`), so purchasing asks it without
     depending on the cash book. Today is never counted closed: today's till may be banked more than once, as online, so
-    an entry made earlier today and sent after a banking today is kept. A delivery on credit or paid from the bank, a
+    an entry made earlier today and sent after a banking today is kept (the lead kept this as it is on the third review).
+    An expense kept offline that waits for approval is checked again when it is approved, with the approver's
+    permissions: a till closed meanwhile makes the request stale unless the approver holds the backdate permission. A delivery on credit or paid from the bank, a
     stock move and usage take no cash from the till and are not checked. A seller's savings made on
     the last day of a month and sent on the first day of the next are kept on their day (the phone dated them within the 7
     days), unlike a date a seller would choose. **Audit:** every entry kept offline writes `retail.entry.recorded_offline`
     (the day, `occurred_at`, `online_as_of`, the day it was entered) in its transaction, so an owner can tell an entry the
-    phone dated; an expense that waits for approval is audited when asked, under the id it takes when approved. (c) **Lost
-    online**, the same body goes again under the same key with when it was made (`offline`, the moment the save began),
-    unless the body names its own day (the owner's earlier day of ADR-120, chosen and reasoned online: the block would
-    replace that day with the day the save began, so it is left out and the request is judged as it was sent online; the
-    third review of #839 asks the lead to confirm this). The `Idempotency-Key` covers the request without
+    phone dated; an expense that waits for approval is audited only when it is approved and exists, since its approval
+    request keeps the `offline` block. (c) **Lost online**, the same body goes again under the same key, always with when
+    it was made (`offline`, the moment the save began; the lead's decision on the third review of #839). The server uses
+    an explicit earlier day the owner chose online, with its reason (ADR-120, which asks the backdate permission for it),
+    when the body has one, and `occurred_at` otherwise. The `Idempotency-Key` covers the request without
     its `offline` block, as a sale's key leaves its delivery fields out (#769): a request that arrived answers once, and one
     that never did is dated the day it was made, not the day the phone got it through. (d) **Sent.** Any 2xx records it,
     including the 202 of an expense that waits for an administrator (ADR-091), whose approval request carries the day the
@@ -244,7 +248,8 @@ left, the branch, the period, the person's roles.
     not hold up the entries behind it and is never reported to a manager (the server has no record of it): its maker taps Fix
     (its form opens on it with a new key), Send again, or Discard (asked first). Fix is not offered when the server may
     hold the entry (it gave up after its tries, or was still recording it): a new key could record it twice, so only Send
-    again, under its own key, is. (f) **Who.** Whoever records one of these
+    again, under its own key, is; Fix is offered once the server has refused that key. Fix opens the form the entry was
+    made in, under that form's own draft name (Buy again on its purchase). (f) **Who.** Whoever records one of these
     forms has offline support now, not only a seller: the outbox, the dot, the sign-out warning and the kept reads (ADR-116).
     Only a seller's phone fills the catalogue copy, which the item pickers of Buy stock, Move stock and usage search while
     offline. The lists these forms wait on are kept for reading: expense categories, beneficiaries, suppliers, the savings

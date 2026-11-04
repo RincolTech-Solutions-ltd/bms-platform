@@ -56,14 +56,14 @@ describe('an entry kept on the phone', () => {
     expect(isKept({ id: 'x' })).toBe(false);
   });
 
-  it('sends a lost online request again with when it was made, unless it names its own day (second review of #839)', () => {
+  it('sends a lost online request again with when it was made, always (third review of #839)', () => {
     expect(lostBody({ amount_minor: 5 }, '2026-11-03T20:58:00.000Z', '2026-11-03T20:57:00.000Z')).toEqual({
       amount_minor: 5,
       offline: { occurred_at: '2026-11-03T20:58:00.000Z', online_as_of: '2026-11-03T20:57:00.000Z' },
     });
-    // The owner's chosen earlier day (ADR-120) already dates it.
+    // The owner's chosen earlier day (ADR-120) stays in the body; the server keeps it over the block.
     const owners = { amount_minor: 5, business_date: '2026-11-01', date_reason: 'Entered late' };
-    expect(lostBody(owners, '2026-11-03T20:58:00.000Z')).toBe(owners);
+    expect(lostBody(owners, '2026-11-03T20:58:00.000Z')).toEqual({ ...owners, offline: { occurred_at: '2026-11-03T20:58:00.000Z' } });
     const lost = offlineEntry({ kind: 'expense', key: 'k-lost', scope: SCOPE, branchId: 'b1', branchName: 'Test Branch A', body: { amount_minor: 5 }, now: new Date(AT), lost: true });
     expect((lost.entry?.body.offline as { occurred_at: string }).occurred_at).toBe(lost.occurredAt);
   });

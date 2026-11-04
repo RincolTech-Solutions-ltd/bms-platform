@@ -429,6 +429,23 @@ class RetailOfflineEntriesIT extends IntegrationTest {
                 .isTrue();
         assertThat(RetailTestSupport.id(replay)).isEqualTo(RetailTestSupport.id(first));
         assertThat(rows("retail_expenses")).isEqualTo(1);
+        // The lead's decision 3 on the third review: the block goes always; an earlier day the owner chose with its
+        // reason
+        // is kept over it, and is the owner's only.
+        Map<String, Object> chosen = new LinkedHashMap<>(again);
+        chosen.put("business_date", today.minusDays(3).toString());
+        chosen.put("date_reason", "Test receipt found late");
+        ResponseEntity<JsonNode> owners = cb.api.postKeyed(
+                "/expenses", chosen, ALL, "*", UUID.randomUUID().toString());
+        assertThat(owners.getStatusCode()).as("%s", owners.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(owners.getBody().get("business_date").asString())
+                .isEqualTo(today.minusDays(3).toString());
+        ResponseEntity<JsonNode> sellers = cb.api.postKeyed(
+                "/expenses", chosen, SELLER, hq.toString(), UUID.randomUUID().toString());
+        assertThat(sellers.getStatusCode().is4xxClientError())
+                .as("%s", sellers.getBody())
+                .isTrue();
+        assertThat(rows("retail_expenses")).isEqualTo(2);
     }
 
     /**
@@ -471,5 +488,42 @@ class RetailOfflineEntriesIT extends IntegrationTest {
                 .query(LocalDate.class)
                 .single();
         assertThat(dated).isEqualTo(today.minusDays(2));
+        // JUSTIFICATION-A3: the lead's decision 5 on the third review of #839, proven on the same setup.
+        // Audited once it exists, not when asked; a till closed before approval is the owner's, for the approver too.
+        assertThat(cb.auditPayloads("retail.entry.recorded_offline")).hasSize(1);
+        ResponseEntity<JsonNode> second = cb.api.postKeyed(
+                "/expenses",
+                bodies(madeTwoDaysAgo(), null).get("/expenses").get(),
+                ALL,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(second.getStatusCode()).as("%s", second.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(cb.auditPayloads("retail.entry.recorded_offline")).hasSize(1);
+        Map<String, Object> banking = new LinkedHashMap<>();
+        banking.put("branch_id", hq);
+        banking.put("business_date", today.minusDays(2).toString());
+        banking.put("amount_minor", 1_000);
+        assertThat(cb.api
+                        .postKeyed(
+                                "/bankings",
+                                banking,
+                                ALL,
+                                "*",
+                                UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> late = http.exchange(
+                "/api/v1/approvals/" + second.getBody().get("approval_id").asString() + "/approve",
+                HttpMethod.POST,
+                new HttpEntity<>(
+                        Map.of("note", "Checked"),
+                        checker.headers("core.settings.manage,core.approvals.read", "*", Map.of())),
+                JsonNode.class);
+        // The approval goes stale on the refusal (ADR-091's one stale policy); with no banking the same request was
+        // approved.
+        assertThat(late.getStatusCode()).as("%s", late.getBody()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(late.getBody().get("code").asString()).isEqualTo("validation_failed");
+        assertThat(rows("retail_expenses")).isEqualTo(1);
+        assertThat(cb.auditPayloads("retail.entry.recorded_offline")).hasSize(1);
     }
 }

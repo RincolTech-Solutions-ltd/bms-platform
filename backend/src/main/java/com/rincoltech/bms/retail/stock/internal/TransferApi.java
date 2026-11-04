@@ -55,6 +55,11 @@ final class TransferApi {
 
             @Valid OfflineEntry offline) {
 
+        /** An earlier day the owner chose, with its reason, is judged as sent online (ADR-067 decision 13). */
+        TransferRequest {
+            offline = OfflineEntry.unlessChosen(offline, dateReason);
+        }
+
         /** What the Idempotency-Key covers: the request without its offline block (ADR-067 decision 13). */
         TransferRequest forKey() {
             return new TransferRequest(fromBranchId, toBranchId, transferDate, note, lines, dateReason, null);

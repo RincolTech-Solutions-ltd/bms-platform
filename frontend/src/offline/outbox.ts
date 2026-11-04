@@ -28,7 +28,7 @@ export interface OutboxEntry {
   /** What it is in a few plain words, for the list and the toasts: "Expense, Transport, Fuel". */
   words: string;
   /** Where to fix a refused entry: the form's route, and its draft as it was saved, put back under the form's draft name. */
-  fix?: { to: string; draftName: string; draft: unknown };
+  fix?: { to: string; search?: Record<string, string>; draftName: string; draft: unknown };
 }
 
 export interface OutboxItem {

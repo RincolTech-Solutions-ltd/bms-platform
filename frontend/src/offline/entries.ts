@@ -57,10 +57,10 @@ export interface EntrySpec {
   fix?: OutboxEntry['fix'];
 }
 
-/** The body of an online request whose answer was lost: as it was sent, with when it was made unless it names its own date. */
+/** The body of an online request whose answer was lost: as it was sent, with when it was made. */
 export function lostBody(body: Record<string, unknown>, occurredAt: string, onlineAsOf?: string): Record<string, unknown> {
-  // An owner's chosen earlier day (ADR-120) is already in the body; anything else was dated by the app as it was saved.
-  if (DATE_FIELDS.some((k) => body[k] !== undefined && body[k] !== '')) return body;
+  // Always with when it was made (the lead's decision on the third review of #839): the server keeps an earlier day the
+  // owner chose with its reason (ADR-120) and dates anything else by when the save began.
   return { ...body, offline: { occurred_at: occurredAt, ...(onlineAsOf ? { online_as_of: onlineAsOf } : {}) } };
 }
 

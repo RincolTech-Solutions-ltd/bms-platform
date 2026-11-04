@@ -152,6 +152,11 @@ final class CashbookApi {
 
             @Valid OfflineEntry offline) {
 
+        /** An earlier day the owner chose, with its reason, is judged as sent online (ADR-067 decision 13). */
+        SavingsRequest {
+            offline = OfflineEntry.unlessChosen(offline, dateReason);
+        }
+
         /** What the Idempotency-Key covers: the request without its offline block (ADR-067 decision 13). */
         SavingsRequest forKey() {
             return new SavingsRequest(
@@ -265,6 +270,11 @@ final class CashbookApi {
 
             @Valid OfflineEntry offline) {
 
+        /** An earlier day the owner chose, with its reason, is judged as sent online (ADR-067 decision 13). */
+        BankingRequest {
+            offline = OfflineEntry.unlessChosen(offline, dateReason);
+        }
+
         /** What the Idempotency-Key covers: the request without its offline block (ADR-067 decision 13). */
         BankingRequest forKey() {
             return new BankingRequest(branchId, businessDate, amountMinor, bankedAt, reference, dateReason, null);
@@ -323,6 +333,11 @@ final class CashbookApi {
 
             @Valid OfflineEntry offline) {
 
+        /** An earlier day the owner chose, with its reason, is judged as sent online (ADR-067 decision 13). */
+        WithdrawalRequest {
+            offline = OfflineEntry.unlessChosen(offline, dateReason);
+        }
+
         /** What the Idempotency-Key covers: the request without its offline block (ADR-067 decision 13). */
         WithdrawalRequest forKey() {
             return new WithdrawalRequest(branchId, businessDate, amountMinor, withdrawnAt, purpose, dateReason, null);
@@ -367,6 +382,11 @@ final class CashbookApi {
             String dateReason,
 
             @Valid OfflineEntry offline) {
+
+        /** An earlier day the owner chose, with its reason, is judged as sent online (ADR-067 decision 13). */
+        ExpenseRequest {
+            offline = OfflineEntry.unlessChosen(offline, dateReason);
+        }
 
         /** What the Idempotency-Key covers: the request without its offline block (ADR-067 decision 13). */
         ExpenseRequest forKey() {

@@ -121,6 +121,11 @@ final class PurchasingApi {
 
             @Valid OfflineEntry offline) {
 
+        /** An earlier day the owner chose, with its reason, is judged as sent online (ADR-067 decision 13). */
+        PurchaseRequest {
+            offline = OfflineEntry.unlessChosen(offline, dateReason);
+        }
+
         /** What the Idempotency-Key covers: the request without its offline block (ADR-067 decision 13). */
         PurchaseRequest forKey() {
             return new PurchaseRequest(supplierId, purchasedOn, paymentMethod, note, lines, dateReason, null);
