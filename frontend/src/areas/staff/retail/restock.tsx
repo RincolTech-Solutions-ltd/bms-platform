@@ -97,7 +97,37 @@ export function restockTotal(lines: RestockLine[]): number {
   }, 0);
 }
 
-export function buildPurchase(input: { supplierId: string; purchasedOn?: string; dateReason?: string; method: PurchasePayment; lines: RestockLine[] }): PurchaseRequest {
+// JUSTIFICATION-A3: issue #821 adds the delivery's worth and the block that shows it on Buy stock and Past purchases.
+/**
+ * Issue #821 (ADR-126): what the goods on the form should sell for, as the server reckons a saved delivery: each line's quantity
+ * in the item's own unit times the selling price on the line, else the item's current price. A line not yet right counts what
+ * can be read of it.
+ */
+export function restockWorth(lines: RestockLine[]): number {
+  return lines.reduce((sum, l) => {
+    const sell = parseMinor(l.sell, RETAIL_CURRENCY) ?? l.product.sell_minor ?? 0;
+    const factor = lineFactor(l);
+    const milli = Object.values(l.qtyByBranch).reduce((s, q) => {
+      const entered = branchQty(q) ?? 0;
+      return s + (factor === undefined ? entered : (baseQtyMilli(entered, factor ?? undefined) ?? 0));
+    }, 0);
+    return sum + lineTotalMinor(sell, milli);
+  }, 0);
+}
+
+/** Issue #821: the delivery's cost, what it should sell for and the expected profit (a loss said as one), one line each. */
+export function DeliveryWorth({ paid, worth, label }: { paid: number; worth: number; label: string }) {
+  const profit = worth - paid;
+  return (
+    <dl className="rt-figures" aria-label={label} data-testid="delivery-worth">
+      <div><dt>Total cost</dt><dd><Money minor={paid} /></dd></div>
+      <div><dt>Should sell for</dt><dd><Money minor={worth} /></dd></div>
+      <div><dt>{profit < 0 ? 'Expected loss' : 'Expected profit'}</dt><dd><strong><Money minor={Math.abs(profit)} /></strong></dd></div>
+    </dl>
+  );
+}
+
+export function buildPurchase(input:{ supplierId: string; purchasedOn?: string; dateReason?: string; method: PurchasePayment; lines: RestockLine[] }): PurchaseRequest {
   return {
     ...(input.supplierId ? { supplier_id: input.supplierId } : {}),
     // ADR-120: no date for today, so the server dates the purchase itself; an owner's earlier day goes with its reason.
@@ -458,7 +488,12 @@ export function RestockForm({ onSaved, draftName, fixSearch, fromEdit = false, i
       </fieldset>
       {supplierProblem && <p role="alert" className="rt-flag" data-testid="credit-needs-supplier">{supplierProblem}</p>}
 
-      <p className="rt-total" aria-live="polite" data-testid="restock-total">Total cost <Money minor={restockTotal(lines)} /></p>
+      {/* Issue #821: the owner sees what the delivery should sell for; anyone else sees the total cost as before. */}
+      {canProfit ? (
+        <div className="rt-total rt-total-figures" aria-live="polite" data-testid="restock-total"><DeliveryWorth paid={restockTotal(lines)} worth={restockWorth(lines)} label="This delivery" /></div>
+      ) : (
+        <p className="rt-total" aria-live="polite" data-testid="restock-total">Total cost <Money minor={restockTotal(lines)} /></p>
+      )}
       <Problem error={save.error} />
       <ActionBar>
         <BusyButton type="submit" className="rt-primary" data-tour="restock-save" busy={save.isPending} notReady={blocked}>{replaces ? 'Save changes' : 'Save the purchase'}</BusyButton>

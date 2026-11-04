@@ -9,7 +9,8 @@ import { usePersistedDraft } from './idempotency';
 import { showDate } from './maths';
 import { holdsAt, PURCHASE_CREATE } from './permissions';
 import { alreadyVoided, listIsStale, quantityWords, stateOf, unitHint, voidReasonOf, MIN_VOID_REASON } from './restock-correct-state';
-import { Gate, Problem, Success, money } from './ui';
+import { Gate, Problem, Success, money, useProfitAccess } from './ui';
+import { DeliveryWorth } from './restock';
 import { ListGroupBy, ViewSwitch, useListView } from './list-chain';
 import { PURCHASE_ALL, PURCHASE_NAMES, PURCHASE_ORDER, listUser } from './list-chain-state';
 import { useRestockVariantLevel } from './catalogue-variants';
@@ -85,6 +86,8 @@ export function RestockCard({ purchase, supplier, onDone }: { purchase: Purchase
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const voided = purchase.status === 'voided';
+  // Issue #821: the server sends the worth only to someone who may read profit; nothing is worked out here for anyone else.
+  const worth = useProfitAccess() ? purchase.sell_worth_minor : undefined;
   // A scoped caller's copy hides the other branches the restock touched (`partial`): the server would refuse the void with 403.
   const mayVoid = purchase.partial !== true && branchesOf(purchase).every((b) => holdsAt(me, PURCHASE_CREATE, b));
   return (
@@ -93,8 +96,9 @@ export function RestockCard({ purchase, supplier, onDone }: { purchase: Purchase
         <strong>{purchase.purchase_no}</strong> <span className={voided ? 'badge badge-warning' : 'badge badge-info'}>{stateOf(purchase)}</span>
       </p>
       <p className="hint">
-        Bought {showDate(purchase.purchased_on)} from {supplier || 'no supplier'}, {PAYMENT[purchase.payment_method ?? ''] ?? purchase.payment_method}. Total {money(purchase.total_minor ?? 0)}.
+        Bought {showDate(purchase.purchased_on)} from {supplier || 'no supplier'}, {PAYMENT[purchase.payment_method ?? ''] ?? purchase.payment_method}.{worth === undefined ? ` Total ${money(purchase.total_minor ?? 0)}.` : ''}
       </p>
+      {worth !== undefined && <DeliveryWorth paid={purchase.total_minor ?? 0} worth={worth} label={`Purchase ${purchase.purchase_no ?? ''}`} />}
       <ul>
         {(purchase.lines ?? []).map((l) => (
           <li key={l.id}>
