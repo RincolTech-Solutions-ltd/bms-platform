@@ -567,7 +567,10 @@ Notes:
   stock, and are added after the idempotency store, so a replayed answer never carries them to anyone else. A replay
   itself answers only the person who stored the key (issue #852, ADR-026 decision 5): another person in the business who
   sends the same Idempotency-Key, on any route, gets 422 `idempotency_key_other_user`, nothing is done, and the stored
-  answer (a restock's total and lines, a sale, a receipt) is never read into their response. The item page
+  answer (a restock's total and lines, a sale, a receipt) is never read into their response. The damage and
+  use share of Stock health (issue #822, ADR-127) is its own route, `GET /retail/reports/stock-health/damage-share`, guarded
+  by `retail.profit.read`: anyone else gets 403 and no figures, and it answers only the branches where the caller holds it
+  (a branch outside them, or of another business, is 404). The item page
   (issue #813, ADR-121: `GET /retail/stock/items/{product_id}` and its `/movements`) declares `retail.stock.read` and shows
   every quantity and running balance to whoever holds it, in the branches it covers; a shop's average buying price, a
   movement's cost and a sale's `profit_minor` follow the same per-branch `retail.profit.read` rule, and a `branch_id` outside
