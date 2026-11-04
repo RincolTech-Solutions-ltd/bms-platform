@@ -18,6 +18,9 @@ export const RECEIPT_OFFLINE = 'No network. The entry saves without the photo. A
 /** What the saved message adds when the photo could not be sent: the entry is saved, the photo is added from it. */
 export const RECEIPT_LATER = 'The receipt photo was not saved. Add it from the entry.';
 
+/** The saved message with what happened to the photo after it, when it was not saved. */
+export const withPhotoNote = (words: string, note: string | null): string => (note ? words + '. ' + note : words);
+
 /** Sends the photo of an entry just saved; the words to add to the saved message when it failed, or null. */
 export async function sendReceiptPhoto(kind: ReceiptKind, recordId: string | undefined, file: File | null): Promise<string | null> {
   if (!file || !recordId) return null;

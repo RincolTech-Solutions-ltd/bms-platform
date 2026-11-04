@@ -23,7 +23,7 @@ import { AddByName, EmptyChoice, showsEmptyChoice, type AddInline, type ChoiceAd
 import { addOn } from './screen-link';
 import type { Kept } from '../../../offline/entries';
 import { EditNeedsInternet, KeptOnPhone, OfflineFormNote, isKept, useEntrySave } from '../../../offline/keep-entry';
-import { RECEIPT_LATER, ReceiptPhoto, ReceiptPhotoChoice } from './receipt-photo';
+import { RECEIPT_LATER, ReceiptPhoto, ReceiptPhotoChoice, withPhotoNote } from './receipt-photo';
 
 // Company expenses (FR-RET-24): shop, date, category, then an item of that category, an optional
 // beneficiary, the amount, and an explanation when the item needs one. An optional receipt photo (issue #819, ADR-124) is
@@ -83,7 +83,7 @@ export function ExpenseForm({ branchId, onSaved, onWaiting, replaces, onCancel }
         () => retail.createExpense(request, key),
       );
     },
-    meta: { success: (saved: Expense) => (isWaiting(saved) ? null : `Expense${saved.amount_minor != null ? ` of ${money(saved.amount_minor)}` : ''} ${replaces ? 'updated' : 'saved'}${photoNote.current ? `. ${photoNote.current}` : ''}`) },
+    meta: { success: (saved: Expense) => (isWaiting(saved) ? null : withPhotoNote(`Expense${saved.amount_minor != null ? ` of ${money(saved.amount_minor)}` : ''} ${replaces ? 'updated' : 'saved'}`, photoNote.current)) },
     onSuccess: (saved) => {
       if (isKept(saved)) {
         discard();

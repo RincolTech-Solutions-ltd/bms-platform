@@ -50,7 +50,7 @@ import { useBranchHold } from '../branch-picker';
 import { SELL_COUNT_NOTE, savingCount, unfinishedKey } from './unfinished-counts';
 import { icons } from '../../../components/icons';
 import { LocationAsk, useWhereNow } from './entry-location';
-import { ReceiptPhotoChoice, sendReceiptPhoto } from './receipt-photo';
+import { ReceiptPhotoChoice, sendReceiptPhoto, withPhotoNote } from './receipt-photo';
 
 // Record a sale (FR-RET-04, FR-RET-05). One idempotency key per draft, kept with the draft in this
 // tab until the sale is saved or the draft is cleared: a double tap, a retry after a lost answer or a
@@ -296,7 +296,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     return { sale };
   };
   const save = useMutation({
-    meta: { success: (r: { sale: Sale } | { kept: OutboxItem }) => `${r && 'kept' in r ? 'Sale saved on this phone' : r?.sale?.total_minor !== undefined ? `Sale of ${money(r.sale.total_minor)} saved` : 'Sale saved'}${r && !('kept' in r) && photoNote.current ? `. ${photoNote.current}` : ''}` },
+    meta: { success: (r: { sale: Sale } | { kept: OutboxItem }) => (r && 'kept' in r ? 'Sale saved on this phone' : withPhotoNote(r?.sale?.total_minor !== undefined ? `Sale of ${money(r.sale.total_minor)} saved` : 'Sale saved', photoNote.current)) },
     mutationFn: async ({ body, at, pricesAt }: { body: SaleRequest; at: string; pricesAt?: string }): Promise<{ sale: Sale } | { kept: OutboxItem }> => {
       const asked = retail.createSale(body, key);
       if (!offline || !mayKeepOnPhone({ body })) return withPhoto(await asked);

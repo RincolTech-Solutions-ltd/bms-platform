@@ -29,7 +29,7 @@ import { useEntryChecks, useEntryNorms } from './entry-checks';
 import { AddByName } from '../../../app/ui/EmptyChoice';
 import { PickerWithAdd } from '../../../app/ui/PickerWithAdd';
 import { EditNeedsInternet, KeptOnPhone, OfflineFormNote, isKept, useEntrySave } from '../../../offline/keep-entry';
-import { ReceiptPhotoChoice, sendReceiptPhoto } from './receipt-photo';
+import { ReceiptPhotoChoice, sendReceiptPhoto, withPhotoNote } from './receipt-photo';
 
 // Restock (FR-RET-06): supplier, lines with cost, sell price and a quantity per branch. Saving sets
 // the product's cost and sell price in the same transaction and leaves a price history row.
@@ -210,7 +210,6 @@ export function RestockForm({ onSaved, draftName, fixSearch, fromEdit = false, i
   // phone dates it and no date box shows, so a draft's earlier day never holds the save (second review of #839).
   const entries = useEntrySave();
   const dated = entryDate(into.every((b) => holdsAt(me, BACKDATE, b)) && holdsAt(me, BACKDATE, undefined), entries.offlineMode ? businessToday() : purchasedOn, draft.dateReason, businessToday());
-  // success-screen: the purchase saved screen that replaces the form; an edited delivery goes back to Past purchases (issue #830)
   // Issue #819: the optional receipt photo goes once the delivery is saved, never with one kept on the phone.
   const [receipt, setReceipt] = useState<File | null>(null);
   const photoNote = useRef<string | null>(null);
@@ -218,8 +217,9 @@ export function RestockForm({ onSaved, draftName, fixSearch, fromEdit = false, i
     photoNote.current = await sendReceiptPhoto('delivery', r.saved.id, receipt);
     return r;
   };
+  // success-screen: the purchase saved screen that replaces the form; an edited delivery goes back to Past purchases (issue #830)
   const save = useMutation({
-    meta: { success: ({ saved }: { saved: Purchase }) => `${replaces ? 'Delivery updated' : saved?.purchase_no ? `Purchase ${saved.purchase_no} saved` : 'Purchase saved'}${saved && photoNote.current ? `. ${photoNote.current}` : ''}` },
+    meta: { success: ({ saved }: { saved: Purchase }) => withPhotoNote(replaces ? 'Delivery updated' : saved?.purchase_no ? `Purchase ${saved.purchase_no} saved` : 'Purchase saved', photoNote.current) },
     mutationFn: async () => {
       const supplierName = (suppliers.data ?? []).find((x) => x.id === supplierId)?.name ?? '';
       const before = Object.fromEntries(lines.map((l) => [l.product.id ?? '', { sell: l.product.sell_minor, cost: l.product.cost_minor }]));

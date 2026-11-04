@@ -12,7 +12,7 @@ import { BusyButton } from '../../../app/ui/BusyButton';
 import { ActionBar } from '../../../app/ui/ActionBar';
 import { RowChevron } from '../../../app/ui/ListRow';
 import { KeptOnPhone, OfflineFormNote, isKept, useEntrySave } from '../../../offline/keep-entry';
-import { ReceiptPhotoChoice, sendReceiptPhoto } from './receipt-photo';
+import { ReceiptPhotoChoice, sendReceiptPhoto, withPhotoNote } from './receipt-photo';
 
 // Usage and damage (FR-RET-07): items taken out of stock for use in the shop or because they are
 // damaged, with a reason. Valued at cost by the server; no cost is shown here.
@@ -71,7 +71,7 @@ export function UsageForm({ branchId, onSaved }: { branchId: string; onSaved?: (
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       onSaved?.(u);
     },
-    meta: { success: (u: Usage) => `${u?.kind === 'damaged' ? 'Damage recorded, stock reduced' : 'Usage recorded, stock reduced'}${photoNote.current ? `. ${photoNote.current}` : ''}` },
+    meta: { success: (u: Usage) => withPhotoNote(u?.kind === 'damaged' ? 'Damage recorded, stock reduced' : 'Usage recorded, stock reduced', photoNote.current) },
   });
   const valid = lines.length > 0 && reason.trim() !== '' && lines.every((l) => parseQty(l.qty) !== null);
 
