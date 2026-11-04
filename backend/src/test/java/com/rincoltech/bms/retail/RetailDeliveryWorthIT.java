@@ -112,6 +112,27 @@ class RetailDeliveryWorthIT extends IntegrationTest {
         hasWorth(made, 2_750, -250);
     }
 
+    // JUSTIFICATION-A3: one more test case of the branch rule of ADR-017 for the new fields.
+    /** ADR-017: profit read at one shop does not show the worth of a delivery that also stocked another. */
+    @Test
+    void profitReadAtOneOfTheDeliverysBranchesIsNotEnough() {
+        UUID a = api.product("DW-5", 200, 300);
+        Map<String, Object> split = line(a, 200, null, "1");
+        split.put(
+                "qty_by_branch",
+                List.of(
+                        Map.of("branch_id", t.headOffice(), "qty", "3"),
+                        Map.of("branch_id", t.secondBranch(), "qty", "2")));
+        UUID id = RetailTestSupport.id(buy(ADMIN, List.of(split)));
+        Map<String, String> oneShop = Map.of("X-Dev-Scopes", "retail.profit.read=" + t.headOffice());
+        ResponseEntity<JsonNode> scoped =
+                api.call(org.springframework.http.HttpMethod.GET, "/purchases/" + id, null, ADMIN, "*", oneShop);
+        assertThat(scoped.getStatusCode()).as("%s", scoped.getBody()).isEqualTo(HttpStatus.OK);
+        hasNoWorth(scoped.getBody());
+        // At both: 5 x 300 against 5 x 200.
+        hasWorth(api.get("/purchases/" + id, ADMIN).getBody(), 1_500, 500);
+    }
+
     @Test
     void aBuyerWithoutProfitReadGetsNeitherField() {
         UUID a = api.product("DW-4", 300, 500);

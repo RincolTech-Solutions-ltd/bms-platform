@@ -696,7 +696,12 @@ class PurchasingService implements QuickAddPurchase {
     }
 
     private Purchase shown(Purchase p, Map<UUID, Long> prices) {
-        if (!CurrentPrincipal.require().hasPermission("retail.profit.read")) {
+        // A branch-bound figure needs the permission at its branch (ADR-017): here every branch the caller sees it stock.
+        Principal principal = CurrentPrincipal.require();
+        if (!principal.hasPermission("retail.profit.read")
+                || !p.lines().stream()
+                        .flatMap(l -> l.qtyByBranch().stream())
+                        .allMatch(b -> principal.may("retail.profit.read", b.branchId()))) {
             return p;
         }
         long worth = 0;

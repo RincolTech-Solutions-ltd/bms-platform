@@ -26,6 +26,7 @@ vi.mock('../../../api/retail', async (original) => {
 
 const { RestockForm, restockWorth } = await import('./restock');
 const { RestockCard } = await import('./restocks');
+const { PROFIT } = await import('./permissions');
 
 afterEach(() => {
   cleanup();
@@ -98,6 +99,14 @@ describe('Buy stock (issue #821)', () => {
     expect(figures(screen.getByTestId('restock-total'))).toEqual(['Total cost: UGX 15,000', 'Should sell for: UGX 11,600', 'Expected loss: UGX 3,400']);
     fireEvent.click(screen.getByRole('button', { name: 'Remove Test rice' }));
     expect(figures(screen.getByTestId('restock-total'))).toEqual(['Total cost: UGX 3,000', 'Should sell for: UGX 2,000', 'Expected loss: UGX 1,000']);
+  });
+
+  it('works nothing out for someone who reads profit only at a branch the delivery does not go to', () => {
+    const other = owner.branches?.find((b) => b.id !== branch)?.id ?? 'b-other';
+    const elsewhere = { ...owner, permission_scopes: { ...(owner.permission_scopes ?? {}), [PROFIT]: { all_branches: false, branch_ids: [other] } } };
+    screenOf(elsewhere, <RestockForm initial={draft()} />);
+    expect(screen.queryByTestId('delivery-worth')).toBeNull();
+    expect(screen.getByTestId('restock-total').textContent).toBe('Total cost UGX 8,000');
   });
 
   it('shows a buyer without the profit permission the total cost only, as before', () => {

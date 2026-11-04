@@ -12,7 +12,7 @@ import { Gate, Money, Note, Problem, ProductPicker, money, useProfitAccess } fro
 import { ScanBar } from './scan';
 import { PACK_UNUSABLE, plusOne, scanInto, touchedLine } from './barcode-state';
 import { ScreenToast, useItemAdded } from './toast';
-import { BACKDATE, TRANSFER, UNITS, canUse, capabilityOn, holdsAt } from './permissions';
+import { BACKDATE, PROFIT, TRANSFER, UNITS, canUse, capabilityOn, holdsAt } from './permissions';
 import { entryDate } from './cash-state';
 import { DateField } from './cash-ui';
 import { NextSteps } from './next-steps';
@@ -488,8 +488,8 @@ export function RestockForm({ onSaved, draftName, fixSearch, fromEdit = false, i
       </fieldset>
       {supplierProblem && <p role="alert" className="rt-flag" data-testid="credit-needs-supplier">{supplierProblem}</p>}
 
-      {/* Issue #821: the owner sees what the delivery should sell for; anyone else sees the total cost as before. */}
-      {canProfit ? (
+      {/* Issue #821: who reads profit at every branch on the form sees what the delivery should sell for; anyone else, the total cost as before. */}
+      {canProfit && into.every((b) => holdsAt(me, PROFIT, b)) ? (
         <div className="rt-total rt-total-figures" aria-live="polite" data-testid="restock-total"><DeliveryWorth paid={restockTotal(lines)} worth={restockWorth(lines)} label="This delivery" /></div>
       ) : (
         <p className="rt-total" aria-live="polite" data-testid="restock-total">Total cost <Money minor={restockTotal(lines)} /></p>
