@@ -77,4 +77,20 @@ final class UsageApi {
             List<UsageLine> lines,
             Instant createdAt,
             UUID createdBy) {}
+
+    @Schema(name = "RetailUsageUndoRequest")
+    record UndoRequest(@NotBlank @Size(max = 300) String reason) {}
+
+    @Schema(name = "RetailUsageUndone", description = "An entry undone (issue #818): the stock is back, the entry kept")
+    record UsageUndone(
+            UUID reportId,
+            UUID branchId,
+            String kind,
+
+            @Schema(description = "The business day the stock went back and the reversal is dated")
+            LocalDate undoneOn,
+
+            Instant undoneAt,
+            UUID undoneBy,
+            String reason) {}
 }

@@ -220,7 +220,14 @@ final class StockApi {
             @Schema(
                     description =
                             "The item page (issue #813), on a sale: the sale line's total less its cost; " + COST_ONLY)
-            Long profitMinor) {}
+            Long profitMinor,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL) MovementUndone undone) {}
+
+    @Schema(
+            name = "RetailStockMovementUndone",
+            description = "Present on a usage or damage movement whose entry was undone (issue #818): who, when, why")
+    record MovementUndone(Instant at, UUID by, String byName, String reason) {}
 
     @Schema(
             name = "RetailStockMovementCorrection",

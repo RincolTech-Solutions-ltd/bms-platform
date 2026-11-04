@@ -7,6 +7,7 @@ import com.rincoltech.bms.retail.stock.Quantities;
 import com.rincoltech.bms.retail.stock.internal.StockApi.Correction;
 import com.rincoltech.bms.retail.stock.internal.StockApi.MovementCorrection;
 import com.rincoltech.bms.retail.stock.internal.StockApi.MovementRow;
+import com.rincoltech.bms.retail.stock.internal.StockApi.MovementUndone;
 import com.rincoltech.bms.retail.stock.internal.StockApi.OpenStocktake;
 import com.rincoltech.bms.retail.stock.internal.StockApi.StandardPack;
 import com.rincoltech.bms.retail.stock.internal.StockApi.StockRow;
@@ -397,7 +398,16 @@ class StockRepository {
                        (SELECT p.code FROM retail_products p WHERE p.id = retail_stock_movements.product_id) AS product_code,
                        (SELECT p.description FROM retail_products p WHERE p.id = retail_stock_movements.product_id) AS product_description,
                        (SELECT u.name FROM retail_products p JOIN retail_units u ON u.id = p.unit_id
-                         WHERE p.id = retail_stock_movements.product_id) AS product_unit
+                         WHERE p.id = retail_stock_movements.product_id) AS product_unit,
+                       (SELECT d.created_at FROM retail_usage_undos d WHERE retail_stock_movements.source_type
+                         = 'retail.usage' AND d.report_id = retail_stock_movements.source_id) AS undone_at,
+                       (SELECT d.undone_by FROM retail_usage_undos d WHERE retail_stock_movements.source_type
+                         = 'retail.usage' AND d.report_id = retail_stock_movements.source_id) AS undone_by,
+                       (SELECT d.reason FROM retail_usage_undos d WHERE retail_stock_movements.source_type
+                         = 'retail.usage' AND d.report_id = retail_stock_movements.source_id) AS undo_reason,
+                       (SELECT uu.full_name FROM retail_usage_undos d JOIN users uu ON uu.id = d.undone_by
+                         WHERE retail_stock_movements.source_type = 'retail.usage'
+                           AND d.report_id = retail_stock_movements.source_id) AS undone_by_name
                 """)
                 .append(extra)
                 .append(" FROM ")
@@ -473,7 +483,14 @@ class StockRepository {
                         rs.getBigDecimal("balance_after") == null
                                 ? null
                                 : Quantities.format(rs.getBigDecimal("balance_after")),
-                        rs.getObject("profit_minor", Long.class)))
+                        rs.getObject("profit_minor", Long.class),
+                        rs.getTimestamp("undone_at") == null
+                                ? null
+                                : new MovementUndone(
+                                        rs.getTimestamp("undone_at").toInstant(),
+                                        rs.getObject("undone_by", UUID.class),
+                                        rs.getString("undone_by_name"),
+                                        rs.getString("undo_reason"))))
                 .list();
     }
 
