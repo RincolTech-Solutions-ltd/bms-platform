@@ -80,7 +80,8 @@ class RetailDamageShareIT extends IntegrationTest {
         body.put("purchased_on", on.toString());
         body.put("payment_method", "cash");
         body.put("lines", List.of(line));
-        ResponseEntity<JsonNode> r = api.postKeyed("/purchases", body, ADMIN, "*", UUID.randomUUID().toString());
+        ResponseEntity<JsonNode> r =
+                api.postKeyed("/purchases", body, ADMIN, "*", UUID.randomUUID().toString());
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
         return RetailTestSupport.id(r);
     }
@@ -112,6 +113,14 @@ class RetailDamageShareIT extends IntegrationTest {
         ResponseEntity<JsonNode> r = api.call(HttpMethod.GET, PATH + query, null, permissions, "*", extra);
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
         return r.getBody();
+    }
+
+    String firstShop(JsonNode report) {
+        return report.get("branches").get(0).get("branch_id").asString();
+    }
+
+    JsonNode hqItems() {
+        return shop(report(todayOnly(), ADMIN, Map.of()), t.headOffice()).get("items");
     }
 
     JsonNode shop(JsonNode report, UUID branch) {
@@ -149,13 +158,13 @@ class RetailDamageShareIT extends IntegrationTest {
         JsonNode two = shop(r, t.secondBranch());
         assertThat(two.get("damaged_pct").asInt()).isEqualTo(5);
         assertThat(two.get("used_pct").asInt()).isZero();
-        assertThat(r.get("branches").get(0).get("branch_id").asString()).isEqualTo(t.headOffice().toString());
+        assertThat(firstShop(r)).isEqualTo(t.headOffice().toString());
         assertThat(r.toString()).doesNotContain("cost").doesNotContain("price").doesNotContain("margin");
     }
 
     @Test
     void aZeroBaseShowsNoShare() {
-        JsonNode items = shop(report(todayOnly(), ADMIN, Map.of()), t.headOffice()).get("items");
+        JsonNode items = hqItems();
         assertThat(items).hasSize(2);
         JsonNode counted = items.get(1);
         assertThat(counted.get("code").asString()).as("no share comes last").isEqualTo("DSH-2");
@@ -167,13 +176,15 @@ class RetailDamageShareIT extends IntegrationTest {
 
     @Test
     void undoneEntriesAreLeftOut() {
-        JsonNode item = shop(report(todayOnly(), ADMIN, Map.of()), t.headOffice()).get("items").get(0);
+        JsonNode item = hqItems().get(0);
         assertThat(item.get("damaged_qty").asString()).isEqualTo("5.000");
         // The day the 40 came in, the opening was nothing and the 40 came in; nothing was damaged then.
         LocalDate day = today.minusDays(2);
         JsonNode earlier = report("?from=" + day + "&to=" + day, ADMIN, Map.of());
         List<String> codes = new ArrayList<>();
-        earlier.get("branches").forEach(b -> b.get("items").forEach(i -> codes.add(i.get("code").asString())));
+        for (JsonNode b : earlier.get("branches")) {
+            b.get("items").forEach(i -> codes.add(i.get("code").asString()));
+        }
         assertThat(codes).isEmpty();
         assertThat(shop(earlier, t.headOffice()).get("base_qty").asString()).isEqualTo("40.000");
     }
@@ -190,9 +201,10 @@ class RetailDamageShareIT extends IntegrationTest {
         Map<String, String> hqOnly = Map.of("X-Dev-Scopes", "retail.profit.read=" + t.headOffice());
         JsonNode r = report(todayOnly(), "retail.stock.read", hqOnly);
         assertThat(r.get("branches")).hasSize(1);
-        assertThat(r.get("branches").get(0).get("branch_id").asString()).isEqualTo(t.headOffice().toString());
+        assertThat(firstShop(r)).isEqualTo(t.headOffice().toString());
         String two = PATH + todayOnly() + "&branch_id=" + t.secondBranch();
-        ResponseEntity<JsonNode> other = api.call(HttpMethod.GET, two, null, "retail.stock.read", "*", hqOnly);
+        String reader = "retail.stock.read";
+        ResponseEntity<JsonNode> other = api.call(HttpMethod.GET, two, null, reader, "*", hqOnly);
         assertThat(other.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(other.getBody().get("code").asString()).isEqualTo("unknown_branch");
         JsonNode asked = report(todayOnly() + "&branch_id=" + t.secondBranch(), ADMIN, Map.of());
@@ -202,17 +214,20 @@ class RetailDamageShareIT extends IntegrationTest {
     @Test
     void anotherBusinessesShopIs404() {
         TestDatabase.Fixture other = TestDatabase.tenant("retail-dmg2", false, true);
-        ResponseEntity<JsonNode> r = api.get(PATH + todayOnly() + "&branch_id=" + other.headOffice(), ADMIN);
+        String path = PATH + todayOnly() + "&branch_id=" + other.headOffice();
+        ResponseEntity<JsonNode> r = api.get(path, ADMIN);
         assertThat(r.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(r.getBody().toString()).doesNotContain("DSH-");
         // And the other business sees none of this one's figures.
-        JsonNode theirs = new RetailTestSupport(http, other).get(PATH + todayOnly(), ADMIN).getBody();
-        assertThat(theirs.toString()).doesNotContain("DSH-").doesNotContain(t.headOffice().toString());
+        RetailTestSupport otherApi = new RetailTestSupport(http, other);
+        String theirs = otherApi.get(PATH + todayOnly(), ADMIN).getBody().toString();
+        assertThat(theirs).doesNotContain("DSH-").doesNotContain(t.headOffice().toString());
     }
 
     @Test
     void aPersonWithoutTheProfitPermissionGetsNothing() {
-        for (String permissions : List.of(SALES, "retail.stock.read,retail.usage.report,retail.sale.all_sellers")) {
+        String noProfit = "retail.stock.read,retail.usage.report,retail.sale.all_sellers";
+        for (String permissions : List.of(SALES, noProfit)) {
             ResponseEntity<JsonNode> r = api.get(PATH + todayOnly(), permissions);
             assertThat(r.getStatusCode()).as(permissions).isEqualTo(HttpStatus.FORBIDDEN);
             assertThat(r.getBody().has("branches")).isFalse();
