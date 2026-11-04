@@ -51,7 +51,7 @@ export function UndoFormView({ busy, error, onUndo, onCancel }: { busy?: boolean
         if (ready !== '' && !busy) onUndo(ready);
       }}
     >
-      <p className="hint">Every item of this entry goes back into stock. The entry stays in this list marked Undone, and stops counting in the totals.</p>
+      <p className="hint">Every item goes back into stock and the entry stays here, marked Undone.</p>
       <label htmlFor="undo-usage-reason">Why is this entry wrong?</label>
       <input id="undo-usage-reason" value={reason} maxLength={300} required onChange={(e) => setReason(e.target.value)} />
       <Problem error={error} />
@@ -69,19 +69,19 @@ export function UndoUsageAction({ m }: { m: StockMovement }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   // Undone, or found undone already: the button stays away until the reloaded list says Undone.
-  const [done, setDone] = useState(false);
+  const [gone, setGone] = useState(false);
   const sending = useRef(false);
   const send = useMutation({
     mutationFn: (reason: string) => retail.undoUsage(m.source_id ?? '', reason),
     onSuccess: () => {
-      setDone(true);
+      setGone(true);
       setOpen(false);
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
     onError: (error) => {
       // An undo that already went through (a lost answer, a second person) is done, not an error.
       if (error instanceof RetailError && error.code === 'usage_undone') {
-        setDone(true);
+        setGone(true);
         setOpen(false);
         void queryClient.invalidateQueries({ queryKey: ['retail'] });
       }
@@ -89,7 +89,7 @@ export function UndoUsageAction({ m }: { m: StockMovement }) {
     onSettled: () => { sending.current = false; },
     meta: { success: `${m.description ? `${m.description} entry` : 'Entry'} undone, stock put back` },
   });
-  if (done || !undoOffered(me, m)) return null;
+  if (gone || !undoOffered(me, m)) return null;
   if (!open) return <p><button type="button" className="btn-sm" onClick={() => { send.reset(); setOpen(true); }}>Undo this entry</button></p>;
   return <UndoFormView busy={send.isPending} error={send.error} onUndo={(reason) => {
     if (sending.current) return;

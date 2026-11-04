@@ -85,7 +85,7 @@ describe('Undo a usage or damage entry', () => {
     fireEvent.click(within(form).getByRole('button', { name: 'Yes, undo it' }));
     await new Promise((r) => setTimeout(r, 50));
     expect(undoUsage).not.toHaveBeenCalled();
-    expect(form.textContent).toContain('Every item of this entry goes back into stock');
+    expect(form.textContent).toContain('Every item goes back into stock');
     fireEvent.change(within(form).getByLabelText('Why is this entry wrong?'), { target: { value: '  Wrong item ' } });
     fireEvent.click(within(row).getByRole('button', { name: 'Yes, undo it' }));
     await waitFor(() => expect(undoUsage).toHaveBeenCalledWith('r1', 'Wrong item'));
