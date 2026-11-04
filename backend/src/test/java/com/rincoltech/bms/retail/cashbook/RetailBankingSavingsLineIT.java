@@ -140,8 +140,8 @@ class RetailBankingSavingsLineIT extends IntegrationTest {
         body.put("branch_id", hq);
         body.put("amount_minor", amount);
 
-        ResponseEntity<JsonNode> r = api.call(
-                HttpMethod.POST, R + "/bankings", body, seller, Map.of("Idempotency-Key", "key-814-bank"));
+        ResponseEntity<JsonNode> r =
+                api.call(HttpMethod.POST, R + "/bankings", body, seller, Map.of("Idempotency-Key", "key-814-bank"));
 
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
         assertThat(r.getBody().get("amount_minor").asLong()).isEqualTo(amount);

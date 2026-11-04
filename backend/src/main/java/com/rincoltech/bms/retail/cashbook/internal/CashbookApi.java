@@ -244,9 +244,10 @@ final class CashbookApi {
 
             @JsonInclude(JsonInclude.Include.NON_NULL)
             @Schema(
-                    description = "Issue #814, ADR-115 decision 11: cash expected less the day's savings (plus their voids),"
-                            + " never less the cash purchases; present only without retail.profit.read, while the owner's"
-                            + " setting salespeople_see_savings_amount is on")
+                    description =
+                            "Issue #814, ADR-115 decision 11: cash expected less the day's savings (plus their voids),"
+                                    + " never less the cash purchases; present only without retail.profit.read, while the owner's"
+                                    + " setting salespeople_see_savings_amount is on")
             Long expectedAfterSavingsMinor,
 
             long bankedSoFarMinor) {}
