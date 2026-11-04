@@ -91,7 +91,7 @@ final class PurchasingApi {
             @Schema(description = "Send as If-Match when updating")
             int version,
 
-            @Schema(description = "Issue #820: the optional details; the bank account only for those who may edit suppliers")
+            // Issue #820: the optional details; the bank account only for those who may edit suppliers.
             SupplierDetails details,
 
             @Schema(

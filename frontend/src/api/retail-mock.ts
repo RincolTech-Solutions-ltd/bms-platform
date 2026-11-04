@@ -1207,7 +1207,7 @@ export function createMockRetail(): RetailApi {
       if (!suppliers.some((x) => x.id === id)) return refuse(404, 'not_found', 'The resource does not exist.');
       const all = deliveriesOf(id);
       const start = cursor ? Number(cursor) : 0;
-      return { items: all.slice(start, start + SUPPLIER_DELIVERY_PAGE), next_cursor: start + SUPPLIER_DELIVERY_PAGE < all.length ? String(start + SUPPLIER_DELIVERY_PAGE) : null };
+      return { items: all.slice(start, start + SUPPLIER_DELIVERY_PAGE), ...(start + SUPPLIER_DELIVERY_PAGE < all.length ? { next_cursor: String(start + SUPPLIER_DELIVERY_PAGE) } : {}) };
     }),
     listSupplierTypes: () => delay([...new Set(suppliers.map((s) => s.details?.supplier_type?.trim()).filter((t): t is string => !!t))]),
     createSupplier: (body) =>
