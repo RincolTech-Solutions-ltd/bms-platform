@@ -98,7 +98,6 @@ export function RestockCard({ purchase, supplier, onDone }: { purchase: Purchase
       <p className="hint">
         Bought {showDate(purchase.purchased_on)} from {supplier || 'no supplier'}, {PAYMENT[purchase.payment_method ?? ''] ?? purchase.payment_method}.{worth === undefined ? ` Total ${money(purchase.total_minor ?? 0)}.` : ''}
       </p>
-      {worth !== undefined && <DeliveryWorth paid={purchase.total_minor ?? 0} worth={worth} label={`Purchase ${purchase.purchase_no ?? ''}`} />}
       <ul>
         {(purchase.lines ?? []).map((l) => (
           <li key={l.id}>
@@ -107,6 +106,7 @@ export function RestockCard({ purchase, supplier, onDone }: { purchase: Purchase
           </li>
         ))}
       </ul>
+      {worth !== undefined && <DeliveryWorth paid={purchase.total_minor ?? 0} worth={worth} label={`Purchase ${purchase.purchase_no ?? ''}`} />}
       {/* Issue #830: an edited delivery names the one it replaces, which stays in this list marked Voided. */}
       {purchase.note && <p className="hint" data-testid="purchase-note">{purchase.note}</p>}
       {voided && (

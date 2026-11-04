@@ -1389,6 +1389,8 @@ th[scope='rowgroup'] .cat-head {
 /* Buy stock's total for the owner (issue #821): the cost, what it should sell for and the expected profit in the total's box. */
 .rt-total-figures {
   display: block;
+  font-size: var(--text-base);
+  font-weight: var(--weight-regular);
 }
 
 .rt-total-figures .rt-figures {
