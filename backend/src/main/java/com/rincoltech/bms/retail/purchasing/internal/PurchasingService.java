@@ -26,6 +26,7 @@ import com.rincoltech.bms.retail.purchasing.internal.PurchasingApi.SupplierReque
 import com.rincoltech.bms.retail.purchasing.internal.PurchasingApi.UpdateSupplierRequest;
 import com.rincoltech.bms.retail.purchasing.internal.PurchasingApi.VoidPurchaseRequest;
 import com.rincoltech.bms.retail.purchasing.internal.PurchasingRepository.NewLine;
+import com.rincoltech.bms.retail.stock.ClosedTills;
 import com.rincoltech.bms.retail.stock.EntryDates;
 import com.rincoltech.bms.retail.stock.OfflineEntry;
 import com.rincoltech.bms.retail.stock.Quantities;
@@ -52,6 +53,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.UUID;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -83,6 +85,8 @@ class PurchasingService implements QuickAddPurchase {
     private final RetailCapabilities capabilities;
     private final Validator validator;
     private final EntryDates entryDates;
+    /** Answered by the cash book, which purchasing does not depend on (ADR-067 decision 13). */
+    private final ObjectProvider<ClosedTills> closedTills;
 
     PurchasingService(
             PurchasingRepository repo,
@@ -97,8 +101,10 @@ class PurchasingService implements QuickAddPurchase {
             AuditLog audit,
             RetailCapabilities capabilities,
             Validator validator,
-            EntryDates entryDates) {
+            EntryDates entryDates,
+            ObjectProvider<ClosedTills> closedTills) {
         this.entryDates = entryDates;
+        this.closedTills = closedTills;
         this.repo = repo;
         this.catalogue = catalogue;
         this.stock = stock;
@@ -421,6 +427,15 @@ class PurchasingService implements QuickAddPurchase {
         // the owner.
         EntryDates.Backdate backdate =
                 r.offline() != null ? null : entryDates.check(r.purchasedOn(), "purchased_on", r.dateReason(), into);
+        // Paid in cash or mobile money, it is money out of each branch's till: a closed day is the owner's (review of
+        // #839).
+        if (r.offline() != null
+                && (r.paymentMethod().equals("cash") || r.paymentMethod().equals("mobile_money"))) {
+            ClosedTills tills = closedTills.getIfAvailable();
+            if (tills != null) {
+                tills.requireOpen(r.offline(), r.purchasedOn(), today, into);
+            }
+        }
         products.forEach(catalogue::lock);
 
         UUID id = UUID.randomUUID();

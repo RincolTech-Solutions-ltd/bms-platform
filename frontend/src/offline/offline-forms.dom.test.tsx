@@ -233,6 +233,29 @@ describe('a daily form with no network', () => {
     expect(back.key).not.toBe('k-fix');
   });
 
+  // JUSTIFICATION-A3: the third review of #839 asks for the closed till's words and for no Fix on an entry the server may hold.
+  it('shows a closed till refusal in the server words, and offers no Fix when the server may have recorded it', async () => {
+    const { EntryState } = await import('./entry-state');
+    const { offlineEntry } = await import('./entries');
+    const { GAVE_UP_CODE } = await import('./outbox');
+    const closed = { status: 422, body: { code: 'validation_failed', detail: 'One or more fields are invalid.', errors: [{ field: 'offline.occurred_at', code: 'offline_day_closed', message: "That day's till is closed. Ask the owner to enter it." }] } };
+    const offline = testOffline(admin, { online: true, deps: { send: async () => closed } });
+    const fix = { to: '/staff/retail/withdrawals', draftName: `withdrawal:${uid}:${branch}`, draft: { date: today, amount: '700', purpose: '' } };
+    await offline?.engine.queue(offlineEntry({ kind: 'withdrawal', key: 'k-closed', scope: offline?.scope ?? '', branchId: branch, branchName: 'Test Shop A', body: {}, now: new Date(), fix }));
+    await act(async () => {
+      await offline?.engine.syncNow();
+    });
+    const [refused] = offline?.engine.snapshot().items ?? [];
+    mount(<EntryState item={refused as OutboxItem} />, offline);
+    expect(screen.getByText("Not recorded: That day's till is closed. Ask the owner to enter it.")).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Fix' })).toBeTruthy();
+    cleanup();
+    const gaveUp = { ...(refused as OutboxItem), error: { code: GAVE_UP_CODE, message: 'The server did not take this entry after 5 tries.' } };
+    mount(<EntryState item={gaveUp} />, offline);
+    expect(screen.queryByRole('button', { name: 'Fix' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Send again' })).toBeTruthy();
+  });
+
   it('keeps an entry whose answer was lost online under the same key and body, so the server records it once', async () => {
     seed(`withdrawal:${uid}:${branch}`, 'k-lost', { date: today, amount: '10000', purpose: 'Test float' });
     const api = server();

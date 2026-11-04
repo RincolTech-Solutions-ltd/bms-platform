@@ -2,7 +2,7 @@ import { useRouter } from '@tanstack/react-router';
 import { useState } from 'react';
 import { draftInProgress, restoreDraft } from '../areas/staff/retail/idempotency';
 import { useOffline } from './offline-context';
-import type { OutboxItem } from './outbox';
+import { GAVE_UP_CODE, IN_PROGRESS_CODES, type OutboxItem } from './outbox';
 
 // The state of an entry kept on the phone that is not a sale (issue #812, ADR-067 decision 13), as the sync sheet and the
 // form's Saved on this phone panel show it.
@@ -25,7 +25,10 @@ export function EntryState({ item }: { item: OutboxItem }) {
   const [asking, setAsking] = useState(false);
   const [formInUse, setFormInUse] = useState(false);
   if (item.state !== 'failed') return <p className="muted">{entryStateWords(item)}</p>;
-  const fix = item.entry?.fix;
+  // The server may have recorded it (it gave up answering, or was still recording): a new key could save it twice, so
+  // only Send again, under its own key, is offered (third review of #839).
+  const maybeRecorded = item.error?.code === GAVE_UP_CODE || IN_PROGRESS_CODES.includes(item.error?.code ?? '');
+  const fix = maybeRecorded ? undefined : item.entry?.fix;
   const fixIt = async () => {
     if (!fix) return;
     // The form already holds other work (review of #839): nothing is written over it and the entry stays here.

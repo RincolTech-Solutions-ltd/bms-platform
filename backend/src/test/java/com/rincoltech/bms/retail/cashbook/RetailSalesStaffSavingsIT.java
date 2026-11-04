@@ -186,6 +186,51 @@ class RetailSalesStaffSavingsIT extends IntegrationTest {
     }
 
     /**
+     * Third review of #839: savings kept offline on a day whose till was closed (its cash banked) are the owner's; a seller
+     * on the sales staff route is refused with the words the phone shows. JUSTIFICATION-A3: the review asks for this route.
+     */
+    @Test
+    void savingsKeptOfflineOnAClosedDayAreRefusedForASeller() {
+        theSwitch(true);
+        LocalDate yesterday = today.minusDays(1);
+        Map<String, Object> banking = new LinkedHashMap<>();
+        banking.put("branch_id", hq);
+        banking.put("business_date", yesterday.toString());
+        banking.put("amount_minor", 1_000);
+        assertThat(cb.api
+                        .postKeyed(
+                                "/bankings",
+                                banking,
+                                ALL,
+                                "*",
+                                UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        java.time.Instant made =
+                yesterday.atTime(12, 0).atZone(BusinessClock.DEFAULT_ZONE).toInstant();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("suggestion_token", "test-token");
+        body.put(
+                "offline",
+                Map.of(
+                        "occurred_at",
+                        made.toString(),
+                        "online_as_of",
+                        made.minusSeconds(3600).toString()));
+        ResponseEntity<JsonNode> refused = api.call(
+                HttpMethod.POST,
+                SALES_STAFF,
+                body,
+                seller,
+                Map.of("Idempotency-Key", UUID.randomUUID().toString()));
+        assertThat(refused.getStatusCode()).as("%s", refused.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(refused.getBody().toString())
+                .contains("offline_day_closed")
+                .contains("That day's till is closed. Ask the owner to enter it.");
+    }
+
+    /**
      * ADR-120 (issue #811): a seller saves today's savings only; an earlier day of the month is the owner's, a reason or not.
      * JUSTIFICATION-A3: a new test case asked for by the review of #831; no existing test covers this route's date.
      */

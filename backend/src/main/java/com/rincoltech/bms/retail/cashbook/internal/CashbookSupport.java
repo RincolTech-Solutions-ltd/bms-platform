@@ -7,6 +7,7 @@ import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.retail.cashbook.internal.CashbookApi.VoidRequest;
+import com.rincoltech.bms.retail.stock.ClosedTills;
 import com.rincoltech.bms.retail.stock.EntryDates;
 import com.rincoltech.bms.retail.stock.OfflineEntry;
 import java.nio.charset.StandardCharsets;
@@ -33,7 +34,7 @@ import org.springframework.stereotype.Component;
  * token. No permission is checked here except the profit gate's question.
  */
 @Component
-class CashbookSupport {
+class CashbookSupport implements ClosedTills {
 
     static final String READ = "retail.cashbook.read";
     static final String SAVINGS_RECORD = "retail.savings.record";
@@ -137,19 +138,13 @@ class CashbookSupport {
      */
     LocalDate offlineDay(OfflineEntry offline, LocalDate requested, String field, UUID branch) {
         LocalDate day = businessDate(OfflineEntry.day(offline, requested, now(), zone(), List.of(branch)), field);
-        if (day.isBefore(today())
-                && banked(branch, day)
-                && !CurrentPrincipal.require().may(OfflineEntry.BACKDATE, branch)) {
-            throw ApiException.validation(List.of(new FieldProblem(
-                    "offline.occurred_at",
-                    "offline_day_closed",
-                    "That day's till is closed. Ask the owner to enter it.")));
-        }
+        requireOpen(offline, day, today(), List.of(branch));
         return day;
     }
 
     /** The branch's cash of that day was banked: an active banking record on the day. */
-    private boolean banked(UUID branch, LocalDate day) {
+    @Override
+    public boolean closed(UUID branch, LocalDate day) {
         return jdbc.sql("""
                         SELECT EXISTS (SELECT 1 FROM retail_cash_bankings
                                         WHERE branch_id = ? AND business_date = ? AND voided_at IS NULL)

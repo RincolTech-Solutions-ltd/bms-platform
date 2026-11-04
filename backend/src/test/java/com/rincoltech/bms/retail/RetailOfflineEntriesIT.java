@@ -320,17 +320,63 @@ class RetailOfflineEntriesIT extends IntegrationTest {
                 .isEqualTo(HttpStatus.CREATED);
 
         RetailTestSupport seller = new RetailTestSupport(http, t);
-        ResponseEntity<JsonNode> refused = seller.postKeyed(
-                "/expenses",
-                bodies(madeYesterday(), null).get("/expenses").get(),
-                SELLER,
-                hq.toString(),
-                UUID.randomUUID().toString());
-        assertThat(refused.getStatusCode()).as("%s", refused.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(refused.getBody().toString())
-                .contains("offline_day_closed")
-                .contains("That day's till is closed. Ask the owner to enter it.");
+        // JUSTIFICATION-A3: the third review of #839 asks for the closed day on every route that moves the till's cash.
+        // Every entry that moves the till's cash, Buy stock paid in cash or by mobile money included.
+        Map<String, Object> savings = new LinkedHashMap<>();
+        savings.put("branch_id", hq);
+        savings.put("suggestion_token", "test-token");
+        savings.put("offline", offline(madeYesterday(), null));
+        Map<String, Map<String, Object>> closedDay = new LinkedHashMap<>();
+        for (String path : List.of("/expenses", "/bankings", "/withdrawals")) {
+            closedDay.put(path, bodies(madeYesterday(), null).get(path).get());
+        }
+        closedDay.put("/savings", savings);
+        closedDay.put(
+                "/purchases", bodies(madeYesterday(), null).get("/purchases").get());
+        Map<String, Object> mobile =
+                bodies(madeYesterday(), null).get("/purchases").get();
+        mobile.put("payment_method", "mobile_money");
+        closedDay.put("/purchases mobile money", mobile);
+        String buyer = SELLER + ",retail.purchase.create";
+        long purchases = rows("retail_purchases");
+        closedDay.forEach((label, body) -> {
+            ResponseEntity<JsonNode> refused = seller.postKeyed(
+                    label.split(" ")[0],
+                    body,
+                    buyer,
+                    hq.toString(),
+                    UUID.randomUUID().toString());
+            assertThat(refused.getStatusCode())
+                    .as("%s %s", label, refused.getBody())
+                    .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+            assertThat(refused.getBody().toString())
+                    .as(label)
+                    .contains("offline_day_closed")
+                    .contains("That day's till is closed. Ask the owner to enter it.");
+        });
         assertThat(rows("retail_expenses")).isZero();
+        assertThat(rows("retail_cash_withdrawals")).isZero();
+        assertThat(rows("retail_cash_bankings")).isEqualTo(1);
+        assertThat(rows("retail_daily_savings")).isZero();
+        assertThat(rows("retail_purchases")).isEqualTo(purchases);
+        // A delivery bought on credit takes nothing from the till.
+        Map<String, Object> credit =
+                bodies(madeYesterday(), null).get("/purchases").get();
+        credit.put("payment_method", "credit");
+        credit.put(
+                "supplier_id",
+                RetailTestSupport.id(cb.api.post("/suppliers", Map.of("name", "Test Supplier 812"), ALL)));
+        ResponseEntity<JsonNode> onCredit = seller.postKeyed(
+                "/purchases", credit, buyer, hq.toString(), UUID.randomUUID().toString());
+        assertThat(onCredit.getStatusCode()).as("%s", onCredit.getBody()).isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> ownersCash = cb.api.postKeyed(
+                "/purchases",
+                bodies(madeYesterday(), null).get("/purchases").get(),
+                ALL,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(ownersCash.getStatusCode()).as("%s", ownersCash.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(ownersCash.getBody().get("purchased_on").asString()).isEqualTo(yesterday.toString());
 
         ResponseEntity<JsonNode> owners = cb.api.postKeyed(
                 "/expenses",

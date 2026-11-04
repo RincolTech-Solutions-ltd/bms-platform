@@ -184,6 +184,10 @@ export function classifyEntry(status: number, body: unknown): SendOutcome {
     const b = (body ?? {}) as { code?: string; detail?: string };
     return { kind: 'refused', code: b.code, message: b.detail ?? 'The server refused it: something changed since it was made.' };
   }
+  // A field problem's own words say what is wrong ("That day's till is closed. Ask the owner to enter it."), not the
+  // general line above them.
+  const fields = ((body ?? {}) as { errors?: { message?: string }[] }).errors?.map((e) => e.message).filter(Boolean).join(' ');
+  if (read.kind === 'refused' && read.code === 'validation_failed' && fields) return { ...read, message: fields };
   return read;
 }
 
