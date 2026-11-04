@@ -49,6 +49,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -695,16 +696,7 @@ class PurchasingService implements QuickAddPurchase {
     }
 
     private Purchase shown(Purchase p, Map<UUID, Long> prices) {
-        // A branch-bound figure needs the permission at its branch (ADR-017): here every branch the caller sees it
-        // stock. A voided delivery's stock went back out, so it never sells: no worth (review of #850); nor for a
-        // restock the caller sees no line of.
-        Principal principal = CurrentPrincipal.require();
-        if (!"posted".equals(p.status())
-                || p.lines().isEmpty()
-                || !principal.hasPermission("retail.profit.read")
-                || !p.lines().stream()
-                        .flatMap(l -> l.qtyByBranch().stream())
-                        .allMatch(b -> principal.may("retail.profit.read", b.branchId()))) {
+        if (!showsWorth(p, CurrentPrincipal.get())) {
             return p;
         }
         long worth = 0;
@@ -717,9 +709,30 @@ class PurchasingService implements QuickAddPurchase {
                                     .find(id)
                                     .map(ProductSnapshot::sellMinor)
                                     .orElse(0L));
+            if (sell <= 0) {
+                // An item with no selling price yet: no worth, said as such (review of #850).
+                return p.withWorth(null);
+            }
             worth = Math.addExact(worth, Quantities.value(new BigDecimal(l.qtyTotal()), sell));
         }
         return p.withWorth(worth);
+    }
+
+    // JUSTIFICATION-A3: the checks moved out of shown() so a unit test proves the no-principal case (review of #850).
+    /**
+     * Issue #821: whether the caller sees the worth of {@code p}. Never without a principal (an internal caller), on a voided
+     * restock (its stock went back out, so it never sells) or on one the caller sees no line of; otherwise only with
+     * {@code retail.profit.read} at every branch the caller sees it stock, as a branch-bound figure needs (ADR-017).
+     */
+    static boolean showsWorth(Purchase p, Optional<Principal> caller) {
+        if (caller.isEmpty() || !"posted".equals(p.status()) || p.lines().isEmpty()) {
+            return false;
+        }
+        Principal principal = caller.get();
+        return principal.hasPermission("retail.profit.read")
+                && p.lines().stream()
+                        .flatMap(l -> l.qtyByBranch().stream())
+                        .allMatch(b -> principal.may("retail.profit.read", b.branchId()));
     }
 
     // ---- Void a restock (issue #351, ADR-044) -----------------------------------------------

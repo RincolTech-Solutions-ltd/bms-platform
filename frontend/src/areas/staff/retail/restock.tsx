@@ -101,9 +101,10 @@ export function restockTotal(lines: RestockLine[]): number {
 /**
  * Issue #821 (ADR-126): what the goods on the form should sell for, as the server reckons a saved delivery: each line's quantity
  * in the item's own unit times the selling price on the line, else the item's current price. A line not yet right counts what
- * can be read of it.
+ * can be read of it. Null when an item has no selling price yet (review of #850): the worth is then not known.
  */
-export function restockWorth(lines: RestockLine[]): number {
+export function restockWorth(lines: RestockLine[]): number | null {
+  if (lines.some((l) => (parseMinor(l.sell, RETAIL_CURRENCY) ?? l.product.sell_minor ?? 0) <= 0)) return null;
   return lines.reduce((sum, l) => {
     const sell = parseMinor(l.sell, RETAIL_CURRENCY) ?? l.product.sell_minor ?? 0;
     const factor = lineFactor(l);
@@ -115,15 +116,21 @@ export function restockWorth(lines: RestockLine[]): number {
   }, 0);
 }
 
-/** Issue #821: the delivery's cost, what it should sell for and the expected profit (a loss said as one), one line each. */
-export function DeliveryWorth({ paid, worth, label }: { paid: number; worth: number; label: string }) {
-  const profit = worth - paid;
+/**
+ * Issue #821: the delivery's cost, what it should sell for and the expected profit (a loss said as one), one line each. With an
+ * item that has no selling price yet (a null worth), the cost and that sentence instead of the other two.
+ */
+export function DeliveryWorth({ paid, worth, label }: { paid: number; worth: number | null; label: string }) {
+  const profit = worth === null ? 0 : worth - paid;
   return (
-    <dl className="rt-figures" aria-label={label} data-testid="delivery-worth">
-      <div><dt>Total cost</dt><dd><Money minor={paid} /></dd></div>
-      <div><dt>Should sell for</dt><dd><Money minor={worth} /></dd></div>
-      <div><dt>{profit < 0 ? 'Expected loss' : 'Expected profit'}</dt><dd><strong><Money minor={Math.abs(profit)} /></strong></dd></div>
-    </dl>
+    <>
+      <dl className="rt-figures" aria-label={label} data-testid="delivery-worth">
+        <div><dt>Total cost</dt><dd><Money minor={paid} /></dd></div>
+        {worth !== null && <div><dt>Should sell for</dt><dd><Money minor={worth} /></dd></div>}
+        {worth !== null && <div><dt>{profit < 0 ? 'Expected loss' : 'Expected profit'}</dt><dd><strong><Money minor={Math.abs(profit)} /></strong></dd></div>}
+      </dl>
+      {worth === null && <p className="hint" data-testid="unpriced-note">Some items have no selling price yet.</p>}
+    </>
   );
 }
 

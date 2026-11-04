@@ -16914,6 +16914,8 @@ export interface components {
              * @description Issue #821 (ADR-126): sell_worth_minor less total_minor. Present only to a holder of retail.profit.read
              */
             expected_profit_minor?: number;
+            /** @description Issue #821 (ADR-126): true, for a holder of retail.profit.read, when an item on a line has no selling price yet; sell_worth_minor and expected_profit_minor are then absent */
+            has_unpriced_items?: boolean;
             /** Format: uuid */
             id?: string;
             lines?: components["schemas"]["RetailPurchaseLine"][];

@@ -88,7 +88,8 @@ export function RestockCard({ purchase, supplier, onDone }: { purchase: Purchase
   const voided = purchase.status === 'voided';
   // Issue #821: the server sends the worth only to someone who may read profit; nothing is worked out here for anyone else.
   // A voided delivery will never sell, so it shows its total alone, as the server sends it (review of #850).
-  const worth = useProfitAccess() && !voided ? purchase.sell_worth_minor : undefined;
+  // A null worth: an item has no selling price yet, which the server says with has_unpriced_items.
+  const worth = !useProfitAccess() || voided ? undefined : purchase.has_unpriced_items ? null : purchase.sell_worth_minor;
   // A scoped caller's copy hides the other branches the restock touched (`partial`): the server would refuse the void with 403.
   const mayVoid = purchase.partial !== true && branchesOf(purchase).every((b) => holdsAt(me, PURCHASE_CREATE, b));
   return (

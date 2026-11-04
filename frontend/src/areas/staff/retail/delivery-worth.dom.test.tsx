@@ -71,6 +71,12 @@ describe('the worth of a delivery on the form', () => {
     expect(restockWorth([])).toBe(0);
   });
 
+  it('is not known while an item has no selling price yet', () => {
+    const lines = draft().lines;
+    expect(restockWorth([lines[0]!, { ...lines[1]!, product: { ...soap, sell_minor: 0 } }])).toBeNull();
+    expect(restockWorth([{ ...lines[0]!, sell: '0' }])).toBeNull();
+  });
+
   it('counts a line bought in packs in the item\'s own unit, at the price per unit', () => {
     const packed: Product = { ...soap, packs: [{ unit_id: 'u-box', unit: 'box', factor: '12', active: true, purpose: 'both' }] } as Product;
     // 2 boxes of 12 bars at 500 a bar.
@@ -99,6 +105,18 @@ describe('Buy stock (issue #821)', () => {
     expect(figures(screen.getByTestId('restock-total'))).toEqual(['Total cost: UGX 15,000', 'Should sell for: UGX 11,600', 'Expected loss: UGX 3,400']);
     fireEvent.click(screen.getByRole('button', { name: 'Remove Test rice' }));
     expect(figures(screen.getByTestId('restock-total'))).toEqual(['Total cost: UGX 3,000', 'Should sell for: UGX 2,000', 'Expected loss: UGX 1,000']);
+  });
+
+  it('says so instead of the two figures while an item has no selling price yet', () => {
+    const lines = draft().lines;
+    screenOf(owner, <RestockForm initial={{ ...draft(), lines: [lines[0]!, { ...lines[1]!, product: { ...soap, sell_minor: 0 } }] }} />);
+    const total = screen.getByTestId('restock-total');
+    expect(figures(total)).toEqual(['Total cost: UGX 8,000']);
+    expect(within(total).getByTestId('unpriced-note').textContent).toBe('Some items have no selling price yet.');
+    // A price typed for the soap brings the figures back: 5 x 1,600 + 10 x 450.
+    fireEvent.change(document.getElementById('sell-1') as HTMLInputElement, { target: { value: '450' } });
+    expect(figures(total)).toEqual(['Total cost: UGX 8,000', 'Should sell for: UGX 12,500', 'Expected profit: UGX 4,500']);
+    expect(screen.queryByTestId('unpriced-note')).toBeNull();
   });
 
   it('works nothing out for someone who reads profit only at a branch the delivery does not go to', () => {
@@ -141,6 +159,14 @@ describe('Past purchases (issue #821)', () => {
     const card = screen.getByTestId('restock-card');
     expect(screen.queryByTestId('delivery-worth')).toBeNull();
     expect(card.textContent).toContain('Total UGX 8,000.');
+  });
+
+  it('says an item has no selling price yet when the server says so', () => {
+    const { sell_worth_minor: _w, expected_profit_minor: _p, ...unknown } = purchase;
+    screenOf(owner, <ul><RestockCard purchase={{ ...unknown, has_unpriced_items: true }} onDone={() => undefined} /></ul>);
+    const card = screen.getByTestId('restock-card');
+    expect(figures(card)).toEqual(['Total cost: UGX 8,000']);
+    expect(within(card).getByTestId('unpriced-note').textContent).toBe('Some items have no selling price yet.');
   });
 
   it('says a loss as one', () => {

@@ -26,13 +26,17 @@ purchases. The figures tell the margin of every line, so they are the owner's, a
    held 10 count as 20.
 2. **Only a delivery that stands.** A voided restock (ADR-044) had its stock taken back out and will never sell, so it has
    no worth: both fields are absent from it, from the answer of its void on, and Past purchases shows its total alone, as
-   before. A restock the caller sees no line of has none either.
+   before. A restock the caller sees no line of has none either. When an item on a line has no selling price yet (a price
+   of 0 on the line, or no price of its own and the item's price 0), the worth is not known: both fields are left out and
+   `has_unpriced_items` is true for whoever may read profit, and the screens say "Some items have no selling price yet."
+   under the total cost, on the form as soon as such a line is on it.
 3. **The server decides who sees it.** Every restock response (the list, one restock, and the answers of create, void and
    replace) carries `sell_worth_minor` and `expected_profit_minor` only for a caller holding `retail.profit.read` at every
    branch the caller sees the restock stock (ADR-017), and leaves both out for anyone else, never null and never only hidden
    in the screen. They are added after the idempotency store, so the stored answer has neither and a replay under the same
    key shows them only to someone who may read them. For a caller whose scope hides part of a restock, the worth covers the
-   part they see, as the total does. The routes read under the caller's own principal; no job or report reuses them.
+   part they see, as the total does. The routes read under the caller's own principal; no job or report reuses them, and a caller with no principal
+   (an internal one) gets neither field rather than an error (`PurchasingService.showsWorth`).
 4. **The form works it out as the lines change.** Buy stock draws the total cost, Should sell for and Expected profit (an
    Expected loss when it should sell for less) in the total's box, from the lines on the form and the item's price the form
    already holds, with the same rounding as the server. It does so only for someone who reads profit at every branch on the

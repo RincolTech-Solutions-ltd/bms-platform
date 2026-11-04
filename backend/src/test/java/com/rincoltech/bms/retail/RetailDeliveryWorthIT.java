@@ -223,6 +223,26 @@ class RetailDeliveryWorthIT extends IntegrationTest {
         hasWorth(buy(ADMIN, List.of(priced)).getBody(), 9_000, 1_000);
     }
 
+    // JUSTIFICATION-A3: the lead's decision 6 on the review of #850, proven on the delivery and the list.
+    @Test
+    void anItemWithNoSellingPriceYetLeavesTheWorthOutAndSaysSo() {
+        UUID priced = api.product("DW-10", 200, 300);
+        UUID unpriced = api.product("DW-11", 200, 300);
+        TestDatabase.owner()
+                .sql("UPDATE retail_products SET sell_minor = 0 WHERE id = ?")
+                .params(unpriced)
+                .update();
+        List<Map<String, Object>> lines = List.of(line(priced, 200, null, "2"), line(unpriced, 200, null, "3"));
+        UUID id = RetailTestSupport.id(buy(ADMIN, lines));
+        for (JsonNode p : List.of(api.get("/purchases/" + id, ADMIN).getBody(), listed(id, ADMIN))) {
+            hasNoWorth(p);
+            assertThat(p.get("has_unpriced_items").asBoolean()).as("%s", p).isTrue();
+        }
+        JsonNode asBuyer = api.get("/purchases/" + id, BUYER).getBody();
+        hasNoWorth(asBuyer);
+        assertThat(asBuyer.has("has_unpriced_items")).as("%s", asBuyer).isFalse();
+    }
+
     // JUSTIFICATION-A3: one more test case of the branch rule of ADR-017 for the new fields.
     /** ADR-017: profit read at one shop does not show the worth of a delivery that also stocked another. */
     @Test

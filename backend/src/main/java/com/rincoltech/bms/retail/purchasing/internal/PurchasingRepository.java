@@ -491,6 +491,7 @@ class PurchasingRepository {
                 rs.getString("void_reason"),
                 null,
                 null,
+                null,
                 null);
     }
 }

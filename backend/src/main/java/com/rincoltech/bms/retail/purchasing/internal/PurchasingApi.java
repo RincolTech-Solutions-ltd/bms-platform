@@ -334,7 +334,14 @@ final class PurchasingApi {
             @Schema(
                     description = "Issue #821 (ADR-126): sell_worth_minor less total_minor. Present only to a holder of"
                             + " retail.profit.read")
-            Long expectedProfitMinor) {
+            Long expectedProfitMinor,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description = "Issue #821 (ADR-126): true, for a holder of retail.profit.read, when an item"
+                            + " on a line has no selling price yet; sell_worth_minor and expected_profit_minor are"
+                            + " then absent")
+            Boolean hasUnpricedItems) {
 
         // JUSTIFICATION-A3: a restock gained the void fields of issue #351; the short constructor keeps the three
         // existing callers as they are.
@@ -370,12 +377,16 @@ final class PurchasingApi {
                     null,
                     null,
                     null,
+                    null,
                     null);
         }
 
         // JUSTIFICATION-A3: a record copy names every component; the worth is two new ones (issue #821).
-        /** This restock with what its goods should sell for and the expected profit (issue #821, ADR-126). */
-        Purchase withWorth(long sellWorth) {
+        /**
+         * This restock with what its goods should sell for and the expected profit (issue #821, ADR-126); a null worth says an
+         * item on a line has no selling price yet, and leaves both out.
+         */
+        Purchase withWorth(Long sellWorth) {
             return new Purchase(
                     id,
                     purchaseNo,
@@ -395,7 +406,8 @@ final class PurchasingApi {
                     voidReason,
                     partial,
                     sellWorth,
-                    Math.subtractExact(sellWorth, totalMinor));
+                    sellWorth == null ? null : Math.subtractExact(sellWorth, totalMinor),
+                    sellWorth == null ? Boolean.TRUE : null);
         }
 
         Purchase withLinesAndTotal(List<PurchaseLine> newLines, long newTotal, boolean hidden) {
@@ -418,7 +430,8 @@ final class PurchasingApi {
                     voidReason,
                     hidden ? Boolean.TRUE : null,
                     sellWorthMinor,
-                    expectedProfitMinor);
+                    expectedProfitMinor,
+                    hasUnpricedItems);
         }
     }
 
