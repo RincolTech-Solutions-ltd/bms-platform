@@ -45224,7 +45224,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Damaged and used as a share of the stock that passed through, per item and per shop (issue #822)",
+        "summary" : "Damaged and used as a share of the stock that passed through, per item and shop (issue #822)",
         "tags" : [ "retail-reports" ]
       }
     },

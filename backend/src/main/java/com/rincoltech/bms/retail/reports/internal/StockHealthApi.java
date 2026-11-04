@@ -207,9 +207,11 @@ final class StockHealthApi {
             @Schema(description = COST_ONLY + "; used and damaged plus loss, less gain")
             Long netCostMinor) {}
 
-    // JUSTIFICATION-A3: issue #822 asks for a new report section; its records sit beside the other Stock health records.
-    static final String BASE_WORDS = "The stock that passed through: the stock at the start of the first day plus what came in"
-            + " during the period (deliveries, stock moved in, and a starting stock first set in it)";
+    // JUSTIFICATION-A3: issue #822 asks for a new report section; its records sit beside the other Stock health
+    // records.
+    static final String BASE_WORDS =
+            "The stock that passed through: the stock at the start of the first day plus what came in"
+                    + " during the period (deliveries, stock moved in, and a starting stock first set in it)";
 
     @Schema(
             name = "RetailDamageShareItem",
@@ -226,8 +228,9 @@ final class StockHealthApi {
             String openingQty,
 
             @Schema(
-                    description = "What came in during the period: deliveries, stock moved in, a starting stock first set;"
-                            + " a voided one is left out")
+                    description =
+                            "What came in during the period: deliveries, stock moved in, a starting stock first set;"
+                                    + " a voided one is left out")
             String receivedQty,
 
             @Schema(description = BASE_WORDS + "; opening_qty plus received_qty")
@@ -259,16 +262,19 @@ final class StockHealthApi {
             String damagedQty,
             String usedQty,
 
-            @Schema(description = "Absent when base_qty is 0") Integer damagedPct,
+            @Schema(description = "Absent when base_qty is 0")
+            Integer damagedPct,
 
-            @Schema(description = "Absent when base_qty is 0") Integer usedPct,
+            @Schema(description = "Absent when base_qty is 0")
+            Integer usedPct,
 
             List<DamageShareItem> items) {}
 
     @Schema(
             name = "RetailDamageShare",
-            description = "Damaged and used as a share of the stock that passed through, per item and per shop (issue #822,"
-                    + " ADR-127). Only for retail.profit.read, and only the shops where it is held")
+            description =
+                    "Damaged and used as a share of the stock that passed through, per item and per shop (issue #822,"
+                            + " ADR-127). Only for retail.profit.read, and only the shops where it is held")
     record DamageShare(
             LocalDate from,
             LocalDate to,

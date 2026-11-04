@@ -118,7 +118,7 @@ class ReportsController {
     @GetMapping("/stock-health/damage-share")
     @RequiresPermission("retail.profit.read")
     @Operation(
-            summary = "Damaged and used as a share of the stock that passed through, per item and per shop (issue #822)",
+            summary = "Damaged and used as a share of the stock that passed through, per item and shop (issue #822)",
             description = "The base is the stock at the start of the first day plus what came in during the period"
                     + " (ADR-127). This month by default. Only the shops where the caller holds retail.profit.read;"
                     + " a branch_id outside them or of another business is 404 unknown_branch",

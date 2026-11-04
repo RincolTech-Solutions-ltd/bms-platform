@@ -139,7 +139,7 @@ class RetailDamageShareIT extends IntegrationTest {
         assertThat(item.get("used_qty").asString()).isEqualTo("2.000");
         assertThat(item.get("used_pct").asInt()).isEqualTo(4);
 
-        // The shop total: 6 damaged and 2 used of the 50 that passed through the shop, DSH-2 adding nothing to the base.
+        // The shop total: 6 damaged and 2 used of the 50 that passed through, DSH-2 adding nothing to the base.
         assertThat(hq.get("base_qty").asString()).isEqualTo("50.000");
         assertThat(hq.get("damaged_qty").asString()).isEqualTo("6.000");
         assertThat(hq.get("damaged_pct").asInt()).isEqualTo(12);

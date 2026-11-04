@@ -259,7 +259,7 @@ class StockHealthService {
      */
     @Transactional(readOnly = true)
     DamageShare damageShare(List<UUID> branchIds, LocalDate from, LocalDate to) {
-        // JUSTIFICATION-A3: issue #822 asks for this report; it is one read, grouped per shop, beside the shrinkage it extends.
+        // JUSTIFICATION-A3: issue #822 asks for this report: one read, grouped per shop, beside the shrinkage.
         Principal principal = CurrentPrincipal.require();
         if (branchIds != null && !branchIds.isEmpty()) {
             List<UUID> known = branches.all().stream().map(Branches.Branch::id).toList();
@@ -308,8 +308,7 @@ class StockHealthService {
                             percent(f.used(), itemBase)));
                 }
             }
-            Comparator<DamageShareItem> byShare =
-                    Comparator.comparing(i -> share(i.damagedQty(), i.usedQty(), i.baseQty()), HIGHEST_FIRST);
+            Comparator<DamageShareItem> byShare = Comparator.comparing(StockHealthService::itemShare, HIGHEST_FIRST);
             items.sort(byShare.thenComparing(DamageShareItem::code).thenComparing(DamageShareItem::productId));
             shops.add(new DamageShareBranch(
                     branch,
@@ -320,25 +319,36 @@ class StockHealthService {
                     percent(used, base),
                     items));
         });
-        Comparator<DamageShareBranch> byShare =
-                Comparator.comparing(s -> share(s.damagedQty(), s.usedQty(), s.baseQty()), HIGHEST_FIRST);
+        Comparator<DamageShareBranch> byShare = Comparator.comparing(StockHealthService::shopShare, HIGHEST_FIRST);
         shops.sort(byShare.thenComparing(DamageShareBranch::branchId));
         return new DamageShare(w.from(), w.to(), shops);
     }
 
     /** {@code part} over {@code base} as a whole percent, half up; null when nothing passed through. */
     static Integer percent(BigDecimal part, BigDecimal base) {
-        return base.signum() <= 0
-                ? null
-                : part.multiply(BigDecimal.valueOf(100)).divide(base, 0, RoundingMode.HALF_UP).intValueExact();
+        if (base.signum() <= 0) {
+            return null;
+        }
+        BigDecimal hundredths = part.multiply(BigDecimal.valueOf(100));
+        return hundredths.divide(base, 0, RoundingMode.HALF_UP).intValueExact();
     }
 
     /** The order of the list: the larger of the damaged and used shares, exactly; null when nothing passed through. */
     static BigDecimal share(String damaged, String used, String base) {
         BigDecimal b = new BigDecimal(base);
-        return b.signum() <= 0
-                ? null
-                : new BigDecimal(damaged).max(new BigDecimal(used)).divide(b, 9, RoundingMode.HALF_UP);
+        if (b.signum() <= 0) {
+            return null;
+        }
+        BigDecimal larger = new BigDecimal(damaged).max(new BigDecimal(used));
+        return larger.divide(b, 9, RoundingMode.HALF_UP);
+    }
+
+    private static BigDecimal itemShare(DamageShareItem i) {
+        return share(i.damagedQty(), i.usedQty(), i.baseQty());
+    }
+
+    private static BigDecimal shopShare(DamageShareBranch s) {
+        return share(s.damagedQty(), s.usedQty(), s.baseQty());
     }
 
     private List<Shrinkage> shrinkage(Principal principal, List<UUID> filter, Window w) {
