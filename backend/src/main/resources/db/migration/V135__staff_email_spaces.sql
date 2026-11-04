@@ -14,8 +14,32 @@
 -- would reach the deploy log); a person fixes it by hand. Each change writes a system audit row in the business's own log
 -- with the email before and after, as an edit by an administrator does. Running it again changes nothing.
 --
--- No row lock beyond the UPDATE's own and no DDL on a table. bms_owner runs migrations with BYPASSRLS
--- (deploy/postgres/initdb/01-roles.sh), so it sees every business, as the V79 backfill does.
+-- No row lock beyond the UPDATE's own. users and audit_log have FORCE ROW LEVEL SECURITY and no app.tenant_id is bound
+-- here. bms_owner has BYPASSRLS (deploy/postgres/initdb/01-roles.sh), so the statements see every business; row_security =
+-- off makes PostgreSQL raise rather than silently see no rows should a policy still apply. As in V98, an owner without
+-- BYPASSRLS drops FORCE on those two tables for this transaction only, and only where a table has it, and puts back exactly
+-- what it found before the commit (bms.v135_unforced records it); with BYPASSRLS nothing is altered. That ALTER TABLE takes
+-- an ACCESS EXCLUSIVE lock, so lock_timeout is five seconds as in V96 and V98: the migration fails and is retried rather than
+-- every sign-in queueing behind it.
+
+SET LOCAL lock_timeout = '5s';
+SET LOCAL row_security = off;
+DO $$
+DECLARE
+    t text;
+    unforced text := '';
+BEGIN
+    IF NOT (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user) THEN
+        FOREACH t IN ARRAY ARRAY['users', 'audit_log'] LOOP
+            IF (SELECT relforcerowsecurity FROM pg_class WHERE oid = t::regclass) THEN
+                EXECUTE format('ALTER TABLE %I NO FORCE ROW LEVEL SECURITY', t);
+                unforced := unforced || t || ',';
+            END IF;
+        END LOOP;
+    END IF;
+    PERFORM set_config('bms.v135_unforced', unforced, true);
+END
+$$;
 
 WITH staff AS (
         SELECT u.tenant_id, u.id, u.email,
@@ -61,3 +85,16 @@ BEGIN
     END IF;
 END
 $$;
+
+DO $$
+DECLARE
+    t text;
+BEGIN
+    FOREACH t IN ARRAY string_to_array(rtrim(current_setting('bms.v135_unforced', true), ','), ',') LOOP
+        IF t <> '' THEN
+            EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
+        END IF;
+    END LOOP;
+END
+$$;
+SET LOCAL row_security = on;
