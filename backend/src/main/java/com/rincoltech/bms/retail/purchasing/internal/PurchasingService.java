@@ -658,8 +658,7 @@ class PurchasingService implements QuickAddPurchase {
                         items.getLast().createdAt() + "|" + items.getLast().id())
                 : null;
         Map<UUID, Long> prices = new HashMap<>();
-        return new PurchasePage(
-                items.stream().map(p -> shown(p, prices)).toList(), next);
+        return new PurchasePage(items.stream().map(p -> shown(p, prices)).toList(), next);
     }
 
     /** One restock with the quantities of the branches the caller may see; absent when it added stock to none of them. */
@@ -696,7 +695,8 @@ class PurchasingService implements QuickAddPurchase {
     }
 
     private Purchase shown(Purchase p, Map<UUID, Long> prices) {
-        // A branch-bound figure needs the permission at its branch (ADR-017): here every branch the caller sees it stock.
+        // A branch-bound figure needs the permission at its branch (ADR-017): here every branch the caller sees it
+        // stock.
         Principal principal = CurrentPrincipal.require();
         if (!principal.hasPermission("retail.profit.read")
                 || !p.lines().stream()
@@ -708,10 +708,12 @@ class PurchasingService implements QuickAddPurchase {
         for (PurchasingApi.PurchaseLine l : p.lines()) {
             Long sell = l.sellMinor() != null
                     ? l.sellMinor()
-                    : prices.computeIfAbsent(l.productId(), id -> catalogue
-                            .find(id)
-                            .map(ProductSnapshot::sellMinor)
-                            .orElse(0L));
+                    : prices.computeIfAbsent(
+                            l.productId(),
+                            id -> catalogue
+                                    .find(id)
+                                    .map(ProductSnapshot::sellMinor)
+                                    .orElse(0L));
             worth = Math.addExact(worth, Quantities.value(new BigDecimal(l.qtyTotal()), sell));
         }
         return p.withWorth(worth);

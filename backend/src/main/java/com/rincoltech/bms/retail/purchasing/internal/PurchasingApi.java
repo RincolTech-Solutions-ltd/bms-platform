@@ -324,9 +324,10 @@ final class PurchasingApi {
 
             @JsonInclude(JsonInclude.Include.NON_NULL)
             @Schema(
-                    description = "Issue #821 (ADR-126): what the goods should sell for, each line's quantity in base units"
-                            + " times the selling price the line set, else the item's current selling price. Present only"
-                            + " to a holder of retail.profit.read")
+                    description =
+                            "Issue #821 (ADR-126): what the goods should sell for, each line's quantity in base units"
+                                    + " times the selling price the line set, else the item's current selling price. Present only"
+                                    + " to a holder of retail.profit.read")
             Long sellWorthMinor,
 
             @JsonInclude(JsonInclude.Include.NON_NULL)
