@@ -3138,7 +3138,7 @@ class MigrationOrderIT {
                             .single())
                     .doesNotContain("UNIQUE")
                     .contains("(tenant_id, key)");
-            // Built CONCURRENTLY outside a transaction (V136__idempotency_key_lookup.sql.conf): finished and usable.
+            // Built in Flyway's transaction, not CONCURRENTLY (which waited on Flyway's own lock): finished and usable.
             assertThat(owner.sql("SELECT indisvalid AND indisready FROM pg_index"
                                     + " WHERE indexrelid = 'idempotency_keys_tenant_key'::regclass")
                             .query(Boolean.class)

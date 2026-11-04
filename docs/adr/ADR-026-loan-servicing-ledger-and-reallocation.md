@@ -79,10 +79,12 @@ questions are not settled by chapters 3 and 6 as written:
    `idempotency_in_progress` after 5 seconds). Tests: `RetailIdempotencyProtocolIT` and one
    per module (`RetailSalesKeyPerPersonIT`, `RetailRestockKeyPerPersonIT`,
    `RetailCashbookKeyPerPersonIT`, `RetailUsageKeyPerPersonIT`, `LoanServicingIT`, `SavingsIT`).
-   V136 builds the index `CONCURRENTLY` in a script of its own run outside a transaction
-   (`executeInTransaction=false` in `V136__idempotency_key_lookup.sql.conf`), so keyed writes in
-   every business go on while it builds; a build that fails part way leaves an invalid index that
-   the script drops before building again. **Rolling-deploy window:** while instances on the old
+   V136 builds the index with a plain `CREATE INDEX` in Flyway's transaction, under a 10 second
+   `lock_timeout`, not `CONCURRENTLY`: a concurrent build waits for every open transaction to end,
+   and Flyway holds its migration lock in one, so the build waited on Flyway for good (a CI run hung
+   there; a deploy would have too). The table holds 7 days of keys, so the build is short; keyed
+   writes wait on it briefly, and a table held by a long transaction fails the migration after 10
+   seconds with nothing changed, to be run again. **Rolling-deploy window:** while instances on the old
    code still serve requests, they neither take the key lock nor look across people, so until the
    last old instance stops, two people sending one key can each run their work under it (the
    behaviour before issue #852). Rows stored that way are the ones the non-unique index allows

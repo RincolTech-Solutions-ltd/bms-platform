@@ -14,12 +14,13 @@
 -- the old protocol allowed). They stay as they are and stay safe: each of those people still replays only their own
 -- row, and anyone else is refused. Keys are kept 7 days (CoreJobs), so such rows are gone a week after the deploy.
 --
--- Built CONCURRENTLY, so keyed writes in every business go on while it builds; a plain CREATE INDEX would hold a SHARE
--- lock that turns them into 409 idempotency_in_progress after 5 seconds. CONCURRENTLY cannot run in a transaction, so
--- V136__idempotency_key_lookup.sql.conf sets executeInTransaction=false for this script alone. The build waits for
--- transactions already open on the table to end, without blocking anyone. If it fails part way, Postgres leaves an
--- INVALID index behind; the DROP first means that, after `flyway repair`, running the migration again builds it afresh.
+-- A plain CREATE INDEX inside Flyway's transaction, not CONCURRENTLY. CONCURRENTLY waits for every open transaction to
+-- end, and Flyway holds its migration lock in an open transaction on another connection, so the build waited on Flyway
+-- forever (the CI run of fd91332 stopped here for over an hour; a deploy would too). The table holds 7 days of keys, so
+-- the build takes moments; while it runs, a keyed write waits on its SHARE lock like any request waits on a key held in
+-- progress. lock_timeout bounds the wait for the lock itself: if a long transaction holds the table, the migration fails
+-- after 10 seconds with a lock timeout and changes nothing, and the deploy is simply run again.
 
-DROP INDEX CONCURRENTLY IF EXISTS idempotency_keys_tenant_key;
+SET LOCAL lock_timeout = '10s';
 
-CREATE INDEX CONCURRENTLY idempotency_keys_tenant_key ON idempotency_keys (tenant_id, key);
+CREATE INDEX IF NOT EXISTS idempotency_keys_tenant_key ON idempotency_keys (tenant_id, key);
