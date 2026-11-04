@@ -280,7 +280,10 @@ final class SalesApi {
 
             @JsonInclude(JsonInclude.Include.NON_NULL)
             @Schema(description = "ADR-067: present when the sale carried a client sale id")
-            Device device) {
+            Device device,
+
+            @Schema(description = "Issue #819, ADR-124: a photo of the paper receipt is on the sale")
+            boolean hasReceiptPhoto) {
 
         Sale withDevice(Device d) {
             return new Sale(
@@ -313,7 +316,8 @@ final class SalesApi {
                     writeOff,
                     countedWhenPaid,
                     deliveryFeeOwedMinor,
-                    d);
+                    d,
+                    hasReceiptPhoto);
         }
     }
 

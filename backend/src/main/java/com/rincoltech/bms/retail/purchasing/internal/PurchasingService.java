@@ -652,14 +652,20 @@ class PurchasingService implements QuickAddPurchase {
     /** One restock with the quantities of the branches the caller may see; absent when it added stock to none of them. */
     @Transactional(readOnly = true)
     Purchase get(UUID id) {
+        return visible(id).orElseThrow(ApiException::notFound);
+    }
+
+    /**
+     * The check of {@link #get} in the caller's transaction, empty instead of 404, so a caller inside another read (the
+     * receipt photo's access rule, ADR-124) never marks that transaction for rollback.
+     */
+    java.util.Optional<Purchase> visible(UUID id) {
         List<UUID> filter = CurrentPrincipal.require().branchFilter(PERMISSION, null);
         if (filter != null && filter.isEmpty()) {
-            throw ApiException.notFound();
+            return java.util.Optional.empty();
         }
         UUID own = ownRecordsOnly();
-        return repo.find(id, filter)
-                .filter(p -> own == null || own.equals(p.createdBy()))
-                .orElseThrow(ApiException::notFound);
+        return repo.find(id, filter).filter(p -> own == null || own.equals(p.createdBy()));
     }
 
     /**

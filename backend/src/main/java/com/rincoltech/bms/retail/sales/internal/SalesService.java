@@ -434,7 +434,8 @@ class SalesService {
                 null,
                 false,
                 null,
-                r.clientSaleId() == null ? null : new Device(r.clientSaleId(), occurredAt, offline, List.of()));
+                r.clientSaleId() == null ? null : new Device(r.clientSaleId(), occurredAt, offline, List.of()),
+                false);
         try {
             repo.insert(header, r.clientSaleId() == null ? null : requestHash(r));
         } catch (DuplicateKeyException e) {
@@ -1744,7 +1745,8 @@ class SalesService {
                 s.writeOff(),
                 counted,
                 s.deliveryFeeOwedMinor(),
-                s.device());
+                s.device(),
+                s.hasReceiptPhoto());
     }
 
     /** 409 {@code sale_written_off}: what a sale whose unpaid part was written off refuses (ADR-043). */

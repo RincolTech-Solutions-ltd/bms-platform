@@ -43,7 +43,9 @@ class SalesRepository {
                    (SELECT w.reason FROM retail_sale_writeoffs w WHERE w.sale_id = retail_sales.id) AS written_off_reason,
                    (SELECT w.fee_minor FROM retail_sale_writeoffs w WHERE w.sale_id = retail_sales.id) AS written_off_fee_minor,
                    (SELECT o.delivery_fee_minor FROM retail_customer_orders o WHERE o.sale_id = retail_sales.id
-                       AND o.fee_method = 'account' AND o.fee_paid_at IS NULL AND retail_sales.status = 'completed') AS fee_owed
+                       AND o.fee_method = 'account' AND o.fee_paid_at IS NULL AND retail_sales.status = 'completed') AS fee_owed,
+                   EXISTS (SELECT 1 FROM documents d WHERE d.subject_type = 'retail.sale_receipt_photo'
+                       AND d.subject_id = retail_sales.id) AS has_receipt_photo
               FROM retail_sales
             """;
 
@@ -522,7 +524,8 @@ class SalesRepository {
                 s.writeOff(),
                 s.countedWhenPaid(),
                 s.deliveryFeeOwedMinor(),
-                s.device());
+                s.device(),
+                s.hasReceiptPhoto());
     }
 
     private static Sale header(ResultSet rs) throws SQLException {
@@ -573,7 +576,8 @@ class SalesRepository {
                                 rs.getObject("client_sale_id", UUID.class),
                                 instant(rs, "occurred_at"),
                                 rs.getBoolean("recorded_offline"),
-                                List.of()));
+                                List.of()),
+                rs.getBoolean("has_receipt_photo"));
     }
 
     // ---- Payments --------------------------------------------------------------------------

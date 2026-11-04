@@ -254,7 +254,10 @@ final class PurchasingApi {
 
             @JsonInclude(JsonInclude.Include.NON_NULL)
             @Schema(description = "True when the caller's branch scope hid other branches this restock added stock to")
-            Boolean partial) {
+            Boolean partial,
+
+            @Schema(description = "Issue #819, ADR-124: a photo of the paper receipt is on the delivery")
+            boolean hasReceiptPhoto) {
 
         // JUSTIFICATION-A3: a restock gained the void fields of issue #351; the short constructor keeps the three
         // existing callers as they are.
@@ -288,7 +291,8 @@ final class PurchasingApi {
                     null,
                     null,
                     null,
-                    null);
+                    null,
+                    false);
         }
 
         Purchase withLinesAndTotal(List<PurchaseLine> newLines, long newTotal, boolean hidden) {
@@ -309,7 +313,8 @@ final class PurchasingApi {
                     voidedBy,
                     voidedOn,
                     voidReason,
-                    hidden ? Boolean.TRUE : null);
+                    hidden ? Boolean.TRUE : null,
+                    hasReceiptPhoto);
         }
     }
 

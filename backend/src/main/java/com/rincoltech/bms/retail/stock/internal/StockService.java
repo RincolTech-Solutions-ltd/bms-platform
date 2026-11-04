@@ -359,7 +359,8 @@ class StockService {
                                         m.balanceAfter(),
                                         null,
                                         m.undone(),
-                                        m.entryLines()))
+                                        m.entryLines(),
+                                        m.hasReceiptPhoto()))
                         .toList(),
                 next);
     }
