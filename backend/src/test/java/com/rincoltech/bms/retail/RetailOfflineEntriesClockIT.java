@@ -152,6 +152,42 @@ class RetailOfflineEntriesClockIT extends IntegrationTest {
         assertThat(dated).isEqualTo(LocalDate.of(2026, 10, 31));
     }
 
+    // JUSTIFICATION-A3: the lead's decision 3 on the second review of #839 names this exact case; one test of it.
+    /**
+     * The lead's decision 3 on the second review of #839: an expense saved online at 23:58 whose answer never came is sent
+     * again the next morning with when it was made, under the same key, and stays on its own day; a send of the same request
+     * again then answers the same expense.
+     */
+    @Test
+    void anExpenseSavedAt2358WhoseAnswerWasLostIsSentTheNextMorningAndStaysOnItsDay() {
+        UUID[] item = cb.categoryWithItem("Test Transport", "Test Fuel", false);
+        Instant saved =
+                LocalDate.of(2026, 10, 31).atTime(23, 58).atZone(KAMPALA).toInstant();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("category_id", item[0]);
+        body.put("item_id", item[1]);
+        body.put("amount_minor", 700);
+        // The request at 23:58 never reached the server; the phone kept it with the moment the save began.
+        body.put(
+                "offline",
+                Map.of(
+                        "occurred_at",
+                        saved.toString(),
+                        "online_as_of",
+                        saved.minus(Duration.ofMinutes(1)).toString()));
+        String key = UUID.randomUUID().toString();
+        CLOCK.set(LocalDate.of(2026, 11, 1).atTime(7, 0).atZone(KAMPALA).toInstant());
+        ResponseEntity<JsonNode> sent = cb.api.postKeyed("/expenses", body, CASHIER_WITH_EXPENSES, hq.toString(), key);
+        assertThat(sent.getStatusCode()).as("%s", sent.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(sent.getBody().get("business_date").asString()).isEqualTo("2026-10-31");
+        ResponseEntity<JsonNode> again = cb.api.postKeyed("/expenses", body, CASHIER_WITH_EXPENSES, hq.toString(), key);
+        assertThat(RetailTestSupport.id(again)).isEqualTo(RetailTestSupport.id(sent));
+    }
+
+    /** A seller with the till's cash book (issue #799), scoped to the head office, with no backdate permission. */
+    static final String CASHIER_WITH_EXPENSES = CashbookTestSupport.CASHIER;
+
     @Test
     void aSellersSavingsMadeOfflineOnTheLastDayOfAMonthAreKeptOnThatDayWhenSentOnTheFirst() {
         UUID product = cb.api.product("TEST-812-C", 1_000, 1_500);

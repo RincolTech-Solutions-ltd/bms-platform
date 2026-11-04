@@ -266,8 +266,8 @@ otherwise). The entry is then dated the business day of `occurred_at`, judged as
 is now; a time more than 2 minutes before `online_as_of` (a phone clock behind) is refused, 422 `offline_clock_behind`; a time
 more than 7 days ago needs `retail.entry.backdate` (the owner's, issue #811) at every branch ADR-120 asks it at (the source
 of a move and its destination when it completes now, every branch a delivery stocks) and is otherwise refused, 422
-`offline_entry_too_old`; an expense, savings, banking or withdrawal on a day before today whose cash was already banked (an
-active banking record at the branch) needs it at the branch too, else 422 `offline_day_closed`; these refusals are on
+`offline_entry_too_old`; an expense, savings, banking or withdrawal on a day before today whose till was closed (the till is
+closed by banking the day's cash: an active banking record at the branch) needs it at the branch too, else 422 `offline_day_closed`; these refusals are on
 `offline.occurred_at`, record nothing and say in plain words to fix the entry on the phone; a closed period is the ledger's
 `period_closed`; the date field of the route (`business_date`, `purchased_on`, `transfer_date`, `occurred_on`) is not used,
 nor a banking's or withdrawal's time: it is the judged time. Each is audited as `retail.entry.recorded_offline`. Everything

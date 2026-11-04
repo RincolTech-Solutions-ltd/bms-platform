@@ -1768,9 +1768,8 @@ damage keep working with no network, in the same outbox, count and dot as Sell.
   entry was made, so its day is not known. Fix it on the phone to save it as an entry of today."
 - **Fix** never writes over a form with work in it: "That form has other work in it. Save or clear it first, then tap Fix
   again."
-- **A banked day**: an expense, savings, banking or withdrawal kept on the phone that lands on a day whose cash was already
-  banked reads, for anyone but the owner, "Not recorded: The cash of that day was already banked, so only the owner can add to
-  it. Fix it on the phone to save it as an entry of today."
+- **A closed till**: an expense, savings, banking or withdrawal kept on the phone that lands on a day whose till was closed
+  (its cash banked) reads, for anyone but the owner, "Not recorded: That day's till is closed. Ask the owner to enter it."
 - A draft left from an earlier day saves offline as an entry of the day it is kept: offline there is no date box, so nothing
   about the date can hold the save.
 - Offline, an item search with nothing saved on the phone says "Items are not saved on this phone. Search for items when you

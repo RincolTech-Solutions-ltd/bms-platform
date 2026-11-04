@@ -329,7 +329,7 @@ class RetailOfflineEntriesIT extends IntegrationTest {
         assertThat(refused.getStatusCode()).as("%s", refused.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(refused.getBody().toString())
                 .contains("offline_day_closed")
-                .contains("only the owner can add to it");
+                .contains("That day's till is closed. Ask the owner to enter it.");
         assertThat(rows("retail_expenses")).isZero();
 
         ResponseEntity<JsonNode> owners = cb.api.postKeyed(

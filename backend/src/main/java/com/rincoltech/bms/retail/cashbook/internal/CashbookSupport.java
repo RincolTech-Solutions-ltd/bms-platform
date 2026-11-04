@@ -143,8 +143,7 @@ class CashbookSupport {
             throw ApiException.validation(List.of(new FieldProblem(
                     "offline.occurred_at",
                     "offline_day_closed",
-                    "The cash of that day was already banked, so only the owner can add to it. Fix it on the phone to"
-                            + " save it as an entry of today.")));
+                    "That day's till is closed. Ask the owner to enter it.")));
         }
         return day;
     }

@@ -216,11 +216,12 @@ left, the branch, the period, the person's roles.
     not apply to it; past them it is the owner's. Within the 7 days an entry may land on a day already banked, as an offline
     sale may; it shows in that day's cash book. Offline the forms show no date box. Buy stock's
     `purchased_on` is still required by its route and not used for such an entry. A banking's or withdrawal's time sent with
-    it is not used either: it is the judged time. **A closed day** (second review of #839): retail has no till-close record;
-    "Can close the till and do the banking" closes a day by banking it, so a day before today with an active banking record
-    at the branch is closed, and an expense, savings, banking or withdrawal kept offline that lands on it needs
-    `retail.entry.backdate` at the branch and is otherwise refused (422 `offline_day_closed`, "The cash of that day was
-    already banked, so only the owner can add to it."). Stock entries have no cash day to close. A seller's savings made on
+    it is not used either: it is the judged time. **A closed day** (the lead's decision on the second review of #839: a day
+    whose till is closed for the branch): retail keeps no till-close record of its own; the holder of `retail.till.close`
+    ("Can close the till and do the banking") closes a day's till by banking it, so the record of a closed till is an active
+    banking record on that day at the branch. An expense, savings, banking or withdrawal kept offline that lands on a closed
+    day before today needs `retail.entry.backdate` at the branch and is otherwise refused (422 `offline_day_closed`,
+    "That day's till is closed. Ask the owner to enter it."). Stock entries have no cash day to close. A seller's savings made on
     the last day of a month and sent on the first day of the next are kept on their day (the phone dated them within the 7
     days), unlike a date a seller would choose. **Audit:** every entry kept offline writes `retail.entry.recorded_offline`
     (the day, `occurred_at`, `online_as_of`, the day it was entered) in its transaction, so an owner can tell an entry the
