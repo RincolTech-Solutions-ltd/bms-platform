@@ -44,7 +44,11 @@ public record OfflineEntry(
         @Schema(description = "When the entry was made on the phone", requiredMode = Schema.RequiredMode.REQUIRED)
         Instant occurredAt,
 
-        @NotNull
+        // Review of #839: a phone never online since this app was installed cannot say it; the refusal tells its maker
+        // what to do in plain words, as the other offline refusals do.
+        @NotNull(
+                message = "The phone had not been online with this app before this entry was made, so its day is not"
+                        + " known. Fix it on the phone to save it as an entry of today.")
         @Schema(
                 description = "The server's time when the phone was last online",
                 requiredMode = Schema.RequiredMode.REQUIRED)

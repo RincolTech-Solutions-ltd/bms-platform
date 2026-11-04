@@ -205,7 +205,9 @@ left, the branch, the period, the person's roles.
     entry the business day of `occurred_at`, judged as a sale is (decisions 5 and 6), with the lead's decisions on the
     review of #839, because `occurred_at` comes from the phone. `online_as_of` is required: the server's time at the
     phone's last answered ping of `/healthz` (its Date header, kept on the phone for every person, seller or not) or the
-    catalogue's time, whichever is later. A time ahead of the server is now. A time more than 2 minutes before `online_as_of`
+    catalogue's time, whichever is later; a phone never online with this app has neither, and the entry is refused with
+    "The phone had not been online with this app before this entry was made, so its day is not known. Fix it on the phone
+    to save it as an entry of today." A time ahead of the server is now. A time more than 2 minutes before `online_as_of`
     (a phone clock behind) is refused (422 `offline_clock_behind`). A time more than 7 days ago, the same limit as an offline
     sale (its key is answered for 7 days, decision 5), needs the backdate permission of #811 (`retail.entry.backdate`,
     the owner's, ADR-120) at every branch the entry touches and is kept on its own day for the owner; for
@@ -246,9 +248,10 @@ left, the branch, the period, the person's roles.
     every maker-checker answer does. A 409 that is not a key still in progress (the savings suggestion changed, the day is
     saved already) is a refusal, not a retry. (e) **Refused.** The entry stays on the phone with the server's words; it does
     not hold up the entries behind it and is never reported to a manager (the server has no record of it): its maker taps Fix
-    (its form opens on it with a new key), Send again, or Discard (asked first). Fix is not offered when the server may
-    hold the entry (it gave up after its tries, or was still recording it): a new key could record it twice, so only Send
-    again, under its own key, is; Fix is offered once the server has refused that key. Fix opens the form the entry was
+    (its form opens on it with a new key), Send again, or Discard (asked first). Fix and Discard are not offered when the
+    server may hold the entry (it gave up after its tries, or was still recording it): a new key, or the entry discarded
+    and typed again, could record it twice, so only Send again, under its own key, is; Fix and Discard are offered once
+    the server has refused that key. Fix opens the form the entry was
     made in, under that form's own draft name (Buy again on its purchase). (f) **Who.** Whoever records one of these
     forms has offline support now, not only a seller: the outbox, the dot, the sign-out warning and the kept reads (ADR-116).
     Only a seller's phone fills the catalogue copy, which the item pickers of Buy stock, Move stock and usage search while

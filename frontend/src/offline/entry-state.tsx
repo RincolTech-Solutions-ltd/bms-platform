@@ -25,8 +25,9 @@ export function EntryState({ item }: { item: OutboxItem }) {
   const [asking, setAsking] = useState(false);
   const [formInUse, setFormInUse] = useState(false);
   if (item.state !== 'failed') return <p className="muted">{entryStateWords(item)}</p>;
-  // The server may have recorded it (it gave up answering, or was still recording): a new key could save it twice, so
-  // only Send again, under its own key, is offered (third review of #839).
+  // The server may have recorded it (it gave up answering, or was still recording): a new key, or discarding it and typing
+  // it again, could save it twice, so only Send again, under its own key, is offered (the lead's decision 2 on the third
+  // review of #839; Fix and Discard come back once the server has refused that key).
   const maybeRecorded = item.error?.code === GAVE_UP_CODE || IN_PROGRESS_CODES.includes(item.error?.code ?? '');
   const fix = maybeRecorded ? undefined : item.entry?.fix;
   const fixIt = async () => {
@@ -67,9 +68,11 @@ export function EntryState({ item }: { item: OutboxItem }) {
           <button type="button" className="btn-sm" onClick={() => void offline?.engine.sendAgain(item.id)}>
             Send again
           </button>
-          <button type="button" className="btn-ghost btn-sm" onClick={() => setAsking(true)}>
-            Discard
-          </button>
+          {!maybeRecorded && (
+            <button type="button" className="btn-ghost btn-sm" onClick={() => setAsking(true)}>
+              Discard
+            </button>
+          )}
         </div>
       )}
     </>

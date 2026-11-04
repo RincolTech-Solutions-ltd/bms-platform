@@ -1768,7 +1768,7 @@ damage keep working with no network, in the same outbox, count and dot as Sell.
   entry was made, so its day is not known. Fix it on the phone to save it as an entry of today."
 - **Fix** never writes over a form with work in it: "That form has other work in it. Save or clear it first, then tap Fix
   again." It is not shown when the server may hold the entry ("The server did not take this entry after ... tries" or "The
-  server is still recording this entry"): only **Send again** and **Discard**.
+  server is still recording this entry"), and neither is **Discard**: only **Send again**, under the same key.
 - **A closed till**: an expense, savings, banking, withdrawal or delivery paid in cash or by mobile money kept on the phone that lands on a day whose till was closed
   (its cash banked) reads, for anyone but the owner, "Not recorded: That day's till is closed. Ask the owner to enter it."
 - A draft left from an earlier day saves offline as an entry of the day it is kept: offline there is no date box, so nothing

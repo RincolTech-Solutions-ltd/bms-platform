@@ -241,6 +241,10 @@ class RetailOfflineEntriesIT extends IntegrationTest {
             ResponseEntity<JsonNode> r =
                     cb.api.postKeyed(path, b, ALL, "*", UUID.randomUUID().toString());
             assertThat(r.getStatusCode()).as("%s %s", path, r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+            // A phone never online with this app has no online_as_of: plain words that say what to do.
+            assertThat(r.getBody().toString())
+                    .as(path)
+                    .contains("Fix it on the phone to save it as an entry of today.");
         });
     }
 

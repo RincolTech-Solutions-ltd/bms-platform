@@ -248,7 +248,9 @@ describe('a daily form with no network', () => {
     const { offlineEntry } = await import('./entries');
     const { GAVE_UP_CODE } = await import('./outbox');
     const closed = { status: 422, body: { code: 'validation_failed', detail: 'One or more fields are invalid.', errors: [{ field: 'offline.occurred_at', code: 'offline_day_closed', message: "That day's till is closed. Ask the owner to enter it." }] } };
-    const offline = testOffline(admin, { online: true, deps: { send: async () => closed } });
+    let answer: { status: number; body: unknown } = closed;
+    const sends: string[] = [];
+    const offline = testOffline(admin, { online: true, deps: { send: async (i: OutboxItem) => { sends.push(i.key); return answer; } } });
     const fix = { to: '/staff/retail/withdrawals', draftName: `withdrawal:${uid}:${branch}`, draft: { date: today, amount: '700', purpose: '' } };
     await offline?.engine.queue(offlineEntry({ kind: 'withdrawal', key: 'k-closed', scope: offline?.scope ?? '', branchId: branch, branchName: 'Test Shop A', body: {}, now: new Date(), fix }));
     await act(async () => {
@@ -260,9 +262,16 @@ describe('a daily form with no network', () => {
     expect(screen.getByRole('button', { name: 'Fix' })).toBeTruthy();
     cleanup();
     const gaveUp = { ...(refused as OutboxItem), error: { code: GAVE_UP_CODE, message: 'The server did not take this entry after 5 tries.' } };
+    await offline?.engine.queue(gaveUp);
     mount(<EntryState item={gaveUp} />, offline);
     expect(screen.queryByRole('button', { name: 'Fix' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Send again' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Discard' })).toBeNull();
+    // Send again goes under the same key: the server answers that key once, never a second record.
+    answer = { status: 201, body: { id: 'rec-1' } };
+    sends.length = 0;
+    fireEvent.click(screen.getByRole('button', { name: 'Send again' }));
+    await waitFor(() => expect(sends).toEqual(['k-closed']));
+    await waitFor(() => expect(offline?.engine.snapshot().items[0]?.state).toBe('sent'));
   });
 
   it('keeps an entry whose answer was lost online under the same key and body, so the server records it once', async () => {
