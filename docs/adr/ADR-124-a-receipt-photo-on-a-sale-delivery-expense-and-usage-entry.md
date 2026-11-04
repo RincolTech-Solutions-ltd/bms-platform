@@ -24,7 +24,8 @@ yes. A second storage or a second image check would be one more thing to keep sa
    type `upload` whose subject is the record: `retail.sale_receipt_photo`, `retail.delivery_receipt_photo` and
    `retail.usage_receipt_photo` with the sale, restock or usage entry id, and the existing `retail.expense_receipt` for an
    expense. The document's branch is the record's. One copy is kept: a receipt is opened rarely and must stay readable, so
-   no small copy is made, and the small picture on the record is the same image drawn small.
+   no small copy is made, and the small picture on the record is the same image drawn small. `retail.cashbook` declares
+   `retail.catalogue` among its allowed dependencies for this port (it amends the list of ADR-022 decision 1).
 2. **Linked by the subject, so no migration.** A record has a receipt photo when a document of its subject type names it;
    the newest one is shown and earlier ones are kept, as every document is. The records answer `has_receipt_photo`. An
    expense also keeps its `receipt_document_id` when the photo was sent with it; one added later is a document of the
