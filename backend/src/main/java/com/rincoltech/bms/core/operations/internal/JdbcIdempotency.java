@@ -38,7 +38,7 @@ class JdbcIdempotency implements Idempotency {
         this.mapper = mapper;
     }
 
-    private record Stored(boolean mine, String requestHash, String body) {}
+    private record Stored(String requestHash, String body) {}
 
     /**
      * The transaction lock of one key in the bound business. A test that holds a key in progress takes the same lock
@@ -69,16 +69,16 @@ class JdbcIdempotency implements Idempotency {
             jdbc.sql(LOCK_SQL).param(key).query(rs -> {});
             // The caller's own row first; a business may hold one key under two people from before issue #852, and each
             // of them still replays their own.
-            Stored found = jdbc.sql("""
-                            SELECT principal_id = ? AS mine, request_hash FROM idempotency_keys
+            Boolean mine = jdbc.sql("""
+                            SELECT principal_id = ? AS mine FROM idempotency_keys
                              WHERE tenant_id = current_setting('app.tenant_id')::uuid AND key = ?
                              ORDER BY (principal_id = ?) DESC LIMIT 1
                             """)
                     .params(principal, key, principal)
-                    .query((rs, n) -> new Stored(rs.getBoolean(1), rs.getString(2), null))
+                    .query(Boolean.class)
                     .optional()
                     .orElse(null);
-            if (found != null && !found.mine()) {
+            if (Boolean.FALSE.equals(mine)) {
                 // Neither the other person's answer nor whether their request matched this one is told.
                 throw ApiException.rule(
                         Idempotency.OTHER_USER,
@@ -103,10 +103,10 @@ class JdbcIdempotency implements Idempotency {
         if (inserted == 0) {
             Stored stored = jdbc.sql("""
                             SELECT request_hash, response_body::text AS body FROM idempotency_keys
-                             WHERE principal_id = ? AND key = ?
+                             WHERE tenant_id = current_setting('app.tenant_id')::uuid AND principal_id = ? AND key = ?
                             """)
                     .params(principal, key)
-                    .query((rs, n) -> new Stored(true, rs.getString(1), rs.getString(2)))
+                    .query((rs, n) -> new Stored(rs.getString(1), rs.getString(2)))
                     .single();
             if (!stored.requestHash().equals(hash)) {
                 throw ApiException.rule(
@@ -118,7 +118,7 @@ class JdbcIdempotency implements Idempotency {
         jdbc.sql("""
                         UPDATE idempotency_keys SET status = 'completed', response_status = 201,
                                response_body = CAST(? AS jsonb)
-                         WHERE principal_id = ? AND key = ?
+                         WHERE tenant_id = current_setting('app.tenant_id')::uuid AND principal_id = ? AND key = ?
                         """).params(mapper.writeValueAsString(body), principal, key).update();
         return new Outcome<>(body, false);
     }
