@@ -114,7 +114,10 @@ class RetailSupplierDetailsIT extends IntegrationTest {
         assertThat(s.get("name").asString()).isEqualTo("Test Supplier 02");
         assertThat(s.get("details").size()).isZero();
         restock(id, "2026-01-15", t.headOffice());
-        assertThat(api.get("/suppliers/" + id, ADMIN).getBody().get("last_delivery_on").asString())
+        assertThat(api.get("/suppliers/" + id, ADMIN)
+                        .getBody()
+                        .get("last_delivery_on")
+                        .asString())
                 .isEqualTo("2026-01-15");
     }
 
@@ -140,7 +143,9 @@ class RetailSupplierDetailsIT extends IntegrationTest {
         assertThat(audit).contains("payment_terms", "notes", "country").doesNotContain("Cash on delivery", "Kenya");
 
         ResponseEntity<JsonNode> nothing = patch(id, Map.of("details", Map.of("country", "Kenya")));
-        assertThat(nothing.getBody().get("version").asInt()).as("nothing changed").isEqualTo(2);
+        assertThat(nothing.getBody().get("version").asInt())
+                .as("nothing changed")
+                .isEqualTo(2);
     }
 
     /** FR-RET-90: the email must look like one, the website like a web address, and every field has a length. */
@@ -196,7 +201,10 @@ class RetailSupplierDetailsIT extends IntegrationTest {
         restock(id, "2026-02-10", t.headOffice());
         UUID newest = restock(id, "2026-03-01", t.headOffice());
         restock(id, "2026-02-20", t.headOffice());
-        assertThat(api.get("/suppliers/" + id, ADMIN).getBody().get("last_delivery_on").asString())
+        assertThat(api.get("/suppliers/" + id, ADMIN)
+                        .getBody()
+                        .get("last_delivery_on")
+                        .asString())
                 .isEqualTo("2026-03-01");
 
         ResponseEntity<JsonNode> voided = api.postKeyed(
@@ -206,14 +214,20 @@ class RetailSupplierDetailsIT extends IntegrationTest {
                 "*",
                 UUID.randomUUID().toString());
         assertThat(voided.getStatusCode()).as("%s", voided.getBody()).isEqualTo(HttpStatus.OK);
-        assertThat(api.get("/suppliers/" + id, ADMIN).getBody().get("last_delivery_on").asString())
+        assertThat(api.get("/suppliers/" + id, ADMIN)
+                        .getBody()
+                        .get("last_delivery_on")
+                        .asString())
                 .isEqualTo("2026-02-20");
 
         JsonNode listed = byName(api.get("/suppliers", ADMIN).getBody(), "Test Supplier 05");
         assertThat(listed.get("last_delivery_on").asString()).isEqualTo("2026-02-20");
 
         ResponseEntity<JsonNode> typed = patch(id, Map.of("last_delivery_on", "2026-12-01"));
-        assertThat(api.get("/suppliers/" + id, ADMIN).getBody().get("last_delivery_on").asString())
+        assertThat(api.get("/suppliers/" + id, ADMIN)
+                        .getBody()
+                        .get("last_delivery_on")
+                        .asString())
                 .as("never typed: %s", typed.getStatusCode())
                 .isEqualTo("2026-02-20");
     }
@@ -228,13 +242,16 @@ class RetailSupplierDetailsIT extends IntegrationTest {
         UUID second = restock(id, "2026-04-02", t.headOffice());
         restock(other, "2026-04-05", t.headOffice());
 
-        JsonNode page1 = api.get("/suppliers/" + id + "/deliveries?limit=2", ADMIN).getBody();
+        JsonNode page1 =
+                api.get("/suppliers/" + id + "/deliveries?limit=2", ADMIN).getBody();
         assertThat(ids(page1)).containsExactly(third.toString(), second.toString());
         assertThat(page1.get("items").get(0).get("purchased_on").asString()).isEqualTo("2026-04-03");
         assertThat(page1.get("items").get(0).get("purchase_no").asString()).isNotBlank();
         assertThat(page1.get("items").get(0).get("lines").asInt()).isEqualTo(1);
         assertThat(page1.get("items").get(0).get("voided").asBoolean()).isFalse();
-        assertThat(page1.get("items").get(0).has("total_minor")).as("no amount on the list").isFalse();
+        assertThat(page1.get("items").get(0).has("total_minor"))
+                .as("no amount on the list")
+                .isFalse();
         String cursor = page1.get("next_cursor").asString();
         assertThat(cursor).isNotBlank();
 
@@ -243,7 +260,8 @@ class RetailSupplierDetailsIT extends IntegrationTest {
         assertThat(ids(page2)).containsExactly(first.toString());
         assertThat(page2.get("next_cursor").isNull()).isTrue();
 
-        assertThat(api.get("/suppliers/" + id + "/deliveries?cursor=nonsense", ADMIN).getStatusCode())
+        assertThat(api.get("/suppliers/" + id + "/deliveries?cursor=nonsense", ADMIN)
+                        .getStatusCode())
                 .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
     }
 
@@ -258,14 +276,17 @@ class RetailSupplierDetailsIT extends IntegrationTest {
         restock(id, "2026-05-09", t.secondBranch());
 
         String head = t.headOffice().toString();
-        ResponseEntity<JsonNode> scoped = api.call(
-                HttpMethod.GET, "/suppliers/" + id + "/deliveries", null, BUYER, head, Map.of());
+        ResponseEntity<JsonNode> scoped =
+                api.call(HttpMethod.GET, "/suppliers/" + id + "/deliveries", null, BUYER, head, Map.of());
         assertThat(scoped.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(ids(scoped.getBody())).containsExactly(atHead.toString());
-        JsonNode page =
-                api.call(HttpMethod.GET, "/suppliers/" + id, null, BUYER, head, Map.of()).getBody();
+        JsonNode page = api.call(HttpMethod.GET, "/suppliers/" + id, null, BUYER, head, Map.of())
+                .getBody();
         assertThat(page.get("last_delivery_on").asString()).isEqualTo("2026-05-01");
-        assertThat(api.get("/suppliers/" + id, ADMIN).getBody().get("last_delivery_on").asString())
+        assertThat(api.get("/suppliers/" + id, ADMIN)
+                        .getBody()
+                        .get("last_delivery_on")
+                        .asString())
                 .isEqualTo("2026-05-09");
 
         TestDatabase.Fixture otherBusiness = TestDatabase.tenant("retail-supdet-x", false, true);
@@ -277,7 +298,8 @@ class RetailSupplierDetailsIT extends IntegrationTest {
                         .getBody()
                         .get("items"))
                 .isEmpty();
-        assertThat(api.get("/suppliers/" + UUID.randomUUID() + "/deliveries", ADMIN).getStatusCode())
+        assertThat(api.get("/suppliers/" + UUID.randomUUID() + "/deliveries", ADMIN)
+                        .getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
     }
 
@@ -291,8 +313,7 @@ class RetailSupplierDetailsIT extends IntegrationTest {
         assertThat(names(api.get("/suppliers?q=paint", ADMIN).getBody())).containsExactly("Test Paint Depot");
         assertThat(names(api.get("/suppliers?q=0700000201", ADMIN).getBody()))
                 .containsExactly("Test Hardware Wholesale");
-        assertThat(names(api.get("/suppliers?q=256700000202", ADMIN).getBody()))
-                .containsExactly("Test Paint Depot");
+        assertThat(names(api.get("/suppliers?q=256700000202", ADMIN).getBody())).containsExactly("Test Paint Depot");
         assertThat(names(api.get("/suppliers?q=wholesaler", ADMIN).getBody()))
                 .containsExactlyInAnyOrder("Test Hardware Wholesale", "Test Cable House");
         assertThat(names(api.get("/suppliers?q=paint depot", ADMIN).getBody())).containsExactly("Test Paint Depot");
@@ -320,16 +341,21 @@ class RetailSupplierDetailsIT extends IntegrationTest {
                         .get("details")
                         .has("bank_account"))
                 .isFalse();
-        assertThat(api.get("/suppliers/" + id, ADMIN).getBody().get("details").get("bank_account").asString())
+        assertThat(api.get("/suppliers/" + id, ADMIN)
+                        .getBody()
+                        .get("details")
+                        .get("bank_account")
+                        .asString())
                 .isEqualTo("0000111122");
 
-        ResponseEntity<JsonNode> added = api.post(
-                "/suppliers", Map.of("name", "Test Supplier 10", "details", Map.of("notes", "Fine.")), BUYER);
+        ResponseEntity<JsonNode> added =
+                api.post("/suppliers", Map.of("name", "Test Supplier 10", "details", Map.of("notes", "Fine.")), BUYER);
         assertThat(added.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         ResponseEntity<JsonNode> withBank = api.post(
                 "/suppliers", Map.of("name", "Test Supplier 11", "details", Map.of("bank_account", "1234")), BUYER);
         assertThat(withBank.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(withBank.getBody().get("errors").get(0).get("code").asString()).isEqualTo("not_allowed");
+        assertThat(withBank.getBody().get("errors").get(0).get("code").asString())
+                .isEqualTo("not_allowed");
 
         String etag = api.get("/suppliers/" + id, ADMIN).getHeaders().getETag();
         assertThat(api.call(

@@ -69,7 +69,9 @@ class PurchasingController {
 
     @GetMapping("/suppliers/{supplier_id}")
     @RequiresPermission("retail.purchase.create")
-    @Operation(summary = "One supplier with its details and last delivery date (FR-RET-90)", operationId = "getRetailSupplier")
+    @Operation(
+            summary = "One supplier with its details and last delivery date (FR-RET-90)",
+            operationId = "getRetailSupplier")
     ResponseEntity<Supplier> supplier(@PathVariable("supplier_id") UUID id) {
         Supplier s = suppliers.get(id);
         return ResponseEntity.ok().eTag(String.valueOf(s.version())).body(s);

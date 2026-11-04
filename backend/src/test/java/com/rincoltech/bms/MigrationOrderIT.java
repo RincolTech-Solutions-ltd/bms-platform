@@ -3019,7 +3019,8 @@ class MigrationOrderIT {
                             .success)
                     .isTrue();
 
-            assertThat(owner.sql(kept).param(supplier).query(String.class).single()).isEqualTo(was);
+            assertThat(owner.sql(kept).param(supplier).query(String.class).single())
+                    .isEqualTo(was);
             assertThat(owner.sql("SELECT num_nulls(email, address, country, website, payment_terms, bank_account,"
                                     + " supplier_type, notes) FROM retail_suppliers WHERE id = ?")
                             .param(supplier)

@@ -145,7 +145,9 @@ class SuppliersService {
                 pick(was.supplierType(), typed.supplierType()),
                 pick(was.notes(), typed.notes()));
         List<FieldProblem> problems = new ArrayList<>();
-        if (d.email() != null && !Objects.equals(d.email(), was.email()) && !EMAIL.matcher(d.email()).matches()) {
+        if (d.email() != null
+                && !Objects.equals(d.email(), was.email())
+                && !EMAIL.matcher(d.email()).matches()) {
             problems.add(new FieldProblem(
                     "details.email", "invalid", "That email does not look right. Write it like name@example.com."));
         }

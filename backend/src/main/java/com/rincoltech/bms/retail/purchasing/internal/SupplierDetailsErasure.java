@@ -35,7 +35,6 @@ class SupplierDetailsErasure implements PersonalDataEraser {
                            AND (email IS NOT NULL OR address IS NOT NULL OR country IS NOT NULL OR website IS NOT NULL
                                 OR payment_terms IS NOT NULL OR bank_account IS NOT NULL OR supplier_type IS NOT NULL
                                 OR notes IS NOT NULL)
-                        """)
-                .update();
+                        """).update();
     }
 }

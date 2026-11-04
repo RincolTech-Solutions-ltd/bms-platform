@@ -47,7 +47,8 @@ class SuppliersRepository {
     }
 
     /** One of a supplier's deliveries as its page lists it: no amount; the restock itself opens with them. */
-    record DeliveryRow(UUID id, String purchaseNo, LocalDate purchasedOn, Instant createdAt, boolean voided, int lines) {}
+    record DeliveryRow(
+            UUID id, String purchaseNo, LocalDate purchasedOn, Instant createdAt, boolean voided, int lines) {}
 
     /** The supplier with its last delivery date in the reader's scope. */
     Optional<Supplier> supplier(UUID id, Scope scope) {
@@ -69,8 +70,8 @@ class SuppliersRepository {
         if (search == null) {
             sql.append(" ORDER BY lower(s.name), s.id");
         } else {
-            Search.Match match =
-                    search.match(Search.Fields.of().names("s.name", "s.supplier_type").phones("s.contact"));
+            Search.Match match = search.match(
+                    Search.Fields.of().names("s.name", "s.supplier_type").phones("s.contact"));
             params.putAll(match.params());
             sql.append(" WHERE ")
                     .append(match.where())
@@ -78,7 +79,10 @@ class SuppliersRepository {
                     .append(match.rank())
                     .append(", lower(s.name), s.id");
         }
-        return jdbc.sql(sql.toString()).params(params).query(SuppliersRepository::row).list();
+        return jdbc.sql(sql.toString())
+                .params(params)
+                .query(SuppliersRepository::row)
+                .list();
     }
 
     /** The supplier types already used, the most used first, for the form's suggestions. */
@@ -89,9 +93,7 @@ class SuppliersRepository {
                          GROUP BY lower(btrim(supplier_type))
                          ORDER BY count(*) DESC, lower(btrim(supplier_type))
                          LIMIT 50
-                        """)
-                .query(String.class)
-                .list();
+                        """).query(String.class).list();
     }
 
     /**
@@ -113,7 +115,7 @@ class SuppliersRepository {
                 """);
         if (scope.branches() != null) {
             sql.append(" AND EXISTS (SELECT 1 FROM retail_stock_movements m WHERE m.source_type = 'retail.purchase'"
-                    + " AND m.kind = 'purchase' AND m.source_line_id = l.id")
+                            + " AND m.kind = 'purchase' AND m.source_line_id = l.id")
                     .append(inScope)
                     .append(")");
         }

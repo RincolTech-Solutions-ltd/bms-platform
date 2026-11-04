@@ -10,13 +10,17 @@ final class SuppliersApi {
 
     private SuppliersApi() {}
 
-    @Schema(name = "RetailSupplierDelivery", description = "A restock from the supplier; it opens as the restock itself")
+    @Schema(
+            name = "RetailSupplierDelivery",
+            description = "A restock from the supplier; it opens as the restock itself")
     record Delivery(
             UUID id,
             String purchaseNo,
             LocalDate purchasedOn,
             boolean voided,
-            @Schema(description = "How many lines added stock at the branches the caller may read") int lines) {}
+
+            @Schema(description = "How many lines added stock at the branches the caller may read")
+            int lines) {}
 
     @Schema(name = "RetailSupplierDeliveryPage")
     record DeliveryPage(List<Delivery> items, String nextCursor) {}

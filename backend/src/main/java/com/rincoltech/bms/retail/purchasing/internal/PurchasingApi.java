@@ -47,14 +47,20 @@ final class PurchasingApi {
             @Size(max = 254) String email,
             @Size(max = 300) String address,
             @Size(max = 100) String country,
-            @Size(max = 300) @Schema(description = "A web address, with or without https://") String website,
-            @Size(max = 100) @Schema(description = "As typed, for example 30 days") String paymentTerms,
+
+            @Size(max = 300) @Schema(description = "A web address, with or without https://")
+            String website,
+
+            @Size(max = 100) @Schema(description = "As typed, for example 30 days")
+            String paymentTerms,
 
             @Size(max = 60)
             @Schema(description = "Shown only to those who may edit suppliers (retail.catalogue.manage)")
             String bankAccount,
 
-            @Size(max = 60) @Schema(description = "A short free label, for example Wholesaler") String supplierType,
+            @Size(max = 60) @Schema(description = "A short free label, for example Wholesaler")
+            String supplierType,
+
             @Size(max = 1000) String notes) {
 
         static final SupplierDetails NONE = new SupplierDetails(null, null, null, null, null, null, null, null);
@@ -86,7 +92,9 @@ final class PurchasingApi {
             String name,
             String contact,
             boolean active,
-            @Schema(description = "The date added, set by the server") Instant createdAt,
+
+            @Schema(description = "The date added, set by the server")
+            Instant createdAt,
 
             @Schema(description = "Send as If-Match when updating")
             int version,
@@ -95,8 +103,9 @@ final class PurchasingApi {
             SupplierDetails details,
 
             @Schema(
-                    description = "Issue #820: the day of the newest restock from this supplier that is not voided, among"
-                            + " those the caller may list; never typed")
+                    description =
+                            "Issue #820: the day of the newest restock from this supplier that is not voided, among"
+                                    + " those the caller may list; never typed")
             LocalDate lastDeliveryOn) {
 
         Supplier withDetails(SupplierDetails shown) {
