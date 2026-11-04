@@ -38,12 +38,17 @@ export function costOf(m: StockMovement): number | null {
   return m.line_cost_minor ?? null;
 }
 
-/** How many lines of `m`'s entry the list holds, so the undo can say all of them go back (issue #818). */
+/**
+ * Issue #818: how many lines of `m`'s entry the list holds, or 0 when `m` is not the first of them, so Undo this entry shows
+ * once per entry, on its first line, and says how many items go back.
+ */
 export function linesOfEntry(items: StockMovement[], m: StockMovement): number {
-  return m.source_id ? items.filter((x) => x.source_type === m.source_type && x.source_id === m.source_id).length : 1;
+  if (!m.source_id) return 1;
+  const same = items.filter((x) => x.source_type === m.source_type && x.source_id === m.source_id);
+  return same[0]?.id === m.id ? same.length : 0;
 }
 
-function UsageRow({ m, branch, where, lines }: { m: StockMovement; branch?: string; where?: EntryDistance; lines?: number }) {
+function UsageRow({ m, branch, where, lines }: { m: StockMovement; branch?: string; where?: EntryDistance; lines: number }) {
   const cost = costOf(m);
   return (
     <li className="rt-card" data-testid="usage-row">
@@ -59,7 +64,7 @@ function UsageRow({ m, branch, where, lines }: { m: StockMovement; branch?: stri
       {m.note && <p className="hint">Reason: {m.note}</p>}
       {m.undone && <p className="hint" data-testid="usage-undone-words">{undoneWords(m)}. The stock went back.</p>}
       {where && <p className="hint" data-testid="usage-where">Where: {whereWords(where)}</p>}
-      <UndoUsageAction m={m} lines={lines} />
+      {lines > 0 && <UndoUsageAction m={m} lines={lines} />}
     </li>
   );
 }

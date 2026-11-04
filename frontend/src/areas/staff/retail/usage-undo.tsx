@@ -38,9 +38,15 @@ export function UndoneMark() {
   );
 }
 
-/** What the form says goes back: every line of the entry, with how many when the list shows more than one. */
+/** What the form says goes back: every line of the entry, with how many. */
 export function undoWhat(lines: number): string {
-  return lines > 1 ? `All ${lines} items of this entry go back into stock, not only this one.` : 'Every item of this entry goes back into stock.';
+  return lines > 1 ? `All ${lines} items of this entry go back into stock.` : 'The item of this entry goes back into stock.';
+}
+
+/** The toast: the entry undone and how many items were put back. */
+export function undoneToast(m: StockMovement, lines: number): string {
+  const what = lines > 1 ? 'Entry undone' : `${m.description ? `${m.description} entry` : 'Entry'} undone`;
+  return `${what}, ${lines > 1 ? `${lines} items` : '1 item'} put back`;
 }
 
 /** The reason form: what will happen in plain words, a required reason, and one clear button. */
@@ -94,7 +100,7 @@ export function UndoUsageAction({ m, lines = 1 }: { m: StockMovement; lines?: nu
       }
     },
     onSettled: () => { sending.current = false; },
-    meta: { success: lines > 1 ? `Entry of ${lines} items undone, stock put back` : `${m.description ? `${m.description} entry` : 'Entry'} undone, stock put back` },
+    meta: { success: undoneToast(m, lines) },
   });
   if (gone || !undoOffered(me, m)) return null;
   if (!open) return <p><button type="button" className="btn-sm" onClick={() => { send.reset(); setOpen(true); }}>Undo this entry</button></p>;

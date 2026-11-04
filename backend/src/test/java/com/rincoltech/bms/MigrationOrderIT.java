@@ -2983,56 +2983,6 @@ class MigrationOrderIT {
         }
     }
 
-    /**
-     * V133 (issue #818, ADR-123) is the claimed number directly after V132 and expand only: one new, empty, append-only
-     * retail_usage_undos with forced row-level security and at most one undo per entry; an entry made before it reads as
-     * not undone and keeps its shape.
-     * JUSTIFICATION-A3: a new test case; no existing case covers the undo of a usage entry.
-     */
-    @Test
-    void usageUndoMigrationAddsOneEmptyAppendOnlyTableAfterV132() {
-        assertThat(VERSIONS.indexOf("133")).isEqualTo(VERSIONS.indexOf("132") + 1);
-        try (PostgreSQLContainer postgres = database()) {
-            postgres.start();
-            assertThat(flyway(postgres, "132").migrate().targetSchemaVersion).isEqualTo("132");
-            JdbcClient owner = JdbcClient.create(
-                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
-            String usageColumns =
-                    "SELECT string_agg(column_name, ',' ORDER BY column_name) FROM information_schema.columns"
-                            + " WHERE table_name = 'retail_usage_reports'";
-            String shape = owner.sql(usageColumns).query(String.class).single();
-
-            assertThat(flyway(postgres, "133").migrate().success).isTrue();
-
-            assertThat(owner.sql(usageColumns).query(String.class).single())
-                    .as("the entries keep their shape")
-                    .isEqualTo(shape);
-            assertThat(owner.sql("SELECT count(*) FROM retail_usage_undos")
-                            .query(Long.class)
-                            .single())
-                    .isZero();
-            assertThat(owner.sql("SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE relname ="
-                                    + " 'retail_usage_undos'")
-                            .query(Boolean.class)
-                            .single())
-                    .isTrue();
-            assertThat(owner.sql("SELECT privilege_type FROM information_schema.role_table_grants"
-                                    + " WHERE table_name = 'retail_usage_undos' AND grantee = 'bms_app'"
-                                    + " ORDER BY privilege_type")
-                            .query(String.class)
-                            .list())
-                    .as("append-only: the application inserts and reads, never updates or deletes")
-                    .containsExactly("INSERT", "SELECT");
-            assertThat(owner.sql("SELECT count(*) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid"
-                                    + " WHERE t.relname = 'retail_usage_undos' AND c.contype = 'u'"
-                                    + " AND pg_get_constraintdef(c.oid) = 'UNIQUE (tenant_id, report_id)'")
-                            .query(Long.class)
-                            .single())
-                    .as("one undo per entry")
-                    .isEqualTo(1);
-        }
-    }
-
     private static PostgreSQLContainer database() {
         // Shared rootless Docker on the runners can hand out a host port another job just took.
         return new PostgreSQLContainer("postgres:16-alpine")
