@@ -13,6 +13,7 @@ import { EmptyState } from '../../../app/ui/EmptyState';
 import { useStaff } from '../context';
 import { ENTRY_LOCATION, canUse, holds } from './permissions';
 import { useEntryDistances, whereWords } from './entry-location';
+import { UndoUsageAction, UndoneMark, undoneWords } from './usage-undo';
 import { showDate, showQty } from './maths';
 import { Gate, Money, Problem, useBranchName, useBranchView } from './ui';
 
@@ -44,13 +45,16 @@ function UsageRow({ m, branch, where }: { m: StockMovement; branch?: string; whe
       <p>
         <strong>{m.description}</strong> {m.code && <span className="hint">({m.code})</span>}{' '}
         <span className={m.kind === 'damage' ? 'badge badge-warning' : 'badge badge-info'}>{m.kind === 'damage' ? 'Damaged' : 'Used'}</span>
+        {m.undone && <>{' '}<UndoneMark /></>}
       </p>
       <p>
         <span className="num">{takenOut(m)}</span> taken out on {showDate(dayOf(m))}{branch ? ` at ${branch}` : ''}.
         {cost !== null && <> Worth <Money minor={cost} /> at buying price.</>}
       </p>
       {m.note && <p className="hint">Reason: {m.note}</p>}
+      {m.undone && <p className="hint" data-testid="usage-undone-words">{undoneWords(m)}. The stock went back.</p>}
       {where && <p className="hint" data-testid="usage-where">Where: {whereWords(where)}</p>}
+      <UndoUsageAction m={m} />
     </li>
   );
 }
@@ -136,7 +140,7 @@ export function UsageHistoryPage() {
   const where = useEntryDistances('usage', items.map(usage), holds(me, ENTRY_LOCATION));
   return (
     <Gate screen="stock" title="Past usage and damage">
-      <Hint>Every item taken out of stock as used in the shop or damaged. Choose the days, the branch at the top of the page, or one item.</Hint>
+      <Hint>Every item taken out of stock as used in the shop or damaged. Choose the days, the branch at the top of the page, or one item. An entry undone stays here marked Undone and counts in no total.</Hint>
       <div data-tour="usage-history-filters">
         <PeriodPicker from={from} to={to} onChange={(range) => { setFrom(range.from); setTo(range.to); }} />
         <SearchBox id="usage-history-item-search" label="Item (type part of its name or code)" search={itemBox} fetching={products.isPlaceholderData || products.isFetching} count={itemSearch !== '' && products.data ? products.data.length : undefined} />
