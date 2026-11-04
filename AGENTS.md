@@ -911,7 +911,8 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   `usage_undone` the second time, 422 `usage_imported` for imported history, audit `retail.usage.undone`. Movements carry
   `undone`; Past usage and damage shows Undone in words with an icon and an Undo this entry button with a reason
   (`usage-undo.tsx`), and its grouped totals, the daily profit's usage and the stock health's usage leave undone entries
-  out; Controls gains `usage_undos`; Undo this entry shows once per entry and names how many items go back. Tests:
+  out; Controls gains `usage_undos`; Undo this entry shows once per entry, and the toast names how many items went back
+  from the answer's `items_back`, never from the list. Tests:
   `RetailUsageUndoIT` (also two undos at once and another business's entry), `usage-undo.dom.test.tsx`,
   `controls-state.test.ts`, `layout/usage-undo.layout.test.ts`.
 - **Built (Past usage and damage, issue #145, AppSheet "Damaged or used stock not sold"):** no migration and no permission.

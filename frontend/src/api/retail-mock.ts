@@ -1418,7 +1418,7 @@ export function createMockRetail(): RetailApi {
           m.undone = undone;
         });
         const first = moved[0];
-        return { report_id: reportId, branch_id: first?.branch_id, kind: first?.kind === 'damage' ? 'damaged' : 'used', undone_on: today(), undone_at: undone.at, undone_by: undone.by, reason: undone.reason };
+        return { report_id: reportId, branch_id: first?.branch_id, kind: first?.kind === 'damage' ? 'damaged' : 'used', items_back: moved.length, undone_on: today(), undone_at: undone.at, undone_by: undone.by, reason: undone.reason };
       }),
 
     createStocktake: (body) => {

@@ -22977,6 +22977,11 @@
             "format" : "uuid",
             "type" : "string"
           },
+          "items_back" : {
+            "description" : "How many items of the entry went back into stock, every line of it",
+            "format" : "int32",
+            "type" : "integer"
+          },
           "kind" : {
             "type" : "string"
           },

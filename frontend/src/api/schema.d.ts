@@ -19869,6 +19869,11 @@ export interface components {
         RetailUsageUndone: {
             /** Format: uuid */
             branch_id?: string;
+            /**
+             * Format: int32
+             * @description How many items of the entry went back into stock, every line of it
+             */
+            items_back?: number;
             kind?: string;
             reason?: string;
             /** Format: uuid */

@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useId, useRef, useState } from 'react';
 import type { Me } from '../../../api/client';
-import { RetailError, businessToday, retail, type StockMovement } from '../../../api/retail';
+import { RetailError, businessToday, retail, type StockMovement, type UsageUndone } from '../../../api/retail';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { icons } from '../../../components/icons';
 import { useStaff } from '../context';
@@ -38,19 +38,20 @@ export function UndoneMark() {
   );
 }
 
-/** What the form says goes back: every line of the entry, with how many. */
-export function undoWhat(lines: number): string {
-  return lines > 1 ? `All ${lines} items of this entry go back into stock.` : 'The item of this entry goes back into stock.';
-}
+/**
+ * What the form says goes back. The list may be filtered to one item or split across pages, so it never knows how many lines
+ * an entry has; the form names no number, and the toast takes the server's count.
+ */
+export const UNDO_WHAT = 'Every item of this entry goes back into stock, on every line.';
 
-/** The toast: the entry undone and how many items were put back. */
-export function undoneToast(m: StockMovement, lines: number): string {
-  const what = lines > 1 ? 'Entry undone' : `${m.description ? `${m.description} entry` : 'Entry'} undone`;
-  return `${what}, ${lines > 1 ? `${lines} items` : '1 item'} put back`;
+/** The toast, from the server's count of the items that went back. */
+export function undoneToast(m: StockMovement, itemsBack: number | undefined): string {
+  const n = itemsBack ?? 1;
+  return n > 1 ? `Entry undone, ${n} items put back` : `${m.description ? `${m.description} entry` : 'Entry'} undone, 1 item put back`;
 }
 
 /** The reason form: what will happen in plain words, a required reason, and one clear button. */
-export function UndoFormView({ lines = 1, busy, error, onUndo, onCancel }: { lines?: number; busy?: boolean; error?: unknown; onUndo: (reason: string) => void; onCancel: () => void }) {
+export function UndoFormView({ busy, error, onUndo, onCancel }: { busy?: boolean; error?: unknown; onUndo: (reason: string) => void; onCancel: () => void }) {
   const [reason, setReason] = useState('');
   const id = useId();
   const ready = reason.trim();
@@ -63,7 +64,7 @@ export function UndoFormView({ lines = 1, busy, error, onUndo, onCancel }: { lin
         if (ready !== '' && !busy) onUndo(ready);
       }}
     >
-      <p className="hint" data-testid="undo-what">{undoWhat(lines)}</p>
+      <p className="hint" data-testid="undo-what">{UNDO_WHAT}</p>
       <p className="hint">The entry stays here, marked Undone.</p>
       <label htmlFor={id}>Why is this entry wrong?</label>
       <input id={id} value={reason} maxLength={300} required onChange={(e) => setReason(e.target.value)} />
@@ -77,7 +78,7 @@ export function UndoFormView({ lines = 1, busy, error, onUndo, onCancel }: { lin
 }
 
 /** Undo this entry, for whoever may delete a sale at the entry's shop; nothing shows for anyone else or once it is undone. */
-export function UndoUsageAction({ m, lines = 1 }: { m: StockMovement; lines?: number }) {
+export function UndoUsageAction({ m }: { m: StockMovement }) {
   const { me } = useStaff();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -100,11 +101,11 @@ export function UndoUsageAction({ m, lines = 1 }: { m: StockMovement; lines?: nu
       }
     },
     onSettled: () => { sending.current = false; },
-    meta: { success: undoneToast(m, lines) },
+    meta: { success: (done: UsageUndone) => undoneToast(m, done.items_back) },
   });
   if (gone || !undoOffered(me, m)) return null;
   if (!open) return <p><button type="button" className="btn-sm" onClick={() => { send.reset(); setOpen(true); }}>Undo this entry</button></p>;
-  return <UndoFormView lines={lines} busy={send.isPending} error={send.error} onUndo={(reason) => {
+  return <UndoFormView busy={send.isPending} error={send.error} onUndo={(reason) => {
     if (sending.current) return;
     sending.current = true;
     send.mutate(reason);

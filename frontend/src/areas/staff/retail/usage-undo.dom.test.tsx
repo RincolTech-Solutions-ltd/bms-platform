@@ -35,7 +35,7 @@ vi.mock('../../../api/retail', async (original) => {
   };
 });
 
-const { UsageHistoryPage } = await import('./usage-history');
+const { UsageHistoryPage, firstLines } = await import('./usage-history');
 const { undoOffered, undoneWords } = await import('./usage-undo');
 const { DoneToast, doneToasts } = await import('./toast');
 const { RetailError } = await import('../../../api/retail');
@@ -77,7 +77,7 @@ describe('Undo a usage or damage entry', () => {
 
   it('asks for a reason, sends it, and says it worked in the toast', async () => {
     usageHistory.mockResolvedValue({ items: [damaged] });
-    undoUsage.mockResolvedValue({ report_id: 'r1', reason: 'Wrong item' });
+    undoUsage.mockResolvedValue({ report_id: 'r1', reason: 'Wrong item', items_back: 1 });
     wrap(<UsageHistoryPage />);
     const row = await screen.findByTestId('usage-row');
     fireEvent.click(within(row).getByRole('button', { name: 'Undo this entry' }));
@@ -86,7 +86,7 @@ describe('Undo a usage or damage entry', () => {
     fireEvent.click(within(form).getByRole('button', { name: 'Yes, undo it' }));
     await new Promise((r) => setTimeout(r, 50));
     expect(undoUsage).not.toHaveBeenCalled();
-    expect(within(form).getByTestId('undo-what').textContent).toBe('The item of this entry goes back into stock.');
+    expect(within(form).getByTestId('undo-what').textContent).toBe('Every item of this entry goes back into stock, on every line.');
     fireEvent.change(within(form).getByLabelText('Why is this entry wrong?'), { target: { value: '  Wrong item ' } });
     fireEvent.click(within(row).getByRole('button', { name: 'Yes, undo it' }));
     await waitFor(() => expect(undoUsage).toHaveBeenCalledWith('r1', 'Wrong item'));
@@ -99,7 +99,7 @@ describe('Undo a usage or damage entry', () => {
     const third: StockMovement = { ...damaged, id: 'm4', product_id: 'p3', description: 'Test roller' };
     const other: StockMovement = { ...damaged, id: 'm5', source_id: 'r9', description: 'Test tape' };
     usageHistory.mockResolvedValue({ items: [damaged, second, third, other] });
-    undoUsage.mockResolvedValue({ report_id: 'r1', reason: 'Wrong entry' });
+    undoUsage.mockResolvedValue({ report_id: 'r1', reason: 'Wrong entry', items_back: 3 });
     wrap(<UsageHistoryPage />);
     await waitFor(() => expect(screen.getAllByTestId('usage-row')).toHaveLength(4));
     expect(screen.getAllByRole('button', { name: 'Undo this entry' })).toHaveLength(2);
@@ -107,11 +107,35 @@ describe('Undo a usage or damage entry', () => {
     expect(within(two!).queryByRole('button', { name: 'Undo this entry' })).toBeNull();
     expect(within(three!).queryByRole('button', { name: 'Undo this entry' })).toBeNull();
     fireEvent.click(within(row!).getByRole('button', { name: 'Undo this entry' }));
-    expect(within(row!).getByTestId('undo-what').textContent).toBe('All 3 items of this entry go back into stock.');
+    expect(within(row!).getByTestId('undo-what').textContent).toBe('Every item of this entry goes back into stock, on every line.');
     fireEvent.change(within(row!).getByLabelText('Why is this entry wrong?'), { target: { value: 'Wrong entry' } });
     fireEvent.click(within(row!).getByRole('button', { name: 'Yes, undo it' }));
     await waitFor(() => expect(undoUsage).toHaveBeenCalledWith('r1', 'Wrong entry'));
     expect(await screen.findByText('Entry undone, 3 items put back')).toBeTruthy();
+  });
+
+  // JUSTIFICATION-A3: the review of 56e3ad9 asks for a filtered list and an entry split across pages.
+  it('names no count the list cannot know: filtered to one item, the toast takes the server count of 3', async () => {
+    // Past usage and damage narrowed to Test paint: one line of a three line entry shows.
+    usageHistory.mockResolvedValue({ items: [damaged] });
+    undoUsage.mockResolvedValue({ report_id: 'r1', reason: 'Wrong entry', items_back: 3 });
+    wrap(<UsageHistoryPage />);
+    const row = await screen.findByTestId('usage-row');
+    fireEvent.click(within(row).getByRole('button', { name: 'Undo this entry' }));
+    const what = within(row).getByTestId('undo-what').textContent ?? '';
+    expect(what).toBe('Every item of this entry goes back into stock, on every line.');
+    expect(what).not.toMatch(/\d/);
+    fireEvent.change(within(row).getByLabelText('Why is this entry wrong?'), { target: { value: 'Wrong entry' } });
+    fireEvent.click(within(row).getByRole('button', { name: 'Yes, undo it' }));
+    expect(await screen.findByText('Entry undone, 3 items put back')).toBeTruthy();
+    expect(screen.queryByText(/1 item put back/)).toBeNull();
+  });
+
+  it('marks each entry once even when its lines are split across pages, the undone words on its first line only', () => {
+    const page1: StockMovement[] = [undone, { ...undone, id: 'm6' }];
+    const page2: StockMovement[] = [{ ...undone, id: 'm7' }, damaged];
+    expect([...firstLines([...page1, ...page2])]).toEqual(['m2', 'm1']);
+    expect([...firstLines(page1)]).toEqual(['m2']);
   });
 
   it('names the stock that came back on the item page as an undo, never as a customer return', () => {

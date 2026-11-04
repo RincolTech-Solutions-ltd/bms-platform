@@ -127,6 +127,7 @@ class RetailUsageUndoIT extends IntegrationTest {
         ResponseEntity<JsonNode> done = undo(report, "Counted twice by mistake", ADMIN);
         assertThat(done.getStatusCode()).as("%s", done.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(done.getBody().get("undone_on").asString()).isEqualTo("2026-10-13");
+        assertThat(done.getBody().get("items_back").asInt()).isEqualTo(1);
         assertThat(done.getBody().get("reason").asString()).isEqualTo("Counted twice by mistake");
         assertThat(balance()).isEqualByComparingTo("10");
         assertThat(inventory()).isEqualTo(valueBefore);
@@ -189,6 +190,31 @@ class RetailUsageUndoIT extends IntegrationTest {
                 .extracting(a -> a.get("action"))
                 .containsExactly("retail.usage.reported", "retail.usage.undone");
         assertThat(audits.get(1).get("data").toString()).contains("Counted twice by mistake");
+    }
+
+    // JUSTIFICATION-A3: the review of 56e3ad9 asks the count to come from the server; a two-item entry proves it.
+    @Test
+    void anEntryOfTwoItemsPutsBothBackAndSaysSo() {
+        UUID brush = api.product("UU-2", 100, 200);
+        api.stockUp(hq, brush, "5");
+        ResponseEntity<JsonNode> r = api.postKeyed(
+                "/usage",
+                Map.of(
+                        "branch_id",
+                        hq,
+                        "kind",
+                        "damaged",
+                        "reason",
+                        "Test entry",
+                        "lines",
+                        List.of(Map.of("product_id", product, "qty", "1"), Map.of("product_id", brush, "qty", "2"))),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        ResponseEntity<JsonNode> done = undo(RetailTestSupport.id(r), "Wrong entry", ADMIN);
+        assertThat(done.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(done.getBody().get("items_back").asInt()).isEqualTo(2);
+        assertThat(balance()).isEqualByComparingTo("10");
     }
 
     @Test

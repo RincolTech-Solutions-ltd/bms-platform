@@ -87,6 +87,9 @@ final class UsageApi {
             UUID branchId,
             String kind,
 
+            @Schema(description = "How many items of the entry went back into stock, every line of it")
+            int itemsBack,
+
             @Schema(description = "The business day the stock went back and the reversal is dated")
             LocalDate undoneOn,
 

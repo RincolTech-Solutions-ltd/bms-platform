@@ -39,16 +39,23 @@ export function costOf(m: StockMovement): number | null {
 }
 
 /**
- * Issue #818: how many lines of `m`'s entry the list holds, or 0 when `m` is not the first of them, so Undo this entry shows
- * once per entry, on its first line, and says how many items go back.
+ * Issue #818: the movements that are the first line of their entry in the list, worked out once per list, so Undo this entry
+ * and the Undone words show once per entry. How many lines an entry has is the server's to say, never counted here.
  */
-export function linesOfEntry(items: StockMovement[], m: StockMovement): number {
-  if (!m.source_id) return 1;
-  const same = items.filter((x) => x.source_type === m.source_type && x.source_id === m.source_id);
-  return same[0]?.id === m.id ? same.length : 0;
+export function firstLines(items: StockMovement[]): Set<string> {
+  const seen = new Set<string>();
+  const first = new Set<string>();
+  for (const m of items) {
+    const entry = m.source_id ? `${m.source_type ?? ''}|${m.source_id}` : `line|${m.id ?? ''}`;
+    if (!seen.has(entry)) {
+      seen.add(entry);
+      first.add(m.id ?? '');
+    }
+  }
+  return first;
 }
 
-function UsageRow({ m, branch, where, lines }: { m: StockMovement; branch?: string; where?: EntryDistance; lines: number }) {
+function UsageRow({ m, branch, where, first }: { m: StockMovement; branch?: string; where?: EntryDistance; first: boolean }) {
   const cost = costOf(m);
   return (
     <li className="rt-card" data-testid="usage-row">
@@ -62,9 +69,9 @@ function UsageRow({ m, branch, where, lines }: { m: StockMovement; branch?: stri
         {cost !== null && <> Worth <Money minor={cost} /> at buying price.</>}
       </p>
       {m.note && <p className="hint">Reason: {m.note}</p>}
-      {m.undone && <p className="hint" data-testid="usage-undone-words">{undoneWords(m)}. The stock went back.</p>}
+      {m.undone && first && <p className="hint" data-testid="usage-undone-words">{undoneWords(m)}. The stock went back.</p>}
       {where && <p className="hint" data-testid="usage-where">Where: {whereWords(where)}</p>}
-      {lines > 0 && <UndoUsageAction m={m} lines={lines} />}
+      {first && <UndoUsageAction m={m} />}
     </li>
   );
 }
@@ -108,12 +115,13 @@ function UsageRows({ sel, all, nameOf }: { sel: ListSelection; all: boolean; nam
     getNextPageParam: (last) => last.next_cursor || undefined,
   });
   const items = (page.data?.pages ?? []).flatMap((p) => p.items ?? []);
+  const first = firstLines(items);
   return (
     <>
       {page.isPending && <p className="loading">Loading</p>}
       <Problem error={page.error} />
       <ul style={{ listStyle: 'none', padding: 0 }}>
-        {items.map((m) => <UsageRow key={m.id} m={m} branch={all && !sel.branchId ? nameOf(m.branch_id) : undefined} lines={linesOfEntry(items, m)} />)}
+        {items.map((m) => <UsageRow key={m.id} m={m} branch={all && !sel.branchId ? nameOf(m.branch_id) : undefined} first={first.has(m.id ?? '')} />)}
       </ul>
       {page.hasNextPage && <button type="button" onClick={() => void page.fetchNextPage()} disabled={page.isFetchingNextPage}>{page.isFetchingNextPage ? 'Loading' : 'Show older records'}</button>}
     </>
@@ -145,6 +153,7 @@ export function UsageHistoryPage() {
     enabled: ready && !grouped,
   });
   const items = (page.data?.pages ?? []).flatMap((p) => p.items ?? []);
+  const first = firstLines(items);
   // ADR-122: how far from the shop each entry was made, for the owner only (asked for the entries, not the lines).
   const usage = (m: StockMovement) => (m.source_type === 'retail.usage' ? (m.source_id ?? '') : '');
   const where = useEntryDistances('usage', items.map(usage), holds(me, ENTRY_LOCATION));
@@ -184,7 +193,7 @@ export function UsageHistoryPage() {
         />
       )}
       <ul style={{ listStyle: 'none', padding: 0 }} data-tour="usage-history-list">
-        {items.map((m) => <UsageRow key={m.id} m={m} branch={all ? nameOf(m.branch_id) : undefined} where={where.get(usage(m))} lines={linesOfEntry(items, m)} />)}
+        {items.map((m) => <UsageRow key={m.id} m={m} branch={all ? nameOf(m.branch_id) : undefined} where={where.get(usage(m))} first={first.has(m.id ?? '')} />)}
       </ul>
       {page.hasNextPage && <button type="button" onClick={() => void page.fetchNextPage()} disabled={page.isFetchingNextPage}>{page.isFetchingNextPage ? 'Loading' : 'Show older records'}</button>}
       </>}

@@ -137,6 +137,7 @@ class UsageUndoService {
                         reportId,
                         report.branchId(),
                         report.kind(),
+                        moved.size(),
                         today,
                         rs.getTimestamp("created_at").toInstant(),
                         by,
