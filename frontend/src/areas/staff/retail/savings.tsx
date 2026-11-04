@@ -95,7 +95,7 @@ export function SavingsForm({ branchId, onSaved }: { branchId: string; onSaved?:
         () => retail.createSavings(plan.request, key, { salesStaff }),
       );
     },
-    meta: { success: 'Savings saved' },
+    meta: { success: (saved: Savings) => (saved?.amount_minor != null ? `Savings of ${money(saved.amount_minor)} saved` : 'Savings for the day saved') },
     onSuccess: (saved) => {
       if (isKept(saved)) {
         discard();

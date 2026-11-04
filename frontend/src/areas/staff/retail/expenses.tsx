@@ -60,7 +60,7 @@ export function ExpenseForm({ branchId, onSaved, onWaiting, replaces, onCancel }
       { kind: 'expense', body: plan.request, key, branchId, detail, amountMinor: plan.request.amount_minor, fix: { to: '/staff/retail/expenses', draftName: name, draft } },
       () => retail.createExpense(plan.request, key),
     )),
-    meta: { success: (saved: Expense) => (isWaiting(saved) ? null : replaces ? 'Expense updated' : 'Expense saved') },
+    meta: { success: (saved: Expense) => (isWaiting(saved) ? null : `Expense${saved.amount_minor != null ? ` of ${money(saved.amount_minor)}` : ''} ${replaces ? 'updated' : 'saved'}`) },
     onSuccess: (saved) => {
       if (isKept(saved)) {
         discard();

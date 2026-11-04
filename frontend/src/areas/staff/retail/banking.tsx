@@ -57,7 +57,10 @@ export function BankingForm({ branchId, onSaved }: { branchId: string; onSaved?:
       { kind: 'banking', body, key, branchId, detail: draft.reference.trim() || undefined, amountMinor: body.amount_minor, fix: { to: '/staff/retail/banking', draftName: name, draft } },
       () => retail.createBanking(body, key),
     ),
-    meta: { success: 'Banking saved' },
+    meta: { success: (saved: Banking) => {
+      const amount = saved?.amount_minor ?? minor;
+      return amount != null ? `Banking of ${money(amount)} saved` : 'Banking for the day saved';
+    } },
     onSuccess: (saved) => {
       if (isKept(saved)) {
         discard();

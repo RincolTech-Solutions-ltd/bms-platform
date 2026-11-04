@@ -35,7 +35,10 @@ export function WithdrawalForm({ branchId, onSaved }: { branchId: string; onSave
       { kind: 'withdrawal', body, key, branchId, detail: draft.purpose.trim() || undefined, amountMinor: body.amount_minor, fix: { to: '/staff/retail/withdrawals', draftName: name, draft } },
       () => retail.createWithdrawal(body, key),
     ),
-    meta: { success: 'Withdrawal saved' },
+    meta: { success: (saved: Withdrawal) => {
+      const amount = saved?.amount_minor ?? minor;
+      return amount != null ? `Withdrawal of ${money(amount)} saved` : 'Withdrawal for the day saved';
+    } },
     onSuccess: (saved) => {
       if (isKept(saved)) {
         discard();
