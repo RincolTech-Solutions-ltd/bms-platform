@@ -76,7 +76,7 @@ describe('Banking for the Till role and the savings switch (#814)', () => {
     expect(amount.value).toBe('120000');
     fireEvent.click(screen.getByRole('button', { name: 'Save banking' }));
     await waitFor(() => expect(api.createBanking).toHaveBeenCalledTimes(1));
-    expect(api.createBanking.mock.calls[0][0]).toMatchObject({ branch_id: branch, amount_minor: 120000 });
+    expect(api.createBanking.mock.calls[0]?.[0]).toMatchObject({ branch_id: branch, amount_minor: 120000 });
   });
 
   it('with the switch off shows the cash expected only and fills the amount with it, as before', async () => {
