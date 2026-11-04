@@ -87,6 +87,16 @@ questions are not settled by chapters 3 and 6 as written:
    last old instance stops, two people sending one key can each run their work under it (the
    behaviour before issue #852). Rows stored that way are the ones the non-unique index allows
    for; nothing is repaired afterwards. The window is the length of the container switch (ADR-006).
+   **Jobs and callbacks.** Every caller of `Idempotency.once` (75 call sites, listed in
+   `IdempotencyCallersTest`) runs on a staff, member or operator request: `once` reads the
+   person from `CurrentPrincipal`, which only the authentication filter sets
+   (`SecurityArchitectureTest`), so no job, listener or payment callback calls it today, and one
+   that did would get 401 before any work. The jobs and the gateway callback deduplicate on their
+   own rows (the task instance, the payment intent). Work with no signed-in person that needs the
+   key protocol uses `Idempotency.onceAsJob(job, ...)`: the key is held under a stable principal
+   per job (a name-based UUID of the job's name, never equal to a person's random one), so a
+   retried run replays the first run's answer; another job or a person with the key is refused
+   like another person. Test: `IdempotencyJobRetryIT`.
 
 Also decided here, within the rules of chapter 3:
 

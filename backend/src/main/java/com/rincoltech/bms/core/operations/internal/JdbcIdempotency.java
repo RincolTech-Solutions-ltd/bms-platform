@@ -51,6 +51,18 @@ class JdbcIdempotency implements Idempotency {
     @Transactional(propagation = Propagation.MANDATORY)
     public <T> Outcome<T> once(
             String key, String method, String path, Object request, Class<T> responseType, Supplier<T> work) {
+        return run(CurrentPrincipal.require().userId(), key, method, path, request, responseType, work);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public <T> Outcome<T> onceAsJob(
+            String job, String key, String method, String path, Object request, Class<T> type, Supplier<T> work) {
+        return run(Idempotency.jobPrincipal(job), key, method, path, request, type, work);
+    }
+
+    private <T> Outcome<T> run(
+            UUID principal, String key, String method, String path, Object request, Class<T> type, Supplier<T> work) {
         if (key == null || key.isBlank()) {
             throw ApiException.rule(
                     "idempotency_key_missing",
@@ -60,7 +72,6 @@ class JdbcIdempotency implements Idempotency {
             throw ApiException.validation(
                     List.of(new FieldProblem("Idempotency-Key", "invalid", "The key must be 8 to 100 characters.")));
         }
-        UUID principal = CurrentPrincipal.require().userId();
         String hash = sha256(method + " " + path + "\n" + mapper.writeValueAsString(request));
         jdbc.sql("SET LOCAL lock_timeout = '5s'").update();
         int inserted;
@@ -112,7 +123,7 @@ class JdbcIdempotency implements Idempotency {
                 throw ApiException.rule(
                         Idempotency.KEY_REUSED, "This Idempotency-Key was used for a different request.");
             }
-            return new Outcome<>(mapper.readValue(stored.body(), responseType), true);
+            return new Outcome<>(mapper.readValue(stored.body(), type), true);
         }
         T body = work.get();
         jdbc.sql("""
