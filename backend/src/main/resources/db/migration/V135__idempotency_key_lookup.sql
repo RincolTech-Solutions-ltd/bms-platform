@@ -14,6 +14,12 @@
 -- the old protocol allowed). They stay as they are and stay safe: each of those people still replays only their own
 -- row, and anyone else is refused. Keys are kept 7 days (CoreJobs), so such rows are gone a week after the deploy.
 --
--- A plain CREATE INDEX, not CONCURRENTLY, which cannot run inside Flyway's transaction: the table holds 7 days of keys.
+-- Built CONCURRENTLY, so keyed writes in every business go on while it builds; a plain CREATE INDEX would hold a SHARE
+-- lock that turns them into 409 idempotency_in_progress after 5 seconds. CONCURRENTLY cannot run in a transaction, so
+-- V135__idempotency_key_lookup.sql.conf sets executeInTransaction=false for this script alone. The build waits for
+-- transactions already open on the table to end, without blocking anyone. If it fails part way, Postgres leaves an
+-- INVALID index behind; the DROP first means that, after `flyway repair`, running the migration again builds it afresh.
 
-CREATE INDEX idempotency_keys_tenant_key ON idempotency_keys (tenant_id, key);
+DROP INDEX CONCURRENTLY IF EXISTS idempotency_keys_tenant_key;
+
+CREATE INDEX CONCURRENTLY idempotency_keys_tenant_key ON idempotency_keys (tenant_id, key);

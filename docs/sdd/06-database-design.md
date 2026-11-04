@@ -1010,7 +1010,9 @@ in the business transaction, so they are gap-free (FR-DOC-04).
 
 PK `(tenant_id, principal_id, key)`. Index `idempotency_keys_tenant_key (tenant_id, key)` (V135, issue #852), not unique:
 a key is read across the people of a business so that a replay answers only the person who stored it and anyone else is
-refused; rows stored before V135 may hold one key under two people. Behaviour in chapter 7 section 7.8.
+refused; rows stored before V135 may hold one key under two people. V135 builds it `CONCURRENTLY` outside a transaction
+(its `.sql.conf` sets `executeInTransaction=false`), so keyed writes go on during the build. Behaviour in chapter 7
+section 7.8.
 
 ### `outbox_events` (RLS)
 

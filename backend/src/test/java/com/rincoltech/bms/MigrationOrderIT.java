@@ -3079,6 +3079,12 @@ class MigrationOrderIT {
                             .single())
                     .doesNotContain("UNIQUE")
                     .contains("(tenant_id, key)");
+            // Built CONCURRENTLY outside a transaction (V135__idempotency_key_lookup.sql.conf): finished and usable.
+            assertThat(owner.sql("SELECT indisvalid AND indisready FROM pg_index"
+                                    + " WHERE indexrelid = 'idempotency_keys_tenant_key'::regclass")
+                            .query(Boolean.class)
+                            .single())
+                    .isTrue();
         }
     }
 
