@@ -233,12 +233,27 @@ class RetailReceiptPhotosIT extends IntegrationTest {
                         .get("has_receipt_photo")
                         .asBoolean())
                 .isTrue();
-        // ADR-055: another seller, who sees only their own sales, does not see this one's photo either.
+        // ADR-055: another seller, who sees only their own sales, does not see this one's photo either, nor adds one.
         RetailTestSupport otherSeller = new RetailTestSupport(http, t);
         assertThat(image(otherSeller, "/sales/" + sale + "/receipt-photo", SALES, "*")
                         .getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(upload(otherSeller, "/sales/" + sale + "/receipt-photo", png(100, 100), SALES, "*")
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        // The owner, who holds every permission in every branch, always sees it.
+        RetailTestSupport owner = new RetailTestSupport(http, t);
+        assertThat(image(owner, "/sales/" + sale + "/receipt-photo", ALL, "*").getStatusCode())
+                .isEqualTo(HttpStatus.OK);
         assertThat(cb.auditPayloads("retail.sale.receipt_photo_added")).hasSize(1);
+
+        // A voided sale takes no photo.
+        assertThat(api.post("/sales/" + sale + "/void", Map.of("reason", "Test entered twice"), ADMIN)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        ResponseEntity<JsonNode> voided = upload(api, "/sales/" + sale + "/receipt-photo", png(100, 100), SALES, "*");
+        assertThat(voided.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(voided.getBody().get("code").asString()).isEqualTo("record_voided");
     }
 
     @Test
@@ -266,6 +281,14 @@ class RetailReceiptPhotosIT extends IntegrationTest {
         JsonNode rows = api.get("/stock/movements?kind=damage", ADMIN).getBody().get("items");
         assertThat(rows.get(0).get("source_id").asString()).isEqualTo(entry.toString());
         assertThat(rows.get(0).get("has_receipt_photo").asBoolean()).isTrue();
+
+        // An undone entry takes no more photos.
+        assertThat(api.post("/usage/" + entry + "/undo", Map.of("reason", "Test wrong entry"), ADMIN)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(upload(api, "/usage/" + entry + "/receipt-photo", png(100, 100), SALES, "*")
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CONFLICT);
     }
 
     @Test
@@ -277,6 +300,25 @@ class RetailReceiptPhotosIT extends IntegrationTest {
         JsonNode listed = cb.get("/expenses", ALL).getBody().get("items").get(0);
         assertThat(listed.get("id").asString()).isEqualTo(expense.toString());
         assertThat(listed.hasNonNull("receipt_document_id")).isTrue();
+
+        // JUSTIFICATION-A3: the review of #846 asks for the reuse case and the voided record to be tested.
+        // An expense of another shop that names this photo is refused, so the photo never becomes readable there.
+        Map<String, Object> elsewhere = new LinkedHashMap<>();
+        elsewhere.put("branch_id", t.secondBranch());
+        elsewhere.put("category_id", expenseItem()[0]);
+        elsewhere.put("item_id", expenseItem()[1]);
+        elsewhere.put("amount_minor", 1_000);
+        elsewhere.put("receipt_document_id", listed.get("receipt_document_id").asString());
+        ResponseEntity<JsonNode> reused = cb.post("/expenses", elsewhere, CashbookTestSupport.CASHBOOK_ADMIN);
+        assertThat(reused.getStatusCode()).as("%s", reused.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(reused.getBody().get("errors").get(0).get("code").asString()).isEqualTo("unknown_document");
+
+        // A voided expense takes no more photos.
+        assertThat(cb.voidIt("/expenses/" + expense, "Entered twice", ALL).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(upload(api, "/expenses/" + expense + "/receipt-photo", png(100, 100), "retail.expense.record", "*")
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CONFLICT);
     }
 
     @Test

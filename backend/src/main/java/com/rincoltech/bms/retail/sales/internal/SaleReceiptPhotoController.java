@@ -9,6 +9,7 @@ import com.rincoltech.bms.retail.catalogue.ReceiptPhotos.Kind;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -51,11 +52,17 @@ class SaleReceiptPhotoController {
     ReceiptPhotos.Added add(@PathVariable("sale_id") UUID id, @RequestPart("file") MultipartFile file) {
         Principal principal = CurrentPrincipal.require();
         return new ReceiptPhotos.Added(photos.attach(Kind.SALE, id, ReceiptPhotos.bytes(file), () -> {
-            UUID branch = rule.branchSeen(principal, id);
-            if (branch == null || !principal.may("retail.sale.create", branch)) {
-                throw ApiException.notFound();
+            // Review of #846: the seller who made the sale adds its photo, or someone who sees every seller's sales
+            // there; a colleague's credit sale, seen to take a payment, takes none from them. A voided sale takes none.
+            SalesApi.Sale sale = rule.seen(principal, id)
+                    .filter(s -> principal.may("retail.sale.create", s.branchId()))
+                    .filter(s -> principal.may(SalesSummaryService.ALL_SELLERS, s.branchId())
+                            || Objects.equals(principal.userId(), s.createdBy()))
+                    .orElseThrow(ApiException::notFound);
+            if ("voided".equals(sale.status())) {
+                throw ReceiptPhotos.voided();
             }
-            return branch;
+            return sale.branchId();
         }));
     }
 
@@ -85,19 +92,17 @@ class SaleReceiptPhotoController {
 
         @Override
         public boolean canSee(Principal principal, UUID recordId, UUID photoId) {
-            return branchSeen(principal, recordId) != null;
+            return seen(principal, recordId).isPresent();
         }
 
-        /** The sale's branch when the caller sees the sale, else null. */
-        UUID branchSeen(Principal principal, UUID saleId) {
+        /** The sale when the caller sees it, as {@code GET /retail/sales/{sale_id}} does, else empty. */
+        Optional<SalesApi.Sale> seen(Principal principal, UUID saleId) {
             return repo.find(saleId, false)
                     .map(SalesRepository.Header::sale)
                     .filter(s -> principal.may("retail.sale.read", s.branchId()))
                     .filter(s -> principal.may(SalesSummaryService.ALL_SELLERS, s.branchId())
                             || Objects.equals(principal.userId(), s.createdBy())
-                            || SalesSummaryService.stillOwed(s))
-                    .map(SalesApi.Sale::branchId)
-                    .orElse(null);
+                            || SalesSummaryService.stillOwed(s));
         }
     }
 }

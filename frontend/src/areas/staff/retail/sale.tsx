@@ -50,7 +50,7 @@ import { useBranchHold } from '../branch-picker';
 import { SELL_COUNT_NOTE, savingCount, unfinishedKey } from './unfinished-counts';
 import { icons } from '../../../components/icons';
 import { LocationAsk, useWhereNow } from './entry-location';
-import { ReceiptPhotoChoice, sendReceiptPhoto, withPhotoNote } from './receipt-photo';
+import { ReceiptPhotoChoice, sendReceiptPhotoAfter } from './receipt-photo';
 
 // Record a sale (FR-RET-04, FR-RET-05). One idempotency key per draft, kept with the draft in this
 // tab until the sale is saved or the draft is cleared: a double tap, a retry after a lost answer or a
@@ -288,20 +288,16 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
   // network, goes to the outbox at once under the same key, with when it was taken (recorded offline), and the provisional
   // receipt shows. The answer that comes later is ignored here; the server finds the sale by its client sale id, or answers
   // from the key, whose hash leaves the delivery fields out, so the sale is recorded once (ADR-067 decision 5).
-  // Issue #819: the optional receipt photo goes once the sale is recorded, never with a sale kept on the phone.
+  // Issue #819: the optional receipt photo goes after the sale is recorded and said, never holding the form, and never with a
+  // sale kept on the phone; it is cleared on every save, kept or sent, so it never goes with the next sale.
   const [receipt, setReceipt] = useState<File | null>(null);
-  const photoNote = useRef<string | null>(null);
-  const withPhoto = async (sale: Sale) => {
-    photoNote.current = await sendReceiptPhoto('sale', sale.id, receipt);
-    return { sale };
-  };
   const save = useMutation({
-    meta: { success: (r: { sale: Sale } | { kept: OutboxItem }) => (r && 'kept' in r ? 'Sale saved on this phone' : withPhotoNote(r?.sale?.total_minor !== undefined ? `Sale of ${money(r.sale.total_minor)} saved` : 'Sale saved', photoNote.current)) },
+    meta: { success: (r: { sale: Sale } | { kept: OutboxItem }) => (r && 'kept' in r ? 'Sale saved on this phone' : r?.sale?.total_minor !== undefined ? `Sale of ${money(r.sale.total_minor)} saved` : 'Sale saved') },
     mutationFn: async ({ body, at, pricesAt }: { body: SaleRequest; at: string; pricesAt?: string }): Promise<{ sale: Sale } | { kept: OutboxItem }> => {
       const asked = retail.createSale(body, key);
-      if (!offline || !mayKeepOnPhone({ body })) return withPhoto(await asked);
+      if (!offline || !mayKeepOnPhone({ body })) return { sale: await asked };
       try {
-        return await withPhoto(await answerWithin(asked, SALE_ANSWER_MS));
+        return { sale: await answerWithin(asked, SALE_ANSWER_MS) };
       } catch (e) {
         // Only no answer in time or a network failure (fetch's TypeError); a 401 or any refusal is a RetailError and stays here.
         // A write is never refreshed and sent again inside the client (only reads are), so the race is the sale request alone.
@@ -321,6 +317,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       if (e instanceof RetailError) setDraft((d) => ({ ...d, sent: undefined }));
     },
     onSuccess: (done) => {
+      setReceipt(null);
+      if (!('kept' in done)) sendReceiptPhotoAfter('sale', done.sale.id, receipt);
       if ('kept' in done) {
         // The sale goes to the server from the outbox: its confirmed warnings are recorded and forgotten, as for a sent sale.
         entry.saved();
@@ -333,7 +331,6 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       const { sale } = done;
       entry.saved();
       finish();
-      setReceipt(null);
       void queryClient.invalidateQueries({ queryKey: ['retail', 'products'] });
       void queryClient.invalidateQueries({ queryKey: ['retail', 'stock'] });
       // Home's shop figures (issue #485) count the sale at once.
@@ -667,6 +664,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     },
     onSuccess: (item) => {
       finish();
+      setReceipt(null);
       if (offline?.connectivity.online()) void offline.engine.sync();
       onQueued?.(item);
     },
@@ -685,6 +683,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     discard();
     setAddingBuyer(false);
     setReceived('');
+    setReceipt(null);
     setConfirmClear(false);
     save.reset();
   };

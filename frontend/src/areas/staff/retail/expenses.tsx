@@ -23,7 +23,7 @@ import { AddByName, EmptyChoice, showsEmptyChoice, type AddInline, type ChoiceAd
 import { addOn } from './screen-link';
 import type { Kept } from '../../../offline/entries';
 import { EditNeedsInternet, KeptOnPhone, OfflineFormNote, isKept, useEntrySave } from '../../../offline/keep-entry';
-import { RECEIPT_LATER, ReceiptPhoto, ReceiptPhotoChoice, withPhotoNote } from './receipt-photo';
+import { RECEIPT_LATER, ReceiptPhoto, ReceiptPhotoChoice, bounded, withPhotoNote } from './receipt-photo';
 
 // Company expenses (FR-RET-24): shop, date, category, then an item of that category, an optional
 // beneficiary, the amount, and an explanation when the item needs one. An optional receipt photo (issue #819, ADR-124) is
@@ -56,7 +56,8 @@ export function ExpenseForm({ branchId, onSaved, onWaiting, replaces, onCancel }
   const plan = planExpense({ branchId, ...draft, entry }, list);
   const detail = [list.find((c) => c.id === draft.categoryId)?.name, items.find((i) => i.id === draft.itemId)?.name].filter(Boolean).join(', ');
   // Issue #819: the photo is sent once per file chosen, so a retry under the same key names the same document; an edit keeps
-  // the photo the expense had unless another is chosen. A photo that fails is left out and the saved message says so.
+  // the photo the expense had unless another is chosen. A photo that fails, or takes longer than RECEIPT_SEND_MS, is left out,
+  // the expense is saved without it and the saved message says so. Every save, kept on the phone or sent, clears the photo.
   const [receipt, setReceipt] = useState<File | null>(null);
   const sentReceipt = useRef<{ file: File; id?: string } | null>(null);
   const photoNote = useRef<string | null>(null);
@@ -65,7 +66,7 @@ export function ExpenseForm({ branchId, onSaved, onWaiting, replaces, onCancel }
     let id = replaces?.receipt_document_id;
     if (receipt && !entries.offlineMode) {
       if (sentReceipt.current?.file !== receipt) {
-        sentReceipt.current = await retail.sendExpenseReceiptPhoto(receipt).then((r) => ({ file: receipt, id: r.photo_id }), () => null);
+        sentReceipt.current = await bounded((signal) => retail.sendExpenseReceiptPhoto(receipt, signal)).then((r) => ({ file: receipt, id: r.photo_id }), () => null);
       }
       if (sentReceipt.current?.id) id = sentReceipt.current.id;
       else photoNote.current = RECEIPT_LATER;
@@ -85,6 +86,8 @@ export function ExpenseForm({ branchId, onSaved, onWaiting, replaces, onCancel }
     },
     meta: { success: (saved: Expense) => (isWaiting(saved) ? null : withPhotoNote(`Expense${saved.amount_minor != null ? ` of ${money(saved.amount_minor)}` : ''} ${replaces ? 'updated' : 'saved'}`, photoNote.current)) },
     onSuccess: (saved) => {
+      setReceipt(null);
+      sentReceipt.current = null;
       if (isKept(saved)) {
         discard();
         return;

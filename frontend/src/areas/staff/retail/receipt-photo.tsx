@@ -5,6 +5,7 @@ import { Sheet } from '../../../app/ui/Sheet';
 import { retail, type ReceiptKind } from '../../../api/retail';
 import { useOnline } from '../../../offline/offline-context';
 import { PHOTO_TYPES, photoProblem } from './item-photo';
+import { sayDone } from './toast';
 
 // A photo of the paper receipt on a sale, a delivery, a usage or damage entry and an expense (issue #819, ADR-124, FR-RET-89),
 // as the owner's old app had. One optional button on each form, through the item photo's upload and limits; the form saves the
@@ -21,15 +22,42 @@ export const RECEIPT_LATER = 'The receipt photo was not saved. Add it from the e
 /** The saved message with what happened to the photo after it, when it was not saved. */
 export const withPhotoNote = (words: string, note: string | null): string => (note ? words + '. ' + note : words);
 
-/** Sends the photo of an entry just saved; the words to add to the saved message when it failed, or null. */
-export async function sendReceiptPhoto(kind: ReceiptKind, recordId: string | undefined, file: File | null): Promise<string | null> {
+/** The longest a receipt photo is given to go up (review of #846): on a weak link it is stopped, never left to hold anything. */
+export const RECEIPT_SEND_MS = 30_000;
+
+/**
+ * Runs `send` with an abort signal and settles within `ms` whatever the network does: the answer, or a rejection once the
+ * time is up (the upload is aborted too).
+ */
+export function bounded<T>(send: (signal: AbortSignal) => Promise<T>, ms: number = RECEIPT_SEND_MS): Promise<T> {
+  const stop = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => { stop.abort(); reject(new Error('The receipt photo took too long to send.')); }, ms);
+  });
+  return Promise.race([send(stop.signal), late]).finally(() => clearTimeout(timer));
+}
+
+/** Sends the photo of an entry just saved, within the time limit; the words to say when it failed, or null. */
+export async function sendReceiptPhoto(kind: ReceiptKind, recordId: string | undefined, file: File | null, ms: number = RECEIPT_SEND_MS): Promise<string | null> {
   if (!file || !recordId) return null;
   try {
-    await retail.addReceiptPhoto(kind, recordId, file);
+    await bounded((signal) => retail.addReceiptPhoto(kind, recordId, file, signal), ms);
     return null;
   } catch {
     return RECEIPT_LATER;
   }
+}
+
+/**
+ * The photo of an entry already saved and said, sent after the save so it never holds the form (review of #846): the next
+ * entry can start at once, and only a photo that was not saved is said, in the app's toast.
+ */
+export function sendReceiptPhotoAfter(kind: ReceiptKind, recordId: string | undefined, file: File | null): void {
+  if (!file || !recordId) return;
+  void sendReceiptPhoto(kind, recordId, file).then((note) => {
+    if (note) sayDone(note);
+  });
 }
 
 /** The picture of a chosen or stored photo, drawn from a blob. */

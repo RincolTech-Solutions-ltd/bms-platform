@@ -54,11 +54,13 @@ class UsageReceiptPhotoController {
             operationId = "addRetailUsageReceiptPhoto")
     ReceiptPhotos.Added add(@PathVariable("report_id") UUID id, @RequestPart("file") MultipartFile file) {
         Principal principal = CurrentPrincipal.require();
-        return new ReceiptPhotos.Added(photos.attach(
-                Kind.USAGE,
-                id,
-                ReceiptPhotos.bytes(file),
-                () -> rule.branch(id).filter(b -> principal.may(ADD, b)).orElseThrow(ApiException::notFound)));
+        return new ReceiptPhotos.Added(photos.attach(Kind.USAGE, id, ReceiptPhotos.bytes(file), () -> {
+            UUID branch = rule.branch(id).filter(b -> principal.may(ADD, b)).orElseThrow(ApiException::notFound);
+            if (rule.undone(id)) {
+                throw ReceiptPhotos.voided();
+            }
+            return branch;
+        }));
     }
 
     @GetMapping(path = "/usage/{report_id}/receipt-photo", produces = MediaType.ALL_VALUE)
@@ -88,6 +90,14 @@ class UsageReceiptPhotoController {
         @Override
         public boolean canSee(Principal principal, UUID recordId, UUID photoId) {
             return branch(recordId).filter(b -> principal.may(READ, b)).isPresent();
+        }
+
+        /** The entry was undone (issue #818): it takes no receipt photo. */
+        boolean undone(UUID reportId) {
+            return jdbc.sql("SELECT EXISTS (SELECT 1 FROM retail_usage_undos WHERE report_id = ?)")
+                    .param(reportId)
+                    .query(Boolean.class)
+                    .single();
         }
 
         /** The entry's branch, in the caller's transaction; empty when there is no such entry in this business. */

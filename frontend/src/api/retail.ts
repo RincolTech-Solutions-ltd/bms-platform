@@ -473,9 +473,9 @@ export interface RetailApi {
   /** The image of a photo (`photo_id` or `item_photo_id`), from the same origin; `small` is the 240 px copy for cards and pickers. */
   photo(photoId: string, signal?: AbortSignal, small?: boolean): Promise<Blob>;
   /** Issue #819 (ADR-124): adds the photo of the paper receipt to a saved sale, delivery, usage entry or expense. */
-  addReceiptPhoto(kind: ReceiptKind, recordId: string, file: Blob): Promise<ReceiptPhotoAdded>;
+  addReceiptPhoto(kind: ReceiptKind, recordId: string, file: Blob, signal?: AbortSignal): Promise<ReceiptPhotoAdded>;
   /** The expense form's photo, sent before the expense; its `photo_id` goes in as `receipt_document_id`. */
-  sendExpenseReceiptPhoto(file: Blob): Promise<ReceiptPhotoAdded>;
+  sendExpenseReceiptPhoto(file: Blob, signal?: AbortSignal): Promise<ReceiptPhotoAdded>;
   /** The receipt photo of a record, from the same origin; 404 when it has none. */
   receiptPhoto(kind: ReceiptKind, recordId: string, signal?: AbortSignal): Promise<Blob>;
   /** The pack sizes of an item (the units capability, issue #194); 404 capability_not_enabled while it is off. */
@@ -919,12 +919,12 @@ const realRetail: RetailApi = {
   },
 
   // JUSTIFICATION-A3: issue #819 adds three routes per record kind; each typed path needs its own call.
-  async addReceiptPhoto(kind, recordId, file) {
-    return postFile<ReceiptPhotoAdded>(`/api/v1/retail/${RECEIPT_RECORDS[kind]}/${encodeURIComponent(recordId)}/receipt-photo`, file, 'receipt', {});
+  async addReceiptPhoto(kind, recordId, file, signal) {
+    return postFile<ReceiptPhotoAdded>(`/api/v1/retail/${RECEIPT_RECORDS[kind]}/${encodeURIComponent(recordId)}/receipt-photo`, file, 'receipt', {}, { signal });
   },
 
-  async sendExpenseReceiptPhoto(file) {
-    return postFile<ReceiptPhotoAdded>('/api/v1/retail/expenses/receipt-photos', file, 'receipt', {});
+  async sendExpenseReceiptPhoto(file, signal) {
+    return postFile<ReceiptPhotoAdded>('/api/v1/retail/expenses/receipt-photos', file, 'receipt', {}, { signal });
   },
 
   async receiptPhoto(kind, recordId, signal) {

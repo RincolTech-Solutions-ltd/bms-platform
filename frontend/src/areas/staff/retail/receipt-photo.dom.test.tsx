@@ -35,7 +35,7 @@ vi.mock('../../../api/retail', async (original) => {
   };
 });
 
-const { ReceiptPhoto, ReceiptPhotoChoice, RECEIPT_OFFLINE, RECEIPT_LATER } = await import('./receipt-photo');
+const { ReceiptPhoto, ReceiptPhotoChoice, RECEIPT_OFFLINE, RECEIPT_LATER, bounded, sendReceiptPhoto } = await import('./receipt-photo');
 const { ExpenseForm } = await import('./expenses');
 const { UsageForm } = await import('./usage');
 const { SaleDetail } = await import('./sales');
@@ -138,9 +138,53 @@ describe('a form with a receipt photo', () => {
     choose('Add receipt photo', file);
     fireEvent.click(screen.getAllByRole('button', { name: 'Save' }).find((b) => b.getAttribute('type') === 'submit') as HTMLButtonElement);
     await waitFor(() => expect(saved).toHaveBeenCalled());
-    expect(calls.mock.calls.map((c) => c[0])).toEqual(['createUsage', 'addReceiptPhoto']);
-    expect(calls.mock.calls[1]?.slice(1)).toEqual(['usage', 'u1', file]);
+    await waitFor(() => expect(calls.mock.calls.map((c) => c[0])).toEqual(['createUsage', 'addReceiptPhoto']));
+    expect(calls.mock.calls[1]?.slice(1, 4)).toEqual(['usage', 'u1', file]);
+    expect(calls.mock.calls[1]?.[4]).toBeInstanceOf(AbortSignal);
     expect(RECEIPT_LATER).toBe('The receipt photo was not saved. Add it from the entry.');
+  });
+
+  // JUSTIFICATION-A3: the review of #846 asks for tests of a photo that never answers and one that never carries over.
+  it('never holds the save while the photo is still going up (review of #846)', async () => {
+    sessionStorage.setItem(`retail-draft:usage:${uid}:${branch}`, JSON.stringify({ key: 'k-slow', draft: { kind: 'used', reason: 'Test fitting', lines: [{ product: cable, qty: '1' }] } }));
+    calls.mockImplementation((name: string) => (name === 'addReceiptPhoto' ? new Promise(() => {}) : Promise.resolve({ id: 'u2', kind: 'used', lines: [] })));
+    const saved = vi.fn();
+    mount(<UsageForm branchId={branch} onSaved={saved} />);
+    choose('Add receipt photo', photo());
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save' }).find((b) => b.getAttribute('type') === 'submit') as HTMLButtonElement);
+    await waitFor(() => expect(saved).toHaveBeenCalled());
+    // The form is free and its photo cleared at once, though the photo has not answered.
+    expect(screen.queryByRole('img', { name: 'The receipt photo chosen' })).toBeNull();
+  });
+
+  it('bounds a photo that never answers, so nothing waits on it', async () => {
+    await expect(bounded(() => new Promise(() => {}), 20)).rejects.toThrow('The receipt photo took too long to send.');
+    calls.mockImplementation(() => new Promise(() => {}));
+    expect(await sendReceiptPhoto('sale', 's9', photo(), 20)).toBe(RECEIPT_LATER);
+  });
+
+  it('saves the expense without its photo when the photo cannot be sent, and says so', async () => {
+    sessionStorage.setItem(`retail-draft:expense:${uid}:${branch}`, JSON.stringify({ key: 'k-exp2', draft: { date: businessToday(), categoryId: 'c1', itemId: 'i1', partyId: '', amount: '5000', explanation: '' } }));
+    calls.mockImplementation((name: string) => (name === 'sendExpenseReceiptPhoto' ? Promise.reject(new Error('no network')) : Promise.resolve({ id: 'e2', amount_minor: 5000 })));
+    mount(<ExpenseForm branchId={branch} />);
+    choose('Add receipt photo', photo());
+    fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
+    await waitFor(() => expect(calls).toHaveBeenCalledWith('createExpense', expect.not.objectContaining({ receipt_document_id: expect.anything() }), 'k-exp2'));
+  });
+
+  it('never carries a photo to the next entry after one kept on the phone when the network dropped (review of #846)', async () => {
+    sessionStorage.setItem(`retail-draft:usage:${uid}:${branch}`, JSON.stringify({ key: 'k-drop', draft: { kind: 'used', reason: 'Test fitting', lines: [{ product: cable, qty: '1' }] } }));
+    const { markDropped } = await import('../../../api/client');
+    calls.mockImplementation(() => Promise.reject(markDropped(new TypeError('Failed to fetch'))));
+    mount(<UsageForm branchId={branch} />);
+    choose('Add receipt photo', photo());
+    expect(screen.getByRole('img', { name: 'The receipt photo chosen' })).toBeTruthy();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save' }).find((b) => b.getAttribute('type') === 'submit') as HTMLButtonElement);
+    await screen.findByTestId('kept-on-phone');
+    fireEvent.click(screen.getByRole('button', { name: 'Record another' }));
+    expect(screen.getByLabelText('Add receipt photo')).toBeTruthy();
+    expect(screen.queryByRole('img', { name: 'The receipt photo chosen' })).toBeNull();
+    expect(calls.mock.calls.map((c) => c[0])).toEqual(['createUsage']);
   });
 
   it('keeps an entry on the phone offline without any photo and says so', async () => {

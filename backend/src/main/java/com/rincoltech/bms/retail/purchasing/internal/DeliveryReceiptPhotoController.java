@@ -48,7 +48,11 @@ class DeliveryReceiptPhotoController {
             operationId = "addRetailPurchaseReceiptPhoto")
     ReceiptPhotos.Added add(@PathVariable("purchase_id") UUID id, @RequestPart("file") MultipartFile file) {
         return new ReceiptPhotos.Added(photos.attach(Kind.DELIVERY, id, ReceiptPhotos.bytes(file), () -> {
-            purchases.visible(id).orElseThrow(ApiException::notFound);
+            String status =
+                    purchases.visible(id).orElseThrow(ApiException::notFound).status();
+            if ("voided".equals(status)) {
+                throw ReceiptPhotos.voided();
+            }
             return null;
         }));
     }

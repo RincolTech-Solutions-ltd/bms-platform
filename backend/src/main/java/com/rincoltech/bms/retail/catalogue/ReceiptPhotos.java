@@ -81,6 +81,15 @@ public interface ReceiptPhotos {
         boolean canSee(Principal principal, UUID recordId, UUID photoId);
     }
 
+    /** 409 {@code record_voided}: a voided sale, delivery or expense, or an undone usage entry, takes no receipt photo. */
+    static ApiException voided() {
+        return new ApiException(
+                HttpStatus.CONFLICT,
+                "record_voided",
+                "Entry deleted",
+                "This entry was deleted or undone, so it takes no receipt photo.");
+    }
+
     /** The bytes of an uploaded file part; 400 when it cannot be read. */
     static byte[] bytes(MultipartFile file) {
         try {

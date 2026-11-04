@@ -228,10 +228,13 @@ class ExpenseService {
                     .orElseThrow(() -> ApiException.validation(
                             List.of(new FieldProblem("party_id", "unknown_party", "No such active beneficiary."))));
         }
+        // Review of #846: a receipt named by, or added to, an expense of another branch is not this one's to name, so
+        // its photo never becomes readable at this branch; the same receipt again at its own branch (an edit) is kept.
         if (r.receiptDocumentId() != null
                 && documents
                         .find(r.receiptDocumentId())
                         .filter(d -> RECEIPT_SUBJECT.equals(d.subjectType()))
+                        .filter(d -> !repo.receiptElsewhere(d.id(), d.subjectId(), branch))
                         .isEmpty()) {
             throw ApiException.validation(
                     List.of(new FieldProblem("receipt_document_id", "unknown_document", "No such uploaded receipt.")));

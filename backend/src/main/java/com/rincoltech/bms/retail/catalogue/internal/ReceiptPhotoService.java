@@ -54,9 +54,18 @@ class ReceiptPhotoService implements ReceiptPhotos {
     @Override
     public UUID upload(Kind kind, byte[] bytes, UUID branchId) {
         Documents.Prepared prepared = documents.prepareImage(bytes, PhotoService.PHOTO);
-        return transactions.execute(s -> documents
-                .store(prepared, kind.subjectType(), UUID.randomUUID(), branchId)
-                .id());
+        return transactions.execute(s -> {
+            Documents.StoredDocument stored =
+                    documents.store(prepared, kind.subjectType(), UUID.randomUUID(), branchId);
+            // Review of #846: a photo sent before its record is audited too, by who sent it, as every photo added is.
+            audit.record(AuditLog.Entry.created(
+                    kind.entityType() + ".receipt_photo_sent",
+                    "core.document",
+                    stored.id(),
+                    branchId,
+                    Map.of("subject_type", kind.subjectType())));
+            return stored.id();
+        });
     }
 
     @Override

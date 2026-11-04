@@ -64,14 +64,15 @@ class ExpenseReceiptPhotoController {
             operationId = "addRetailExpenseReceiptPhoto")
     ReceiptPhotos.Added add(@PathVariable("expense_id") UUID id, @RequestPart("file") MultipartFile file) {
         Principal principal = CurrentPrincipal.require();
-        return new ReceiptPhotos.Added(photos.attach(
-                Kind.EXPENSE,
-                id,
-                ReceiptPhotos.bytes(file),
-                () -> repo.expense(id, false)
-                        .map(CashbookRepository.ExpenseRow::branchId)
-                        .filter(b -> principal.may(CashbookSupport.EXPENSE_RECORD, b))
-                        .orElseThrow(ApiException::notFound)));
+        return new ReceiptPhotos.Added(photos.attach(Kind.EXPENSE, id, ReceiptPhotos.bytes(file), () -> {
+            CashbookRepository.ExpenseRow e = repo.expense(id, false)
+                    .filter(x -> principal.may(CashbookSupport.EXPENSE_RECORD, x.branchId()))
+                    .orElseThrow(ApiException::notFound);
+            if (e.voided().voided()) {
+                throw ReceiptPhotos.voided();
+            }
+            return e.branchId();
+        }));
     }
 
     @GetMapping(path = "/expenses/{expense_id}/receipt-photo", produces = MediaType.ALL_VALUE)

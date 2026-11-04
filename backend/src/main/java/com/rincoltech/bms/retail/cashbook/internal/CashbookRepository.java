@@ -827,6 +827,19 @@ class CashbookRepository {
                 .update();
     }
 
+    /** Issue #819: the receipt is named by, or was added to, an expense of a branch other than {@code branch}. */
+    boolean receiptElsewhere(UUID documentId, UUID subjectId, UUID branch) {
+        return jdbc.sql("""
+                        SELECT EXISTS (SELECT 1 FROM retail_expenses
+                                        WHERE (receipt_document_id = :doc OR id = :subject) AND branch_id <> :branch)
+                        """)
+                .param("doc", documentId)
+                .param("subject", subjectId)
+                .param("branch", branch)
+                .query(Boolean.class)
+                .single();
+    }
+
     Optional<ExpenseRow> expense(UUID id, boolean forUpdate) {
         return jdbc.sql(EXPENSE_SELECT + " WHERE t.id = ?" + (forUpdate ? " FOR UPDATE OF t" : ""))
                 .param(id)
