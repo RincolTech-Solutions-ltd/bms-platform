@@ -43,9 +43,7 @@ class SalesRepository {
                    (SELECT w.reason FROM retail_sale_writeoffs w WHERE w.sale_id = retail_sales.id) AS written_off_reason,
                    (SELECT w.fee_minor FROM retail_sale_writeoffs w WHERE w.sale_id = retail_sales.id) AS written_off_fee_minor,
                    (SELECT o.delivery_fee_minor FROM retail_customer_orders o WHERE o.sale_id = retail_sales.id
-                       AND o.fee_method = 'account' AND o.fee_paid_at IS NULL AND retail_sales.status = 'completed') AS fee_owed,
-                   EXISTS (SELECT 1 FROM documents d WHERE d.subject_type = 'retail.sale_receipt_photo'
-                       AND d.subject_id = retail_sales.id) AS has_receipt_photo
+                       AND o.fee_method = 'account' AND o.fee_paid_at IS NULL AND retail_sales.status = 'completed') AS fee_owed
               FROM retail_sales
             """;
 
@@ -577,7 +575,8 @@ class SalesRepository {
                                 instant(rs, "occurred_at"),
                                 rs.getBoolean("recorded_offline"),
                                 List.of()),
-                rs.getBoolean("has_receipt_photo"));
+                // Issue #819: marked by SalesService through the receipt photo port, not read here.
+                false);
     }
 
     // ---- Payments --------------------------------------------------------------------------

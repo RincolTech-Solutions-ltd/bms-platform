@@ -510,11 +510,12 @@ class RetailCashbookExpensesIT extends IntegrationTest {
         TestDatabase.owner()
                 .sql("""
                         INSERT INTO documents (id, tenant_id, doc_type, subject_type, subject_id, object_key, content_type,
-                            size_bytes, sha256)
+                            size_bytes, sha256, created_by)
                         VALUES (?, ?, 'upload', ?, gen_random_uuid(), 'tenants/' || ?::text || '/test/' || ?::text,
-                            'application/pdf', 10, repeat('a', 64))
+                            'application/pdf', 10, repeat('a', 64), ?)
                         """)
-                .params(id, t.tenantId(), subjectType, t.tenantId(), id)
+                // Issue #819: an expense names only a receipt its recorder sent, so the fabricated one is theirs.
+                .params(id, t.tenantId(), subjectType, t.tenantId(), id, cb.api.userId())
                 .update();
         return id;
     }

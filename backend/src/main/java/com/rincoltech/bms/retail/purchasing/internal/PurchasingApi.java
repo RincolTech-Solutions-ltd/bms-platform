@@ -295,6 +295,30 @@ final class PurchasingApi {
                     false);
         }
 
+        // JUSTIFICATION-A3: the lead's decision on #846 reads the photo through a port; the restock is marked after.
+        /** Issue #819: the same restock, marked as having a receipt photo or not. */
+        Purchase withReceiptPhoto(boolean has) {
+            return new Purchase(
+                    id,
+                    purchaseNo,
+                    supplierId,
+                    purchasedOn,
+                    paymentMethod,
+                    currency,
+                    totalMinor,
+                    note,
+                    lines,
+                    createdAt,
+                    createdBy,
+                    status,
+                    voidedAt,
+                    voidedBy,
+                    voidedOn,
+                    voidReason,
+                    partial,
+                    has);
+        }
+
         Purchase withLinesAndTotal(List<PurchaseLine> newLines, long newTotal, boolean hidden) {
             return new Purchase(
                     id,

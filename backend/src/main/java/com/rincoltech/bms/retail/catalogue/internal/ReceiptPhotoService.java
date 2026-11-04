@@ -5,6 +5,8 @@ import com.rincoltech.bms.core.documents.DocumentAccess;
 import com.rincoltech.bms.core.documents.Documents;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.retail.catalogue.ReceiptPhotos;
+import java.time.Duration;
+import java.util.Collection;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -69,6 +71,11 @@ class ReceiptPhotoService implements ReceiptPhotos {
     }
 
     @Override
+    public Map<UUID, UUID> newest(Kind kind, Collection<UUID> recordIds) {
+        return documents.newestOf(kind.subjectType(), recordIds);
+    }
+
+    @Override
     public Image image(Kind kind, UUID recordId, UUID photoId) {
         Documents.Image image = photoId != null
                 ? documents.readImage(kind.subjectType(), photoId)
@@ -104,6 +111,17 @@ class ReceiptPhotoService implements ReceiptPhotos {
         public boolean hideDenial() {
             // A record outside the caller's scope is not found on its own route; its photo is not found either.
             return true;
+        }
+
+        // Only an expense's photo is sent before its record; the others are stored with theirs.
+        @Override
+        public Duration claimWithin() {
+            return kind == Kind.EXPENSE ? CLAIM_WITHIN : null;
+        }
+
+        @Override
+        public boolean claimed(UUID subjectId, UUID documentId) {
+            return rules.orderedStream().filter(r -> r.kind() == kind).anyMatch(r -> r.claimed(subjectId, documentId));
         }
     }
 

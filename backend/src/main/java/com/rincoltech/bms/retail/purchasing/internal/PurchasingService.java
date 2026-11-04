@@ -12,6 +12,7 @@ import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Cursor;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.Versions;
+import com.rincoltech.bms.retail.catalogue.ReceiptPhotos;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue.PackUnit;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue.ProductSnapshot;
@@ -88,6 +89,9 @@ class PurchasingService implements QuickAddPurchase {
     /** Answered by the cash book, which purchasing does not depend on (ADR-067 decision 13). */
     private final ObjectProvider<ClosedTills> closedTills;
 
+    /** Issue #819: which restocks have a receipt photo, through the catalogue's port. */
+    private final ReceiptPhotos receiptPhotos;
+
     PurchasingService(
             PurchasingRepository repo,
             RetailCatalogue catalogue,
@@ -102,7 +106,9 @@ class PurchasingService implements QuickAddPurchase {
             RetailCapabilities capabilities,
             Validator validator,
             EntryDates entryDates,
-            ObjectProvider<ClosedTills> closedTills) {
+            ObjectProvider<ClosedTills> closedTills,
+            ReceiptPhotos receiptPhotos) {
+        this.receiptPhotos = receiptPhotos;
         this.entryDates = entryDates;
         this.closedTills = closedTills;
         this.repo = repo;
@@ -646,7 +652,17 @@ class PurchasingService implements QuickAddPurchase {
                 ? Cursor.encode(
                         items.getLast().createdAt() + "|" + items.getLast().id())
                 : null;
-        return new PurchasePage(List.copyOf(items), next);
+        return new PurchasePage(withReceiptPhotos(items), next);
+    }
+
+    /** Issue #819 (ADR-124): marks the restocks that have a receipt photo, in one query. */
+    private List<Purchase> withReceiptPhotos(List<Purchase> purchases) {
+        Map<UUID, UUID> photos = receiptPhotos.newest(
+                ReceiptPhotos.Kind.DELIVERY,
+                purchases.stream().map(Purchase::id).toList());
+        return purchases.stream()
+                .map(p -> photos.containsKey(p.id()) ? p.withReceiptPhoto(true) : p)
+                .toList();
     }
 
     /** One restock with the quantities of the branches the caller may see; absent when it added stock to none of them. */
@@ -665,7 +681,9 @@ class PurchasingService implements QuickAddPurchase {
             return java.util.Optional.empty();
         }
         UUID own = ownRecordsOnly();
-        return repo.find(id, filter).filter(p -> own == null || own.equals(p.createdBy()));
+        return repo.find(id, filter)
+                .filter(p -> own == null || own.equals(p.createdBy()))
+                .map(p -> withReceiptPhotos(List.of(p)).getFirst());
     }
 
     /**

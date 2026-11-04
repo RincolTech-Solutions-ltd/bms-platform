@@ -399,10 +399,7 @@ class StockRepository {
                        (SELECT p.description FROM retail_products p WHERE p.id = retail_stock_movements.product_id) AS product_description,
                        (SELECT u.name FROM retail_products p JOIN retail_units u ON u.id = p.unit_id
                          WHERE p.id = retail_stock_movements.product_id) AS product_unit,
-                       undo.undone_at, undo.undone_by, undo.undo_reason, undo.undone_by_name, entry.entry_lines,
-                       (retail_stock_movements.source_type = 'retail.usage' AND EXISTS (SELECT 1 FROM documents d
-                         WHERE d.subject_type = 'retail.usage_receipt_photo'
-                           AND d.subject_id = retail_stock_movements.source_id)) AS has_receipt_photo
+                       undo.undone_at, undo.undone_by, undo.undo_reason, undo.undone_by_name, entry.entry_lines
                 """)
                 .append(extra)
                 .append(" FROM ")
@@ -498,7 +495,8 @@ class StockRepository {
                                         rs.getString("undone_by_name"),
                                         rs.getString("undo_reason")),
                         rs.getInt("entry_lines") > 0 ? rs.getInt("entry_lines") : null,
-                        rs.getInt("entry_lines") > 0 ? rs.getBoolean("has_receipt_photo") : null))
+                        // Issue #819: marked by StockService through the receipt photo port, not read here.
+                        null))
                 .list();
     }
 

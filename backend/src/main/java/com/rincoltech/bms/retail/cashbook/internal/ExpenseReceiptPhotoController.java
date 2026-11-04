@@ -114,6 +114,17 @@ class ExpenseReceiptPhotoController {
                     .anyMatch(b -> principal.may(CashbookSupport.READ, b));
         }
 
+        /** A photo sent before its expense is claimed once an expense names it; one added to an expense always is. */
+        @Override
+        public boolean claimed(UUID recordId, UUID photoId) {
+            return jdbc.sql(
+                            "SELECT EXISTS (SELECT 1 FROM retail_expenses WHERE id = :record OR receipt_document_id = :photo)")
+                    .param("record", recordId)
+                    .param("photo", photoId)
+                    .query(Boolean.class)
+                    .single();
+        }
+
         /** The receipt the expense was recorded with, null when it had none; the route then reads a photo added later. */
         @Transactional(readOnly = true)
         public UUID sentWith(UUID expenseId) {

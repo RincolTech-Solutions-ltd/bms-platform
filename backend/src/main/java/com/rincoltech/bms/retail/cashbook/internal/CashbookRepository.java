@@ -753,11 +753,7 @@ class CashbookRepository {
 
     private static final String EXPENSE_SELECT = """
             SELECT t.id, t.branch_id, t.business_date, t.category_id, t.category_name, t.item_id, t.item_name,
-                   t.party_id, p.name AS party_name, t.amount_minor, t.currency, t.explanation,
-                   -- ADR-124: the receipt sent with the expense, else the newest photo added to it later.
-                   coalesce(t.receipt_document_id, (SELECT d.id FROM documents d
-                       WHERE d.subject_type = 'retail.expense_receipt' AND d.subject_id = t.id
-                       ORDER BY d.created_at DESC, d.id LIMIT 1)) AS receipt_document_id,
+                   t.party_id, p.name AS party_name, t.amount_minor, t.currency, t.explanation, t.receipt_document_id,
                    t.created_at, t.recorded_by, u.full_name AS by_name, t.journal_entry_id, t.historical,
                    t.voided_at, t.voided_by, t.void_reason
               FROM retail_expenses t""" + NAME + " LEFT JOIN retail_cash_parties p ON p.id = t.party_id";
@@ -827,15 +823,20 @@ class CashbookRepository {
                 .update();
     }
 
-    /** Issue #819: the receipt is named by, or was added to, an expense of a branch other than {@code branch}. */
-    boolean receiptElsewhere(UUID documentId, UUID subjectId, UUID branch) {
-        return jdbc.sql("""
-                        SELECT EXISTS (SELECT 1 FROM retail_expenses
-                                        WHERE (receipt_document_id = :doc OR id = :subject) AND branch_id <> :branch)
-                        """)
+    /** Issue #819: the receipt is already named by an expense, or was added to one. */
+    boolean receiptTaken(UUID documentId, UUID subjectId) {
+        return jdbc.sql(
+                        "SELECT EXISTS (SELECT 1 FROM retail_expenses WHERE receipt_document_id = :doc OR id = :subject)")
                 .param("doc", documentId)
                 .param("subject", subjectId)
-                .param("branch", branch)
+                .query(Boolean.class)
+                .single();
+    }
+
+    /** Issue #819: the expense names this receipt. */
+    boolean namesReceipt(UUID expenseId, UUID documentId) {
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM retail_expenses WHERE id = ? AND receipt_document_id = ?)")
+                .params(expenseId, documentId)
                 .query(Boolean.class)
                 .single();
     }

@@ -1056,7 +1056,8 @@ Receipt photos (issue #819, ADR-124, no migration) are `upload` documents whose 
 `retail.sale_receipt_photo` (a `retail_sales` id), `retail.delivery_receipt_photo` (a `retail_purchases` id, no branch),
 `retail.usage_receipt_photo` (a `retail_usage_reports` id) and `retail.expense_receipt` (a `retail_expenses` id for a photo
 added later; one sent with the expense is named by `retail_expenses.receipt_document_id` and its subject is a fresh id). The
-newest of a record is shown; the subject index finds it.
+newest of a record is shown; the subject index finds it, asked through `Documents.newestOf`. A photo sent before its expense
+that no expense names within 24 hours has its object deleted by the nightly `core.documents.unclaimed-sweep`; its row stays.
 
 ### `report_runs` (RLS)
 

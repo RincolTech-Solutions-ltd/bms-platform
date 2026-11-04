@@ -285,6 +285,43 @@ final class SalesApi {
             @Schema(description = "Issue #819, ADR-124: a photo of the paper receipt is on the sale")
             boolean hasReceiptPhoto) {
 
+        // JUSTIFICATION-A3: the lead's decision on #846 reads the photo through a port; the sale is marked after.
+        /** Issue #819: the same sale, marked as having a receipt photo or not. */
+        Sale withReceiptPhoto(boolean has) {
+            return new Sale(
+                    id,
+                    saleNo,
+                    branchId,
+                    saleDate,
+                    paymentMethod,
+                    customerId,
+                    buyerName,
+                    buyerContact,
+                    dueDate,
+                    status,
+                    currency,
+                    totalMinor,
+                    paidMinor,
+                    balanceMinor,
+                    costTotalMinor,
+                    profitMinor,
+                    priceListId,
+                    priceList,
+                    lines,
+                    historical,
+                    createdAt,
+                    createdBy,
+                    voidedAt,
+                    voidedBy,
+                    voidReason,
+                    version,
+                    writeOff,
+                    countedWhenPaid,
+                    deliveryFeeOwedMinor,
+                    device,
+                    has);
+        }
+
         Sale withDevice(Device d) {
             return new Sale(
                     id,

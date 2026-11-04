@@ -141,7 +141,7 @@ describe('a form with a receipt photo', () => {
     await waitFor(() => expect(calls.mock.calls.map((c) => c[0])).toEqual(['createUsage', 'addReceiptPhoto']));
     expect(calls.mock.calls[1]?.slice(1, 4)).toEqual(['usage', 'u1', file]);
     expect(calls.mock.calls[1]?.[4]).toBeInstanceOf(AbortSignal);
-    expect(RECEIPT_LATER).toBe('The receipt photo was not saved. Add it from the entry.');
+    expect(RECEIPT_LATER).toBe('Saved. The photo did not go; add it from the record.');
   });
 
   // JUSTIFICATION-A3: the review of #846 asks for tests of a photo that never answers and one that never carries over.

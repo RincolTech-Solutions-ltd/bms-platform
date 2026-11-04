@@ -23,7 +23,7 @@ import { AddByName, EmptyChoice, showsEmptyChoice, type AddInline, type ChoiceAd
 import { addOn } from './screen-link';
 import type { Kept } from '../../../offline/entries';
 import { EditNeedsInternet, KeptOnPhone, OfflineFormNote, isKept, useEntrySave } from '../../../offline/keep-entry';
-import { RECEIPT_LATER, ReceiptPhoto, ReceiptPhotoChoice, bounded, withPhotoNote } from './receipt-photo';
+import { RECEIPT_LATER_NOTE, ReceiptPhoto, ReceiptPhotoChoice, bounded, withPhotoNote } from './receipt-photo';
 
 // Company expenses (FR-RET-24): shop, date, category, then an item of that category, an optional
 // beneficiary, the amount, and an explanation when the item needs one. An optional receipt photo (issue #819, ADR-124) is
@@ -69,7 +69,7 @@ export function ExpenseForm({ branchId, onSaved, onWaiting, replaces, onCancel }
         sentReceipt.current = await bounded((signal) => retail.sendExpenseReceiptPhoto(receipt, signal)).then((r) => ({ file: receipt, id: r.photo_id }), () => null);
       }
       if (sentReceipt.current?.id) id = sentReceipt.current.id;
-      else photoNote.current = RECEIPT_LATER;
+      else photoNote.current = RECEIPT_LATER_NOTE;
     }
     return id ? { ...plan.request, receipt_document_id: id } : plan.request;
   };

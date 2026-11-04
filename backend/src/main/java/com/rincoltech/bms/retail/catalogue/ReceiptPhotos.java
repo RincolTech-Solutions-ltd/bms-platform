@@ -5,6 +5,8 @@ import com.rincoltech.bms.kernel.Principal;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Collection;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.Supplier;
 import org.springframework.http.CacheControl;
@@ -69,6 +71,15 @@ public interface ReceiptPhotos {
     /** A stored image, its type and its checksum (an ETag). */
     record Image(byte[] bytes, String contentType, String sha256) {}
 
+    /**
+     * The newest photo of each of the records that has one, by record id, in the caller's transaction and one query: what a
+     * list marks as {@code has_receipt_photo}, through core.documents rather than its table. Records with none are absent.
+     */
+    Map<UUID, UUID> newest(Kind kind, Collection<UUID> recordIds);
+
+    /** How long a photo sent before its record may wait to be named by one before its file is deleted (ADR-124). */
+    Duration CLAIM_WITHIN = Duration.ofHours(24);
+
     /** Registered by the module that owns the record: may this person see the record, and so its photo? */
     interface Rule {
 
@@ -79,6 +90,14 @@ public interface ReceiptPhotos {
          * asked for, for a photo sent before its record whose subject is not the record.
          */
         boolean canSee(Principal principal, UUID recordId, UUID photoId);
+
+        /**
+         * Is a photo sent before its record (an expense's) named by one? Only the expense's rule answers no; a photo that
+         * stays unnamed for {@link #CLAIM_WITHIN} has its file deleted by the documents module's nightly sweep.
+         */
+        default boolean claimed(UUID recordId, UUID photoId) {
+            return true;
+        }
     }
 
     /** 409 {@code record_voided}: a voided sale, delivery or expense, or an undone usage entry, takes no receipt photo. */

@@ -52,11 +52,12 @@ class SaleReceiptPhotoController {
     ReceiptPhotos.Added add(@PathVariable("sale_id") UUID id, @RequestPart("file") MultipartFile file) {
         Principal principal = CurrentPrincipal.require();
         return new ReceiptPhotos.Added(photos.attach(Kind.SALE, id, ReceiptPhotos.bytes(file), () -> {
-            // Review of #846: the seller who made the sale adds its photo, or someone who sees every seller's sales
-            // there; a colleague's credit sale, seen to take a payment, takes none from them. A voided sale takes none.
+            // The lead's decision on the review of #846: the person who made the sale adds its photo, or someone
+            // who may cancel sales at its branch; a seller who only sees a colleague's credit sale takes none. A
+            // voided sale takes none.
             SalesApi.Sale sale = rule.seen(principal, id)
                     .filter(s -> principal.may("retail.sale.create", s.branchId()))
-                    .filter(s -> principal.may(SalesSummaryService.ALL_SELLERS, s.branchId())
+                    .filter(s -> principal.may("retail.sale.void", s.branchId())
                             || Objects.equals(principal.userId(), s.createdBy()))
                     .orElseThrow(ApiException::notFound);
             if ("voided".equals(sale.status())) {

@@ -147,9 +147,7 @@ class PurchasingRepository {
     /** The columns of a restock and, when it was voided (issue #351), its void; the void is a row of its own. */
     private static final String HEADER = """
             SELECT p.id, p.purchase_no, p.supplier_id, p.purchased_on, p.payment_method, p.currency, p.total_minor,
-                   p.note, p.created_at, p.created_by, v.created_at AS voided_at, v.voided_by, v.voided_on, v.reason AS void_reason,
-                   EXISTS (SELECT 1 FROM documents d WHERE d.subject_type = 'retail.delivery_receipt_photo'
-                       AND d.subject_id = p.id) AS has_receipt_photo
+                   p.note, p.created_at, p.created_by, v.created_at AS voided_at, v.voided_by, v.voided_on, v.reason AS void_reason
               FROM retail_purchases p
               LEFT JOIN retail_purchase_voids v ON v.tenant_id = p.tenant_id AND v.purchase_id = p.id
             """;
@@ -492,6 +490,7 @@ class PurchasingRepository {
                 rs.getDate("voided_on") == null ? null : rs.getDate("voided_on").toLocalDate(),
                 rs.getString("void_reason"),
                 null,
-                rs.getBoolean("has_receipt_photo"));
+                // Issue #819: marked by PurchasingService through the receipt photo port, not read here.
+                false);
     }
 }

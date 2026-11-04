@@ -16,8 +16,11 @@ import { sayDone } from './toast';
 /** What the form says with no network: the entry saves, the photo waits for the entry. */
 export const RECEIPT_OFFLINE = 'No network. The entry saves without the photo. Add the photo from the entry once you are online.';
 
-/** What the saved message adds when the photo could not be sent: the entry is saved, the photo is added from it. */
-export const RECEIPT_LATER = 'The receipt photo was not saved. Add it from the entry.';
+/** The owner's words (review of #846) when the photo did not go after the entry was saved: it is added from the record. */
+export const RECEIPT_LATER = 'Saved. The photo did not go; add it from the record.';
+
+/** The same, after the expense's own saved words. */
+export const RECEIPT_LATER_NOTE = 'The photo did not go; add it from the record.';
 
 /** The saved message with what happened to the photo after it, when it was not saved. */
 export const withPhotoNote = (words: string, note: string | null): string => (note ? words + '. ' + note : words);

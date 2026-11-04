@@ -53,8 +53,9 @@ class RetailReceiptPhotosIT extends IntegrationTest {
     @BeforeEach
     void setUp() {
         t = TestDatabase.tenant("retail-receipts", false, true);
-        api = new RetailTestSupport(http, t);
         cb = new CashbookTestSupport(http, t);
+        // One person sends the photos and records the entries: an expense names only a receipt its recorder sent.
+        api = cb.api;
         hq = t.headOffice();
         product = api.product("RCPT-1", 1_000, 2_000);
         api.stockUp(hq, product, "20");
@@ -245,7 +246,11 @@ class RetailReceiptPhotosIT extends IntegrationTest {
         RetailTestSupport owner = new RetailTestSupport(http, t);
         assertThat(image(owner, "/sales/" + sale + "/receipt-photo", ALL, "*").getStatusCode())
                 .isEqualTo(HttpStatus.OK);
-        assertThat(cb.auditPayloads("retail.sale.receipt_photo_added")).hasSize(1);
+        // Someone who may cancel sales adds one to another person's sale.
+        assertThat(upload(owner, "/sales/" + sale + "/receipt-photo", png(100, 100), ALL, "*")
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        assertThat(cb.auditPayloads("retail.sale.receipt_photo_added")).hasSize(2);
 
         // A voided sale takes no photo.
         assertThat(api.post("/sales/" + sale + "/void", Map.of("reason", "Test entered twice"), ADMIN)
@@ -302,7 +307,8 @@ class RetailReceiptPhotosIT extends IntegrationTest {
         assertThat(listed.hasNonNull("receipt_document_id")).isTrue();
 
         // JUSTIFICATION-A3: the review of #846 asks for the reuse case and the voided record to be tested.
-        // An expense of another shop that names this photo is refused, so the photo never becomes readable there.
+        // A photo belongs to one expense: another expense naming it, here at another shop, is refused, so the photo
+        // never becomes readable there.
         Map<String, Object> elsewhere = new LinkedHashMap<>();
         elsewhere.put("branch_id", t.secondBranch());
         elsewhere.put("category_id", expenseItem()[0]);
@@ -310,8 +316,8 @@ class RetailReceiptPhotosIT extends IntegrationTest {
         elsewhere.put("amount_minor", 1_000);
         elsewhere.put("receipt_document_id", listed.get("receipt_document_id").asString());
         ResponseEntity<JsonNode> reused = cb.post("/expenses", elsewhere, CashbookTestSupport.CASHBOOK_ADMIN);
-        assertThat(reused.getStatusCode()).as("%s", reused.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(reused.getBody().get("errors").get(0).get("code").asString()).isEqualTo("unknown_document");
+        assertThat(reused.getStatusCode()).as("%s", reused.getBody()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(reused.getBody().get("code").asString()).isEqualTo("receipt_taken");
 
         // A voided expense takes no more photos.
         assertThat(cb.voidIt("/expenses/" + expense, "Entered twice", ALL).getStatusCode())
@@ -347,6 +353,25 @@ class RetailReceiptPhotosIT extends IntegrationTest {
         assertThat(recorded.getStatusCode()).as("%s", recorded.getBody()).isEqualTo(HttpStatus.CREATED);
         assertThat(recorded.getBody().get("receipt_document_id").asString()).isEqualTo(photo);
         UUID expense = RetailTestSupport.id(recorded);
+        assertThat(cb.auditPayloads("retail.expense.receipt_photo_sent")).hasSize(1);
+
+        // The lead's decision on #846: one expense per photo, named only by the person who sent it; 409 otherwise.
+        ResponseEntity<JsonNode> twice = cb.post("/expenses", body, CashbookTestSupport.CASHBOOK_ADMIN);
+        assertThat(twice.getStatusCode()).as("%s", twice.getBody()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(twice.getBody().get("code").asString()).isEqualTo("receipt_taken");
+        String mine = upload(api, "/expenses/receipt-photos", png(200, 200), "retail.expense.record", "*")
+                .getBody()
+                .get("photo_id")
+                .asString();
+        body.put("receipt_document_id", mine);
+        RetailTestSupport someoneElse = new RetailTestSupport(http, t);
+        ResponseEntity<JsonNode> notTheirs = someoneElse.postKeyed(
+                "/expenses",
+                body,
+                CashbookTestSupport.CASHBOOK_ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(notTheirs.getStatusCode()).as("%s", notTheirs.getBody()).isEqualTo(HttpStatus.CONFLICT);
 
         ResponseEntity<byte[]> seen =
                 image(api, "/expenses/" + expense + "/receipt-photo", "retail.cashbook.read", "*");

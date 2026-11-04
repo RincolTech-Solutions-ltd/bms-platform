@@ -922,10 +922,15 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   and serves its record's photo (`POST`/`GET .../receipt-photo` on sales, purchases, usage and expenses, and
   `POST /retail/expenses/receipt-photos` for the expense form's `receipt_document_id`) and registers a `ReceiptPhotos.Rule`, the
   record's own read check, which the catalogue makes the subject type's `DocumentAccess`. `retail.cashbook` now depends on
-  `retail.catalogue`. Sales, restocks and usage movements answer `has_receipt_photo`; an expense answers the photo as its
-  `receipt_document_id`. The four forms have Add receipt photo (`receipt-photo.tsx`), sent after the save and never offline;
-  the sale page, Past purchases, the expense rows and Past usage and damage show it small, opening full size, or offer to add
-  one. Tests: `RetailReceiptPhotosIT`, `receipt-photo.dom.test.tsx`, `layout/receipt-photo.layout.test.ts`.
+  `retail.catalogue`. Sales, restocks and usage movements answer `has_receipt_photo`, and an expense answers the photo as its
+  `receipt_document_id`, asked of core.documents through `Documents.newestOf` (no retail module reads `documents` for it).
+  A voided or undone record takes no photo (409 `record_voided`); a sale's comes from its seller or whoever may cancel sales
+  there; an expense's photo belongs to one expense and its sender (409 `receipt_taken`). A photo no expense names within 24
+  hours loses its file to the nightly `core.documents.unclaimed-sweep` (`UnclaimedSweep`, the claim hooks of
+  `DocumentAccess`). The four forms have Add receipt photo (`receipt-photo.tsx`), sent after the save is said, bounded to 30
+  seconds and never offline, and cleared by every save; the sale page, Past purchases, the expense rows and Past usage and
+  damage show it small, opening full size, or offer to add one. Tests: `RetailReceiptPhotosIT`, `UnclaimedSweepIT`,
+  `receipt-photo.dom.test.tsx`, `layout/receipt-photo.layout.test.ts`.
 - **Built (Past usage and damage, issue #145, AppSheet "Damaged or used stock not sold"):** no migration and no permission.
   `GET /retail/stock/movements` takes a repeatable `kind` filter (422 for an unknown or blank kind) and each row carries the
   item's `code`, `description` and `unit`, and for a profit reader `line_cost_minor`, the value the screen shows as is. The page `/staff/retail/usage-history` (`usage-history.tsx`, `retail.stock.read`), linked
