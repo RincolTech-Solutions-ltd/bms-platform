@@ -43,7 +43,13 @@ final class UsageApi {
             LocalDate occurredOn,
 
             @NotEmpty @Size(max = 200) List<@Valid @NotNull UsageLineRequest> lines,
-            @Valid OfflineEntry offline) {}
+            @Valid OfflineEntry offline) {
+
+        /** What the Idempotency-Key covers: the request without its offline block (ADR-067 decision 13). */
+        UsageRequest forKey() {
+            return new UsageRequest(branchId, kind, reason, occurredOn, lines, null);
+        }
+    }
 
     @Schema(name = "RetailUsageLine")
     record UsageLine(

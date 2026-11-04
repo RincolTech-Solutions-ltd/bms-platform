@@ -121,6 +121,11 @@ final class PurchasingApi {
 
             @Valid OfflineEntry offline) {
 
+        /** What the Idempotency-Key covers: the request without its offline block (ADR-067 decision 13). */
+        PurchaseRequest forKey() {
+            return new PurchaseRequest(supplierId, purchasedOn, paymentMethod, note, lines, dateReason, null);
+        }
+
         /** The same purchase dated {@code on}: an entry kept offline takes the day it was made (ADR-067 decision 13). */
         PurchaseRequest dated(LocalDate on) {
             return java.util.Objects.equals(on, purchasedOn)

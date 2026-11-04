@@ -57,10 +57,19 @@ export interface EntrySpec {
   fix?: OutboxEntry['fix'];
 }
 
+/** The body of an online request whose answer was lost: as it was sent, with when it was made unless it names its own date. */
+export function lostBody(body: Record<string, unknown>, occurredAt: string, onlineAsOf?: string): Record<string, unknown> {
+  // An owner's chosen earlier day (ADR-120) is already in the body; anything else was dated by the app as it was saved.
+  if (DATE_FIELDS.some((k) => body[k] !== undefined && body[k] !== '')) return body;
+  return { ...body, offline: { occurred_at: occurredAt, ...(onlineAsOf ? { online_as_of: onlineAsOf } : {}) } };
+}
+
 /**
  * The outbox item of an entry. Made offline (`lost` false), it is dated by when it was made. `lost`: the form sent it online
- * and the answer never came, so the server may have it under its key already: it goes again exactly as it was sent, under
- * the same key, and the server answers it once (it is then dated when it first arrived).
+ * and the answer never came, so the server may have it under its key already: it goes again under the same key, as it was
+ * sent plus when it was made (`now`, the moment the save began). The key covers the request without that block (second
+ * review of #839), so a request that arrived answers once, and one that never did is dated the day it was made, not the day
+ * the phone got it through.
  */
 export function offlineEntry(spec: EntrySpec & { scope: string; now: Date; onlineAsOf?: string; lost?: boolean }): OutboxItem {
   const occurredAt = spec.now.toISOString();
@@ -72,7 +81,7 @@ export function offlineEntry(spec: EntrySpec & { scope: string; now: Date; onlin
     entry: {
       kind: spec.kind,
       path: spec.path ?? ENTRY_PATHS[spec.kind],
-      body: spec.lost ? spec.body : offlineBody(spec.body, occurredAt, spec.onlineAsOf),
+      body: spec.lost ? lostBody(spec.body, occurredAt, spec.onlineAsOf) : offlineBody(spec.body, occurredAt, spec.onlineAsOf),
       words: spec.detail ? `${name}, ${spec.detail}` : name,
       ...(spec.fix ? { fix: spec.fix } : {}),
     },

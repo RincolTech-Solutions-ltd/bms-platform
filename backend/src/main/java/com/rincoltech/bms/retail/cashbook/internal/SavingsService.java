@@ -26,7 +26,6 @@ import com.rincoltech.bms.retail.cashbook.internal.CashbookRepository.SavingsRow
 import com.rincoltech.bms.retail.cashbook.internal.CashbookSupport.SalespeopleSavings;
 import com.rincoltech.bms.retail.reports.DailyProfits;
 import com.rincoltech.bms.retail.stock.EntryDates;
-import com.rincoltech.bms.retail.stock.OfflineEntry;
 import com.rincoltech.bms.retail.stock.RetailBooks;
 import com.rincoltech.bms.retail.stock.RetailBranchContext;
 import java.math.BigDecimal;
@@ -219,7 +218,8 @@ class SavingsService {
         if (caller == Caller.SALES_STAFF) {
             setting.requireOnForSalesStaff();
         }
-        return idempotency.once(key, "POST", path, r, Savings.class, () -> record(caller, setting, r));
+        // The key covers the request without its offline block (ADR-067 decision 13).
+        return idempotency.once(key, "POST", path, r.forKey(), Savings.class, () -> record(caller, setting, r));
     }
 
     /** The sales staff routes (issue #799). */
@@ -228,14 +228,17 @@ class SavingsService {
     private Savings record(Caller caller, SalespeopleSavings setting, SavingsRequest r) {
         UUID branch = resolveBranch(caller, setting, r.branchId());
         branchContext.requireSells(branch, "branch_id");
-        LocalDate date = businessDate(
-                caller,
-                OfflineEntry.day(r.offline(), r.businessDate(), support.now(), support.zone(), List.of(branch)),
-                "business_date");
-        // ADR-120: an earlier day is the owner's, with a reason, on the till's route and on the sales staff's alike.
-        // Savings
-        // kept offline were dated by the phone, not chosen (ADR-067 decision 13): past 7 days OfflineEntry asks for the
-        // owner.
+        // Savings kept on the phone offline are dated by the phone (ADR-067 decision 13): the day they were made,
+        // judged as
+        // an offline sale is, never a closed day but for the owner, and within the 7 days a day of last month too
+        // (review
+        // of #839: made on the 31st, sent on the 1st). Otherwise the sales staff save days of this month only.
+        LocalDate date = r.offline() != null
+                ? support.offlineDay(r.offline(), r.businessDate(), "business_date", branch)
+                : businessDate(caller, r.businessDate(), "business_date");
+        // ADR-120: an earlier day is the owner's, with a reason, on the till's route and on the sales staff's alike;
+        // not
+        // for savings kept offline, which the phone dated.
         EntryDates.Backdate backdate =
                 r.offline() != null ? null : support.entryDates().check(date, "business_date", r.dateReason(), branch);
         boolean profit = mayProfit(branch);
@@ -337,6 +340,7 @@ class SavingsService {
         }
         audit.record(AuditLog.Entry.created("retail.savings.created", "retail.savings", id, branch, after));
         support.entryDates().audit(backdate, "retail.savings", id, branch);
+        support.entryDates().auditOffline(r.offline(), date, "retail.savings", id, branch);
         return view(repo.savings(id, false).orElseThrow(), setting);
     }
 

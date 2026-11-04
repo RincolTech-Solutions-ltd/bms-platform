@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import { lastOnline, rememberOnline } from './connectivity';
-import { ENTRY_PATHS, isKept, offlineBody, offlineEntry, sentWords } from './entries';
+import { ENTRY_PATHS, isKept, lostBody, offlineBody, offlineEntry, sentWords } from './entries';
 import { classifyEntry, failedCount, provisionalNumber, sentEntries, waiting, waitingWords, type OutboxItem } from './outbox';
 import { memoryStore } from './store';
 import { SyncEngine, type Answer } from './sync-engine';
@@ -54,6 +54,18 @@ describe('an entry kept on the phone', () => {
     expect(item.entry?.words).toBe('Expense');
     expect(isKept({ kept: item })).toBe(true);
     expect(isKept({ id: 'x' })).toBe(false);
+  });
+
+  it('sends a lost online request again with when it was made, unless it names its own day (second review of #839)', () => {
+    expect(lostBody({ amount_minor: 5 }, '2026-11-03T20:58:00.000Z', '2026-11-03T20:57:00.000Z')).toEqual({
+      amount_minor: 5,
+      offline: { occurred_at: '2026-11-03T20:58:00.000Z', online_as_of: '2026-11-03T20:57:00.000Z' },
+    });
+    // The owner's chosen earlier day (ADR-120) already dates it.
+    const owners = { amount_minor: 5, business_date: '2026-11-01', date_reason: 'Entered late' };
+    expect(lostBody(owners, '2026-11-03T20:58:00.000Z')).toBe(owners);
+    const lost = offlineEntry({ kind: 'expense', key: 'k-lost', scope: SCOPE, branchId: 'b1', branchName: 'Test Branch A', body: { amount_minor: 5 }, now: new Date(AT), lost: true });
+    expect((lost.entry?.body.offline as { occurred_at: string }).occurred_at).toBe(lost.occurredAt);
   });
 
   it('is sent with the sales in the order everything was made, one key each, once', async () => {

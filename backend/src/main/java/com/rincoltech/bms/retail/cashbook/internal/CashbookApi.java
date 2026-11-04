@@ -150,7 +150,14 @@ final class CashbookApi {
             @Size(max = 300) @Schema(description = DATE_REASON)
             String dateReason,
 
-            @Valid OfflineEntry offline) {}
+            @Valid OfflineEntry offline) {
+
+        /** What the Idempotency-Key covers: the request without its offline block (ADR-067 decision 13). */
+        SavingsRequest forKey() {
+            return new SavingsRequest(
+                    branchId, businessDate, suggestionToken, amountMinor, overwriteReason, dateReason, null);
+        }
+    }
 
     @Schema(name = "RetailSavings")
     record Savings(
@@ -256,7 +263,13 @@ final class CashbookApi {
             @Size(max = 300) @Schema(description = DATE_REASON)
             String dateReason,
 
-            @Valid OfflineEntry offline) {}
+            @Valid OfflineEntry offline) {
+
+        /** What the Idempotency-Key covers: the request without its offline block (ADR-067 decision 13). */
+        BankingRequest forKey() {
+            return new BankingRequest(branchId, businessDate, amountMinor, bankedAt, reference, dateReason, null);
+        }
+    }
 
     @Schema(name = "RetailBanking")
     record Banking(
@@ -308,7 +321,13 @@ final class CashbookApi {
             @Size(max = 300) @Schema(description = DATE_REASON)
             String dateReason,
 
-            @Valid OfflineEntry offline) {}
+            @Valid OfflineEntry offline) {
+
+        /** What the Idempotency-Key covers: the request without its offline block (ADR-067 decision 13). */
+        WithdrawalRequest forKey() {
+            return new WithdrawalRequest(branchId, businessDate, amountMinor, withdrawnAt, purpose, dateReason, null);
+        }
+    }
 
     @Schema(name = "RetailWithdrawal")
     record Withdrawal(
@@ -347,7 +366,23 @@ final class CashbookApi {
             @Size(max = 300) @Schema(description = DATE_REASON)
             String dateReason,
 
-            @Valid OfflineEntry offline) {}
+            @Valid OfflineEntry offline) {
+
+        /** What the Idempotency-Key covers: the request without its offline block (ADR-067 decision 13). */
+        ExpenseRequest forKey() {
+            return new ExpenseRequest(
+                    branchId,
+                    businessDate,
+                    categoryId,
+                    itemId,
+                    partyId,
+                    amountMinor,
+                    explanation,
+                    receiptDocumentId,
+                    dateReason,
+                    null);
+        }
+    }
 
     @Schema(name = "RetailExpense")
     record Expense(

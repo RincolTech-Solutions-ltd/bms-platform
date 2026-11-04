@@ -31,10 +31,12 @@ export function useEntrySave(): EntrySave {
   const [kept, setKept] = useState<OutboxItem | null>(null);
   const save = useCallback(
     async <T,>(spec: Omit<EntrySpec, 'branchName'>, send: () => Promise<T>): Promise<T | Kept> => {
+      // When the save began: an entry kept on the phone is dated by it, even one whose online answer was lost (#839 review).
+      const madeAt = new Date();
       const keep = async (lost: boolean): Promise<Kept> => {
         if (!offline) throw new Error('This phone cannot keep entries.');
         const item = offlineEntry({
-          ...spec, branchName: branchName(spec.branchId), scope: offline.scope, now: new Date(), onlineAsOf: lastOnline(offline.catalogue?.pricesAsOf), lost,
+          ...spec, branchName: branchName(spec.branchId), scope: offline.scope, now: madeAt, onlineAsOf: lastOnline(offline.catalogue?.pricesAsOf), lost,
         });
         await offline.engine.queue(item);
         if (offline.connectivity.online()) void offline.engine.sync();
@@ -43,9 +45,9 @@ export function useEntrySave(): EntrySave {
       };
       if (offline && !offline.connectivity.online()) return keep(false);
       try {
-        // A save never waits longer than ENTRY_ANSWER_MS (the 8 seconds a sale waits, issue #812): with no
-        // answer by then the entry is kept on the phone under the same key and body, and the late answer and the outbox's send are
-        // one record.
+        // A save never waits longer than ENTRY_ANSWER_MS (the 8 seconds a sale waits, issue #812): with no answer by then the
+        // entry is kept on the phone under the same key, with when it was made, and the late answer and the outbox's send are
+        // one record (the key covers the request without its offline block).
         return await (offline ? answerWithin(send(), ENTRY_ANSWER_MS) : send());
       } catch (e) {
         if (offline && (droppedConnection(e) || e instanceof NoAnswer)) return keep(true);

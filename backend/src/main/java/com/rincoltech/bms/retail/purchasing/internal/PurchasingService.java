@@ -189,13 +189,14 @@ class PurchasingService implements QuickAddPurchase {
 
     @Transactional
     Outcome<Purchase> create(String idempotencyKey, PurchaseRequest r) {
-        // A purchase kept on the phone offline is dated the day it was made (ADR-067 decision 13); the key is checked
-        // against the request as it was sent.
+        // A purchase kept on the phone offline is dated the day it was made (ADR-067 decision 13); the key covers the
+        // request without its offline block, so an online request whose answer was lost, sent again from the phone with
+        // when it was made, is still the same purchase.
         return idempotency.once(
                 idempotencyKey,
                 "POST",
                 PATH,
-                r,
+                r.forKey(),
                 Purchase.class,
                 () -> record(r.dated(OfflineEntry.day(
                         r.offline(),
@@ -558,6 +559,12 @@ class PurchasingService implements QuickAddPurchase {
         audit.record(AuditLog.Entry.created("retail.purchase.created", PURCHASE, id, null, after));
         entryDates.audit(
                 backdate, PURCHASE, id, into.size() == 1 ? into.iterator().next() : null);
+        entryDates.auditOffline(
+                r.offline(),
+                r.purchasedOn(),
+                PURCHASE,
+                id,
+                into.size() == 1 ? into.iterator().next() : null);
         Purchase made = repo.find(id).orElseThrow();
         if (sizesKept.isEmpty()) {
             return made;

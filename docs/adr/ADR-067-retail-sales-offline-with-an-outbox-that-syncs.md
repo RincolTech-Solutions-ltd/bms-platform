@@ -11,8 +11,9 @@ and #318 after `V91`).
 
 Amended by issue #812 (3 Nov 2026, the owner's feedback after comparing the old app screen by screen): decisions 12 and 13
 below. The same outbox, waiting count and online dot now carry the other daily forms (expenses, savings on the till's and the
-sales staff routes, banking, withdrawals, deliveries in Buy stock, Move stock, usage and damage), and no save waits more than 3
-seconds on a cheap phone on 3G. No migration. Edits of a saved entry (PR #832) and approval answers stay online only.
+sales staff routes, banking, withdrawals, deliveries in Buy stock, Move stock, usage and damage), waiting for an answer as
+long as a sale does (8 seconds), with the time to save on a cheap phone on 3G measured. No migration. Edits of a saved entry
+(PR #832) and approval answers stay online only.
 
 ## Context
 
@@ -214,8 +215,20 @@ left, the branch, the period, the person's roles.
     not used: within the 7 days the person never chooses the day, the phone's clock does, so the backdate check of #831 does
     not apply to it; past them it is the owner's. Within the 7 days an entry may land on a day already banked, as an offline
     sale may; it shows in that day's cash book. Offline the forms show no date box. Buy stock's
-    `purchased_on` is still required by its route and not used for such an entry. (c) **Lost online**, the same body goes
-    again under the same key, so the server answers it once (dated when it first arrived). (d) **Sent.** Any 2xx records it,
+    `purchased_on` is still required by its route and not used for such an entry. A banking's or withdrawal's time sent with
+    it is not used either: it is the judged time. **A closed day** (second review of #839): retail has no till-close record;
+    "Can close the till and do the banking" closes a day by banking it, so a day before today with an active banking record
+    at the branch is closed, and an expense, savings, banking or withdrawal kept offline that lands on it needs
+    `retail.entry.backdate` at the branch and is otherwise refused (422 `offline_day_closed`, "The cash of that day was
+    already banked, so only the owner can add to it."). Stock entries have no cash day to close. A seller's savings made on
+    the last day of a month and sent on the first day of the next are kept on their day (the phone dated them within the 7
+    days), unlike a date a seller would choose. **Audit:** every entry kept offline writes `retail.entry.recorded_offline`
+    (the day, `occurred_at`, `online_as_of`, the day it was entered) in its transaction, so an owner can tell an entry the
+    phone dated; an expense that waits for approval is audited when asked, under the id it takes when approved. (c) **Lost
+    online**, the same body goes again under the same key with when it was made (`offline`, the moment the save began),
+    unless the body names its own day (the owner's earlier day of ADR-120). The `Idempotency-Key` covers the request without
+    its `offline` block, as a sale's key leaves its delivery fields out (#769): a request that arrived answers once, and one
+    that never did is dated the day it was made, not the day the phone got it through. (d) **Sent.** Any 2xx records it,
     including the 202 of an expense that waits for an administrator (ADR-091), whose approval request carries the day the
     entry was made, so however late it is approved it stays on that day; the approval itself stays online only, as
     every maker-checker answer does. A 409 that is not a key still in progress (the savings suggestion changed, the day is

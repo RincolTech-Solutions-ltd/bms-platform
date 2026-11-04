@@ -117,7 +117,8 @@ class BankingService {
 
     @Transactional
     Outcome<Banking> createBanking(String key, BankingRequest r) {
-        return idempotency.once(key, "POST", BANKING_PATH, r, Banking.class, () -> recordBanking(r));
+        // The key covers the request without its offline block (ADR-067 decision 13).
+        return idempotency.once(key, "POST", BANKING_PATH, r.forKey(), Banking.class, () -> recordBanking(r));
     }
 
     private Banking recordBanking(BankingRequest r) {
@@ -282,7 +283,8 @@ class BankingService {
 
     @Transactional
     Outcome<Withdrawal> createWithdrawal(String key, WithdrawalRequest r) {
-        return idempotency.once(key, "POST", WITHDRAWAL_PATH, r, Withdrawal.class, () -> recordWithdrawal(r));
+        // The key covers the request without its offline block (ADR-067 decision 13).
+        return idempotency.once(key, "POST", WITHDRAWAL_PATH, r.forKey(), Withdrawal.class, () -> recordWithdrawal(r));
     }
 
     private Withdrawal recordWithdrawal(WithdrawalRequest r) {

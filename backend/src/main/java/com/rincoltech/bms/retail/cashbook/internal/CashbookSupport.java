@@ -126,16 +126,46 @@ class CashbookSupport {
         if (offline == null) {
             return entryDate(requested, field, reason, branch);
         }
-        return new Dated(
-                businessDate(OfflineEntry.day(offline, requested, now(), zone(), List.of(branch)), field), null);
+        return new Dated(offlineDay(offline, requested, field, branch), null, offline);
     }
 
-    /** When a record kept offline happened (the time it was made, judged), or {@code at} as sent, or now. */
-    Instant entryTime(Instant at, OfflineEntry offline, UUID branch) {
-        if (at != null) {
-            return at;
+    /**
+     * The day of a cash book entry kept on the phone offline (ADR-067 decision 13): the day it was made, judged as an offline
+     * sale is, and never a closed day for anyone but the owner (review of #839). Retail has no till-close record: "Can close
+     * the till and do the banking" closes a day by banking it, so a day before today on which the branch's cash was banked
+     * (an active banking record) is closed, and an entry landing on it needs {@code retail.entry.backdate} at the branch.
+     */
+    LocalDate offlineDay(OfflineEntry offline, LocalDate requested, String field, UUID branch) {
+        LocalDate day = businessDate(OfflineEntry.day(offline, requested, now(), zone(), List.of(branch)), field);
+        if (day.isBefore(today())
+                && banked(branch, day)
+                && !CurrentPrincipal.require().may(OfflineEntry.BACKDATE, branch)) {
+            throw ApiException.validation(List.of(new FieldProblem(
+                    "offline.occurred_at",
+                    "offline_day_closed",
+                    "The cash of that day was already banked, so only the owner can add to it. Fix it on the phone to"
+                            + " save it as an entry of today.")));
         }
-        return offline == null ? now() : offline.judged(now(), List.of(branch));
+        return day;
+    }
+
+    /** The branch's cash of that day was banked: an active banking record on the day. */
+    private boolean banked(UUID branch, LocalDate day) {
+        return jdbc.sql("""
+                        SELECT EXISTS (SELECT 1 FROM retail_cash_bankings
+                                        WHERE branch_id = ? AND business_date = ? AND voided_at IS NULL)
+                        """).params(branch, day).query(Boolean.class).single();
+    }
+
+    /**
+     * When a record happened: for one kept offline, the time it was made, judged (a time sent with it is not used: the phone
+     * dated it, review of #839); otherwise {@code at} as sent, or now.
+     */
+    Instant entryTime(Instant at, OfflineEntry offline, UUID branch) {
+        if (offline != null) {
+            return offline.judged(now(), List.of(branch));
+        }
+        return at == null ? now() : at;
     }
 
     /** The business date of a record: today when absent, never in the future (422 field problem). */
@@ -149,8 +179,15 @@ class CashbookSupport {
         return date;
     }
 
-    /** The date of an entry and, when it is before today, the owner's checked backdate (ADR-120); else none. */
-    record Dated(LocalDate date, EntryDates.Backdate backdate) {}
+    /**
+     * The date of an entry and, when it is before today, the owner's checked backdate (ADR-120); else none. {@code offline}:
+     * the entry was kept on the phone and dated by it (ADR-067 decision 13), audited as such.
+     */
+    record Dated(LocalDate date, EntryDates.Backdate backdate, OfflineEntry offline) {
+        Dated(LocalDate date, EntryDates.Backdate backdate) {
+            this(date, backdate, null);
+        }
+    }
 
     /**
      * The business date of a new entry (ADR-120): today when absent, never in the future, and before today only from a
@@ -173,6 +210,7 @@ class CashbookSupport {
     /** The {@code retail.entry.backdated} audit row of an entry dated before today; nothing otherwise. */
     void auditBackdate(Dated dated, String entityType, UUID id, UUID branch) {
         entryDates.audit(dated.backdate(), entityType, id, branch);
+        entryDates.auditOffline(dated.offline(), dated.date(), entityType, id, branch);
     }
 
     EntryDates entryDates() {

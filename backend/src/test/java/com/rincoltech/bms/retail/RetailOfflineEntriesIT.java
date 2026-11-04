@@ -63,6 +63,21 @@ class RetailOfflineEntriesIT extends IntegrationTest {
         expenseItem = cb.categoryWithItem("Test Transport", "Test Fuel", false);
     }
 
+    /**
+     * A seller (the sales column with the till's cash book, issue #799) who also records withdrawals and moves stock, scoped
+     * to the head office: no backdate permission (review of #839).
+     */
+    static final String SELLER = RetailTestSupport.SALES + "," + CashbookTestSupport.CASHBOOK_SALES
+            + ",retail.withdrawal.record,retail.stock.transfer";
+
+    long rows(String table) {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM " + table + " WHERE tenant_id = ?")
+                .param(t.tenantId())
+                .query(Long.class)
+                .single();
+    }
+
     /** Yesterday at noon on the business clock: an entry made on the phone then. */
     Instant madeYesterday() {
         return yesterday.atTime(12, 0).atZone(ZONE).toInstant();
@@ -250,12 +265,23 @@ class RetailOfflineEntriesIT extends IntegrationTest {
             assertThat(r.getBody().toString()).as(path).contains("offline_entry_too_old");
             assertThat(r.getBody().toString()).as(path).contains("Only the owner can save it on its own day");
         });
-        assertThat(TestDatabase.owner()
-                        .sql("SELECT count(*) FROM retail_expenses WHERE tenant_id = ?")
-                        .param(t.tenantId())
-                        .query(Long.class)
-                        .single())
-                .isZero();
+        assertThat(rows("retail_expenses")).isZero();
+        // Review of #839: a seller, scoped to the shop, on expenses, withdrawals and Move stock: refused, nothing
+        // written.
+        RetailTestSupport seller = new RetailTestSupport(http, t);
+        for (String path : List.of("/expenses", "/withdrawals", "/transfers")) {
+            ResponseEntity<JsonNode> r = seller.postKeyed(
+                    path,
+                    bodies(old, null).get(path).get(),
+                    SELLER,
+                    hq.toString(),
+                    UUID.randomUUID().toString());
+            assertThat(r.getStatusCode()).as("%s %s", path, r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+            assertThat(r.getBody().toString()).as(path).contains("offline_entry_too_old");
+        }
+        assertThat(rows("retail_expenses")).isZero();
+        assertThat(rows("retail_cash_withdrawals")).isZero();
+        assertThat(rows("retail_transfers")).isZero();
         String ownerPerms = ALL + "," + OfflineEntry.BACKDATE;
         for (String path : List.of("/expenses", "/withdrawals", "/transfers")) {
             ResponseEntity<JsonNode> r = cb.api.postKeyed(
@@ -269,6 +295,94 @@ class RetailOfflineEntriesIT extends IntegrationTest {
                     .as(path)
                     .isEqualTo(oldDay.toString());
         }
+    }
+
+    // JUSTIFICATION-A3: the second review of #839 asks for these three cases (closed day, sent time, lost request) to
+    // be proven.
+    /**
+     * Review of #839: a day whose cash was already banked is closed. An offline expense made on it is refused for a seller,
+     * with a plain reason and nothing written, and kept on that day for the owner; and it is audited as dated by the phone.
+     */
+    @Test
+    void anOfflineEntryOnADayAlreadyBankedIsTheOwnersOnly() {
+        Map<String, Object> banking = new LinkedHashMap<>();
+        banking.put("branch_id", hq);
+        banking.put("business_date", yesterday.toString());
+        banking.put("amount_minor", 1_000);
+        assertThat(cb.api
+                        .postKeyed(
+                                "/bankings",
+                                banking,
+                                ALL,
+                                "*",
+                                UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+
+        RetailTestSupport seller = new RetailTestSupport(http, t);
+        ResponseEntity<JsonNode> refused = seller.postKeyed(
+                "/expenses",
+                bodies(madeYesterday(), null).get("/expenses").get(),
+                SELLER,
+                hq.toString(),
+                UUID.randomUUID().toString());
+        assertThat(refused.getStatusCode()).as("%s", refused.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(refused.getBody().toString())
+                .contains("offline_day_closed")
+                .contains("only the owner can add to it");
+        assertThat(rows("retail_expenses")).isZero();
+
+        ResponseEntity<JsonNode> owners = cb.api.postKeyed(
+                "/expenses",
+                bodies(madeYesterday(), null).get("/expenses").get(),
+                ALL,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(owners.getStatusCode()).as("%s", owners.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(owners.getBody().get("business_date").asString()).isEqualTo(yesterday.toString());
+        assertThat(cb.auditPayloads("retail.entry.recorded_offline"))
+                .anySatisfy(p -> assertThat(p).contains(yesterday.toString()).contains("retail.expense"));
+    }
+
+    /** Review of #839: a banking or withdrawal time sent with an offline entry is not used; the phone's judged time is. */
+    @Test
+    void aTimeSentWithAnOfflineBankingOrWithdrawalIsNotUsed() {
+        Instant made = Instant.now().minus(Duration.ofMinutes(10)).truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
+        String twentyDaysAgo = Instant.now().minus(Duration.ofDays(20)).toString();
+        for (String path : List.of("/bankings", "/withdrawals")) {
+            Map<String, Object> b = bodies(made, null).get(path).get();
+            b.put(path.equals("/bankings") ? "banked_at" : "withdrawn_at", twentyDaysAgo);
+            ResponseEntity<JsonNode> r = cb.api.postKeyed(
+                    path, b, SELLER, hq.toString(), UUID.randomUUID().toString());
+            assertThat(r.getStatusCode()).as("%s %s", path, r.getBody()).isEqualTo(HttpStatus.CREATED);
+            String at = r.getBody()
+                    .get(path.equals("/bankings") ? "banked_at" : "withdrawn_at")
+                    .asString();
+            assertThat(Instant.parse(at)).as(path).isEqualTo(made);
+            assertThat(r.getBody().get("business_date").asString()).as(path).isEqualTo(today.toString());
+        }
+    }
+
+    /**
+     * Review of #839: an online request whose answer was lost is sent again from the phone under the same key with when it
+     * was made. The key covers the request without its offline block, so a request that had arrived answers once.
+     */
+    @Test
+    void anOnlineRequestSentAgainWithItsOfflineBlockIsTheSameEntry() {
+        String key = UUID.randomUUID().toString();
+        Map<String, Object> online =
+                bodies(madeYesterday(), null).get("/expenses").get();
+        online.remove("offline");
+        ResponseEntity<JsonNode> first = cb.api.postKeyed("/expenses", online, SELLER, hq.toString(), key);
+        assertThat(first.getStatusCode()).as("%s", first.getBody()).isEqualTo(HttpStatus.CREATED);
+        Map<String, Object> again = new LinkedHashMap<>(online);
+        again.put("offline", offline(Instant.now().minus(Duration.ofMinutes(1)), null));
+        ResponseEntity<JsonNode> replay = cb.api.postKeyed("/expenses", again, SELLER, hq.toString(), key);
+        assertThat(replay.getStatusCode().is2xxSuccessful())
+                .as("%s", replay.getBody())
+                .isTrue();
+        assertThat(RetailTestSupport.id(replay)).isEqualTo(RetailTestSupport.id(first));
+        assertThat(rows("retail_expenses")).isEqualTo(1);
     }
 
     /**

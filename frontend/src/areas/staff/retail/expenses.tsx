@@ -46,10 +46,11 @@ export function ExpenseForm({ branchId, onSaved, onWaiting, replaces, onCancel }
   const list = categories.data ?? [];
   const items = itemsOf(list, draft.categoryId);
   const explain = needsExplanation(list, draft.categoryId, draft.itemId);
-  const entry = useEntryDate(branchId, draft.date, draft.dateReason);
-  const plan = planExpense({ branchId, ...draft, entry }, list);
-  // Issue #812: offline, or when the network drops, a new expense is kept on the phone; an edit stays online only.
+  // Issue #812: offline, or when the network drops, a new expense is kept on the phone; an edit stays online only. Offline the
+  // phone dates it and no date box shows, so a draft's earlier day never holds the save (second review of #839).
   const entries = useEntrySave();
+  const entry = useEntryDate(branchId, entries.offlineMode ? businessToday() : draft.date, draft.dateReason);
+  const plan = planExpense({ branchId, ...draft, entry }, list);
   const detail = [list.find((c) => c.id === draft.categoryId)?.name, items.find((i) => i.id === draft.itemId)?.name].filter(Boolean).join(', ');
   // success-screen: the Saved panel replaces the form; one that waits for approval says so on the form instead; an edited one (issue #830) closes its form
   const save = useMutation({

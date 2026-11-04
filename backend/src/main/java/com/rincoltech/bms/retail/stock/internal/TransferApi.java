@@ -53,7 +53,13 @@ final class TransferApi {
             @Size(max = 300) @Schema(description = "Why the move has a date before today; needed then (ADR-120)")
             String dateReason,
 
-            @Valid OfflineEntry offline) {}
+            @Valid OfflineEntry offline) {
+
+        /** What the Idempotency-Key covers: the request without its offline block (ADR-067 decision 13). */
+        TransferRequest forKey() {
+            return new TransferRequest(fromBranchId, toBranchId, transferDate, note, lines, dateReason, null);
+        }
+    }
 
     @Schema(name = "RetailTransferLine")
     record TransferLine(

@@ -50,7 +50,8 @@ asked, months ago, that the app set the date, and that only the owner may put an
    Amended by issue #812 (ADR-067 decision 13): an expense, savings, banking, withdrawal, Buy stock or Move stock kept on
    the phone offline carries `offline.occurred_at` and is dated the day it was made, as an offline sale is, without this
    check, since the phone dated it and the person did not choose it; one made more than 7 days ago needs
-   `retail.entry.backdate` at every branch it touches, as decision 2 does, and is otherwise refused.
+   `retail.entry.backdate` at every branch it touches, as decision 2 does, and is otherwise refused; so does a cash book
+   entry that lands on a day whose cash was already banked. A time sent with an offline banking or withdrawal is not used.
 
 ## Consequences
 

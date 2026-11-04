@@ -178,6 +178,19 @@ describe('a daily form with no network', () => {
     await waitFor(() => expect(screen.getByText('Sent. It is recorded.')).toBeTruthy());
   });
 
+  it('saves offline a draft left from an earlier day, with no date box to fix (second review of #839)', async () => {
+    const yesterday = new Date(Date.parse(`${today}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+    seed(`expense:${uid}:${branch}`, 'k-old-draft', { date: yesterday, dateReason: '', categoryId: 'c1', itemId: 'i1', partyId: '', amount: '20000', explanation: '' });
+    const offline = testOffline(admin, { online: false });
+    mount(<ExpenseForm branchId={branch} />, offline);
+    expect(screen.queryByLabelText(/Why an earlier date/)).toBeNull();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save expense' })[0] as HTMLButtonElement);
+    await screen.findByTestId('kept-on-phone');
+    const body = offline?.engine.snapshot().items[0]?.entry?.body as Record<string, unknown>;
+    expect(body.business_date).toBeUndefined();
+    expect(body.date_reason).toBeUndefined();
+  });
+
   it('says an edit of a saved expense needs the internet, and keeps nothing', async () => {
     const offline = testOffline(admin, { online: false });
     const replaces = { id: 'e1', branch_id: branch, business_date: today, category_id: 'c1', item_id: 'i1', amount_minor: 5000 };
@@ -235,8 +248,11 @@ describe('a daily form with no network', () => {
     await screen.findByTestId('kept-on-phone');
     const [item] = offline?.engine.snapshot().items ?? [];
     expect(item?.key).toBe('k-lost');
-    // Sent as it went online: no offline block, so the server answers the key it already holds.
-    expect((item?.entry?.body as Record<string, unknown>).offline).toBeUndefined();
+    // Sent as it went online plus when it was made (second review of #839): the key covers the request without that block,
+    // so the server answers the key it already holds, and a request that never arrived is dated the day it was made.
+    const body = item?.entry?.body as Record<string, unknown>;
+    expect((body.offline as { occurred_at?: string }).occurred_at).toBe(item?.occurredAt);
+    expect(body.amount_minor).toBe(10000);
     await act(async () => {
       await offline?.engine.syncNow();
     });

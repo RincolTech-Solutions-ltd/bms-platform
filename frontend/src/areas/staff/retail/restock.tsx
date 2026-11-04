@@ -201,10 +201,10 @@ export function RestockForm({ onSaved, draftName, initial, again = false, replac
   const suppliers = useQuery({ queryKey: ['retail', 'suppliers'], queryFn: () => retail.listSuppliers() });
   // ADR-120: only the owner, at every branch the goods go into, sees the date and may choose an earlier one.
   const into = [...new Set(lines.flatMap((l) => Object.keys(l.qtyByBranch)))];
-  const dated = entryDate(into.every((b) => holdsAt(me, BACKDATE, b)) && holdsAt(me, BACKDATE, undefined), purchasedOn, draft.dateReason, businessToday());
-
-  // Issue #812: offline, or when the network drops, a new delivery is kept on the phone; an edit stays online only.
+  // Issue #812: offline, or when the network drops, a new delivery is kept on the phone; an edit stays online only. Offline the
+  // phone dates it and no date box shows, so a draft's earlier day never holds the save (second review of #839).
   const entries = useEntrySave();
+  const dated = entryDate(into.every((b) => holdsAt(me, BACKDATE, b)) && holdsAt(me, BACKDATE, undefined), entries.offlineMode ? businessToday() : purchasedOn, draft.dateReason, businessToday());
   // success-screen: the purchase saved screen that replaces the form; an edited delivery goes back to Past purchases (issue #830)
   const save = useMutation({
     meta: { success: ({ saved }: { saved: Purchase }) => (replaces ? 'Delivery updated' : saved?.purchase_no ? `Purchase ${saved.purchase_no} saved` : 'Purchase saved') },

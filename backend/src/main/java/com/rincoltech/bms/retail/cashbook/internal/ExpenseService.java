@@ -127,7 +127,8 @@ class ExpenseService {
 
     @Transactional
     Outcome<ExpenseOutcome> create(String key, ExpenseRequest r) {
-        return idempotency.once(key, "POST", PATH, r, ExpenseOutcome.class, () -> recordOrAsk(r));
+        // The key covers the request without its offline block (ADR-067 decision 13).
+        return idempotency.once(key, "POST", PATH, r.forKey(), ExpenseOutcome.class, () -> recordOrAsk(r));
     }
 
     /**
@@ -149,11 +150,12 @@ class ExpenseService {
                     r.explanation(),
                     r.receiptDocumentId(),
                     c.backdate() == null ? null : c.backdate().reason(),
-                    // The resolved date c.date() above is what the approval keeps (for an entry kept offline, the day
-                    // it
-                    // was made, issue #812), so the offline block is not sent again.
+                    // The approval keeps the resolved date c.date() above (for an entry kept offline, the day it was
+                    // made, issue #812), so the offline block is not sent again.
                     null);
             UUID id = UUID.randomUUID();
+            // Dated by the phone: audited now, under the id the expense takes when it is approved.
+            support.entryDates().auditOffline(r.offline(), c.date(), "retail.expense", id, branch);
             Approvals.Outcome o = approvals.request(
                     new ActionRequest(
                             ExpenseAction.TYPE,
@@ -269,6 +271,8 @@ class ExpenseService {
         after.put("amount_minor", amount);
         audit.record(AuditLog.Entry.created("retail.expense.created", "retail.expense", id, branch, after));
         support.entryDates().audit(c.backdate(), "retail.expense", id, branch);
+        // Dated by the phone (issue #812); one that waited for approval was audited when it was asked, under this id.
+        support.entryDates().auditOffline(r.offline(), date, "retail.expense", id, branch);
         return view(repo.expense(id, false).orElseThrow());
     }
 

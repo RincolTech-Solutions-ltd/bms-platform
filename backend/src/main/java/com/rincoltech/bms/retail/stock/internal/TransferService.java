@@ -134,7 +134,10 @@ class TransferService implements ModuleSettingsChangeGuard {
 
     @Transactional
     Outcome<Transfer> create(String idempotencyKey, TransferRequest r) {
-        return idempotency.once(idempotencyKey, "POST", PATH, r, Transfer.class, () -> record(r));
+        // The key covers the request without its offline block (ADR-067 decision 13): an online request whose answer
+        // was
+        // lost is sent again from the phone with when it was made, and is still the same move.
+        return idempotency.once(idempotencyKey, "POST", PATH, r.forKey(), Transfer.class, () -> record(r));
     }
 
     private Transfer record(TransferRequest r) {
@@ -150,8 +153,9 @@ class TransferService implements ModuleSettingsChangeGuard {
                 r.transferDate(),
                 clock.now(),
                 tenant.profile().timezone(),
-                // An old entry is the owner's at both ends of the move.
-                List.of(from, r.toBranchId()));
+                // An old entry is the owner's where ADR-120 asks it: the source, and the destination when the move
+                // completes now (a dispatch is received later, on its own day).
+                dispatchOnly ? List.of(from) : List.of(from, r.toBranchId()));
         LocalDate on = requested == null ? today : requested;
         List<FieldProblem> problems = new ArrayList<>();
         Branches.Branch to = null;
@@ -313,6 +317,7 @@ class TransferService implements ModuleSettingsChangeGuard {
         }
         audit.record(AuditLog.Entry.created("retail.transfer.created", TRANSFER, id, from, after));
         entryDates.audit(backdate, TRANSFER, id, from);
+        entryDates.auditOffline(r.offline(), on, TRANSFER, id, from);
         if (dispatchOnly) {
             // The people who can receive at the destination hear on their devices (ADR-050): stock is on its way to
             // them.

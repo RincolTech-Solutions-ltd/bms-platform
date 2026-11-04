@@ -11,6 +11,7 @@ import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue.ProductSnapshot;
+import com.rincoltech.bms.retail.stock.EntryDates;
 import com.rincoltech.bms.retail.stock.OfflineEntry;
 import com.rincoltech.bms.retail.stock.Quantities;
 import com.rincoltech.bms.retail.stock.RetailBooks;
@@ -54,6 +55,8 @@ class UsageService {
     private final CurrentTenant tenant;
     private final BusinessClock clock;
     private final AuditLog audit;
+    /** The audit row of usage kept on the phone offline and dated by the phone (issue #812). */
+    private final EntryDates entryDates;
 
     UsageService(
             JdbcClient jdbc,
@@ -64,7 +67,9 @@ class UsageService {
             RetailBranchContext branches,
             CurrentTenant tenant,
             BusinessClock clock,
-            AuditLog audit) {
+            AuditLog audit,
+            EntryDates entryDates) {
+        this.entryDates = entryDates;
         this.jdbc = jdbc;
         this.catalogue = catalogue;
         this.stock = stock;
@@ -78,7 +83,10 @@ class UsageService {
 
     @Transactional
     Outcome<UsageReport> report(String idempotencyKey, UsageRequest r) {
-        return idempotency.once(idempotencyKey, "POST", PATH, r, UsageReport.class, () -> record(r));
+        // The key covers the request without its offline block (ADR-067 decision 13): an online request whose answer
+        // was
+        // lost is sent again from the phone with when it was made, and is still the same usage.
+        return idempotency.once(idempotencyKey, "POST", PATH, r.forKey(), UsageReport.class, () -> record(r));
     }
 
     private UsageReport record(UsageRequest r) {
@@ -191,6 +199,7 @@ class UsageService {
         after.put("reason", reason);
         after.put("lines", lines.size());
         audit.record(AuditLog.Entry.created("retail.usage.reported", USAGE, id, branch, after));
+        entryDates.auditOffline(r.offline(), on, USAGE, id, branch);
         UsageReport report = new UsageReport(id, branch, r.kind(), reason, on, currency, total, lines, clock.now(), by);
         return StockService.mayReadCost(branch) ? report : withoutCost(report);
     }

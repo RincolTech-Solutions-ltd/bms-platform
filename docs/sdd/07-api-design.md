@@ -264,12 +264,15 @@ offline sale's branch, a stock minimum's branch) is still the 422 field problem 
 `/retail/usage` take an optional `offline: {occurred_at, online_as_of}` (`RetailOfflineEntry`; both required inside it, 422
 otherwise). The entry is then dated the business day of `occurred_at`, judged as an offline sale is: a time ahead of the server
 is now; a time more than 2 minutes before `online_as_of` (a phone clock behind) is refused, 422 `offline_clock_behind`; a time
-more than 7 days ago needs `retail.entry.backdate` (the owner's, issue #811) at every branch the entry touches (both ends of a
-move, every branch a delivery stocks) and is otherwise refused, 422 `offline_entry_too_old`; both refusals are on
+more than 7 days ago needs `retail.entry.backdate` (the owner's, issue #811) at every branch ADR-120 asks it at (the source
+of a move and its destination when it completes now, every branch a delivery stocks) and is otherwise refused, 422
+`offline_entry_too_old`; an expense, savings, banking or withdrawal on a day before today whose cash was already banked (an
+active banking record at the branch) needs it at the branch too, else 422 `offline_day_closed`; these refusals are on
 `offline.occurred_at`, record nothing and say in plain words to fix the entry on the phone; a closed period is the ledger's
-`period_closed`; the date field of the
-route (`business_date`, `purchased_on`, `transfer_date`, `occurred_on`) is not used, and a banking's or withdrawal's time is
-the judged time unless sent. Everything else is checked as online, under the route's own `Idempotency-Key`; an expense that
+`period_closed`; the date field of the route (`business_date`, `purchased_on`, `transfer_date`, `occurred_on`) is not used,
+nor a banking's or withdrawal's time: it is the judged time. Each is audited as `retail.entry.recorded_offline`. Everything
+else is checked as online, under the route's own `Idempotency-Key`, whose request hash leaves the `offline` block out, so an
+online request whose answer was lost may be sent again with it and answers once; an expense that
 reaches the approval amount waits for an administrator with that day fixed (ADR-091). The edit routes (`/expenses/{id}/replace`,
 `/purchases/{id}/replace`) ignore `offline`: an edit is online only.
 

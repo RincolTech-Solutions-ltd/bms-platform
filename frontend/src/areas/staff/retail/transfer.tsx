@@ -66,10 +66,11 @@ export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId:
   // is sent for today and the server dates the move itself.
   const receivedLater = capabilityOn(me, 'retail', TRANSFER_RECEIPT);
   const ownersHere = holdsAt(me, BACKDATE, fromBranchId) && (receivedLater || !draft.toBranchId || holdsAt(me, BACKDATE, draft.toBranchId));
-  const dated = entryDate(ownersHere, draft.transferDate, draft.dateReason, businessToday());
-  const body = { ...buildTransfer(fromBranchId, { ...draft, transferDate: dated.sent?.date ?? '' }), ...dateFields(dated, 'transfer_date') };
-  // Issue #812: offline, or when the network drops, the move is kept on the phone and sent later.
+  // Issue #812: offline, or when the network drops, the move is kept on the phone and sent later. Offline the phone dates it
+  // and no date box shows, so a draft's earlier day never holds the save (second review of #839).
   const entries = useEntrySave();
+  const dated = entryDate(ownersHere, entries.offlineMode ? businessToday() : draft.transferDate, draft.dateReason, businessToday());
+  const body = { ...buildTransfer(fromBranchId, { ...draft, transferDate: dated.sent?.date ?? '' }), ...dateFields(dated, 'transfer_date') };
   // success-screen: Move stock shows the summary of the move in place of the form, and the toast says it too (#824)
   const save = useMutation({
     mutationFn: () => entries.save(
