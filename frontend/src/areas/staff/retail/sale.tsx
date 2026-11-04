@@ -50,6 +50,7 @@ import { useBranchHold } from '../branch-picker';
 import { SELL_COUNT_NOTE, savingCount, unfinishedKey } from './unfinished-counts';
 import { icons } from '../../../components/icons';
 import { LocationAsk, useWhereNow } from './entry-location';
+import { ReceiptPhotoChoice, sendReceiptPhoto } from './receipt-photo';
 
 // Record a sale (FR-RET-04, FR-RET-05). One idempotency key per draft, kept with the draft in this
 // tab until the sale is saved or the draft is cleared: a double tap, a retry after a lost answer or a
@@ -287,13 +288,20 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
   // network, goes to the outbox at once under the same key, with when it was taken (recorded offline), and the provisional
   // receipt shows. The answer that comes later is ignored here; the server finds the sale by its client sale id, or answers
   // from the key, whose hash leaves the delivery fields out, so the sale is recorded once (ADR-067 decision 5).
+  // Issue #819: the optional receipt photo goes once the sale is recorded, never with a sale kept on the phone.
+  const [receipt, setReceipt] = useState<File | null>(null);
+  const photoNote = useRef<string | null>(null);
+  const withPhoto = async (sale: Sale) => {
+    photoNote.current = await sendReceiptPhoto('sale', sale.id, receipt);
+    return { sale };
+  };
   const save = useMutation({
-    meta: { success: (r: { sale: Sale } | { kept: OutboxItem }) => (r && 'kept' in r ? 'Sale saved on this phone' : r?.sale?.total_minor !== undefined ? `Sale of ${money(r.sale.total_minor)} saved` : 'Sale saved') },
+    meta: { success: (r: { sale: Sale } | { kept: OutboxItem }) => `${r && 'kept' in r ? 'Sale saved on this phone' : r?.sale?.total_minor !== undefined ? `Sale of ${money(r.sale.total_minor)} saved` : 'Sale saved'}${r && !('kept' in r) && photoNote.current ? `. ${photoNote.current}` : ''}` },
     mutationFn: async ({ body, at, pricesAt }: { body: SaleRequest; at: string; pricesAt?: string }): Promise<{ sale: Sale } | { kept: OutboxItem }> => {
       const asked = retail.createSale(body, key);
-      if (!offline || !mayKeepOnPhone({ body })) return { sale: await asked };
+      if (!offline || !mayKeepOnPhone({ body })) return withPhoto(await asked);
       try {
-        return { sale: await answerWithin(asked, SALE_ANSWER_MS) };
+        return await withPhoto(await answerWithin(asked, SALE_ANSWER_MS));
       } catch (e) {
         // Only no answer in time or a network failure (fetch's TypeError); a 401 or any refusal is a RetailError and stays here.
         // A write is never refreshed and sent again inside the client (only reads are), so the race is the sale request alone.
@@ -325,6 +333,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       const { sale } = done;
       entry.saved();
       finish();
+      setReceipt(null);
       void queryClient.invalidateQueries({ queryKey: ['retail', 'products'] });
       void queryClient.invalidateQueries({ queryKey: ['retail', 'stock'] });
       // Home's shop figures (issue #485) count the sale at once.
@@ -928,6 +937,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
         </div>
       )}
       {keep.error && <p role="alert" className="alert alert-danger">This phone could not keep the sale: {keep.error.message}</p>}
+      <ReceiptPhotoChoice id="sale-receipt" file={receipt} onChange={setReceipt} />
       <SaleBar>
         <BusyButton type="submit" className="rt-primary sale-bar-action" busy={save.isPending || keep.isPending} notReady={problem !== null && !locked} data-tour="sale-save">
           {offlineMode && mayKeepOnPhone(draft.sent) ? 'Save on this phone' : lost ? 'Try again' : (

@@ -2,6 +2,7 @@ package com.rincoltech.bms.retail.catalogue;
 
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.Principal;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.UUID;
@@ -104,5 +105,6 @@ public interface ReceiptPhotos {
     }
 
     /** The answer of an add: the photo's id. */
+    @Schema(name = "RetailReceiptPhotoAdded")
     record Added(UUID photoId) {}
 }

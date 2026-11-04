@@ -29,6 +29,7 @@ import { useEntryChecks, useEntryNorms } from './entry-checks';
 import { AddByName } from '../../../app/ui/EmptyChoice';
 import { PickerWithAdd } from '../../../app/ui/PickerWithAdd';
 import { EditNeedsInternet, KeptOnPhone, OfflineFormNote, isKept, useEntrySave } from '../../../offline/keep-entry';
+import { ReceiptPhotoChoice, sendReceiptPhoto } from './receipt-photo';
 
 // Restock (FR-RET-06): supplier, lines with cost, sell price and a quantity per branch. Saving sets
 // the product's cost and sell price in the same transaction and leaves a price history row.
@@ -210,18 +211,25 @@ export function RestockForm({ onSaved, draftName, fixSearch, fromEdit = false, i
   const entries = useEntrySave();
   const dated = entryDate(into.every((b) => holdsAt(me, BACKDATE, b)) && holdsAt(me, BACKDATE, undefined), entries.offlineMode ? businessToday() : purchasedOn, draft.dateReason, businessToday());
   // success-screen: the purchase saved screen that replaces the form; an edited delivery goes back to Past purchases (issue #830)
+  // Issue #819: the optional receipt photo goes once the delivery is saved, never with one kept on the phone.
+  const [receipt, setReceipt] = useState<File | null>(null);
+  const photoNote = useRef<string | null>(null);
+  const withPhoto = async <T extends { saved: Purchase }>(r: T): Promise<T> => {
+    photoNote.current = await sendReceiptPhoto('delivery', r.saved.id, receipt);
+    return r;
+  };
   const save = useMutation({
-    meta: { success: ({ saved }: { saved: Purchase }) => (replaces ? 'Delivery updated' : saved?.purchase_no ? `Purchase ${saved.purchase_no} saved` : 'Purchase saved') },
+    meta: { success: ({ saved }: { saved: Purchase }) => `${replaces ? 'Delivery updated' : saved?.purchase_no ? `Purchase ${saved.purchase_no} saved` : 'Purchase saved'}${saved && photoNote.current ? `. ${photoNote.current}` : ''}` },
     mutationFn: async () => {
       const supplierName = (suppliers.data ?? []).find((x) => x.id === supplierId)?.name ?? '';
       const before = Object.fromEntries(lines.map((l) => [l.product.id ?? '', { sell: l.product.sell_minor, cost: l.product.cost_minor }]));
       // Edit (issue #830): one call voids the old delivery and saves this one naming it, in one transaction on the server, so
       // any refusal (its stock moved, an item switched off) leaves the old delivery as it was. The draft's key covers a retry.
       const request = buildPurchase({ supplierId, purchasedOn: dated.sent?.date, dateReason: dated.sent?.reason, method, lines });
-      if (replaces?.id) return { saved: await retail.replacePurchase(replaces.id, request, key), context: { supplierName, before } };
+      if (replaces?.id) return withPhoto({ saved: await retail.replacePurchase(replaces.id, request, key), context: { supplierName, before } });
       // Opened from Edit (a delivery voided already, entered again): online only like an edit, so a dropped connection is an
       // error on the form, never an entry kept on the phone (fifth review of #839). The draft's key covers a retry.
-      if (fromEdit) return { saved: await retail.createPurchase(request, key), context: { supplierName, before } };
+      if (fromEdit) return withPhoto({ saved: await retail.createPurchase(request, key), context: { supplierName, before } });
       const saved = await entries.save(
         {
           kind: 'purchase', body: request, key, branchId: here ?? branches[0]?.id ?? '',
@@ -230,7 +238,7 @@ export function RestockForm({ onSaved, draftName, fixSearch, fromEdit = false, i
         },
         () => retail.createPurchase(request, key),
       );
-      return isKept(saved) ? saved : { saved, context: { supplierName, before } };
+      return isKept(saved) ? saved : withPhoto({ saved, context: { supplierName, before } });
     },
     onSuccess: (result) => {
       entry.saved();
@@ -459,13 +467,14 @@ export function RestockForm({ onSaved, draftName, fixSearch, fromEdit = false, i
       {supplierProblem && <p role="alert" className="rt-flag" data-testid="credit-needs-supplier">{supplierProblem}</p>}
 
       <p className="rt-total" aria-live="polite" data-testid="restock-total">Total cost <Money minor={restockTotal(lines)} /></p>
+      <ReceiptPhotoChoice id="restock-receipt" file={receipt} onChange={setReceipt} />
       <Problem error={save.error} />
       <ActionBar>
         <BusyButton type="submit" className="rt-primary" data-tour="restock-save" busy={save.isPending} notReady={blocked}>{replaces ? 'Save changes' : 'Save the purchase'}</BusyButton>
       </ActionBar>
 
       {lines.length > 0 && !save.isPending && (
-        <button type="button" onClick={() => { discard(); save.reset(); }}>Clear this purchase</button>
+        <button type="button" onClick={() => { discard(); setReceipt(null); save.reset(); }}>Clear this purchase</button>
       )}
       {toast}
     </form>
