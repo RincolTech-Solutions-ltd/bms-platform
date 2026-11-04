@@ -42,7 +42,12 @@ sometimes twice: the banner under the bar and the screen's own red error. The ow
    confirms the server answers (the browser alone says online on Wi-Fi with no internet). Until that ping, no new read is
    written over it either (issue #774): each write that meets such a copy asks the ping again until one answers. The
    removal runs in turn with these writes and only while the copy is still the other rights' one, so a fresh copy written
-   during a slow ping stays. A write of the old rights still under way finishes before the copy is read again.
+   during a slow ping stays. A write of the old rights still under way finishes before the copy is read again. A copy kept
+   before the app update of issue #847, under the older form of the same rights (the first six parts, without the savings
+   switch), is shown as the person's own, offline too, and written again once under the new form (the lead's decision on
+   the review of #858); the copy lives under the person's own scope (business host and person), so it is never another
+   person's, and the older form of other rights is not used. That form does not say whether the switch was on, so with it
+   off its Banking answers are neither shown nor written again.
 4. **Cap.** Sales older than 30 days by their sale date are cut from the kept sales lists, and a single sale that old is not
    kept, apart from credit sales still owing; any kept read older than 30 days is dropped; the whole copy is held under
    2,000,000 JSON characters, newest reads first. A read is written about two seconds after it loads, merged with what was
