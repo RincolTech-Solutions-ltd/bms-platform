@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { businessToday, type Product, type Purchase } from '../../../api/retail';
@@ -21,10 +21,20 @@ vi.mock('@tanstack/react-router', async (original) => {
 
 vi.mock('../../../api/retail', async (original) => {
   const real = await original<typeof import('../../../api/retail')>();
-  return { ...real, retail: { ...real.retail, listProducts: () => Promise.resolve([]), listSuppliers: () => Promise.resolve([]) } };
+  return {
+    ...real,
+    retail: {
+      ...real.retail,
+      listProducts: () => Promise.resolve([]),
+      listSuppliers: () => Promise.resolve([]),
+      priceHistory: () => Promise.resolve([]),
+      editPrices: (id: string, _version: number, body: { sell_minor?: number }) => Promise.resolve({ id, description: 'Test soap', sell_minor: body.sell_minor }),
+    },
+  };
 });
 
 const { RestockForm, restockWorth } = await import('./restock');
+const { PriceForm } = await import('./catalogue-products');
 const { RestockCard } = await import('./restocks');
 const { PROFIT } = await import('./permissions');
 
@@ -119,6 +129,23 @@ describe('Buy stock (issue #821)', () => {
     expect(screen.queryByTestId('unpriced-note')).toBeNull();
   });
 
+  it('shows the total cost alone, with no zeros to sell for or earn, while the form has no line (issue #852)', () => {
+    screenOf(owner, <RestockForm initial={{ ...draft(), lines: [] }} />);
+    const total = screen.getByTestId('restock-total');
+    expect(figures(total)).toEqual(['Total cost: UGX 0']);
+    expect(screen.queryByText(/Should sell for|Expected profit|Expected loss/)).toBeNull();
+    expect(screen.queryByTestId('unpriced-note')).toBeNull();
+  });
+
+  it('hides the two figures again when the last line is removed (issue #852)', () => {
+    const lines = draft().lines;
+    screenOf(owner, <RestockForm initial={{ ...draft(), lines: [lines[1]!] }} />);
+    expect(figures(screen.getByTestId('restock-total'))).toHaveLength(3);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Test soap' }));
+    expect(figures(screen.getByTestId('restock-total'))).toEqual(['Total cost: UGX 0']);
+    expect(screen.queryByText(/Should sell for|Expected profit|Expected loss/)).toBeNull();
+  });
+
   it('works nothing out for someone who reads profit only at a branch the delivery does not go to', () => {
     const other = owner.branches?.find((b) => b.id !== branch)?.id ?? 'b-other';
     const elsewhere = { ...owner, permission_scopes: { ...(owner.permission_scopes ?? {}), [PROFIT]: { all_branches: false, branch_ids: [other] } } };
@@ -181,5 +208,29 @@ describe('Past purchases (issue #821)', () => {
     expect(card.textContent).toContain('Total UGX 8,000.');
     expect(screen.queryByTestId('delivery-worth')).toBeNull();
     expect(card.textContent).not.toMatch(/Should sell for|Expected profit|Expected loss/);
+  });
+});
+
+// JUSTIFICATION-A3: issue #852 item 3 asks for this one assertion, which needs the price form rendered with a query cache.
+describe('a price edit (issue #852)', () => {
+  it('refreshes Past purchases and a delivery read alone, whose worth follows the item\'s current price', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const list = ['retail', 'restocks', '2026-11-01', '2026-11-04', 'all'];
+    const one = ['retail', 'restocks', 'one', 'purchase-1'];
+    client.setQueryData(list, { items: [] });
+    client.setQueryData(one, { id: 'purchase-1' });
+    render(
+      <QueryClientProvider client={client}>
+        <StaffContext.Provider value={{ me: owner, branch }}>
+          <PriceForm product={{ ...soap, version: 1 }} onSaved={() => undefined} onCancel={() => undefined} />
+        </StaffContext.Provider>
+      </QueryClientProvider>,
+    );
+    expect(client.getQueryState(list)?.isInvalidated).toBe(false);
+    fireEvent.change(document.getElementById('price-sell') as HTMLInputElement, { target: { value: '600' } });
+    fireEvent.change(document.getElementById('price-reason') as HTMLInputElement, { target: { value: 'Test new price' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save the new price' }));
+    await waitFor(() => expect(client.getQueryState(list)?.isInvalidated).toBe(true));
+    expect(client.getQueryState(one)?.isInvalidated).toBe(true);
   });
 });
