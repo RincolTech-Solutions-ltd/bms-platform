@@ -3062,15 +3062,28 @@ class MigrationOrderIT {
             owner.sql("INSERT INTO platform_users (id, email, full_name) VALUES (?, ?, 'Test Operator V135')")
                     .params(UUID.randomUUID(), "op v135@example.test")
                     .update();
+            // The counts are across every business, so only this case's business and operator are asserted, by reason.
             List<String> warnings = leftOverWarnings(postgres);
-            assertThat(warnings).hasSize(3).noneMatch(w -> w.contains("@"));
-            assertThat(warnings.get(0))
-                    .startsWith("staff email: 1 staff email(s) hold whitespace and, without it, are the email")
-                    .contains(tenant.toString(), "puts in their own email", "staff-email-left-over.md");
-            assertThat(warnings.get(1))
-                    .startsWith("staff email: 1 staff email(s) hold nothing but whitespace")
-                    .contains(tenant.toString(), "staff-email-left-over.md");
-            assertThat(warnings.get(2)).startsWith("operator email: 1 platform operator email(s) hold whitespace");
+            assertThat(warnings).noneMatch(w -> w.contains("@"));
+            assertThat(warnings)
+                    .filteredOn(w -> w.contains("are the email of another staff user") && w.contains(tenant.toString()))
+                    .singleElement()
+                    .asString()
+                    .contains("puts in their own email", "staff-email-left-over.md");
+            assertThat(warnings)
+                    .filteredOn(w -> w.contains("hold nothing but whitespace") && w.contains(tenant.toString()))
+                    .singleElement()
+                    .asString()
+                    .contains("staff-email-left-over.md");
+            assertThat(warnings)
+                    .filteredOn(w -> w.contains("hold whitespace that can be removed") && w.contains(tenant.toString()))
+                    .as("the clean rows V135 already fixed are not reported")
+                    .isEmpty();
+            assertThat(warnings)
+                    .filteredOn(w -> w.startsWith("operator email:"))
+                    .singleElement()
+                    .asString()
+                    .contains("staff-email-left-over.md");
         }
     }
 

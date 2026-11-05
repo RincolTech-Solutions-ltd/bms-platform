@@ -408,8 +408,12 @@ class RetailDamageShareIT extends IntegrationTest {
                 UUID.randomUUID().toString());
         assertThat(v.getStatusCode()).as("%s", v.getBody()).isEqualTo(HttpStatus.OK);
 
-        // Yesterday alone: DSH-1's 40 from two days ago at the start, and both of yesterday's deliveries, the one
-        // voided today included, because on yesterday the books held it.
+        // Where 65 and 60 come from: setUp gives head office DSH-1's 40 delivered two days ago, DSH-1's 10 delivered
+        // today and 7 delivered and voided today, and DSH-2 counted in today (a count, never "came in"). The shop total
+        // adds every item that passed through the shop, listed or not (ADR-127 decision 4), so DSH-7, neither damaged
+        // nor used, counts in it.
+        // Yesterday alone: DSH-1's 40 at the start, and both of DSH-7's deliveries of yesterday (10 and 15), the one
+        // voided today included, because on yesterday the books held it: 40 + 25 = 65.
         JsonNode closed = shop(report("?from=" + yesterday + "&to=" + yesterday, ADMIN, Map.of()), t.headOffice());
         assertThat(closed.get("base_qty").asString()).isEqualTo("65.000");
         // Yesterday and today: the void is inside the period, so the 15 never came in.
@@ -417,7 +421,7 @@ class RetailDamageShareIT extends IntegrationTest {
         assertThat(item(shop(open, t.headOffice()), "DSH-1").get("received_qty").asString())
                 .isEqualTo("10.000");
         JsonNode hq = shop(open, t.headOffice());
-        // 40 at the start; came in: DSH-1's 10 today and DSH-7's 10 yesterday (the voided 7 and 15 left out).
+        // 40 at the start; came in: DSH-1's 10 today and DSH-7's 10 yesterday (the voided 7 and 15 left out): 60.
         assertThat(hq.get("base_qty").asString()).isEqualTo("60.000");
     }
 }
