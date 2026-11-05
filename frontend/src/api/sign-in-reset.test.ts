@@ -22,7 +22,15 @@ const fetchImpl = vi.hoisted(() => {
   return state;
 });
 
-import { requestPasswordReset, resetUserSignIn, SignInResetError } from './sign-in-reset';
+import { cleanEmail, requestPasswordReset, resetUserSignIn, SignInResetError } from './sign-in-reset';
+
+describe('cleanEmail (issues #823 and #857)', () => {
+  it('removes every space and the zero width space, and keeps the zero width non-joiner and joiner', () => {
+    expect(cleanEmail(' Test.Owner @ example.test​ ')).toBe('test.owner@example.test');
+    expect(cleanEmail('test.ow‌ner@example.test ')).toBe('test.ow‌ner@example.test');
+    expect(cleanEmail(' test.ow‍ner@example.test')).toBe('test.ow‍ner@example.test');
+  });
+});
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const USER = '00000000-0000-4000-8000-0000000000a1';
