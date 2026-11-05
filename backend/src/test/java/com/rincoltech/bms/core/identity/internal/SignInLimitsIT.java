@@ -44,8 +44,6 @@ class SignInLimitsIT extends IntegrationTest {
     static final String PLATFORM_LOGIN = "/api/v1/platform/auth/login";
     static final String FORGOT = "/api/v1/auth/staff/password/forgot";
     static final AtomicInteger ADDRESS = new AtomicInteger();
-    /** A non-breaking space, written by its code so no editor can turn it into a plain one. */
-    static final String NBSP = Character.toString(0x00A0);
 
     @Autowired
     TestRestTemplate http;
