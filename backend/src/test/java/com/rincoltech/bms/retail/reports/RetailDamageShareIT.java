@@ -389,6 +389,18 @@ class RetailDamageShareIT extends IntegrationTest {
         // unit_id is accepted and counts as the 1 piece typed. If usage lines ever take a pack unit, the refusal fails
         // and this test must be changed on purpose (#860, the lead's sign-off).
         // JUSTIFICATION-A3: the #860 review asks this refusal to be proven against the same body accepted.
+        // First the body without unit_id (the shape usage() sends): accepted, 201, as the 1 piece typed.
+        usage(t.headOffice(), "damaged", p, "1");
+        String written = "SELECT (SELECT count(*) FROM retail_usage_lines WHERE tenant_id = ? AND product_id = ?)"
+                + " || '|' || (SELECT count(*) FROM retail_stock_movements WHERE tenant_id = ? AND product_id = ?"
+                + " AND source_type = 'retail.usage')";
+        assertThat(TestDatabase.owner()
+                        .sql(written)
+                        .params(t.tenantId(), p, t.tenantId(), p)
+                        .query(String.class)
+                        .single())
+                .isEqualTo("2|2");
+        // Then the same body with the carton as unit_id: refused for that field alone, with nothing written.
         Map<String, Object> withUnit = new LinkedHashMap<>(Map.of("product_id", p, "qty", "1"));
         withUnit.put("unit_id", carton);
         ResponseEntity<JsonNode> refused = api.postKeyed(
@@ -399,21 +411,13 @@ class RetailDamageShareIT extends IntegrationTest {
                 UUID.randomUUID().toString());
         assertThat(refused.getStatusCode()).as("%s", refused.getBody()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(refused.getBody().get("code").asString()).isEqualTo("malformed_request");
-        String lines = "SELECT count(*) FROM retail_usage_lines WHERE tenant_id = ? AND product_id = ?";
         assertThat(TestDatabase.owner()
-                        .sql(lines)
-                        .params(t.tenantId(), p)
-                        .query(Long.class)
+                        .sql(written)
+                        .params(t.tenantId(), p, t.tenantId(), p)
+                        .query(String.class)
                         .single())
-                .as("nothing recorded from the refused line")
-                .isEqualTo(1);
-        usage(t.headOffice(), "damaged", p, "1");
-        assertThat(TestDatabase.owner()
-                        .sql(lines)
-                        .params(t.tenantId(), p)
-                        .query(Long.class)
-                        .single())
-                .isEqualTo(2);
+                .as("no usage line and no stock movement from the refused line")
+                .isEqualTo("2|2");
 
         JsonNode packed = item(shop(report(todayOnly(), ADMIN, Map.of()), t.headOffice()), "DSH-6");
         // Two cartons of 24 are 48 pieces; 6 + 1 pieces of 48 is 14.6 %, a whole 15 half up; never 6 + 24.
