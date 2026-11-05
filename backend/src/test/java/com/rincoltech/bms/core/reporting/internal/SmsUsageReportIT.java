@@ -19,7 +19,7 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * The report {@code core.sms_usage} (issue #215, FR-NTF-07, FR-NTF-15, chapter 14 section 14.6): its tables equal the
- * hand-computed totals of a fabricated September 2026, months are Kampala months, only messages handed to the provider
+ * hand-computed totals of a fabricated September 2026, months are calendar months in the business's time zone, only messages handed to the provider
  * count, the provider's segments win over ours, a cost in another currency is not added, another business's messages
  * never appear, and the report is offered only to a business with SMS on or SMS history. Every figure is fabricated
  * test data, not a price.
