@@ -289,6 +289,10 @@ export function createCashbookMock(env: CashbookEnv): Pick<RetailApi, Keys> {
       run(() => {
         const c = categories.find((x) => x.id === categoryId);
         if (!c) return refuse(404, 'not_found', 'Not found.');
+        // ADR-118 as the server (issue #810): without retail.expense.manage the category must be active and the item may
+        // not ask for an explanation. The mock takes a session with profit access for the owner's, who manages the lists.
+        if (!env.profit() && c.active === false) refuse(422, 'category_inactive', 'This category is switched off. Pick another one.');
+        if (!env.profit() && body.requires_explanation) refuse(403, 'permission_denied', 'Asking for an explanation on an item needs permission to manage expenses.');
         // ADR-118: with reuse_existing an active item of the same name is picked again, a switched off one refused.
         const spaced = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
         const same = (c.items ?? []).find((i) => spaced(i.name ?? '') === spaced(body.name));
@@ -304,7 +308,10 @@ export function createCashbookMock(env: CashbookEnv): Pick<RetailApi, Keys> {
         const item = categories.find((x) => x.id === categoryId)?.items?.find((i) => i.id === itemId);
         if (!item) return refuse(404, 'not_found', 'Not found.');
         if (item.version !== version) refuse(409, 'version_conflict', 'Stale.');
-        Object.assign(item, { ...(body.name ? { name: body.name.trim() } : {}), ...(body.active !== undefined ? { active: body.active } : {}), ...(body.requires_explanation !== undefined ? { requires_explanation: body.requires_explanation } : {}), version: (item.version ?? 1) + 1 });
+        // Issue #810: a rename is stored with one space between words, and a name the category has already is refused.
+        const named = body.name?.trim().replace(/\s+/g, ' ');
+        if (named && (categories.find((x) => x.id === categoryId)?.items ?? []).some((i) => i.id !== itemId && (i.name ?? '').trim().replace(/\s+/g, ' ').toLowerCase() === named.toLowerCase())) refuse(409, 'duplicate_item', 'This category has an item with that name already.');
+        Object.assign(item, { ...(named ? { name: named } : {}), ...(body.active !== undefined ? { active: body.active } : {}), ...(body.requires_explanation !== undefined ? { requires_explanation: body.requires_explanation } : {}), version: (item.version ?? 1) + 1 });
         return { ...item };
       }),
 
