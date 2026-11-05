@@ -1341,7 +1341,7 @@ Left for the follow-up issue #798 (each needs a look at the flow, not only a sen
 
 | Route or section | Rule 1 | Rule 3 |
 |---|---|---|
-| `/staff/retail/items/$productId` (item page, #813) | Passes: movements are paged with Show older movements, and filtered by shop and days | Passes: one primary, and the empty list offers Count it now or Show everything |
+| `/staff/retail/items/$productId` (item page, #813) | Passes: movements are paged with Show older movements, and filtered by shop and days | Passes: no brand button competes, and the empty list offers Count it now or Show everything |
 | `/staff/retail/restocks/$purchaseId` (one purchase) | Passes: one record | Passes: one primary (Void and enter it again) |
 | `/staff/retail/catalogue/suppliers/$supplierId` (one supplier, #820) | Passes: deliveries are paged with Show older deliveries | Breaks: the empty deliveries text, above, left for #798 |
 | `/staff/retail/catalogue/suppliers` (now `suppliers.tsx`) | Passes: searched | Fixed here again: Empty: add the first one above |

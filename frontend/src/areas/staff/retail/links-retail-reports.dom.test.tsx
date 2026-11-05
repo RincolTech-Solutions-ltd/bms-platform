@@ -8,6 +8,7 @@ import { mockMe } from '../../../api/retail-mock';
 import { router as appRouter } from '../../../app/router';
 import { StaffContext } from '../context';
 import { CreditControlView } from './credit-control';
+import { DamageShareView } from './damage-share';
 import { SalesAnalysisView } from './sales-analysis';
 import { TransferSummary } from './transfer';
 
@@ -59,5 +60,15 @@ describe('links on the retail report pages', () => {
     expect(links.length).toBe(2);
     // Issue #336: each branch name opens that branch's stock.
     for (const a of links) expect(a.getAttribute('href')).toBe(`/staff/retail/stock?branch=${BRANCH}`);
+  });
+
+  it('opens Stock from the shop and the item of damage and use on Stock health', () => {
+    const data = {
+      branches: [{ branch_id: BRANCH, base_qty: '10.000', damaged_qty: '1.000', used_qty: '0.000', damaged_pct: 10, used_pct: 0,
+        items: [{ product_id: 'p1', code: 'TI-01', description: 'Test Item 01', unit: 'piece', opening_qty: '10.000', received_qty: '0.000', base_qty: '10.000', damaged_qty: '1.000', used_qty: '0.000', damaged_pct: 10, used_pct: 0 }] }],
+    };
+    show(<DamageShareView data={data} nameOf={() => 'Test Branch A'} />);
+    expect(screen.getByRole('link', { name: 'Test Branch A' }).getAttribute('href')).toBe(`/staff/retail/stock?branch=${BRANCH}`);
+    expect(screen.getByRole('link', { name: 'Test Item 01' }).getAttribute('href')).toBe('/staff/retail/stock?item=p1');
   });
 });
