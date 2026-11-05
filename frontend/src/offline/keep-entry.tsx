@@ -15,8 +15,9 @@ export interface EntrySave {
   /** Offline support is mounted and the phone is offline now: a save is kept on the phone. */
   offlineMode: boolean;
   /**
-   * Sends `online()` while online. Offline, or when the request got no answer at all (the network dropped), the entry is
-   * kept on the phone instead and `{ kept }` is returned. Any answer the server gave stays the form's to show.
+   * Sends `online()` while online, with the entry on the phone from the moment of save (issue #844) and taken off it once the
+   * server answers. Offline, or when the request got no answer at all (the network dropped), the entry stays on the phone
+   * and `{ kept }` is returned. Any answer the server gave stays the form's to show.
    */
   save<T>(spec: Omit<EntrySpec, 'branchName'>, online: () => Promise<T>): Promise<T | Kept>;
   /** The entry this form last kept on the phone, shown in the form's place until `another` is pressed. */
