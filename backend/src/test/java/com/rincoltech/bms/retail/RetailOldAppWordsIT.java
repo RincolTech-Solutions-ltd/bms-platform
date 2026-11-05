@@ -348,7 +348,8 @@ class RetailOldAppWordsIT extends IntegrationTest {
                 .isEqualTo(1);
     }
 
-    // JUSTIFICATION-A3: issue #838 asks for a test of each rule; no existing case sends an edit without its explanation.
+    // JUSTIFICATION-A3: issue #838 asks for a test of each rule; no existing case sends an edit without its
+    // explanation.
     @Test
     void anExpenseEditMustCarryItsOwnExplanationWhenTheItemNeedsOneAndTheLinkComesAfterIt() {
         UUID[] list = cash.categoryWithItem("Test Gifts", "Test Hamper", true);

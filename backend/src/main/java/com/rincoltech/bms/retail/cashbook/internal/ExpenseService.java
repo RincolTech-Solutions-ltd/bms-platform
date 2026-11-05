@@ -415,8 +415,8 @@ class ExpenseService {
                     r.itemId(),
                     r.partyId(),
                     r.amountMinor(),
-                    // Issue #838: the typed words are checked as typed (explanation_required), and only then is the link
-                    // added; the link alone never meets an item's need for an explanation.
+                    // Issue #838: the typed words are checked as typed (explanation_required), and only then
+                    // is the link added; the link alone never meets an item's need for an explanation.
                     r.explanation(),
                     r.receiptDocumentId(),
                     r.dateReason(),
@@ -456,7 +456,8 @@ class ExpenseService {
     static String linked(String typed, String oldItemName, LocalDate oldDate) {
         String own = CashbookSupport.blankToNull(typed);
         String name = CashbookSupport.blankToNull(oldItemName);
-        String link = "Replaces the " + (name == null ? "expense" : name.strip()) + " entry of " + oldDate + ", edited.";
+        String link =
+                "Replaces the " + (name == null ? "expense" : name.strip()) + " entry of " + oldDate + ", edited.";
         if (own == null) {
             return link;
         }

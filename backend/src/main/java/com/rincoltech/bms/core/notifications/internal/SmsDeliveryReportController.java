@@ -106,7 +106,8 @@ class SmsDeliveryReportController {
         }
         if (request.getContentLengthLong() < 0) {
             // Issue #808: a body of unknown length (chunked) would skip the size check below and be read up to the
-            // container's form limit, so it is refused before it is read. The provider sends a short form with its length.
+            // container's form limit, so it is refused before it is read. The provider sends a short form with its
+            // length.
             reports.count("no_length");
             throw new ApiException(
                     HttpStatus.LENGTH_REQUIRED, "length_required", "Length required", "This is not a delivery report.");

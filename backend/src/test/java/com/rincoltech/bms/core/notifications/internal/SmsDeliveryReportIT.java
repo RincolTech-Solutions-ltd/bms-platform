@@ -297,10 +297,12 @@ class SmsDeliveryReportIT extends IntegrationTest {
                 .header("Content-Type", MediaType.APPLICATION_FORM_URLENCODED_VALUE)
                 .version(java.net.http.HttpClient.Version.HTTP_1_1)
                 // A stream of unknown length: the client sends it chunked, with no Content-Length.
-                .POST(java.net.http.HttpRequest.BodyPublishers.ofInputStream(() -> new java.io.ByteArrayInputStream(body)))
+                .POST(java.net.http.HttpRequest.BodyPublishers.ofInputStream(
+                        () -> new java.io.ByteArrayInputStream(body)))
                 .build();
         try (java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient()) {
-            int status = client.send(request, java.net.http.HttpResponse.BodyHandlers.discarding()).statusCode();
+            int status = client.send(request, java.net.http.HttpResponse.BodyHandlers.discarding())
+                    .statusCode();
             assertThat(status).isEqualTo(411);
         }
         assertThat(hits("no_length") - noLength).isEqualTo(1);

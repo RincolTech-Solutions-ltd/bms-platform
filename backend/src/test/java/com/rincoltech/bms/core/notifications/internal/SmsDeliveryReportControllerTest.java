@@ -46,14 +46,18 @@ class SmsDeliveryReportControllerTest {
         return r;
     }
 
+    static int status(org.springframework.http.ResponseEntity<Void> answer) {
+        return answer.getStatusCode().value();
+    }
+
     @Test
     void pastTheLimitOnlyTheFirstThrottlesOfTheWindowAreCounted() {
         when(reports.apply(anyString(), any())).thenReturn("moved");
         for (int i = 0; i < 10; i++) {
-            assertThat(controller.africasTalking(TOKEN, report()).getStatusCode().value()).isEqualTo(200);
+            assertThat(status(controller.africasTalking(TOKEN, report()))).isEqualTo(200);
         }
         for (int i = 0; i < 25; i++) {
-            assertThat(controller.africasTalking(TOKEN, report()).getStatusCode().value()).isEqualTo(429);
+            assertThat(status(controller.africasTalking(TOKEN, report()))).isEqualTo(429);
         }
         verify(reports, times(10)).apply(anyString(), any());
         verify(reports, times(1)).count("throttled");

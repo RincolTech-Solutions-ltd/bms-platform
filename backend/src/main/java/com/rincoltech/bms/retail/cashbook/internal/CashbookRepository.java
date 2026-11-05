@@ -154,7 +154,7 @@ class CashbookRepository {
 
     boolean itemNameTaken(UUID categoryId, String name, UUID exceptId) {
         return jdbc.sql("SELECT count(*) FROM retail_expense_items WHERE category_id = ? AND " + SPACED_NAME
-                        + " = lower(?) AND (CAST(? AS uuid) IS NULL OR id <> ?)")
+                                + " = lower(?) AND (CAST(? AS uuid) IS NULL OR id <> ?)")
                         .params(categoryId, name, exceptId, exceptId)
                         .query(Long.class)
                         .single()

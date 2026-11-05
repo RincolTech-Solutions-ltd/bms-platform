@@ -202,8 +202,9 @@ class SetupService {
     @Transactional
     ExpenseItem patchItem(UUID categoryId, UUID itemId, String ifMatch, ItemPatch p) {
         int expected = Versions.fromIfMatch(ifMatch);
-        // Issue #810: the category lock first, as an add in place takes it, so a rename and an add of one name run one
-        // after the other and the second sees the first; always before the item's lock, so the two never wait in a circle.
+        // Issue #810: the category lock first, as an add in place takes it, so a rename and an add of one name run
+        // one after the other and the second sees the first; always before the item's lock, so the two never wait
+        // in a circle.
         repo.category(categoryId, true).orElseThrow(ApiException::notFound);
         ItemRow i = repo.item(itemId, true)
                 .filter(x -> x.categoryId().equals(categoryId))
