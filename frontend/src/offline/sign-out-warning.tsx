@@ -15,7 +15,7 @@ export function SignOutWarning({ ask, onSignOut }: { ask: number; onSignOut: () 
   const online = useOnline();
   const outbox = useOutbox();
   const dialog = useRef<HTMLDialogElement>(null);
-  const count = waiting(outbox.items).length;
+  const count = waiting(outbox.items, outbox.formHeld).length;
 
   useEffect(() => {
     const d = dialog.current;

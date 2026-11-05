@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Product } from '../api/retail';
 import { ENTRY_ANSWER_MS } from './connectivity';
 import { waiting, type OutboxItem } from './outbox';
+import { memoryStore } from './store';
 
 // The daily forms with no network (issue #812, ADR-067 decision 13): an expense, savings, banking, a withdrawal, a delivery
 // (Buy stock), a stock move and usage or damage are each kept on the phone with their form's key while offline, the form
@@ -340,7 +341,7 @@ describe('a daily form with no network', () => {
       onPhone = await offline.store.outbox(offline.scope);
       // In flight from the form: the sync engine sends nothing and nothing is counted as waiting.
       await offline.engine.syncNow();
-      expect(waiting(offline.engine.snapshot().items)).toEqual([]);
+      expect(waiting(offline.engine.snapshot().items, offline.engine.snapshot().formHeld)).toEqual([]);
       return { id: 'rec-1' };
     });
     mount(f.form(), offline, 'prime' in f ? f.prime : undefined);
@@ -385,6 +386,23 @@ describe('a daily form with no network', () => {
     await next?.engine.sync();
     expect(api.sends.map((s) => [s.key, s.entry?.kind, s.entry?.lost])).toEqual([[`k-${f.kind}`, f.kind, true]]);
     expect(next?.engine.snapshot().items[0]?.state).toBe('sent');
+  });
+
+  it('still sends an entry online when the phone cannot write it at save, and keeps it after no answer (issue #844)', async () => {
+    seed(`withdrawal:${uid}:${branch}`, 'k-full', { date: today, amount: '10000', purpose: 'Test float' });
+    const store = memoryStore();
+    const add = store.addItem;
+    let fails = 1;
+    store.addItem = (item) => (fails-- > 0 ? Promise.reject(new DOMException('The phone is full.', 'QuotaExceededError')) : add(item));
+    const offline = testOffline(admin, { online: true, store });
+    if (!offline) throw new Error('an administrator keeps entries');
+    const { markDropped } = await import('../api/client');
+    online.mockImplementation(() => Promise.reject(markDropped(new TypeError('Failed to fetch'))));
+    mount(<WithdrawalForm branchId={branch} />, offline);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save withdrawal' })[0] as HTMLButtonElement);
+    await screen.findByTestId('kept-on-phone');
+    expect(online).toHaveBeenCalledTimes(1);
+    expect((await store.outbox(offline.scope)).map((i) => [i.key, i.entry?.lost, i.formUntil])).toEqual([['k-full', true, undefined]]);
   });
 
   it('keeps an entry whose answer was lost online under the same key and body, so the server records it once', async () => {

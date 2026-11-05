@@ -50,7 +50,7 @@ vi.mock('../api/retail', async (original) => {
 const { mockMe } = await import('../api/retail-mock');
 const { StaffContext } = await import('../areas/staff/context');
 const { RecordSale } = await import('../areas/staff/retail/sale');
-const { OfflineProvider, othersOnPhone } = await import('./offline-context');
+const { OfflineProvider, othersOnPhone, waitingNow } = await import('./offline-context');
 const { SyncStatus } = await import('./sync-status');
 const { testOffline } = await import('./test-kit');
 const { setAccessToken } = await import('../auth/session');
@@ -547,14 +547,16 @@ describe('Record a sale offline', () => {
     await act(() => offline.engine.syncNow());
     expect(send).not.toHaveBeenCalled();
     expect(onPhone[0]?.formUntil).toBeGreaterThan(Date.now());
-    expect(waiting(offline.engine.snapshot().items)).toEqual([]);
-    expect(screen.queryByTestId('sync-dot')).toBeNull();
+    expect(waiting(offline.engine.snapshot().items, offline.engine.snapshot().formHeld)).toEqual([]);
+    expect(waitingNow(offline)).toBe(0);
+    expect(screen.queryByText(/\d+ waiting/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /waiting to sync/ })).toBeNull();
     expect(othersOnPhone(await offline.store.allOutbox(), 'test.example', 'test.example|someone-else')).toEqual([]);
 
     await act(async () => answer({ id: 'sale-1', sale_no: 'RS00000081', total_minor: 5000 }));
     await waitFor(() => expect(offline.engine.snapshot().items).toEqual([]));
     expect(await offline.store.outbox(offline.scope)).toEqual([]);
-    expect(screen.queryByTestId('sync-dot')).toBeNull();
+    expect(screen.queryByText(/\d+ waiting/)).toBeNull();
     expect(send).not.toHaveBeenCalled();
   });
 
@@ -584,8 +586,27 @@ describe('Record a sale offline', () => {
     await addBulbAndRecord();
     await waitFor(() => expect(createSale).toHaveBeenCalledTimes(1));
     const [, key] = createSale.mock.calls[0] as [unknown, string];
-    // The app is killed: the screen goes with no answer. The next start, its own engine on the same phone, after the wait.
+    // The app is killed: the screen goes with no answer.
     cleanup();
+    // JUSTIFICATION-A3: the restart-within-the-wait test the review of #859 asks for (item 7), not a mechanism.
+    // Started again within the wait: the sale shows as waiting at once (so sign-out would ask first), and is not sent yet.
+    const early = vi.fn();
+    const soon = testOffline(seller, { store: offline.store, online: true, deps: { send: early } });
+    if (!soon) throw new Error('a seller sells offline');
+    await soon.engine.load();
+    await soon.engine.sync();
+    expect(early).not.toHaveBeenCalled();
+    expect(waitingNow(soon)).toBe(1);
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <OfflineProvider value={soon}>
+          <SyncStatus />
+        </OfflineProvider>
+      </QueryClientProvider>,
+    );
+    expect(screen.getByRole('button', { name: /1 waiting to sync/ })).toBeTruthy();
+    cleanup();
+    // The next start after the wait, its own engine on the same phone.
     const send = vi.fn(async (i: OutboxItem) => ({ status: 201, body: { id: 'sale-1', sale_no: 'RS00000082', key: i.key } }));
     const next = testOffline(seller, { store: offline.store, online: true, deps: { send, now: () => Date.now() + SALE_ANSWER_MS + 60_000 } });
     if (!next) throw new Error('a seller sells offline');

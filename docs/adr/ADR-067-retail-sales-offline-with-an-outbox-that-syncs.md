@@ -278,18 +278,25 @@ left, the branch, the period, the person's roles.
 14. **Kept on the phone at save (issue #844).** Sell (a cash, mobile money or bank sale) and every daily form of decision 13,
     when online, write their outbox item to IndexedDB at save, before the online request goes, under the same id,
     `Idempotency-Key` and body that decisions 12 and 13(c) would keep after a lost answer (so nothing is ever re-keyed, and the
-    replay rule of #852 is untouched). The item carries `formUntil`, the "in flight from the form" flag: the form's own wait
-    (8 seconds) and 5 seconds more, by the phone's clock. While it holds, the sync engine never sends the item (it is not due,
-    and the engine's timer wakes when the flag ends), it is not counted as waiting, so the dot and the sign-out warning never
-    say "1 waiting" during a normal online save, and it is never in the summary of other people's sales sent for the managers
-    (decision 9), which is built from the same waiting list; since it is never sent by the engine, it is never refused and
-    reported for a manager either. Then: a 2xx takes the item off the phone (the form shows the sale or entry saved, as
+    shared-phone replay rule of #853, issue #852, is kept as it is: a replay answers only the person who stored the key, and
+    the outbox never offers Fix with a new key for its own entry). "In flight from the form" is two things. In memory, the
+    sync engine of the tab whose form saved it lists the item as held by a form: that engine never sends it, however late
+    the form's answer comes (a tab frozen in the background), and it is not counted as waiting, so the dot and the sign-out
+    warning never say "1 waiting" during a normal online save. On the item, `formUntil` (the form's own wait of 8 seconds
+    and 5 seconds more) keeps another tab's engine from sending it before then; a `formUntil` further ahead than 13 seconds
+    (the phone's clock moved back) is not believed. While it holds, the sale is not in the summary of other people's sales
+    sent for the managers (decision 9) either, since its request may still be on its way. An app killed during the wait holds nothing in memory any more: on the
+    next start the item counts as waiting at once, so sign-out asks first (decision 9), and it is sent once, under its key,
+    when `formUntil` has passed. Since no engine sends an item a form holds, none is refused and reported for a manager
+    (decision 8) while the form waits. Then: a 2xx takes the item off the phone (the form shows the sale or entry saved, as
     before); a refusal shows in the form as today and takes the item off the phone, as does a 401 or a session that ended
-    before an answer came; no answer within the wait, or a dropped connection, clears the flag and leaves the item to the sync
-    engine at once, and the form shows it saved on the phone, as before. An app closed or killed during the wait leaves the
-    flag to pass, so the next start (or another tab) sends the item once, under its key. A phone that cannot write the item
-    at save (a full disk) still sends the request online and keeps the item after a lost answer as before. A form whose item
-    is on the phone already (Try again after a reload) leaves that item as it is.
+    before an answer came; but an item another tab's engine has tried meanwhile (its `attempts` above 0, or no longer
+    queued) is left to the engines, which hold that try's answer. No answer within the wait, or a dropped connection, ends
+    the hold and leaves the item to the sync engine at once, and the form shows it saved on the phone, as before. A phone
+    that cannot write the item at save (a full disk), or an entry that cannot be made for the phone, is still sent online,
+    and kept after a lost answer as before. A form whose item is on the phone already (Try again after a reload) leaves that
+    item as it is, under its own key. The bound: a tab frozen past its 13 seconds while a second tab of the app is open lets
+    that second tab send the item; the key keeps it one record, and a refusal there is reported as any refused sale is.
 
 ## Consequences
 

@@ -35,9 +35,20 @@ export function useEntrySave(): EntrySave {
       // When the save began: an entry kept on the phone is dated by it, even one whose online answer was lost (#839 review).
       const madeAt = new Date();
       if (!offline) return send();
-      const item = offlineEntry({
+      // `lost`: sent online first, so the server may hold it under its key whatever comes back (decision 13(c)). Online it is
+      // set at save, since the item is written before the request goes (issue #844); taken back on any answer, it only ever
+      // stays on the phone as the entry whose answer was lost.
+      const make = () => offlineEntry({
         ...spec, branchName: branchName(spec.branchId), scope: offline.scope, now: madeAt, onlineAsOf: lastOnline(offline.catalogue?.pricesAsOf), lost: offline.connectivity.online(),
       });
+      let item: OutboxItem;
+      try {
+        item = make();
+      } catch (e) {
+        // Online, an entry that cannot be made for the phone is still sent as it always was; offline there is nothing to send.
+        if (!offline.connectivity.online()) throw e;
+        return send();
+      }
       const kept = async (): Promise<Kept> => {
         if (offline.connectivity.online()) void offline.engine.sync();
         setKept(item);
