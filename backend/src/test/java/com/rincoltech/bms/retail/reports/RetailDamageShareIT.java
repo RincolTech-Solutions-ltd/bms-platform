@@ -372,7 +372,19 @@ class RetailDamageShareIT extends IntegrationTest {
         ResponseEntity<JsonNode> r =
                 api.postKeyed("/purchases", body, ADMIN, "*", UUID.randomUUID().toString());
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
-        usage(t.headOffice(), "damaged", p, "6");
+        UUID used = usage(t.headOffice(), "damaged", p, "6");
+        // A usage line takes no unit (RetailUsageLineRequest is an item and a quantity in its smallest unit), so the
+        // "pack usage" guard is that the line and its stock movement hold the same smallest-unit quantity, which the
+        // share reads from the line.
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT l.qty::text || '|' || (-m.qty)::text FROM retail_usage_lines l"
+                                + " JOIN retail_stock_movements m ON m.tenant_id = l.tenant_id"
+                                + " AND m.source_type = 'retail.usage' AND m.source_line_id = l.id"
+                                + " WHERE l.tenant_id = ? AND l.report_id = ?")
+                        .params(t.tenantId(), used)
+                        .query(String.class)
+                        .single())
+                .isEqualTo("6.000|6.000");
 
         JsonNode packed = item(shop(report(todayOnly(), ADMIN, Map.of()), t.headOffice()), "DSH-6");
         // Two cartons of 24 are 48 pieces; 6 pieces of 48 is 12.5 %, a whole 13 half up.

@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
+import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.retail.RetailTestSupport;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -384,20 +386,38 @@ class RetailSupplierDetailsIT extends IntegrationTest {
         String profitBuyer = buyer + ",retail.profit.read";
         RetailTestSupport mine = new RetailTestSupport(http, t);
         RetailTestSupport colleague = new RetailTestSupport(http, t);
-        UUID own = restockAs(mine, buyer, id, "2026-06-01");
-        UUID theirs = restockAs(colleague, profitBuyer, id, "2026-06-05");
+        LocalDate today = LocalDate.now(BusinessClock.DEFAULT_ZONE);
+        String older = today.minusDays(4).toString();
+        String newer = today.minusDays(1).toString();
+        UUID own = restockAs(mine, buyer, id, older);
+        UUID theirs = restockAs(colleague, profitBuyer, id, newer);
+        // Two people: each restock is recorded as made by the one who sent it.
+        assertThat(mine.userId()).isNotEqualTo(colleague.userId());
+        String madeBy = "SELECT created_by FROM retail_purchases WHERE tenant_id = ? AND id = ?";
+        assertThat(TestDatabase.owner()
+                        .sql(madeBy)
+                        .params(t.tenantId(), own)
+                        .query(UUID.class)
+                        .single())
+                .isEqualTo(mine.userId());
+        assertThat(TestDatabase.owner()
+                        .sql(madeBy)
+                        .params(t.tenantId(), theirs)
+                        .query(UUID.class)
+                        .single())
+                .isEqualTo(colleague.userId());
 
         JsonNode seen = mine.call(HttpMethod.GET, "/suppliers/" + id + "/deliveries", null, buyer, head, Map.of())
                 .getBody();
         assertThat(ids(seen)).containsExactly(own.toString());
         JsonNode page = mine.call(HttpMethod.GET, "/suppliers/" + id, null, buyer, head, Map.of())
                 .getBody();
-        assertThat(page.get("last_delivery_on").asString()).isEqualTo("2026-06-01");
+        assertThat(page.get("last_delivery_on").asString()).isEqualTo(older);
         JsonNode listed = byName(
                 mine.call(HttpMethod.GET, "/suppliers", null, buyer, head, Map.of())
                         .getBody(),
                 "Test Supplier 12");
-        assertThat(listed.get("last_delivery_on").asString()).isEqualTo("2026-06-01");
+        assertThat(listed.get("last_delivery_on").asString()).isEqualTo(older);
 
         // The colleague who may see profit sees both, the newest first.
         JsonNode all = colleague
@@ -409,7 +429,7 @@ class RetailSupplierDetailsIT extends IntegrationTest {
                         .getBody()
                         .get("last_delivery_on")
                         .asString())
-                .isEqualTo("2026-06-05");
+                .isEqualTo(newer);
     }
 
     UUID restockAs(RetailTestSupport who, String permissions, UUID supplier, String on) {

@@ -26,6 +26,24 @@ stored email is `test.ow ner@example.test` while a colleague's is `test.owner@ex
 colleague: their password is checked against the colleague's account, never matches, and five tries lock the colleague out
 for 15 minutes. A stored email of nothing but whitespace can never be typed at all. Fix every row the same day.
 
+## A joiner V135 removed
+
+V135 also removed the zero width non-joiner and joiner (U+200C, U+200D) from stored staff emails. Since #857 the server keeps
+them, so a person whose real address holds one, and whose stored email V135 changed, now types an address that no longer
+matches the stored one and cannot sign in by email. No WARNING finds this, because the stored email holds no whitespace. The
+`core.user.email_cleaned` audit rows V135 wrote list every email it changed, with the email before and after:
+
+```sql
+SELECT t.slug, a.entity_id AS user_id
+  FROM audit_log a
+  JOIN tenants t ON t.id = a.tenant_id
+ WHERE a.action = 'core.user.email_cleaned'
+   AND a.data -> 'before' ->> 'email' ~ '[\x200c\x200d]';
+```
+
+For each row, an administrator of that business puts the person's real address back on their card on Users (the server
+keeps the joiner now). The same rules apply: read the output on the host only.
+
 ## Find the rows
 
 On the host, as `bms_owner` (it reads every business). The output is personal data: read it on the host, never paste it into

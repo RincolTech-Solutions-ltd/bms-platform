@@ -25,10 +25,15 @@ const fetchImpl = vi.hoisted(() => {
 import { cleanEmail, requestPasswordReset, resetUserSignIn, SignInResetError } from './sign-in-reset';
 
 describe('cleanEmail (issues #823 and #857)', () => {
+  // The zero width characters are written by their codes, so no editor or formatter can drop them unseen.
+  const ZWSP = String.fromCharCode(0x200b);
+  const ZWNJ = String.fromCharCode(0x200c);
+  const ZWJ = String.fromCharCode(0x200d);
+
   it('removes every space and the zero width space, and keeps the zero width non-joiner and joiner', () => {
-    expect(cleanEmail(' Test.Owner @ example.test​ ')).toBe('test.owner@example.test');
-    expect(cleanEmail('test.ow‌ner@example.test ')).toBe('test.ow‌ner@example.test');
-    expect(cleanEmail(' test.ow‍ner@example.test')).toBe('test.ow‍ner@example.test');
+    expect(cleanEmail(' Test.Owner @ example.test' + ZWSP + ' ')).toBe('test.owner@example.test');
+    expect(cleanEmail(`test.ow${ZWNJ}ner@example.test `)).toBe(`test.ow${ZWNJ}ner@example.test`);
+    expect(cleanEmail(` test.ow${ZWJ}ner@example.test`)).toBe(`test.ow${ZWJ}ner@example.test`);
   });
 });
 
