@@ -1268,21 +1268,22 @@ opens that sale whatever branch is in use, Back to the list clears it, and a cha
 Show every item; `/staff/retail/stock?branch=<id>` switches to that branch once when the person works there, then drops it from
 the address, and says so otherwise. `SaleLink` (`retail/screen-link.tsx`) now makes the sale number on a credit note, a return,
 an overdue row of Credit control, a delivered order and a converted quotation open the sale; `ToStock` takes `item` or
-`branch`, so the item and branch names on Sales analysis, Margins, Daily profit, Stock value, Stock health, slow movers,
-Business evaluation and a saved stock move open that item or branch. Tested in `retail/record-links.dom.test.tsx` and
+`branch`, so the item and branch names on Sales analysis, Margins, Daily profit, Stock value, Stock health (its damage and use
+section too), slow movers, Business evaluation and a saved stock move open that item or branch. Tested in `retail/record-links.dom.test.tsx` and
 `retail/links-retail-reports.dom.test.tsx`. Still plain: category and unit rows, Insights drill-down rows, the used, damaged
 and found-missing counts on Stock health, and the allocations on an account's payments (listed in the follow-up issue #798).
 
 ## The three rules, screen by screen (issue #336, task #794)
 
 Audit of 2026-11-03 over the staff routes in `frontend/src/app/router.tsx` (136 routes: the 105 above and those added since;
-the same exclusions as above, and the component kit). Rule 2, cross links, is the table above. The rules are in
+the same exclusions as above, and the component kit), brought up to date on 2026-11-05 with the three routes main gained since
+(139 routes; see "Added since the audit" below). Rule 2, cross links, is the table above. The rules are in
 `docs/ui/ux-rules.md`. Rule 1 is "show little, let people open more": a list that can grow is grouped with a summary on each
 group header, or paged, and a record keeps its long sections closed. Rule 3 is "no training needed": plain words (a word a
 shop owner would not use has a help tip), one primary action per view, and an empty list that names the next step.
 
-**Result.** Rule 1: 130 of 136 pass, 6 break. Rule 3: 99 of 136 passed before this change and 37 broke; this change fixes
-27 of them (the empty states, and three screens with a second brand button), so 126 pass and 10 are left. Every route not
+**Result.** Rule 1: 133 of 139 pass, 6 break. Rule 3: 101 of 139 passed before this change and 38 broke; this change fixes
+27 of them (the empty states, and three screens with a second brand button), so 128 pass and 11 are left. Every route not
 named below passes both rules: the sales, stock, restock, controls and cash record lists are grouped; members, loans,
 collateral, documents, opt-outs, the purchasing lists, buyers and suppliers are paged; the reports are bounded by a date
 range or a top count.
@@ -1334,6 +1335,17 @@ Left for the follow-up issue #798 (each needs a look at the flow, not only a sen
 | `/staff` | The column heading KYC has no help tip |
 | `/staff/lending/investments/$investmentId` | "Return accrued" is an accounting word; "Return earned so far" would do |
 | `/staff/insights` | "Portfolio at risk" and "From posted journal lines only" have no help tip |
+| `/staff/retail/catalogue/suppliers/$supplierId` | No deliveries from this supplier yet: does not say a restock from them shows here |
+
+**Added since the audit** (merged from main on 2026-11-05; the screens this change already covers keep their fixes):
+
+| Route or section | Rule 1 | Rule 3 |
+|---|---|---|
+| `/staff/retail/items/$productId` (item page, #813) | Passes: movements are paged with Show older movements, and filtered by shop and days | Passes: one primary, and the empty list offers Count it now or Show everything |
+| `/staff/retail/restocks/$purchaseId` (one purchase) | Passes: one record | Passes: one primary (Void and enter it again) |
+| `/staff/retail/catalogue/suppliers/$supplierId` (one supplier, #820) | Passes: deliveries are paged with Show older deliveries | Breaks: the empty deliveries text, above, left for #798 |
+| `/staff/retail/catalogue/suppliers` (now `suppliers.tsx`) | Passes: searched | Fixed here again: Empty: add the first one above |
+| Damage and use on `/staff/retail/stock-health` (#822) | Passes: grouped by shop with the shop total on each header | Passes; its item and shop names now open Stock (`ToStock`) |
 
 ## Controls (issue #358, part of #357, ADR-047)
 
