@@ -60,6 +60,6 @@ class ExpenseLinkTest {
         String all = ExpenseService.linked(typed, "Test Fuel", DAY);
 
         assertThat(all).isEqualTo("a".repeat(room - 1) + " " + link);
-        assertThat(all.chars().noneMatch(Character::isSurrogate)).isTrue();
+        assertThat(all.chars().noneMatch(c -> Character.isSurrogate((char) c))).isTrue();
     }
 }
