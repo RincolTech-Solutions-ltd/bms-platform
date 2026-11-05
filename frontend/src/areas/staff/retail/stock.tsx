@@ -443,7 +443,7 @@ export function StockPage() {
         <OneItemNote name={fromAddress.product.data?.description} onEvery={everyItem} />
       )}
       <Problem error={fromAddress.product.error} />
-      {unknownBranch !== null && <p className="hint" data-testid="branch-not-yours">That branch is not one you work at, so this is the stock of the branch you are using.</p>}
+      {unknownBranch !== null && <p className="hint" data-testid="branch-not-yours">That branch cannot be opened here (it is closed, or not one you work at), so this is the stock of the branch you are using.</p>}
       {!all && branchId !== null && <NoStockHere branchId={branchId} />}
       {!all && branchId !== null && <UnfinishedCounts branchId={branchId} />}
       <ViewSwitch view={list.view} onChange={list.setView} />
