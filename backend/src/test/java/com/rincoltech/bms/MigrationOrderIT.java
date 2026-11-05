@@ -3019,12 +3019,18 @@ class MigrationOrderIT {
             UUID plain = UUID.randomUUID();
             UUID blank = UUID.randomUUID();
             Map<UUID, String> emails = Map.of(
-                    spaced, "test.owner" + nbsp + "@example.test",
-                    inside, "Test.Cl erk@example.test",
-                    twin, "test.twin@example.test",
-                    twinSpaced, "test.twin" + nbsp + "@example.test",
-                    plain, "test.plain@example.test",
-                    blank, " " + nbsp + " ");
+                    spaced,
+                    "test.owner" + nbsp + "@example.test",
+                    inside,
+                    "Test.Cl erk@example.test",
+                    twin,
+                    "test.twin@example.test",
+                    twinSpaced,
+                    "test.twin" + nbsp + "@example.test",
+                    plain,
+                    "test.plain@example.test",
+                    blank,
+                    " " + nbsp + " ");
             emails.forEach((id, email) -> owner.sql("INSERT INTO users (id, tenant_id, kind, full_name, email, status)"
                             + " VALUES (?, ?, 'staff', 'Test Staff V135', ?, 'active')")
                     .params(id, tenant, email)

@@ -394,7 +394,9 @@ class RetailSupplierDetailsIT extends IntegrationTest {
                 .getBody();
         assertThat(page.get("last_delivery_on").asString()).isEqualTo("2026-06-01");
         JsonNode listed = byName(
-                mine.call(HttpMethod.GET, "/suppliers", null, buyer, head, Map.of()).getBody(), "Test Supplier 12");
+                mine.call(HttpMethod.GET, "/suppliers", null, buyer, head, Map.of())
+                        .getBody(),
+                "Test Supplier 12");
         assertThat(listed.get("last_delivery_on").asString()).isEqualTo("2026-06-01");
 
         // The colleague who may see profit sees both, the newest first.
@@ -402,7 +404,8 @@ class RetailSupplierDetailsIT extends IntegrationTest {
                 .call(HttpMethod.GET, "/suppliers/" + id + "/deliveries", null, profitBuyer, head, Map.of())
                 .getBody();
         assertThat(ids(all)).containsExactly(theirs.toString(), own.toString());
-        assertThat(colleague.call(HttpMethod.GET, "/suppliers/" + id, null, profitBuyer, head, Map.of())
+        assertThat(colleague
+                        .call(HttpMethod.GET, "/suppliers/" + id, null, profitBuyer, head, Map.of())
                         .getBody()
                         .get("last_delivery_on")
                         .asString())
@@ -414,7 +417,11 @@ class RetailSupplierDetailsIT extends IntegrationTest {
                 "cash", supplier, List.of(RetailPurchasingIT.line(product, 1_000L, null, Map.of(t.headOffice(), "2"))));
         body.put("purchased_on", on);
         ResponseEntity<JsonNode> bought = who.postKeyed(
-                "/purchases", body, permissions, t.headOffice().toString(), UUID.randomUUID().toString());
+                "/purchases",
+                body,
+                permissions,
+                t.headOffice().toString(),
+                UUID.randomUUID().toString());
         assertThat(bought.getStatusCode()).as("%s", bought.getBody()).isEqualTo(HttpStatus.CREATED);
         return RetailTestSupport.id(bought);
     }

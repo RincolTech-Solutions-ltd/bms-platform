@@ -277,9 +277,10 @@ class RetailDamageShareIT extends IntegrationTest {
         UUID p = api.product("DSH-3", 100, 150);
         restock(t.headOffice(), p, "30", today.minusDays(2));
         Map<String, Object> line = Map.of("product_id", p, "qty", "12");
-        Map<String, Object> move = Map.of(
-                "from_branch_id", t.headOffice(), "to_branch_id", t.secondBranch(), "lines", List.of(line));
-        ResponseEntity<JsonNode> moved = api.postKeyed("/transfers", move, ADMIN, "*", UUID.randomUUID().toString());
+        Map<String, Object> move =
+                Map.of("from_branch_id", t.headOffice(), "to_branch_id", t.secondBranch(), "lines", List.of(line));
+        ResponseEntity<JsonNode> moved =
+                api.postKeyed("/transfers", move, ADMIN, "*", UUID.randomUUID().toString());
         assertThat(moved.getStatusCode()).as("%s", moved.getBody()).isEqualTo(HttpStatus.CREATED);
         Map<String, Object> wrong = Map.of(
                 "from_branch_id",
@@ -338,13 +339,17 @@ class RetailDamageShareIT extends IntegrationTest {
         assertThat(r.getBody().get("code").asString()).isEqualTo("validation_failed");
         assertThat(r.getBody().toString()).doesNotContain("DSH-");
         // 366 days, today included, is the longest period.
-        assertThat(report("?from=" + today.minusDays(365) + "&to=" + today, ADMIN, Map.of()).get("from").asString())
+        assertThat(report("?from=" + today.minusDays(365) + "&to=" + today, ADMIN, Map.of())
+                        .get("from")
+                        .asString())
                 .isEqualTo(today.minusDays(365).toString());
     }
 
     @Test
     void aPackDeliveryAndAUsageLineCountInTheItemsSmallestUnit() {
-        String etag = api.get("/settings/capabilities", "core.settings.manage").getHeaders().getETag();
+        String etag = api.get("/settings/capabilities", "core.settings.manage")
+                .getHeaders()
+                .getETag();
         ResponseEntity<JsonNode> on = api.call(
                 HttpMethod.PUT,
                 "/settings/capabilities",
@@ -367,7 +372,8 @@ class RetailDamageShareIT extends IntegrationTest {
         body.put("purchased_on", today.toString());
         body.put("payment_method", "cash");
         body.put("lines", List.of(line));
-        ResponseEntity<JsonNode> r = api.postKeyed("/purchases", body, ADMIN, "*", UUID.randomUUID().toString());
+        ResponseEntity<JsonNode> r =
+                api.postKeyed("/purchases", body, ADMIN, "*", UUID.randomUUID().toString());
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
         usage(t.headOffice(), "damaged", p, "6");
 
@@ -393,8 +399,8 @@ class RetailDamageShareIT extends IntegrationTest {
                 UUID.randomUUID().toString());
         assertThat(v.getStatusCode()).as("%s", v.getBody()).isEqualTo(HttpStatus.OK);
 
-        // Yesterday alone: DSH-1's 40 from two days ago at the start, and both of yesterday's deliveries, the one voided
-        // today included, because on yesterday the books held it.
+        // Yesterday alone: DSH-1's 40 from two days ago at the start, and both of yesterday's deliveries, the one
+        // voided today included, because on yesterday the books held it.
         JsonNode closed = shop(report("?from=" + yesterday + "&to=" + yesterday, ADMIN, Map.of()), t.headOffice());
         assertThat(closed.get("base_qty").asString()).isEqualTo("65.000");
         // Yesterday and today: the void is inside the period, so the 15 never came in.

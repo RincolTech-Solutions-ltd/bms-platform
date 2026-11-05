@@ -276,7 +276,8 @@ class SignInLimitsIT extends IntegrationTest {
         Api.staff(t, real, new Role("cashier", t.headOffice()));
         String plain = Api.email("nobody");
         String nobody = Api.email("nobody");
-        String spaced = "  " + nobody.substring(0, 3) + " " + nobody.substring(3).replace("@", " @ ") + "\t";
+        String spaced =
+                "  " + nobody.substring(0, 3) + " " + nobody.substring(3).replace("@", " @ ") + "\t";
 
         ResponseEntity<JsonNode> forReal = login(api, STAFF_LOGIN, real, "Wrong-Password-0", freshIp());
         ResponseEntity<JsonNode> forPlain = login(api, STAFF_LOGIN, plain, "Wrong-Password-0", freshIp());
@@ -310,7 +311,8 @@ class SignInLimitsIT extends IntegrationTest {
         }
 
         List<ResponseEntity<JsonNode>> forgotten = new ArrayList<>();
-        for (String login : List.of(real, Api.email("nobody"), " " + Api.email("nobody").replace("@", " @") + " ")) {
+        for (String login :
+                List.of(real, Api.email("nobody"), " " + Api.email("nobody").replace("@", " @") + " ")) {
             long started = System.nanoTime();
             ResponseEntity<JsonNode> response = forgot(login);
             long millis = (System.nanoTime() - started) / 1_000_000;
