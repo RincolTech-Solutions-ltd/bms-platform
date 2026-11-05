@@ -415,14 +415,25 @@ class ExpenseService {
                     r.itemId(),
                     r.partyId(),
                     r.amountMinor(),
-                    linked(r.explanation(), old),
+                    // Issue #838: the typed words are checked as typed (explanation_required), and only then is the link
+                    // added; the link alone never meets an item's need for an explanation.
+                    r.explanation(),
                     r.receiptDocumentId(),
                     r.dateReason(),
                     // Edits stay online only (issue #812).
                     null);
             UUID branch = branchContext.resolve(CashbookSupport.EXPENSE_RECORD, old.branchId());
             // ADR-120: the edited expense is a new entry; an earlier day is the owner's, with a reason, audited.
-            Checked c = check(branch, edited, false, id);
+            Checked typed = check(branch, edited, false, id);
+            Checked c = new Checked(
+                    typed.branch(),
+                    typed.date(),
+                    typed.backdate(),
+                    typed.category(),
+                    typed.item(),
+                    typed.party(),
+                    linked(typed.explanation(), old.itemName(), old.businessDate()),
+                    typed.receipt());
             if (approvals.rule(ExpenseAction.TYPE).asks(edited.amountMinor())) {
                 throw ApiException.rule(
                         "edit_needs_approval",
@@ -434,12 +445,24 @@ class ExpenseService {
         });
     }
 
-    /** The explanation of an edited expense: what was typed, then the words that name the one it replaces. */
-    static String linked(String typed, Expense old) {
+    /** The longest explanation an expense keeps (V34 {@code explanation varchar(500)}). */
+    static final int MAX_EXPLANATION = 500;
+
+    /**
+     * The explanation of an edited expense: what was typed, then the words that name the one it replaces (issue #838). An
+     * old expense with no item name is named "the expense entry", as the screen's mock does. Past 500 characters the typed
+     * part is cut, never the link, so the screen still finds and strips the link on the next edit.
+     */
+    static String linked(String typed, String oldItemName, LocalDate oldDate) {
         String own = CashbookSupport.blankToNull(typed);
-        String link = "Replaces the " + old.itemName() + " entry of " + old.businessDate() + ", edited.";
-        String all = own == null ? link : own + " " + link;
-        return all.length() > 500 ? all.substring(0, 500) : all;
+        String name = CashbookSupport.blankToNull(oldItemName);
+        String link = "Replaces the " + (name == null ? "expense" : name.strip()) + " entry of " + oldDate + ", edited.";
+        if (own == null) {
+            return link;
+        }
+        int room = MAX_EXPLANATION - link.length() - 1;
+        String kept = own.length() > room ? own.substring(0, Math.max(0, room)).stripTrailing() : own;
+        return kept.isEmpty() ? link : kept + " " + link;
     }
 
     private Expense voidNow(UUID id, String reason) {

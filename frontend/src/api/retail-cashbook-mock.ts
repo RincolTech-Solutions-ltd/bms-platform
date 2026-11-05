@@ -341,11 +341,15 @@ export function createCashbookMock(env: CashbookEnv): Pick<RetailApi, Keys> {
         const category = categories.find((c) => c.id === body.category_id);
         if (!category?.items?.some((i) => i.id === body.item_id)) refuse(422, 'item_not_in_category', 'The item is not in the category.');
         if (!category?.active) refuse(422, 'category_inactive', 'Inactive.');
+        // Issue #838: the typed words are checked as typed; the link added below is never the explanation.
+        if (category?.items?.find((i) => i.id === body.item_id)?.requires_explanation && (body.explanation ?? '').trim().length < 3) refuse(422, 'explanation_required', 'Explanation required.');
         if (env.waiting('retail_expense', body.amount_minor)) refuse(422, 'edit_needs_approval', 'This amount needs an administrator\'s approval, so it cannot be edited in place. Delete the expense and record it again.');
         const fresh = base(old?.branch_id, body.business_date, 'x');
         const was = expenseRow(voidIt(old, 'Edited: entered again with the changes'));
-        const own = body.explanation?.trim();
-        const explanation = `${own ? `${own} ` : ''}Replaces the ${was.item_name ?? 'expense'} entry of ${was.business_date ?? ''}, edited.`;
+        const link = `Replaces the ${was.item_name?.trim() || 'expense'} entry of ${was.business_date ?? ''}, edited.`;
+        // Past 500 characters the typed part is cut, never the link (issue #838).
+        const own = body.explanation?.trim().slice(0, 500 - link.length - 1).trimEnd();
+        const explanation = own ? `${own} ${link}` : link;
         const row = { ...fresh, amount: body.amount_minor, category_id: body.category_id, item_id: body.item_id, ...(body.party_id ? { party_id: body.party_id } : {}), explanation };
         expenses.push(row);
         return expenseRow(row);
