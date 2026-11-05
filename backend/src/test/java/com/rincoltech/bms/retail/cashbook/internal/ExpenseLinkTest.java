@@ -49,4 +49,17 @@ class ExpenseLinkTest {
         String fits = "c".repeat(ExpenseService.MAX_EXPLANATION - link.length() - 1);
         assertThat(ExpenseService.linked(fits, "Test Fuel", DAY)).isEqualTo(fits + " " + link);
     }
+
+    @Test
+    void theCutNeverSplitsAnEmojiIntoALoneHalf() {
+        String link = "Replaces the Test Fuel entry of 2026-11-02, edited.";
+        int room = ExpenseService.MAX_EXPLANATION - link.length() - 1;
+        // The emoji's two UTF-16 units straddle the cut: it is dropped whole.
+        String typed = "a".repeat(room - 1) + "😀" + "bbb";
+
+        String all = ExpenseService.linked(typed, "Test Fuel", DAY);
+
+        assertThat(all).isEqualTo("a".repeat(room - 1) + " " + link);
+        assertThat(all.chars().noneMatch(Character::isSurrogate)).isTrue();
+    }
 }

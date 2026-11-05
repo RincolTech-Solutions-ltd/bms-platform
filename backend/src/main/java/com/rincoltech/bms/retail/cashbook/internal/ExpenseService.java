@@ -125,7 +125,13 @@ class ExpenseService {
             PartyRow party,
             String explanation,
             /* Issue #819: the receipt photo the expense names, null when none or when its file is gone. */
-            UUID receipt) {}
+            UUID receipt) {
+
+        /** The same expense with another explanation (issue #838: the edit's link is added after the check). */
+        Checked withExplanation(String words) {
+            return new Checked(branch, date, backdate, category, item, party, words, receipt);
+        }
+    }
 
     @Transactional
     Outcome<ExpenseOutcome> create(String key, ExpenseRequest r) {
@@ -425,15 +431,7 @@ class ExpenseService {
             UUID branch = branchContext.resolve(CashbookSupport.EXPENSE_RECORD, old.branchId());
             // ADR-120: the edited expense is a new entry; an earlier day is the owner's, with a reason, audited.
             Checked typed = check(branch, edited, false, id);
-            Checked c = new Checked(
-                    typed.branch(),
-                    typed.date(),
-                    typed.backdate(),
-                    typed.category(),
-                    typed.item(),
-                    typed.party(),
-                    linked(typed.explanation(), old.itemName(), old.businessDate()),
-                    typed.receipt());
+            Checked c = typed.withExplanation(linked(typed.explanation(), old.itemName(), old.businessDate()));
             if (approvals.rule(ExpenseAction.TYPE).asks(edited.amountMinor())) {
                 throw ApiException.rule(
                         "edit_needs_approval",
@@ -461,8 +459,13 @@ class ExpenseService {
         if (own == null) {
             return link;
         }
-        int room = MAX_EXPLANATION - link.length() - 1;
-        String kept = own.length() > room ? own.substring(0, Math.max(0, room)).stripTrailing() : own;
+        int room = Math.max(0, MAX_EXPLANATION - link.length() - 1);
+        // Cut at a whole character, never inside a pair of UTF-16 units (an emoji), which would store a lone half.
+        int cut = own.length() <= room ? own.length() : room;
+        if (cut > 0 && cut < own.length() && Character.isHighSurrogate(own.charAt(cut - 1))) {
+            cut--;
+        }
+        String kept = own.substring(0, cut).stripTrailing();
         return kept.isEmpty() ? link : kept + " " + link;
     }
 

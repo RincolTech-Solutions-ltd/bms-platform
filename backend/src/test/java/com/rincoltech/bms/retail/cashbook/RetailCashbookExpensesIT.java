@@ -440,6 +440,21 @@ class RetailCashbookExpensesIT extends IntegrationTest {
         assertThat(tidied.getBody().get("name").asString()).isEqualTo("Generator fuel");
     }
 
+    // JUSTIFICATION-A3: the review of #861 asks for proof that the server refuses what the screen no longer offers.
+    @Test
+    void addingAnItemInPlaceNeedsTillCloseAsTheScreenAsks() {
+        String items = "/expense-categories/" + rent + "/items";
+        ResponseEntity<JsonNode> refused =
+                cb.post(items, Map.of("name", "Test no till", "reuse_existing", true), "retail.expense.record");
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(refused.getBody().get("code").asString()).isEqualTo("permission_denied");
+        ResponseEntity<JsonNode> added = cb.post(
+                items,
+                Map.of("name", "Test no till", "reuse_existing", true),
+                "retail.expense.record,retail.till.close");
+        assertThat(added.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    }
+
     @Test
     void theOwnerStillRenamesAnItemAddedInPlaceAndTheNewNameIsTheOneReused() {
         String items = "/expense-categories/" + rent + "/items";

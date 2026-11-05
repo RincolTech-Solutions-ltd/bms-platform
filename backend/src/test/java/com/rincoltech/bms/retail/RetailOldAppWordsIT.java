@@ -385,7 +385,15 @@ class RetailOldAppWordsIT extends IntegrationTest {
                         "SELECT count(*) FROM retail_expenses WHERE tenant_id = ? AND voided_at IS NULL", t.tenantId()))
                 .isEqualTo(1);
 
-        // A typed explanation near 500 characters: the typed part is cut and the link is kept whole.
+        // Over 500 characters typed is refused as a field problem before anything changes (the review of #861).
+        body.put("explanation", "x".repeat(501));
+        assertThat(cash.post("/expenses/" + old + "/replace", body, CashbookTestSupport.CASHBOOK_ADMIN)
+                        .getStatusCode()
+                        .is4xxClientError())
+                .isTrue();
+        assertThat(cash.cashOnHand(hq, day)).isEqualTo(before);
+
+        // A typed explanation of 500 characters: the typed part is cut and the link is kept whole.
         body.put("explanation", "x".repeat(500));
         ResponseEntity<JsonNode> replaced =
                 cash.post("/expenses/" + old + "/replace", body, CashbookTestSupport.CASHBOOK_ADMIN);

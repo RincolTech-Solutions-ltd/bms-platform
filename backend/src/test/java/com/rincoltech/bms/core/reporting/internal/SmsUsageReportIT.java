@@ -172,6 +172,29 @@ class SmsUsageReportIT extends ReportsItSupport {
                         "[\"Total\",null,1,1,0,1,999,0]");
     }
 
+    /**
+     * Issue #808: the months are the business's own time zone (its profile), not Kampala's. A business in Africa/Lagos
+     * (UTC+1): 22:30 UTC on 30 September is still September there (October in Kampala), and 22:30 UTC on 31 August is
+     * still August there (September in Kampala). No cost is recorded on these rows. JUSTIFICATION-A3: a new case.
+     */
+    @Test
+    void theMonthsAreTheBusinesssOwnTimeZoneNotKampalas() throws Exception {
+        TestDatabase.Fixture lagos = tenant(true);
+        TestDatabase.owner()
+                .sql("UPDATE tenants SET timezone = 'Africa/Lagos' WHERE id = ?")
+                .param(lagos.tenantId())
+                .update();
+        message(lagos, "savings.deposit", "delivered", "2026-09-30T22:30:00Z", 1, 1, null, null);
+        message(lagos, "savings.deposit", "delivered", "2026-08-31T22:30:00Z", 1, 1, null, null);
+
+        JsonNode file = file(lagos, UUID.randomUUID(), RANGE);
+
+        assertThat(rows(file, "usage"))
+                .anyMatch(r -> r.startsWith("[\"September 2026\",\"Savings deposit receipt\",1,1,0,1,"))
+                .noneMatch(r -> r.contains("October 2026"))
+                .noneMatch(r -> r.contains("August 2026"));
+    }
+
     @Test
     void theReportIsOfferedOnlyToABusinessWithSmsOnOrSmsHistory() {
         TestDatabase.Fixture none = tenant(true);

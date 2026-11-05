@@ -186,8 +186,13 @@ class SetupService {
      * for every run of spaces or tabs inside it, so "Generator  fuel" is "Generator fuel", on an add and on the owner's rename.
      */
     static String itemName(String typed) {
-        return typed.replaceAll("\\s+", " ").strip();
+        // The same characters as CashbookRepository.SPACED_NAME, named one by one: Java's \s and PostgreSQL's
+        // locale-dependent \s do not agree on every Unicode space (the review of #861).
+        return typed.replaceAll(SPACES, " ").replaceAll("^ | $", "");
     }
+
+    /** Space, tab, line feed, carriage return, form feed and vertical tab, written alike for Java and PostgreSQL. */
+    static final String SPACES = "[ \\t\\n\\r\\f\\x0B]+";
 
     /** An item of the same name, picked again when it is active (200) and refused in plain words when switched off. */
     private AddedItem existing(ItemRow same) {

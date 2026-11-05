@@ -19,18 +19,18 @@ host and never paste it into a ticket, a chat or a pull request.
 
 ```sql
 -- 1. Names that the tidy would change, and what each would become.
-SELECT t.slug, i.category_id, i.id, i.name AS stored, btrim(regexp_replace(i.name, '\s+', ' ', 'g')) AS tidied, i.active
+SELECT t.slug, i.category_id, i.id, i.name AS stored, btrim(regexp_replace(i.name, '[ \t\n\r\f\v]+', ' ', 'g')) AS tidied, i.active
   FROM retail_expense_items i
   JOIN tenants t ON t.id = i.tenant_id
- WHERE i.name <> btrim(regexp_replace(i.name, '\s+', ' ', 'g'))
+ WHERE i.name <> btrim(regexp_replace(i.name, '[ \t\n\r\f\v]+', ' ', 'g'))
  ORDER BY t.slug, i.category_id, i.name;
 
 -- 2. Items of one category whose names are the same once tidied: the tidy could not store both under one name.
-SELECT t.slug, i.category_id, lower(btrim(regexp_replace(i.name, '\s+', ' ', 'g'))) AS tidied,
+SELECT t.slug, i.category_id, lower(btrim(regexp_replace(i.name, '[ \t\n\r\f\v]+', ' ', 'g'))) AS tidied,
        count(*) AS items, string_agg(i.id::text || CASE WHEN i.active THEN '' ELSE ' (off)' END, ', ' ORDER BY i.id) AS ids
   FROM retail_expense_items i
   JOIN tenants t ON t.id = i.tenant_id
- GROUP BY t.slug, i.category_id, lower(btrim(regexp_replace(i.name, '\s+', ' ', 'g')))
+ GROUP BY t.slug, i.category_id, lower(btrim(regexp_replace(i.name, '[ \t\n\r\f\v]+', ' ', 'g')))
 HAVING count(*) > 1
  ORDER BY t.slug, i.category_id;
 ```
