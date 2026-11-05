@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { GIVE_UP_AFTER_MS, KEEP_SENT_MS, MAX_SERVER_TRIES, provisionalNumber, type OutboxItem } from './outbox';
+import { GIVE_UP_AFTER_MS, KEEP_SENT_MS, MAX_SERVER_TRIES, provisionalNumber, waiting, type OutboxItem } from './outbox';
 import { memoryStore } from './store';
-import { SyncEngine, type Answer, type Decision, type SyncDeps } from './sync-engine';
+import { FORM_SLACK_MS, SyncEngine, type Answer, type Decision, type SyncDeps } from './sync-engine';
 
 // The sync engine (issue #458, ADR-067 decisions 4, 5 and 8; NFR-OFF-07): one at a time, oldest first, backoff, a refusal
 // kept and reported, an expired session that stops it, a manager's decision followed, and never two sends of one sale at
@@ -439,5 +439,64 @@ describe('the sync engine', () => {
   it("never sends another person's outbox", async () => {
     const { engine } = setup(async (i) => ok(i));
     await expect(engine.queue(item('a', 1, { scope: 'test.example|someone-else' }))).rejects.toThrow();
+  });
+});
+
+// JUSTIFICATION-A3: issue #844 asks for these tests of the new hold; they need their own setup.
+describe('an item kept at save, in flight from its form (issue #844)', () => {
+  it('is never sent, reported or counted as waiting while the form waits, and goes once when the form gets no answer', async () => {
+    const { engine, sent, deps } = setup(async () => ({ status: 422, body: { code: 'branch_closed', detail: 'Closed.' } }));
+    expect(await engine.hold(item('a', 1), 8_000)).toBe(true);
+    await engine.syncNow();
+    expect(sent).toEqual([]);
+    expect(deps.report).not.toHaveBeenCalled();
+    expect(waiting(engine.snapshot().items, deps.now())).toEqual([]);
+    await engine.formUnanswered('a');
+    expect(waiting(engine.snapshot().items, deps.now()).map((i) => i.id)).toEqual(['a']);
+    await engine.sync();
+    expect(sent).toEqual(['a:key-a']);
+  });
+
+  it('is taken off the phone when the form gets its answer, a 2xx or a refusal', async () => {
+    const { engine, store, sent } = setup(async (i) => ok(i));
+    await engine.hold(item('a', 1), 8_000);
+    await engine.hold(item('b', 2), 8_000);
+    await engine.formAnswered('a');
+    await engine.formAnswered('b');
+    await engine.sync();
+    expect(sent).toEqual([]);
+    expect(await store.outbox(SCOPE)).toEqual([]);
+    expect(engine.snapshot().items).toEqual([]);
+  });
+
+  it('stays on the phone when the app is killed during the wait, and the next start sends it once', async () => {
+    const first = setup(async (i) => ok(i));
+    await first.engine.hold(item('a', 1), 8_000);
+    // The app is killed: no answer, no release. A new start on the same phone, its own engine on the same store.
+    let now = first.now();
+    const woken: number[] = [];
+    const sent: string[] = [];
+    const next = new SyncEngine({
+      ...first.deps,
+      send: async (i) => {
+        sent.push(`${i.id}:${i.key}`);
+        return ok(i);
+      },
+      now: () => now,
+      later: (_fn, ms) => {
+        woken.push(ms);
+        return () => {};
+      },
+    });
+    await next.load();
+    await next.sync();
+    // Started within the wait: not sent yet, and woken when the form's time is over.
+    expect(sent).toEqual([]);
+    expect(woken.at(-1)).toBe(8_000 + FORM_SLACK_MS);
+    now += 8_000 + FORM_SLACK_MS;
+    await next.sync();
+    await next.sync();
+    expect(sent).toEqual(['a:key-a']);
+    expect(next.snapshot().items[0]).toMatchObject({ id: 'a', key: 'key-a', state: 'sent' });
   });
 });
