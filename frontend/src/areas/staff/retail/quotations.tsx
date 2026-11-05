@@ -18,6 +18,7 @@ import { Gate, Note, Problem, ProductPicker, money, useBranchName, useBranchView
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { Hint } from '../../../app/ui/Hint';
 import { SaleLink } from './screen-link';
+import { ContactLinks } from './contact-links';
 
 // Quotations (documents capability, ADR-033, issue #197): prices offered to a buyer until a date. A quotation reserves no stock and
 // posts nothing; it is numbered and its PDF stored like every document, and it can be made into a sale (and its invoice) once,
@@ -68,7 +69,7 @@ export function ConvertPanel({ form, hasTerms, busy, onChange, onConvert }: { fo
 }
 
 /** One quotation: who it is for, until when, what it comes to, its lines, and what can still be done with it. */
-function QuotationCard({ q, branchName }: { q: Quotation; branchName?: string }) {
+export function QuotationCard({ q, branchName }: { q: Quotation; branchName?: string }) {
   const { me } = useStaff();
   const queryClient = useQueryClient();
   const state = quotationState(q);
@@ -93,7 +94,7 @@ function QuotationCard({ q, branchName }: { q: Quotation; branchName?: string })
       void queryClient.invalidateQueries({ queryKey: ['retail', 'stock'] });
       refresh();
     },
-    meta: { success: (r: Converted) => (r.sale_no ? `Sale ${r.sale_no} made` : 'Sale made') },
+    meta: { success: (r: Converted) => `${r.sale_no ? `Sale ${r.sale_no}` : 'Sale'} made from ${q.number ? `quotation ${q.number}` : 'the quotation'}` },
   });
   const cancel = useMutation({
     mutationFn: () => retail.cancelQuotation(q.id ?? '', reason),
@@ -101,7 +102,7 @@ function QuotationCard({ q, branchName }: { q: Quotation; branchName?: string })
       setPanel(null);
       refresh();
     },
-    meta: { success: 'Quotation cancelled' },
+    meta: { success: `${q.number ? `Quotation ${q.number}` : 'Quotation'} cancelled` },
   });
   const open = q.status === 'open' && !q.expired;
   // A store never sells (ADR-048), so a quotation made there cannot be turned into a sale.
@@ -112,6 +113,7 @@ function QuotationCard({ q, branchName }: { q: Quotation; branchName?: string })
         <strong>{q.number}</strong> <span className={`badge badge-${state.tone}`}>{state.label}</span>
       </p>
       <p>{q.buyer_name}{q.buyer_contact ? `, ${q.buyer_contact}` : ''}</p>
+      <ContactLinks contact={q.buyer_contact} name={q.buyer_name} />
       <p className="hint">
         {showDate(q.quote_date)}, valid until <strong>{showDate(q.valid_until)}</strong>, <strong>{money(q.total_minor ?? 0)}</strong>{branchName ? `, ${branchName}` : ''}
         {q.price_list ? `, price list ${q.price_list}` : ''}
@@ -165,7 +167,7 @@ export function QuotationForm({ branchId, onSaved }: { branchId: string; onSaved
       finish();
       onSaved(q);
     },
-    meta: { success: 'Quotation saved' },
+    meta: { success: (saved: { number?: string }) => (saved?.number ? `Quotation ${saved.number} saved` : 'Quotation saved') },
   });
   const update = (patch: Partial<QuotationDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const setLine = (i: number, patch: { qty?: string; price?: string }) => setDraft((d) => ({ ...d, lines: d.lines.map((l, n) => (n === i ? { ...l, ...patch } : l)) }));

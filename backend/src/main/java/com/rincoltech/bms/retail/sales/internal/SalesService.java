@@ -18,6 +18,7 @@ import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.PushNotice;
 import com.rincoltech.bms.kernel.Search;
 import com.rincoltech.bms.kernel.Versions;
+import com.rincoltech.bms.retail.catalogue.ReceiptPhotos;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue.PackUnit;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue.ProductSnapshot;
@@ -49,6 +50,7 @@ import com.rincoltech.bms.retail.sales.internal.SalesRepository.Header;
 import com.rincoltech.bms.retail.sales.internal.SalesRepository.LinePricing;
 import com.rincoltech.bms.retail.sales.internal.SalesRepository.NewLine;
 import com.rincoltech.bms.retail.stock.CreditPeriods;
+import com.rincoltech.bms.retail.stock.EntryLocations;
 import com.rincoltech.bms.retail.stock.Quantities;
 import com.rincoltech.bms.retail.stock.RetailBooks;
 import com.rincoltech.bms.retail.stock.RetailBooks.Leg;
@@ -111,6 +113,8 @@ class SalesService {
     private final ApplicationEventPublisher events;
     // Lazy: the approvals module holds the void action, which calls back into this service on approval.
     private final Approvals approvals;
+    private final EntryLocations locations;
+    private final ReceiptPhotos receiptPhotos;
 
     SalesService(
             SalesRepository repo,
@@ -129,7 +133,11 @@ class SalesService {
             AccountsService accounts,
             ReturnsRepository returns,
             ApplicationEventPublisher events,
-            @Lazy Approvals approvals) {
+            @Lazy Approvals approvals,
+            EntryLocations locations,
+            ReceiptPhotos receiptPhotos) {
+        this.locations = locations;
+        this.receiptPhotos = receiptPhotos;
         this.approvals = approvals;
         this.events = events;
         this.repo = repo;
@@ -196,11 +204,12 @@ class SalesService {
         return earlier[0] ? new Outcome<>(outcome.body(), true) : outcome;
     }
 
-    /** What the Idempotency-Key covers: a request with a client sale id without its delivery fields (issue #769). */
+    /**
+     * What the Idempotency-Key covers: a request with a client sale id without its delivery fields (issue #769), and never
+     * where the phone was (ADR-122), so a retry from a phone that has moved is the same request.
+     */
     static SaleRequest keyed(SaleRequest r) {
-        if (r.clientSaleId() == null) {
-            return r;
-        }
+        boolean device = r.clientSaleId() != null;
         return new SaleRequest(
                 r.branchId(),
                 r.saleDate(),
@@ -213,8 +222,9 @@ class SalesService {
                 r.creditOverrideReason(),
                 r.lines(),
                 r.clientSaleId(),
-                null,
-                null,
+                device ? null : r.occurredAt(),
+                device ? null : r.recordedOffline(),
+                device ? null : r.pricesAsOf(),
                 null);
     }
 
@@ -428,7 +438,8 @@ class SalesService {
                 null,
                 false,
                 null,
-                r.clientSaleId() == null ? null : new Device(r.clientSaleId(), occurredAt, offline, List.of()));
+                r.clientSaleId() == null ? null : new Device(r.clientSaleId(), occurredAt, offline, List.of()),
+                false);
         try {
             repo.insert(header, r.clientSaleId() == null ? null : requestHash(r));
         } catch (DuplicateKeyException e) {
@@ -444,6 +455,8 @@ class SalesService {
                     "This sale is being recorded by another request; try again shortly.");
         }
         lines.forEach(l -> repo.insertLine(id, l));
+        // ADR-122: where the phone was, online or offline, when it said; never in the audit entry or the request hash.
+        locations.record(EntryLocations.SALE, id, branch, r.location());
         List<Movement> movements = lines.stream()
                 .map(l -> new Movement(
                         branch,
@@ -1230,7 +1243,17 @@ class SalesService {
                                 + items.getLast().id()))
                 : null;
         CreditPeriods periods = capabilities.onPaymentPeriods();
-        return new SalePage(items.stream().map(x -> visible(x, periods)).toList(), next);
+        return new SalePage(
+                withReceiptPhotos(items.stream().map(x -> visible(x, periods)).toList()), next);
+    }
+
+    /** Issue #819 (ADR-124): marks the sales that have a receipt photo, through the catalogue's port, in one query. */
+    private List<Sale> withReceiptPhotos(List<Sale> sales) {
+        Map<UUID, UUID> photos = receiptPhotos.newest(
+                ReceiptPhotos.Kind.SALE, sales.stream().map(Sale::id).toList());
+        return sales.stream()
+                .map(s -> photos.containsKey(s.id()) ? s.withReceiptPhoto(true) : s)
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -1244,6 +1267,7 @@ class SalesService {
                         || java.util.Objects.equals(principal.userId(), s.createdBy())
                         || SalesSummaryService.stillOwed(s))
                 .map(this::visible)
+                .map(s -> withReceiptPhotos(List.of(s)).getFirst())
                 .orElseThrow(ApiException::notFound);
     }
 
@@ -1279,12 +1303,19 @@ class SalesService {
                     rule);
             if (o.executed()) {
                 return new VoidOutcome(
-                        visible(repo.find(id, false).orElseThrow().sale()), null);
+                        withReceiptPhotos(List.of(visible(
+                                        repo.find(id, false).orElseThrow().sale())))
+                                .getFirst(),
+                        null);
             }
             return new VoidOutcome(
                     null, new ApprovalWaiting(o.approvalId(), SaleVoidAction.TYPE, s.totalMinor(), s.currency()));
         }
-        return new VoidOutcome(voidNow(h, reason, principal.userId()), null);
+        // Review of #846: the answer says whether the sale has a receipt photo, as its read does.
+        return new VoidOutcome(
+                withReceiptPhotos(List.of(voidNow(h, reason, principal.userId())))
+                        .getFirst(),
+                null);
     }
 
     /** On approval (ADR-091): the sale as it is now, checked again, voided in the name of the person who asked. */
@@ -1736,7 +1767,8 @@ class SalesService {
                 s.writeOff(),
                 counted,
                 s.deliveryFeeOwedMinor(),
-                s.device());
+                s.device(),
+                s.hasReceiptPhoto());
     }
 
     /** 409 {@code sale_written_off}: what a sale whose unpaid part was written off refuses (ADR-043). */

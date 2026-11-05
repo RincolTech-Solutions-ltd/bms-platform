@@ -12,7 +12,7 @@ draft: names are snake_case and the client is typed by the generated `src/api/sc
 |---|---|---|
 | `/staff/retail` | Landing: one tile per screen the user may use | any `retail.*` permission |
 | `/staff/retail/sale` | Record a sale, then the receipt summary; a shop with no items starts with the card Get your shop ready (Quick add an item, the one primary action, then Set up your shop, Add your first items and Import a list, or Ask the owner to add the items first), and a search that finds nothing offers Not in the list? Add it here with what was typed and How many you have here (more than 0), the new item counted and going on the sale; an existing item chosen with Use this item is never counted (issue #615) | `retail.sale.create` (Add it here: `retail.catalogue.manage`, others read Ask the owner to add it; the count: `retail.stocktake.commit` at the branch) |
-| `/staff/retail/restock` | Buy stock: supplier, lines, per-branch quantities; under the item search, Not in the list? Add it here (issue #505): Item code shown as text, made by the app from the category (never typed, issue #562), Category, Description, Counted in, Buying price, Selling price and the quantity at this branch, one Save that makes the item and puts it on the purchase; a line bought in a pack asks How many pieces in each carton? (issue #554, ADR-082: required, filled with the usual size or by a scanned carton barcode, and Use 30 from now on for a different size, offered with `retail.catalogue.manage`) | `retail.purchase.create` (Add it here: `retail.catalogue.manage`, others read Ask your manager to add this item) |
+| `/staff/retail/restock` | Buy stock: supplier, lines, per-branch quantities; under the item search, Not in the list? Add it here (issue #505): Item code shown as text, made by the app from the category (never typed, issue #562), Category, Description, Counted in, Buying price, Selling price and the quantity at this branch, one Save that makes the item and puts it on the purchase; a line bought in a pack asks How many pieces in each carton? (issue #554, ADR-082: required, filled with the usual size or by a scanned carton barcode, and Use 30 from now on for a different size, offered with `retail.catalogue.manage`); under the lines, in the total's box, Total cost, Should sell for and Expected profit (Expected loss when below the cost), updated as the lines change, for someone who reads profit at every branch on the form, and the same three under each row's lines on Past purchases, from the server's `sell_worth_minor` (issue #821, ADR-126); anyone else sees Total cost alone, as before | `retail.purchase.create` (the three figures: `retail.profit.read`; Add it here: `retail.catalogue.manage`, others read Ask your manager to add this item) |
 | `/staff/retail/usage` | Usage and damage | `retail.usage.report` |
 | `/staff/retail/credit-sales` | Credit sales, grouped by a chain of levels the user chooses (issues #328, #341): buyer, date, amount, due date, state; open a sale | `retail.sale.read` |
 | `/staff/retail/sales` | All sales, grouped by a chain of levels the user chooses (issues #328, #341): filters by dates, buyer, paid by and item; open a sale | `retail.sale.read` |
@@ -27,7 +27,7 @@ draft: names are snake_case and the client is typed by the generated `src/api/sc
 | `/staff/retail/profit` | Daily profit per branch, with the stock-take difference as its own column (#121) | `retail.profit.read` |
 | `/staff/retail/sales-analysis` | Sales analysis: totals by day, week or month, top items as bars, by branch, category, item and seller, slow movers, items with no sale (#149) | `retail.sale.read` (profit columns: `retail.profit.read`) |
 | `/staff/retail/margins` | Margins: profit and margin by item and category, items under a margin target, price change impact (#149) | `retail.profit.read` |
-| `/staff/retail/stock-health` | Stock health: days of cover, reorder suggestions, slow movers (#414), dead stock, used, damaged and found missing (#149) | `retail.stock.read` (cost: `retail.profit.read`) |
+| `/staff/retail/stock-health` | Stock health: days of cover, reorder suggestions, slow movers (#414), dead stock, used, damaged and found missing (#149); Damage and use as a share of stock (#822, ADR-127): its own period picker on This month, the hint "Out of the stock that passed through: the stock at the start plus what came in.", per shop a Shop total and each item damaged or used, the highest first, each share in words with the quantities ("Damaged 10%, 5 of 50 piece", "under 1%", "no stock came in to compare with"), kept for offline | `retail.stock.read` (cost: `retail.profit.read`; the damage and use section only with `retail.profit.read`) |
 | `/staff/retail/credit-control` | Credit control: what credit buyers owe by age, the overdue list, payments received (#149) | `retail.sale.read` |
 | `/staff/retail/evaluation` | Business evaluation: profit to date, expected profit of the stock at today's prices, a 30 day pace (#149) | `retail.profit.read` |
 | `/staff/retail/catalogue` | Catalogue home: links to the screens below the session may use | any one of the catalogue screens' permissions |
@@ -311,13 +311,13 @@ from Town to Second Shop. A Playwright script drove Chromium at 360px and 390px;
   write screens (sale, usage, stock-take, Move stock; Restock already chose its branches per line) still need one
   branch, and now say "Choose a branch to continue:" with a button for each of the user's branches.
 - **Out of stock and Low stock.** Tabs on Stock (`stock_level=out|low`): out is zero or less, low is at or below
-  the item's minimum (the branch's own, else the one for every branch) or 5 or fewer without one, and so includes
+  the item's minimum (the branch's own, else the one for every branch) or 10 or fewer without one (issue #830), and so includes
   out of stock. Both keep only items the branch has held (issue #490, ADR-077). The threshold is a constant in the
   API (`StockService.LOW_STOCK_MILLI`, ADR-029); in All branches an item is low when it is low at any listed branch and out
   when its total is zero or less. The hints say
   "Items you have stocked with none left, or less than none." and "Items you have stocked that are at or below their
-  minimum, or 5 or fewer without one, including those out of stock."; the dashboard's Low stock figure says "at their
-  minimum, or 5 or fewer without one".
+  minimum, or 10 or fewer without one, including those out of stock."; the dashboard's Low stock figure says "at their
+  minimum, or 10 or fewer without one".
 - **Credit sales and All sales.** Two screens on the sales list API (new filters `payment_method`, `product_id`,
   `buyer`, `status`, `newest_first`), linked from the retail home. A card shows the buyer, date and amount; a
   credit sale adds the due date, what is still owed and a state badge (Paid, Part paid, Unpaid, Overdue; the
@@ -354,7 +354,8 @@ of the screens under it; the Catalogue home lists only those it may use (a sales
   history** of the item lists each change with the date and time in the business's time zone (`showWhen`,
   Africa/Kampala like `businessToday`), what changed, why, and the cost only when the server sent it. A new item
   asks for a selling price; its cost is asked only with `retail.profit.read` (else 0, and a restock sets it).
-- **Categories and Units** (`catalogue-lists.tsx`, one component twice): Add, Rename, Switch off or Switch on,
+- **Categories and Units** (`catalogue-lists.tsx`, one component twice): Add, Rename, Switch off or Switch on (issue #830: the
+  buttons say Delete, asked first, and Bring back; a deleted row is hidden until Show deleted),
   with "Used by N items". Nothing is deleted. A switched-off row stays on the items that use it and is not offered
   for a new item (the server refuses it with 422 `inactive_category`, `inactive_unit`). A switched-on unit also has
   Usual pack (issue #637), offered unless another unit's usual pack counts it (one level only): a Sheet
@@ -369,7 +370,7 @@ of the screens under it; the Catalogue home lists only those it may use (a sales
   as it stands now. A file with a problem row adds nothing. Adding again skips everything already there. The cost
   price column is accepted only with `retail.profit.read`.
 - **Messages.** Every save shows a green on-screen message (`Success`, `role="status"`) and a toast above the
-  bottom bar (`useToast` in `ui.tsx`, six seconds, hidden from assistive technology since the on-screen message
+  bottom bar (`useToast` in `ui.tsx`, four seconds, hidden from assistive technology since the on-screen message
   carries the same words). There was no toast helper in the app before this (only the `.toast` style), so
   `useToast` is the first and the other retail screens do not use it yet. Refusals use the existing `Problem` alert
   with the server's plain message.
@@ -457,6 +458,14 @@ widths: see its README), and the script is not committed. Notes:
 - A caller without `retail.profit.read` sees the day's total sold and "Cash expected" only: no savings amount,
   suggestion, profit, cash purchases, net expected amount, difference or running unbanked total, and the savings
   form sends no amount.
+- Banking with the Owner's savings switch on (issue #814, ADR-115 decision 11): a person who banks without
+  `retail.profit.read` (the Till role) sees "Cash expected", "Savings set aside" and "Expected to bank" with the
+  hint "Cash expected less the savings set aside.", and the amount banked is filled with Expected to bank less
+  what is already banked that day. Stock bought with cash, the difference and the flag stay hidden. The server
+  sends these lines; the form only shows what the answer carries, online and from the read kept on the phone.
+  When the savings are more than the cash expected, Expected to bank shows 0 with the plain line "Savings are
+  more than the cash in the till today." and the amount is filled with 0, never a negative amount. The read kept
+  on the phone goes once the Owner turns the switch off (issue #847).
 - The bottom bar now carries Retail plus up to five shortcuts in the pilot's order (Sale, Banked, Savings,
   Expenses, Advances), so an administrator's bar no longer shows Stock and Restock; both stay on the Retail home.
   Six items still fit at 360px.
@@ -808,7 +817,7 @@ again under the sale's lock; the screens only save a round trip and say each ref
   `sale_voided` make the lists and the sale load again. In Mark as fully paid the message is "The balance has changed; check the new amount."; a typed amount above
   the new balance goes back to the balance. Record payment and Mark as fully paid keep separate drafts and keys, so a lost answer on one never blocks the other; Cancel
   forgets the form unless a request went out and its answer may have been lost; `idempotency_key_reused` resets the form with a new key instead of asking for a reload.
-- **Void this sale** (an opened sale only). Shown on a completed sale to a holder of `retail.sale.void` at the sale's branch. A credit sale that has had a payment or a return shows
+- **Void this sale** (an opened sale only; issue #830: the button says Delete this sale, see "Edit and delete buttons as in the old app"). Shown on a completed sale to a holder of `retail.sale.void` at the sale's branch. A credit sale that has had a payment or a return shows
   "A credit sale that has had a payment or a return cannot be voided." instead of the button (the server refuses it as `sale_has_payments`), and an imported sale
   shows a short note instead (its stock and entries predate this system). A void that already went through (`sale_voided`) counts as done, and the button stays away
   until the reloaded sale reads Voided. The form needs a reason of at least five
@@ -958,6 +967,49 @@ An item that is no longer sold is switched off, never deleted.
 - **Refusals.** Through the API a sale, restock, purchase order line or transfer of an inactive item is 422 `product_inactive` in plain words.
 - **Tour.** `page-catalogue` is version 2 with an Items you stopped selling step.
 - **Tests.** `catalogue.test.tsx` (the warning, the lists), `RetailProductInactiveIT` (backend, CI only).
+- **Issue #830.** The Inactive tick is now **Delete this item** (see the next section); the badge and the filter say Deleted.
+
+## Edit and delete buttons as in the old app (issue #830)
+
+The owner's old app let people edit and delete records directly. BMS still corrects by voiding and switching off (the void model,
+ADR-044 and ADR-045, is unchanged); the screens now use the old app's buttons and words, and every one keeps the record and the audit
+trail underneath. No migration; two endpoints were added for the edits (review of #830), so an edit is one transaction:
+`POST /retail/purchases/{id}/replace` and `POST /retail/expenses/{id}/replace` void the old record and save the new one together, and
+any refusal changes nothing. A typed reason shorter than five characters is kept after the plain default ("Deleted from the sale
+screen: dup"), so a void always has a full reason.
+
+- **Delete this sale** (`VoidSaleAction`, an opened sale; `retail.sale.void` at the sale's branch, the owner's, as before). It asks
+  "Delete this sale? The stock goes back to <branch>." with a line that the sale stays in the lists marked Deleted, and an optional
+  reason; Yes, delete it sends the void (`POST /retail/sales/{id}/void`) with the typed reason or, when none is typed, "Deleted from the
+  sale screen". Toast: "Sale deleted. The stock went back." A voided sale reads **Deleted** in the lists and "Deleted because" on the
+  sale; the refusals say deleted (`sale_voided`, `sale_has_payments`).
+- **Mark as paid** (was Mark as fully paid) on an unpaid credit sale: the whole balance, dated today, in cash unless another way is
+  picked; it is the same payment as Record payment (`POST /retail/sales/{id}/payments`).
+- **Edit a delivery** (Past purchases, beside Correct this purchase, for the same people). Edit goes to `/staff/retail/restock?edit=<id>`:
+  Buy stock opens filled in with that delivery, its own date kept (the date warning says when that day may be banked), under "You are
+  editing delivery RP...". **Save changes** is one call (`POST /retail/purchases/{id}/replace`): the old one is voided through the
+  correct-this-purchase void with the reason "Edited: entered again with the changes" and the form is saved as a new delivery whose
+  note is "Replaces RP..., edited", in one transaction; then Past purchases opens with the toast "Delivery updated". A refusal (its stock
+  moved, an item deleted since) changes nothing, and the person stays on the edit form with the reason. A delivery found voided already
+  is entered again instead and ends in the saved screen. The card shows the note, so the new delivery names the old one, which stays
+  marked Voided.
+- **Edit or delete an expense** (Expense records, in place of Void, where the expense may be voided: `retail.cashbook.void`, the
+  owner's). **Delete** asks "Delete this expense? It stops counting in the cash book and the reports." with an optional reason (default
+  "Deleted from the expenses screen") and voids it; the screen says "Expense deleted." **Edit** (also needs `retail.expense.record` there)
+  opens the expense form filled in; Save changes is one call (`POST /retail/expenses/{id}/replace`) that voids the old one ("Edited:
+  entered again with the changes") and saves the new one with "Replaces the <item> entry of <date>, edited." after any explanation, and
+  says "Expense updated". An amount that would wait for an administrator is refused (`edit_needs_approval`: delete it and record it
+  again), so an expense is never voided while its replacement waits; the form stays with the reason.
+- **Delete an item, category or unit.** Categories and Units say **Delete** (asked first: "Delete <name>? It is hidden from lists and
+  pickers. Items, history and reports keep it, and Show deleted brings it back.") and **Bring back**; the item's edit form says **Delete
+  this item** (asked first, with the stock warning when it holds stock) and Bring back. Underneath each is the switch off
+  (`PATCH ... {active: false}`). A deleted row is hidden from the list until **Show deleted (N)** is ticked, and from the category and
+  unit pickers unless it is the row already chosen (a category filter, one with All categories, still lists it, so its history and
+  reports can be found); the Items filter offers On sale, Deleted only and Show deleted too.
+- **Low stock.** The default level for an item with no minimum of its own is 10, the old app's rule (ADR-029 amended); an item's own
+  minimum still wins.
+- **Tests.** `sale-actions.dom.test.tsx`, `sales-wiring.dom.test.tsx`, `edit-delivery.dom.test.tsx`, `edit-expense.dom.test.tsx`,
+  `delete-catalogue.dom.test.tsx`, `expenses.test.tsx`; `RetailOldAppWordsIT` (backend, CI only) proves the safe effects through the API.
 
 ## Left to do
 
@@ -1183,7 +1235,7 @@ therefore as far as the existing routes go: Stock, and Past restocks and Stock m
 | `/staff/retail/settings` | Retail settings | `page-retail-settings` v4 (slow movers step, #414) | none added |
 | `/staff/retail/stock` | Stock | `page-stock` v3 (existing) | none added |
 | `/staff/retail/stock-by-location` | Stores and shops | `page-stock-by-location` v1 (existing) | none added |
-| `/staff/retail/stock-health` | Stock health | `page-stock-health` v2 (slow movers step, #414) | item and branch names open Stock; Move on a slow mover opens Move stock filled in |
+| `/staff/retail/stock-health` | Stock health | `page-stock-health` v4 (slow movers step, #414; why-low, #412; damage and use share for profit readers, #822) | item and branch names open Stock; Move on a slow mover opens Move stock filled in |
 | `/staff/retail/stocktake` | Stock-take | `page-stocktake` v1 (existing) | none added |
 | `/staff/retail/supplier-bills` | Supplier invoices | `page-supplier-bills` v1 (added) | none added |
 | `/staff/retail/supplier-bills/$billId` | Supplier invoice | `page-supplier-bill` v1 (added) | supplier opens its open items; delivery number opens the delivery |
@@ -1516,6 +1568,24 @@ The owner, 29 Oct 2026: "On mobile I can't easily find items and categories. It 
 - **On a phone** the Items list follows the search, Quick add and Add an item; the sizes and colours ways to add come after it.
 - **Layout check.** `layout/phone-find.layout.test.ts` at 360, 390 and 412px, at both font scales.
 
+## The item page (issue #813, FR-RET-85, ADR-121)
+
+The owner checks that stock tallies by opening one item, as the old app allowed.
+
+- **Where.** `/staff/retail/items/$productId` (`item-page.tsx`), named by the item in the breadcrumbs; tour `page-item`. Open
+  the item, a full size ghost button (`ItemPageLink`), sits on each item of My stock (the phone card, the table, every shop's
+  table and cards), on each item of Items and on each line of a sale opened from the sales lists, for whoever may read stock.
+- **Top.** The item code and category, then In stock: a card per shop with its quantity in tabular figures (below zero
+  flagged in words), a closed shop only while it still holds the item, and All shops with the sum when there are two or more.
+  The owner sees the average buying price per shop under it.
+- **Movements.** "Every movement, newest first": a card per movement with what it was in plain words (Delivery, Sale, Moved
+  in, Moved out, Used in the shop, Damaged, Count, Correction, Customer brought back, Sale cancelled, Delivery cancelled), the
+  day and the shop, In or Out with the quantity, and In stock after. The owner also sees its value at buying price and, on a
+  sale, the profit. The Shop choice (two shops or more) and the PeriodPicker (every day to start with) narrow the list; the
+  balances stay those of the whole history. Show older movements loads the next page.
+- **Offline.** Both reads are kept like My stock (ADR-116), so an item opened before shows offline.
+- **Layout check.** `layout/item-page.layout.test.ts` at 412px, at both font scales, the owner's page and a seller's.
+
 ## Add it in place (issue #688, FR-UXN-12)
 
 The owner, 29 Oct 2026 (D75): "if something is not there you have the option to add it in place and then continue with the
@@ -1758,6 +1828,52 @@ profile, refreshed when the app comes online, at sign-in and every 15 minutes (`
 Tests: `outbox.test.ts`, `sync-engine.test.ts`, `catalogue.test.ts`, `offline-sale.dom.test.tsx`, `sync-status.dom.test.tsx`,
 `read-cache.test.ts`, `offline-reading.dom.test.tsx`; backend `RetailOfflineSalesIT` and `PushPublishersIT`.
 
+## The daily forms offline (issue #812, ADR-067 decisions 12 and 13, NFR-OFF-10)
+
+Expenses, Savings (the till's and the sales staff's), Banking, Withdrawals, Buy stock (a delivery), Move stock and Usage and
+damage keep working with no network, in the same outbox, count and dot as Sell.
+
+- **Offline**, each form opens with "**You are offline.** This expense is kept on this phone and sent when the phone is back
+  online." (savings record, banking, withdrawal, delivery, stock move, usage or damage record). No date is asked: the entry is
+  dated when it was made. Item search in Buy stock, Move stock and Usage reads the items saved on this phone. Savings needs the
+  day's figures loaded once while online ("The day's figures are not saved on this phone. Open Savings once while online to
+  save them."); Banking saves without its expected figures.
+- After saving, the form gives way to **Saved on this phone**, what was kept ("Expense, Transport, Fuel, UGX 20,000") and its
+  state: "Waiting to be sent", "Sending", "Waiting to try again: ...", then **Sent** with "Sent. It is recorded." or "Sent. It
+  waits for an administrator to approve it." A refused one reads "Not recorded:" and the server's words, with **Fix** (the form
+  opens on it), **Send again** and **Discard** ("Discard this entry? It is not recorded and is not sent again." **Discard** or
+  **Keep it**). **Record another** (**Move more stock**, **Record another delivery**) opens a fresh form.
+- **Online**, a save with no answer within the 8 seconds a sale waits, or lost on the network, is kept on the phone the same
+  way, under the same key. Measured on a slow phone: about 1 second on 3G, about 2.5 on Slow 3G.
+- **Refused for its time**: an entry kept for more than 7 days, sent by anyone but the owner, reads "Not recorded: This entry
+  was kept on the phone for more than 7 days. Only the owner can save it on its own day. Fix it on the phone to save it as an
+  entry of today." One made while the phone's clock was behind reads "Not recorded: The phone's clock was behind when this
+  entry was made, so its day is not known. Fix it on the phone to save it as an entry of today."
+- **Fix** never writes over a form with work in it: "That form has other work in it. Save or clear it first, then tap Fix
+  again." It is not shown when the server may hold the entry ("The server did not take this entry after ... tries" or "The
+  server is still recording this entry"), and neither is **Discard**: only **Send again**, under the same key, with "This
+  may already be recorded. Send again to check; it is never recorded twice." An entry whose online answer was lost shows
+  the same after its first refusal; **Fix** and **Discard** appear once the server refuses it again.
+- A delivery opened from **Edit** is never kept on the phone, also one voided already that Edit enters again: offline it
+  says "Changing a saved entry needs the internet.", and a connection lost during its save is an error on the form, as an
+  edit's is.
+- **A closed till**: an expense, savings, banking, withdrawal or delivery paid in cash or by mobile money kept on the phone that lands on a day whose till was closed
+  (its cash banked) reads, for anyone but the owner, "Not recorded: That day's till is closed. Ask the owner to enter it."
+- A draft left from an earlier day saves offline as an entry of the day it is kept: offline there is no date box, so nothing
+  about the date can hold the save.
+- Offline, an item search with nothing saved on the phone says "Items are not saved on this phone. Search for items when you
+  are back online."
+- **Toasts**: "Expense, Transport, Fuel saved on this phone. It is sent when the phone is back online." when kept, and
+  "Expense sent" (or "Expense sent. It waits for an administrator to approve it.") when it reaches the server.
+- **The sheet** lists entries beside sales, as "Expense, Transport, Fuel 3 Nov 10:12, Test Shop A, UGX 20,000", with the same
+  state words and buttons, and the entries sent in the last day under **Sent in the last day**. Its words add: "So are expenses, savings, banking,
+  withdrawals, deliveries, stock moves, usage and damage. Changing a saved entry needs the internet."
+- **Edit** of a saved expense or delivery offline says "You are offline. Changing a saved entry needs the internet. Your change is
+  not kept on this phone." and does not save.
+
+Tests: `entries.test.ts`, `offline-forms.dom.test.tsx`, `layout/offline-forms.layout.test.ts` (412px, 48px targets, the time
+to save on 3G and Slow 3G); backend `RetailOfflineEntriesIT`.
+
 ## Barcodes, scanning and labels (issue #345)
 
 ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability switch.
@@ -1895,6 +2011,39 @@ ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability s
 - The list, with who sees each button, is `docs/ui/next-steps.md`, the single source; `next-steps.dom.test.tsx` holds the code
   to it and fails on a success screen drawn with no next step.
 
+## Every shop's stock on My stock (issue #807)
+
+A business owner asked that everyone on My stock see how many of each item every shop has, in one view, the way the old
+spreadsheet catalogue showed it, without the Switch button that moved them to the other shop (ADR-119, FR-RET-84).
+
+- **Each card** (and the In stock cell on a wide screen) lists every active shop that keeps goods: "In stock here: 0 pieces"
+  first and larger, then "Another shop: 1 piece", in the item's packs and pieces when it has a standard pack. A shop with none
+  shows 0; a quantity below zero keeps its minus sign and adds "Below zero" in words. Quantities in tabular figures, no stripe.
+- **Everyone** who may see My stock at the shop in use sees it, a seller scoped to one shop included. Only the counts: the
+  buying price shows only to a reader of costs, for this shop, as before; the selling price as before.
+- **The owner's switch** is on Retail settings: "Show other shops' stock to everyone", on by default. Off, the card is as before
+  issue #807, with the "0 here" note and no Switch button.
+- The search, the filters, the category chips and their counts are those of the shop in use. The list comes in the same request
+  as before, page by page, and is kept for reading offline with the rest of My stock.
+
+## Out of stock and Only N left on Record sale (issue #815)
+
+The owner's old app warned in red and orange when an item was running out; BMS showed the bare number. Record sale now says it
+in words, as the old app did.
+
+- **In the item picker** each match whose stock here is zero or below says **Out of stock**, and one at or below its low stock
+  level says **Only N left** (for example "Only 4 left"); an item above its level says nothing more. The level is the one the
+  Low tab of My stock uses: the shop's own minimum, else the item's, else the low stock threshold of ADR-029 (10 since issue #830, pull request #832). Like the Low tab, it
+  judges the whole balance here, stock kept for customer orders included.
+- **On the sale line** the same words sit beside the item's name, from the stock read when the item was picked or scanned.
+  They describe the shop's stock, not the quantity typed on the line: 8 of an item with 4 left still says Only 4 left.
+- **How it looks:** a tinted badge with an icon and the words (the circle with an exclamation mark for Out of stock on the
+  danger tint, the triangle for Only N left on the warning tint). Never colour alone, no stripe, no gradient.
+- **Selling past the stock is not changed:** the words only inform; the sale goes on as before and the server decides as before.
+- **Offline** the words come from the copy of the items saved on the phone, which carries the level with the stock
+  (`low_stock_level` on `GET /retail/products` with `branch_id`, and on the barcode lookup). A copy saved before the level was
+  sent still says Out of stock at zero.
+
 ## Where is my stock (issue #728)
 
 A shop owner added his items with Quick add at his store, looked at My stock in his main shop, saw 0 and thought his numbers
@@ -1902,7 +2051,8 @@ were lost; he also left two counts at Review the difference, because the last st
 `docs/ui/where-is-my-stock`.
 
 - **My stock and the item's page** say where an item is when the shop in use has none of it and another shop has some:
-  "0 here. 456 at Test Store", with **Switch to Test Store**, which changes the shop in use with the house toast (issue #680).
+  "0 here. 456 at Test Store" (the **Switch to Test Store** button it had is gone since issue #807; with the owner's switch on,
+  My stock lists every shop instead, see below).
   The other shops are those the all-branches stock list returns (cut by the server to the shops the person may read stock at)
   that are in the person's own branch list; the one holding the most is named. A negative balance keeps its own flag. The flat
   list and the grouped view both say it, and both read the all-branches list under one cache key (`allBranchesKey`).
@@ -1921,3 +2071,21 @@ were lost; he also left two counts at Review the difference, because the last st
 - **Plain words.** The last step of a count, on Count stock and on Sell's count of a new item, is **Save the count**, with a help
   tip: "Your stock changes only when you save the count." Review the difference stays the step before. The tour
   `page-stocktake` is version 8.
+
+## Call, Text and WhatsApp (issue #817)
+
+Chasing a debt or ordering stock is one tap, as in the owner's old app. Wherever a phone number shows, three links stand under
+it: **Call** (`tel:+256...`), **Text** (`sms:+256...`) and **WhatsApp** (`https://wa.me/256...`). They open the phone's own
+dialler, messages or WhatsApp; the app sends nothing.
+
+- **Where.** A sale (Sales and Credit sales), a credit buyer and a supplier (Credit buyers, Suppliers), a customer who owes
+  (Customer accounts), a buyer's account page (its number is read from the customer list by the buyer's name, paging until
+  that buyer is found, since the account carries none), an advance and each party on Who owes (the number saved on the
+  party), a quotation and a customer order. Lists that show no number (the Credit sales and Advances rows, the pickers) get
+  no links; the sale or advance they open has them.
+- **The number.** It is read with the receipt sender's normaliser (`normalisePhone`): Uganda by default (`07...`, `7...`,
+  `256...`, `+256...`), another country with its `+` and code. No number draws no links; a contact it cannot read (a
+  landline, an email, a number with digits missing) stays text only, as it was.
+- **Sizes.** `ContactLinks` (`contact-links.tsx`): 48 by 48px targets, `--tap-gap` (8px) apart, each as wide as its word on every
+  screen, never stretched on a laptop; icons from the app's set (a round bubble for WhatsApp, no brand logo). The layout suite
+  `layout/contact-links.layout.test.ts` measures them at 412 and 1366.

@@ -5,6 +5,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLWarning;
+import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
@@ -64,7 +69,12 @@ class MigrationOrderIT {
             // for; named with their table, so a column of that name elsewhere (stock movements' occurred_at) still
             // counts.
             + " AND NOT (table_name = 'retail_sales'"
-            + " AND column_name IN ('client_sale_id', 'occurred_at', 'recorded_offline', 'request_hash'))";
+            + " AND column_name IN ('client_sale_id', 'occurred_at', 'recorded_offline', 'request_hash'))"
+            // V134 (a supplier's details, #820) adds eight nullable columns to retail_suppliers; it answers for them in
+            // supplierDetailsMigrationKeepsEverySupplier.
+            + " AND NOT (table_name = 'retail_suppliers'"
+            + " AND column_name IN ('email', 'address', 'country', 'website', 'payment_terms', 'bank_account',"
+            + " 'supplier_type', 'notes'))";
 
     /** Every migration file on the classpath in numeric order: a new migration only adds its file. */
     static final List<String> VERSIONS = discoveredVersions();
@@ -1876,7 +1886,11 @@ class MigrationOrderIT {
                                         + " 'lending.collections.all_officers', 'core.referrals.read',"
                                         + " 'lending.loans.bring_in', 'core.data_export.run', 'core.billing.read',"
                                         + " 'lending.charges.waive_fee_interest', 'core.payments.allocate_approve',"
-                                        + " 'core.payments.manage')")
+                                        + " 'core.payments.manage',"
+                                        // V131 (the owner's earlier date, #811).
+                                        + " 'retail.entry.backdate',"
+                                        // V132 (where an entry is made, #826): the owner's read of the distances.
+                                        + " 'retail.entry_location.read')")
                         .query(Long.class)
                         .single())
                 .as("no permission is added")
@@ -2976,6 +2990,276 @@ class MigrationOrderIT {
                             .query(String.class)
                             .list())
                     .containsExactly("SELECT");
+        }
+    }
+
+    /**
+     * V135 (issue #823) removes whitespace from a stored staff email (a non-breaking space passed the old check), audited,
+     * and leaves a row whose cleaned email another staff user of the business already has exactly as it was. A clean email
+     * is not touched. JUSTIFICATION-A3: a new test case; no existing case covers the staff email clean up.
+     */
+    @Test
+    void staffEmailSpacesMigrationCleansWithoutDuplicates() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            String before = VERSIONS.get(VERSIONS.indexOf("135") - 1);
+            assertThat(flyway(postgres, before).migrate().targetSchemaVersion).isEqualTo(before);
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            UUID tenant = UUID.randomUUID();
+            owner.sql("INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v135-spaces', 'Test Tenant V135',"
+                            + " '00000000-0000-4000-8000-000000000001')")
+                    .param(tenant)
+                    .update();
+            String nbsp = Character.toString(0x00A0);
+            UUID spaced = UUID.randomUUID();
+            UUID inside = UUID.randomUUID();
+            UUID twin = UUID.randomUUID();
+            UUID twinSpaced = UUID.randomUUID();
+            UUID plain = UUID.randomUUID();
+            UUID blank = UUID.randomUUID();
+            Map<UUID, String> emails = Map.of(
+                    spaced,
+                    "test.owner" + nbsp + "@example.test",
+                    inside,
+                    "Test.Cl erk@example.test",
+                    twin,
+                    "test.twin@example.test",
+                    twinSpaced,
+                    "test.twin" + nbsp + "@example.test",
+                    plain,
+                    "test.plain@example.test",
+                    blank,
+                    " " + nbsp + " ");
+            emails.forEach((id, email) -> owner.sql("INSERT INTO users (id, tenant_id, kind, full_name, email, status)"
+                            + " VALUES (?, ?, 'staff', 'Test Staff V135', ?, 'active')")
+                    .params(id, tenant, email)
+                    .update());
+
+            assertThat(DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD)
+                            .success)
+                    .isTrue();
+
+            String read = "SELECT email || '|' || version FROM users WHERE id = ?";
+            assertThat(owner.sql(read).param(spaced).query(String.class).single())
+                    .isEqualTo("test.owner@example.test|2");
+            assertThat(owner.sql(read).param(inside).query(String.class).single())
+                    .isEqualTo("test.clerk@example.test|2");
+            assertThat(owner.sql(read).param(twinSpaced).query(String.class).single())
+                    .as("left as it was: the cleaned email is another staff user's")
+                    .isEqualTo("test.twin" + nbsp + "@example.test|1");
+            assertThat(owner.sql(read).param(twin).query(String.class).single()).isEqualTo("test.twin@example.test|1");
+            assertThat(owner.sql(read).param(plain).query(String.class).single())
+                    .isEqualTo("test.plain@example.test|1");
+            assertThat(owner.sql("SELECT entity_id FROM audit_log WHERE tenant_id = ? AND action ="
+                                    + " 'core.user.email_cleaned' AND actor_kind = 'system'")
+                            .param(tenant)
+                            .query(UUID.class)
+                            .list())
+                    .containsExactlyInAnyOrder(spaced, inside);
+
+            // Issue #857: the check after every migrate names each reason on its own, with the fix and no email.
+            UUID operator = UUID.randomUUID();
+            owner.sql("INSERT INTO platform_users (id, email, full_name) VALUES (?, ?, 'Test Operator V135')")
+                    .params(operator, "op v135@example.test")
+                    .update();
+            // The counts are across every business, so only this case's business and operator are asserted, by reason.
+            List<String> warnings = leftOverWarnings(postgres);
+            assertThat(warnings).noneMatch(w -> w.contains("@"));
+            assertThat(warnings)
+                    .filteredOn(w -> w.contains("are the email of another staff user") && w.contains(tenant.toString()))
+                    .singleElement()
+                    .asString()
+                    .contains("puts in their own email", "staff-email-left-over.md");
+            assertThat(warnings)
+                    .filteredOn(w -> w.contains("hold nothing but whitespace") && w.contains(tenant.toString()))
+                    .singleElement()
+                    .asString()
+                    .contains("staff-email-left-over.md");
+            assertThat(warnings)
+                    .filteredOn(w -> w.contains("hold whitespace that can be removed") && w.contains(tenant.toString()))
+                    .as("the clean rows V135 already fixed are not reported")
+                    .isEmpty();
+            assertThat(warnings)
+                    .filteredOn(w -> w.startsWith("operator email:"))
+                    .singleElement()
+                    .asString()
+                    .contains("staff-email-left-over.md");
+
+            // The runbook's operator fix, as written there, works on this schema and clears the WARNING.
+            // JUSTIFICATION-A3: the #860 review asks the runbook's operator statements to be run in a test.
+            owner.sql("""
+                            UPDATE platform_users
+                               SET email = lower(regexp_replace(email,
+                                       '[\\s\\x00a0\\x0085\\x1680\\x180e\\x2000-\\x200b\\x2028\\x2029\\x202f\\x205f\\x2060\\x3000\\xfeff]', '', 'g')),
+                                   updated_at = now()
+                             WHERE id = ?
+                            """).param(operator).update();
+            owner.sql("""
+                            INSERT INTO platform_audit_log (id, action, data)
+                            VALUES (gen_random_uuid(), 'platform.user.email_cleaned',
+                                    jsonb_build_object('platform_user_id', ?::text, 'reason', 'whitespace removed (issue #857)'))
+                            """).param(operator).update();
+            assertThat(owner.sql("SELECT email FROM platform_users WHERE id = ?")
+                            .param(operator)
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("opv135@example.test");
+            assertThat(leftOverWarnings(postgres)).noneMatch(w -> w.startsWith("operator email:"));
+        }
+    }
+
+    /**
+     * The WARNINGs of {@code afterMigrate__staff_email_left_over.sql}, run on its own as the owner (issue #857).
+     * JUSTIFICATION-A3: #857 asks the left-over WARNING to count each reason; this reads what the check raises.
+     */
+    private static List<String> leftOverWarnings(PostgreSQLContainer postgres) {
+        List<String> warnings = new ArrayList<>();
+        String url = postgres.getJdbcUrl();
+        String check = "src/main/resources/db/migration/afterMigrate__staff_email_left_over.sql";
+        try (Connection connection = DriverManager.getConnection(url, "bms_owner", TestDatabase.OWNER_PASSWORD);
+                Statement statement = connection.createStatement()) {
+            statement.execute(Files.readString(Path.of(check)));
+            for (SQLWarning warning = statement.getWarnings(); warning != null; warning = warning.getNextWarning()) {
+                warnings.add(warning.getMessage());
+            }
+        } catch (Exception e) {
+            throw new IllegalStateException("cannot run the staff email check", e);
+        }
+        return warnings;
+    }
+
+    /**
+     * V134 (issue #820, ADR-125) is expand only: eight nullable columns on retail_suppliers, so a supplier from before keeps
+     * its name, contact, date added and version with every new detail empty, and one index on retail_purchases.
+     * JUSTIFICATION-A3: a new test case; no existing case covers the supplier details.
+     */
+    @Test
+    void supplierDetailsMigrationKeepsEverySupplier() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            String before = VERSIONS.get(VERSIONS.indexOf("134") - 1);
+            assertThat(flyway(postgres, before).migrate().targetSchemaVersion).isEqualTo(before);
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            UUID tenant = UUID.randomUUID();
+            UUID supplier = UUID.randomUUID();
+            owner.sql("INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v134', 'Test Tenant V134',"
+                            + " '00000000-0000-4000-8000-000000000001')")
+                    .param(tenant)
+                    .update();
+            owner.sql("INSERT INTO retail_suppliers (id, tenant_id, name, contact, created_at)"
+                            + " VALUES (?, ?, 'Test Supplier 01', '+256700000001', TIMESTAMPTZ '2026-01-15 09:00+03')")
+                    .params(supplier, tenant)
+                    .update();
+            String kept = "SELECT name || '|' || contact || '|' || created_at::date || '|' || version || '|' || active"
+                    + " FROM retail_suppliers WHERE id = ?";
+            String was = owner.sql(kept).param(supplier).query(String.class).single();
+
+            assertThat(DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD)
+                            .success)
+                    .isTrue();
+
+            assertThat(owner.sql(kept).param(supplier).query(String.class).single())
+                    .isEqualTo(was);
+            assertThat(owner.sql("SELECT num_nulls(email, address, country, website, payment_terms, bank_account,"
+                                    + " supplier_type, notes) FROM retail_suppliers WHERE id = ?")
+                            .param(supplier)
+                            .query(Integer.class)
+                            .single())
+                    .as("every new detail is empty")
+                    .isEqualTo(8);
+            assertThat(owner.sql("SELECT count(*) FROM information_schema.columns WHERE table_name = 'retail_suppliers'"
+                                    + " AND column_name IN ('email', 'address', 'country', 'website', 'payment_terms',"
+                                    + " 'bank_account', 'supplier_type', 'notes') AND is_nullable = 'YES'")
+                            .query(Long.class)
+                            .single())
+                    .isEqualTo(8);
+            assertThat(owner.sql("SELECT count(*) FROM pg_indexes WHERE indexname = 'retail_purchases_supplier'")
+                            .query(Long.class)
+                            .single())
+                    .isEqualTo(1);
+        }
+    }
+
+    /**
+     * V136 (issue #852, ADR-026 decision 5) adds one index and changes no row: keys stored before it, one key under two
+     * people included, stay as they were. JUSTIFICATION-A3: a new test case; no existing case covers V136.
+     */
+    @Test
+    void idempotencyKeyLookupMigrationKeepsEveryKey() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            String before = VERSIONS.get(VERSIONS.indexOf("136") - 1);
+            assertThat(flyway(postgres, before).migrate().targetSchemaVersion).isEqualTo(before);
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            UUID tenant = UUID.randomUUID();
+            owner.sql("INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v136', 'Test Tenant V136',"
+                            + " '00000000-0000-4000-8000-000000000001')")
+                    .param(tenant)
+                    .update();
+            for (UUID person : List.of(UUID.randomUUID(), UUID.randomUUID())) {
+                owner.sql("INSERT INTO idempotency_keys (tenant_id, principal_id, key, method, path, request_hash,"
+                                + " status, response_status, response_body)"
+                                + " VALUES (?, ?, 'test-key-v136', 'POST', '/test', ?, 'completed', 201, '{}')")
+                        .params(tenant, person, "0".repeat(64))
+                        .update();
+            }
+
+            assertThat(DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD)
+                            .success)
+                    .isTrue();
+
+            assertThat(owner.sql("SELECT count(*) FROM idempotency_keys WHERE key = 'test-key-v136'")
+                            .query(Long.class)
+                            .single())
+                    .isEqualTo(2);
+            assertThat(owner.sql("SELECT indexdef FROM pg_indexes WHERE indexname = 'idempotency_keys_tenant_key'")
+                            .query(String.class)
+                            .single())
+                    .doesNotContain("UNIQUE")
+                    .contains("(tenant_id, key)");
+            // Built in Flyway's transaction, not CONCURRENTLY (which waited on Flyway's own lock): finished and usable.
+            assertThat(owner.sql("SELECT indisvalid AND indisready FROM pg_index"
+                                    + " WHERE indexrelid = 'idempotency_keys_tenant_key'::regclass")
+                            .query(Boolean.class)
+                            .single())
+                    .isTrue();
+        }
+    }
+
+    /**
+     * V137 (issue #808, ADR-036 decision 7) replaces two function bodies and changes no row: the report counters stored
+     * before it stay as they were, and both functions stay definer functions the application role may run. JUSTIFICATION-A3:
+     * a new test case; no existing case covers V137.
+     */
+    @Test
+    void smsReportFollowUpsMigrationKeepsEveryCounter() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            String before = VERSIONS.get(VERSIONS.indexOf("137") - 1);
+            assertThat(flyway(postgres, before).migrate().targetSchemaVersion).isEqualTo(before);
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            owner.sql("INSERT INTO sms_report_counters (day, outcome, hits) VALUES (DATE '2026-10-05', 'moved', 7),"
+                            + " (DATE '2026-10-05', 'throttled', 2)")
+                    .update();
+
+            assertThat(DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD)
+                            .success)
+                    .isTrue();
+
+            assertThat(owner.sql("SELECT sum(hits) FROM sms_report_counters WHERE day = DATE '2026-10-05'")
+                            .query(Long.class)
+                            .single())
+                    .isEqualTo(9);
+            assertThat(owner.sql("SELECT count(*) FROM pg_proc WHERE proname IN ('sms_deliveries_purge',"
+                                    + " 'app_count_sms_report') AND prosecdef"
+                                    + " AND has_function_privilege('bms_app', oid, 'EXECUTE')")
+                            .query(Long.class)
+                            .single())
+                    .isEqualTo(2);
         }
     }
 

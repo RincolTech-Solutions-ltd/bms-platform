@@ -21,6 +21,7 @@ import { CustomerPicker } from './customer-picker';
 import { SaleLink, ScreenLink } from './screen-link';
 import { Gate, Note, Problem, ProductPicker, money, useBranchName, useBranchView, useSingleBranch } from './ui';
 import { Hint } from '../../../app/ui/Hint';
+import { ContactLinks } from './contact-links';
 
 // Customer orders with delivery (issue #385, ADR-052): orders that come by WhatsApp, Instagram, Facebook, a phone call or at the
 // counter. Saving an order keeps its items aside so the till cannot sell them; nothing is paid yet. The order is packed, sent out
@@ -41,9 +42,10 @@ export function DeliverPanel({ order, onDone }: { order: Order; onDone: (d: Deli
   const client = useQueryClient();
   const [form, setForm] = useState<DeliverForm>(blankDeliver());
   const [key, setKey] = useState(newIdempotencyKey);
-  // toast-exempt: success screen, OrderActions puts its Delivered, Sale made words in place of the order buttons through onDone
+  // success-screen: OrderActions puts its Delivered, Sale made words in place of the order buttons through onDone
   const deliver = useMutation({
     mutationFn: () => retailOrders.deliver(order.id ?? '', buildDeliverRequest(order, form), key),
+    meta: { success: `${order.order_no ? `Order ${order.order_no}` : 'Order'} delivered, sale made` },
     onSuccess: (d) => {
       setKey(newIdempotencyKey());
       invalidate(client);
@@ -110,9 +112,10 @@ export function OrderActions({ order, onDelivered }: { order: Order; onDelivered
     setPanel(null);
     invalidate(client);
   };
-  const pack = useMutation({ mutationFn: () => retailOrders.pack(order.id ?? ''), onSuccess: after, meta: { success: 'Order packed' } });
-  const send = useMutation({ mutationFn: () => retailOrders.send(order.id ?? '', rider.trim()), onSuccess: after, meta: { success: 'Order out for delivery' } });
-  const cancel = useMutation({ mutationFn: () => retailOrders.cancel(order.id ?? '', reason.trim()), onSuccess: after, meta: { success: 'Order cancelled' } });
+  const which = order.order_no ? `Order ${order.order_no}` : 'Order';
+  const pack = useMutation({ mutationFn: () => retailOrders.pack(order.id ?? ''), onSuccess: after, meta: { success: `${which} packed` } });
+  const send = useMutation({ mutationFn: () => retailOrders.send(order.id ?? '', rider.trim()), onSuccess: after, meta: { success: `${which} out for delivery${rider.trim() ? ` with ${rider.trim()}` : ''}` } });
+  const cancel = useMutation({ mutationFn: () => retailOrders.cancel(order.id ?? '', reason.trim()), onSuccess: after, meta: { success: `${which} cancelled` } });
   const steps = nextSteps(order);
   // Delivering records a sale, so it is offered to whoever may sell at the order's shop.
   const maySell = holdsAt(me, 'retail.sale.create', order.branch_id);
@@ -166,6 +169,7 @@ export function OrderSummary({ order, branchName }: { order: Order; branchName?:
         {order.customer_name}
         {order.customer_phone && <>, <a href={`tel:${order.customer_phone}`}>{order.customer_phone}</a></>}
       </p>
+      <ContactLinks contact={order.customer_phone} name={order.customer_name} />
       <p className="hint">
         {order.delivery_place ? `Deliver to ${order.delivery_place}` : 'Collects at the shop'}
         {order.delivery_date ? `, on ${showDate(order.delivery_date)}` : ''}

@@ -424,7 +424,20 @@ last minute), then by due time, and locks the best twenty candidates in that ord
   `failed`, `rejected`, `blocked_optout`, `sunk`, `unknown`], `failure_reason`, `attempts`. The message text and the number
   are in no column. Indexes on `(tenant_id, provider_message_id)`, `(tenant_id, created_at)` and `(created_at)`. Kept 13
   months by `sms_deliveries_purge`; counted by `sms_platform_count_since` (the platform ceiling) and
-  `sms_tenant_count_since` (the operator's view).
+  `sms_tenant_count_since` (the operator's view). `V130` (issue #215) adds the index `sms_deliveries_by_provider_message`
+  on `(provider, provider_message_id)` where the id is set, for a delivery report that names no tenant, and the definer
+  function `sms_delivery_report_apply(provider, message_id, status, reason, now)`: platform only (it refuses a transaction
+  bound to a tenant), it moves the one row with that id from `sent` to `delivered` or `undelivered` and never back, and
+  answers `moved`, `repeated`, `not_forward`, `unknown_id` or `ambiguous_id`. Read per month and event by the report
+  `core.sms_usage` (chapter 14 section 14.6).
+- `sms_report_counters` (platform, `V130`; row-level security forced with no policy, no grant to `bms_app`): `day`
+  (Kampala), `outcome` (a word of ours: `moved`, `repeated`, `not_forward`, `interim`, `unknown_id`, `ambiguous_id`,
+  `bad_token`, `throttled`, `malformed`, `unknown_status`, `oversized`, `no_length`, `store_failed`), `hits`; primary key
+  `(day, outcome)`. Written only by `app_count_sms_report(day, outcome)`, which since `V137` (issue #808) refuses a
+  transaction bound to a tenant, as `sms_delivery_report_apply` does; no id, number or tenant. Cleared with the delivery
+  rows by `sms_deliveries_purge` after 13 months (the counters of every day before the purge's cut-off; the `V130` header's
+  "400 days" was wrong, `V137` says so). Since `V137` the purge answers the delivery rows it deleted only, as in `V50`; the
+  counter rows it clears with them are not in that figure.
 - `sms_opt_outs` (tenant, row-level security): `id`, `tenant_id`, `created_at`, `member_id` (no foreign key; null for a row
   about a number alone), `recipient_hash` (null means the member on any number; a row needs a member or a hash),
   `recipient_masked` (`+256*****1234`, for display; the number is never stored), `scope` [`reminders`, `all`], `source`
@@ -584,8 +597,8 @@ write. Keys and defaults:
 | `go_live_source` | `set` or `first_admin_sign_in`, with `go_live_date` | `set` when the Owner or the operator set the date; `first_admin_sign_in` when it was stored at that sign-in (issue #466, ADR-071) | FR-EXL-03 |
 | `financial_year_end_month` | 1 to 12, or absent | the month the business's financial year ends in; absent means June, the end of the Uganda tax year; set only by the Owner (`PATCH /settings`, 403 `owner_only` otherwise); the retention of a closed business's money records counts from the end of that financial year (issue #571, ADR-090, owner decision D46) | FR-TEN-09 |
 | `reports_enabled` | boolean | false; the tenant switch of the report runs (ADR-038, issue #214): off, nothing is queued, run or listed | FR-RPT-04 |
-| `salespeople_see_savings_amount` | boolean | false; set by the Owner only; "Salespeople can see and change the savings amount" in Business set-up: on, a caller without `retail.profit.read` sees the savings suggestion and may change it before the day is saved, and sees the saved amount of records made while it is on when holding `retail.savings.record`; never the cap, the profit or the expenses (issue #768, ADR-115) | FR-RET-18, FR-RET-19 |
-| `salespeople_see_savings_amount_since` | string (instant) | absent; written by the server when the Owner turns `salespeople_see_savings_amount` on (the database clock) and removed when it is turned off; a savings record made before it keeps its amount hidden from a caller without `retail.profit.read` (ADR-115) | FR-RET-18 |
+| `salespeople_see_savings_amount` | boolean | false; set by the Owner only; "Salespeople can see and change the savings amount" in Business set-up: on, a caller without `retail.profit.read` sees the savings suggestion and may change it before the day is saved, and sees the saved amount of every record of any month when holding `retail.savings.record` or `retail.sale.create` for its branch (issue #827); a seller without the till records savings through the sales staff routes while it is on, and `/me` carries it; never the cap, the profit or the expenses (issues #768 and #799, ADR-115) | FR-RET-18, FR-RET-19 |
+| `salespeople_see_savings_amount_since` | string (instant) | absent; written by the server when the Owner turns `salespeople_see_savings_amount` on (the database clock) and removed when it is turned off; since issue #827 no rule reads it (every month's amounts show while the setting is on, ADR-115 decision 3), so it is kept only as the record of when the Owner turned the setting on (issues #768, #799 and #827) | FR-RET-18 |
 
 `logo_document_id` is set only by the logo upload route, never by a settings patch: it names a
 `documents` row of this tenant whose subject type is `core.tenant` and subject id is the tenant id
@@ -626,6 +639,16 @@ WHERE kind = 'staff' AND phone_e164 IS NOT NULL AND status IN ('invited', 'activ
 invitations at once cannot make two staff users with one phone; V98 stops, changing nothing, when a business already has
 such a pair, `docs/runbooks/staff-duplicate-phones.md`).
 `CHECK (email IS NOT NULL OR phone_e164 IS NOT NULL)`.
+A staff email is stored with no whitespace anywhere and in lower case: the application cleans every typed email with
+`kernel.EmailAddresses` before it saves it or looks it up (issue #823). `V135` cleans the stored staff emails that hold
+whitespace (a non-breaking space passed the old check), with a system `core.user.email_cleaned` audit row each (the email
+before and after), and leaves exactly as it was a row whose cleaned email another staff user of the business already has (a
+WARNING in the migration log names the businesses, never the email). Since issue #857 the Flyway callback
+`afterMigrate__staff_email_left_over.sql` (no version, never in `flyway_schema_history`, read only) runs after every migrate
+and raises one WARNING per reason a row is still left: a clash with another staff user, nothing but whitespace, whitespace that
+can be removed, and a platform operator email holding whitespace, each with the fix
+(`docs/runbooks/staff-email-left-over.md`). The zero width non-joiner and joiner (U+200C, U+200D) are no longer removed
+(issue #857): some scripts need them.
 `is_owner boolean NOT NULL DEFAULT false` (`V79`, ADR-062, FR-IAM-18): the Owner of the business. `contact_changed_at
 timestamptz` (`V79`): when the email or phone last changed; `second_factor_changed_at timestamptz` (`V79`): when two-step
 sign-in was last set up or reset; the Owner's own transfer waits 24 hours after either (or after
@@ -998,7 +1021,11 @@ in the business transaction, so they are gap-free (FR-DOC-04).
 | `created_at` | `timestamptz NOT NULL` | |
 | `expires_at` | `timestamptz NOT NULL` | `created_at + 7 days`; purged nightly. |
 
-PK `(tenant_id, principal_id, key)`. Behaviour in chapter 7 section 7.8.
+PK `(tenant_id, principal_id, key)`. Index `idempotency_keys_tenant_key (tenant_id, key)` (V136, issue #852), not unique:
+a key is read across the people of a business so that a replay answers only the person who stored it and anyone else is
+refused; rows stored before V136 may hold one key under two people. V136 builds it in Flyway's transaction under a 10 second
+`lock_timeout`, not `CONCURRENTLY`, which would wait on Flyway's own lock for good. Behaviour in chapter 7
+section 7.8.
 
 ### `outbox_events` (RLS)
 
@@ -1041,6 +1068,13 @@ The worker's dispatcher reads pending rows across tenants through
 `CHECK (object_key LIKE 'tenants/' || tenant_id::text || '/%')` ties the key to the row's own
 tenant. Index `(tenant_id, subject_type, subject_id)`. A document is written once: `bms_app` holds
 SELECT and INSERT only. `sha256` is of the stored bytes, after images are re-encoded.
+
+Receipt photos (issue #819, ADR-124, no migration) are `upload` documents whose subject is the record they show:
+`retail.sale_receipt_photo` (a `retail_sales` id), `retail.delivery_receipt_photo` (a `retail_purchases` id, no branch),
+`retail.usage_receipt_photo` (a `retail_usage_reports` id) and `retail.expense_receipt` (a `retail_expenses` id for a photo
+added later; one sent with the expense is named by `retail_expenses.receipt_document_id` and its subject is a fresh id). The
+newest of a record is shown; the subject index finds it, asked through `Documents.newestOf`. A photo sent before its expense
+that no expense names within 24 hours has its object deleted by the nightly `core.documents.unclaimed-sweep`; its row stays.
 
 ### `report_runs` (RLS)
 
@@ -1247,6 +1281,22 @@ As built so far (migration `V127__import_runs.sql`, issue #127, ADR-027; chapter
   committed). The upload columns of chapter 13 section 13.4 and their statuses arrive with #128.
 
 Both are removed with a closed business by the generic purge (ADR-090); neither holds personal data.
+
+Added by `V129__import_upload.sql` (issue #128, chapter 13 section 13.14.1), expand only:
+
+- **`import_runs.data_key_wrapped`** (`bytea`): the run's data key wrapped by the platform import key, made at the first upload.
+- **`import_batches`** gains `source_filename`, `source_sha256`, `size_bytes`, `file_type` [`csv`, `xlsx`, `jsonl`], `object_key`
+  (the encrypted file under `tenants/<tenant_id>/quarantine/imports/`, NULL once deleted, with `quarantine_deleted_at`), `encoding`
+  [`utf-8`, `windows-1252`], `uploaded_by`, `uploaded_at`, `sheet_name`, `header_row_no`, `row_count`, `column_count`,
+  `parse_warnings text[]` (codes only), `parsed_at`, `failure_code`, `failure_reason` (set when `failed`, and kept when a failed batch is cancelled), `failed_at`
+  and `cancelled_at`; its `status` check becomes [`pending`, `uploaded`, `parsed`, `failed`, `cancelled`, `committed`] (replaced in
+  the migration's one transaction; the table is empty on every server). A failed or cancelled batch keeps its `object_key`
+  until storage confirms the file's delete, so the cleanup finds a delete that failed. A partial unique index `import_batches_one_file_per_run (run_id, source_sha256)` over batches
+  not failed or cancelled holds one copy of a file per run, and `import_batches_held_files` finds the files still held.
+- **`import_rows`** (RLS, `SELECT, INSERT, DELETE`; never updated): `batch_id` (FK `(tenant_id, batch_id)`), `source_row_no`
+  (`UNIQUE (batch_id, source_row_no)`), `raw jsonb` (per kept column `{"value", "type"}`, a column absent is empty). It holds a
+  customer's cells and so may hold personal data: it is the quarantine, read by no business module, removed with a cancelled
+  run by the cleanup and purged by #139; the generic purge removes it with a closed business before its batch.
 
 ## 6.6 General ledger (RLS)
 
@@ -2432,6 +2482,12 @@ under a SHARE lock with a five second `lock_timeout`, as V101.
 ### `retail_suppliers` (RLS; `bms_app` SELECT, INSERT, UPDATE)
 
 `name varchar(200)` unique per tenant ignoring case, `contact`, `active`, `created_by`, `updated_at` (V28).
+V134 (issue #820, ADR-125) adds the optional details, each nullable with no default: `email varchar(254)`, `address
+varchar(300)`, `country varchar(100)`, `website varchar(300)`, `payment_terms varchar(100)`, `bank_account varchar(60)`
+(returned only to holders of `retail.catalogue.manage`), `supplier_type varchar(60)` and `notes varchar(1000)`. The date
+added is `created_at`; the last delivery date is not stored but read as the newest `purchased_on` of the supplier's
+restocks without a `retail_purchase_voids` row, through the new index `retail_purchases_supplier (tenant_id, supplier_id,
+purchased_on DESC, created_at DESC) WHERE supplier_id IS NOT NULL`. Removing a closed business clears the eight details.
 
 ### `retail_purchases`, `retail_purchase_lines` (RLS; append-only, `bms_app` SELECT, INSERT)
 
@@ -2533,6 +2589,29 @@ lines, never the sale header, review F10), less `retail_usage_reports.cost_total
 ### 6.11.3b Controls (FR-RET-48, issue #358, ADR-047)
 
 No table: `retail.reports` reads `retail_sales` (voids: `voided_at`, `voided_by`, `void_reason`; sales entered: `sale_date`, `created_by`, `historical`), `retail_sale_returns` (`returned_on`, `created_by`, `note`, `status`), `retail_sale_writeoffs` (`written_off_on`, `unpaid_minor`, `reason`, `created_by`; ADR-087, served by `retail_sale_writeoffs_by_day (tenant_id, branch_id, written_off_on)` of V64) and `retail_sale_lines` (`price_source`, `resolved_unit_price_minor`, `price_override_reason`, `line_total_minor`, `line_cost_minor`), and the `users` and `branches` names. Migration `V66` adds the permission `retail.controls.read`, granted to `tenant_admin` (a global role row, so every existing tenant has it). No index is added by V66: the voids of a window are found by `retail_sales_voided (tenant_id, branch_id, voided_at) WHERE voided_at IS NOT NULL` (V34, section 6.11) and every other metric by the sale date (`retail_sales_by_date`). Expand only. `V101` (issue #357, ADR-087) adds two partial indexes for the sale line metrics, `retail_sale_lines_price_changed (tenant_id, sale_id) WHERE price_source = 'override'` and `retail_sale_lines_below_cost (tenant_id, sale_id) WHERE line_total_minor < line_cost_minor`, so changed prices, discounts and lines below cost no longer read the tenant's whole line history; indexes only, each built under a SHARE lock on `retail_sale_lines` in the migration's transaction with a five second `lock_timeout`. The plans on a tenant of a million sales are in `docs/specs/controls-query-plans-357.md`.
+
+### 6.11.3b Where an entry is made (ADR-122)
+
+Built (issue #826, migration `V132`). `retail_entry_locations`: one row per sale or usage or damage entry the phone gave a
+location for; `tenant_id`, `source` in (`retail.sale`, `retail.usage`), `source_id` (the entry's id, written in the same
+transaction, no foreign key since it names one of two tables), `branch_id` (composite foreign key to `branches`), `latitude`
+`numeric(8,6)` from -90 to 90, `longitude` `numeric(9,6)` from -180 to 180, `accuracy_m` `numeric(9,1)` at least 0,
+`recorded_at`; primary key `(tenant_id, source, source_id)`; forced RLS; the application role may SELECT, INSERT and DELETE
+(deletes only when a closed business is removed, ADR-090), never UPDATE. An entry without a location has no row.
+`retail_shop_locations`: one row per branch at most; `tenant_id`, `branch_id` (composite foreign key), `latitude`,
+`longitude`, `accuracy_m` as above, `set_by`, `set_at`; primary key `(tenant_id, branch_id)`; forced RLS; SELECT, INSERT,
+UPDATE and DELETE. A missing row means the shop has no location. `V132` also adds the permission
+`retail.entry_location.read`, granted to `tenant_admin`. Expand only. The coordinates are never logged, audited or returned
+by the API; the distance is computed on read with the haversine formula.
+
+### 6.11.3b An entry of usage or damage undone (ADR-123)
+
+Built (issue #818, migration `V133`). `retail_usage_undos`: one row per usage or damage entry undone, at most one
+(`UNIQUE (tenant_id, report_id)`, also the guard against two undos at once); `id`, `tenant_id`, `created_at` (when),
+`report_id` (composite foreign key to `retail_usage_reports`), `undone_on` (the business day of the undo), `reason`
+`varchar(300)` not blank, `undone_by`; forced RLS; append-only (SELECT and INSERT). The entry itself stays as it was. The stock
+goes back with `return` movements of source type `retail.usage_undo` naming the movements they reverse, at their unit cost; the
+shrinkage reversal is found by `journal_entries.reverses_entry_id`. Expand only: one new, empty table.
 
 ### 6.11.3a Trade capabilities (ADR-033)
 
@@ -2935,7 +3014,8 @@ tables with `tenant_id`, forced row-level security (`bms_apply_tenant_rls`) and 
 |---|---|---|
 | `notification_outbox.tenant_id`, `.category`, `.subject_type`, `.subject_id` (columns, platform table, additive; built, `V50`) | #212 | The tenant that caused an SMS row, its category and subject (ADR-036). The enqueue takes the tenant from the bound transaction; platform rows keep null |
 | `platform_sms_controls`, `sms_channel_state` (platform; built, `V50`) | #212 | The operator's per tenant switch and cap; the SMS mode last seen, for the backlog drop. See "SMS tables" in section 6.4 |
-| `sms_deliveries` (built, `V50`) | #212 | One row per SMS message, moved from `queued` to its outcome: outbox id, template key, category, subject type and id, recipient masked, `recipient_hash`, provider, `provider_message_id`, `segments`, `provider_segments`, `cost_minor`, `currency`, `cost_raw`, `status`, `failure_reason`, timestamps. Index on `(tenant_id, provider_message_id)` and `(tenant_id, created_at)`. Retention 13 months |
+| `sms_deliveries` (built, `V50`; delivery reports `V130`) | #212, #215 | One row per SMS message, moved from `queued` to its outcome: outbox id, template key, category, subject type and id, recipient masked, `recipient_hash`, provider, `provider_message_id`, `segments`, `provider_segments`, `cost_minor`, `currency`, `cost_raw`, `status`, `failure_reason`, timestamps. Index on `(tenant_id, provider_message_id)` and `(tenant_id, created_at)`, and on `(provider, provider_message_id)` for delivery reports (`V130`). A delivery report moves `sent` to `delivered` or `undelivered` once, never back. Retention 13 months |
+| `sms_report_counters` (built, `V130`) | #215 | Platform: the day's delivery report outcomes for the operator's alerts, `(day, outcome, hits)`; no id, number or tenant |
 | `sms_opt_outs` (table built in `V50`, #212; widened and written by the screens of #218, `V52`) | #212, #218 | `member_id` (null for a number alone), `recipient_hash`, `recipient_masked`, `scope` [`reminders`, `all`], `source` [`staff`, `member`, `number`, `import`], `created_by`, `created_at`; a removal sets `removed_at` |
 | `sms_template_overrides` (built, `V52`) | #218 | Tenant overrides for an `event_key` (channel `sms`) with the text and a version (FR-NTF-03); the planned name `notification_templates` is not used, as only SMS wording exists |
 | `platform_sms_sender_ids` (platform; built, `V52`) | #218 | The operator's allow-list of sender ids per tenant, one tenant per id at a time (ADR-036 second amendment) |

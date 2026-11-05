@@ -270,6 +270,35 @@ class DocumentService implements Documents {
     }
 
     @Override
+    public Map<UUID, UUID> newestOf(String subjectType, java.util.Collection<UUID> subjectIds) {
+        Map<UUID, UUID> newest = new LinkedHashMap<>();
+        if (subjectIds.isEmpty()) {
+            return newest;
+        }
+        jdbc.sql("""
+                        SELECT DISTINCT ON (subject_id) subject_id, id FROM documents
+                         WHERE subject_type = :type AND subject_id IN (:ids)
+                         ORDER BY subject_id, created_at DESC, id
+                        """)
+                .param("type", subjectType)
+                .param("ids", List.copyOf(new java.util.HashSet<>(subjectIds)))
+                .query(rs -> {
+                    newest.put(rs.getObject("subject_id", UUID.class), rs.getObject("id", UUID.class));
+                });
+        return newest;
+    }
+
+    @Override
+    public boolean stored(UUID documentId) {
+        return jdbc.sql("SELECT object_key FROM documents WHERE id = ?")
+                .param(documentId)
+                .query(String.class)
+                .optional()
+                .map(storage::exists)
+                .orElse(false);
+    }
+
+    @Override
     public Image readImageOf(String subjectType, UUID subjectId) {
         ImageRef ref = reads.execute(s -> imageRef(jdbc.sql("SELECT " + COLUMNS + " FROM documents"
                         + " WHERE subject_type = ? AND subject_id = ? ORDER BY created_at DESC, id LIMIT 1")
@@ -531,6 +560,25 @@ class DocumentService implements Documents {
             } catch (RuntimeException e) {
                 log.warn("could not delete object {} of a purged business", key, e);
             }
+        }
+        // The quarantined import files (issue #128) have no documents row; they go by their prefix.
+        List<String> quarantined;
+        try (var held = storage.list(QuarantineStore.prefix())) {
+            quarantined = held.map(ObjectStorage.Listed::key).toList();
+        }
+        int refused = 0;
+        for (int from = 0; from < quarantined.size(); from += 1000) {
+            List<String> page = quarantined.subList(from, Math.min(from + 1000, quarantined.size()));
+            int failed = storage.deleteAll(page).size();
+            refused += failed;
+            deleted += page.size() - failed;
+        }
+        if (refused > 0) {
+            // No later job visits a removed business, so the purge stops here and runs again the next night rather than
+            // leave its quarantined files behind.
+            log.warn("{} quarantined import files of a purged business could not be deleted", refused);
+            throw new IllegalStateException(
+                    "quarantined import files of a purged business remain; the purge runs again");
         }
         return deleted;
     }

@@ -318,6 +318,11 @@ public class RlsIsolationIT {
                         """)
                 .params(UUID.randomUUID(), t.tenantId(), usage, retailProduct)
                 .update();
+        // A usage entry undone (migration V133, issue #818).
+        owner.sql("""
+                        INSERT INTO retail_usage_undos (id, tenant_id, report_id, undone_on, reason, undone_by)
+                        VALUES (?, ?, ?, DATE '2026-01-16', 'Test undo', ?)
+                        """).params(UUID.randomUUID(), t.tenantId(), usage, user).update();
         // SMS delivery log and opt-out (migration V50, ADR-036).
         owner.sql("""
                         INSERT INTO sms_deliveries (id, tenant_id, outbox_id, template_key, category, recipient_masked,
@@ -667,6 +672,15 @@ public class RlsIsolationIT {
         // Retail branch roles (ADR-033, #191).
         owner.sql("INSERT INTO retail_branch_roles (tenant_id, branch_id, role) VALUES (?, ?, 'shop')")
                 .params(t.tenantId(), t.secondBranch())
+                .update();
+        // Where an entry was made and a shop's location (ADR-122, #826); fabricated positions.
+        owner.sql("INSERT INTO retail_entry_locations (tenant_id, source, source_id, branch_id, latitude, longitude,"
+                        + " accuracy_m) VALUES (?, 'retail.usage', ?, ?, 0.3136, 32.5811, 10)")
+                .params(t.tenantId(), UUID.randomUUID(), t.secondBranch())
+                .update();
+        owner.sql("INSERT INTO retail_shop_locations (tenant_id, branch_id, latitude, longitude, accuracy_m, set_by)"
+                        + " VALUES (?, ?, 0.3136, 32.5811, 10, ?)")
+                .params(t.tenantId(), t.secondBranch(), UUID.randomUUID())
                 .update();
         // Retail optional documents (ADR-033, #197): a prefix, a counter, a quotation with a line and its document.
         // JUSTIFICATION-A3: a fixture row for each new table; the isolation test needs one row per tenant table.
@@ -1183,9 +1197,15 @@ public class RlsIsolationIT {
         owner.sql("INSERT INTO import_runs (id, tenant_id, created_by) VALUES (?, ?, ?)")
                 .params(importRun, t.tenantId(), user)
                 .update();
+        UUID importBatch = UUID.randomUUID();
         owner.sql("INSERT INTO import_batches (id, tenant_id, run_id, seq) VALUES (?, ?, ?, 1)")
-                .params(UUID.randomUUID(), t.tenantId(), importRun)
+                .params(importBatch, t.tenantId(), importRun)
                 .update();
+        // The quarantined upload (migration V129, #128): one staged row of fabricated cells.
+        owner.sql("""
+                        INSERT INTO import_rows (id, tenant_id, batch_id, source_row_no, raw)
+                        VALUES (?, ?, ?, 2, '{"Item": {"value": "Fabricated item", "type": "text"}}')
+                        """).params(UUID.randomUUID(), t.tenantId(), importBatch).update();
     }
 
     /**
@@ -1750,7 +1770,11 @@ public class RlsIsolationIT {
     @Test
     void smsPlatformTablesAreClosedToTheApplicationRole() throws SQLException {
         for (String table : List.of(
-                "notification_outbox", "platform_sms_controls", "sms_channel_state", "platform_sms_sender_ids")) {
+                "notification_outbox",
+                "platform_sms_controls",
+                "sms_channel_state",
+                "platform_sms_sender_ids",
+                "sms_report_counters")) {
             assertThatThrownBy(() -> asApp(a.tenantId(), c -> count(c, "SELECT count(*) FROM " + table)))
                     .as("SELECT on %s", table)
                     .hasStackTraceContaining("permission denied");
@@ -1787,10 +1811,38 @@ public class RlsIsolationIT {
                     }
                 }))
                 .hasStackTraceContaining("platform operator only");
+        // A tenant transaction cannot apply a delivery report (V130, #215): a report names no tenant, so only the
+        // platform step may move a delivery row, and never a tenant session that names another tenant's message id.
+        assertThatThrownBy(() -> asApp(a.tenantId(), c -> {
+                    try (PreparedStatement ps = c.prepareStatement(
+                            "SELECT sms_delivery_report_apply('africastalking', 'ATXid_rls', 'delivered', NULL, now())")) {
+                        ps.execute();
+                        return null;
+                    }
+                }))
+                .hasStackTraceContaining("platform only");
+        // Nor write a report counter (V137, #808): the counters are the platform's, as the apply function is.
+        long before = TestDatabase.owner()
+                .sql("SELECT coalesce(sum(hits), 0) FROM sms_report_counters WHERE outcome = 'rls_probe'")
+                .query(Long.class)
+                .single();
+        assertThatThrownBy(() -> asApp(a.tenantId(), c -> {
+                    try (PreparedStatement ps =
+                            c.prepareStatement("SELECT app_count_sms_report(current_date, 'rls_probe')")) {
+                        ps.execute();
+                        return null;
+                    }
+                }))
+                .hasStackTraceContaining("platform only");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT coalesce(sum(hits), 0) FROM sms_report_counters WHERE outcome = 'rls_probe'")
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(before);
     }
 
     /**
-     * Every SMS and tenant lookup function of V50 is a definer function owned by bms_owner, executable
+     * Every SMS and tenant lookup function of V50 and V130 is a definer function owned by bms_owner, executable
      * by bms_app and not by PUBLIC (ADR-016): they are the only way into the platform SMS tables.
      */
     @Test
@@ -1799,7 +1851,7 @@ public class RlsIsolationIT {
                 TestDatabase.owner().sql("""
                         SELECT p.oid::text AS oid, p.proname FROM pg_proc p
                          WHERE p.pronamespace = 'public'::regnamespace
-                           AND (p.proname LIKE 'sms\\_%' OR p.proname = 'app_tenant_is_active')
+                           AND (p.proname LIKE 'sms\\_%' OR p.proname IN ('app_tenant_is_active', 'app_count_sms_report'))
                         """).query().listOfRows();
         assertThat(functions)
                 .extracting(f -> f.get("proname"))
@@ -1811,6 +1863,8 @@ public class RlsIsolationIT {
                         "sms_platform_count_since",
                         "sms_tenant_count_since",
                         "sms_deliveries_purge",
+                        "sms_delivery_report_apply",
+                        "app_count_sms_report",
                         "app_tenant_is_active");
         for (Map<String, Object> f : functions) {
             Map<String, Object> row =

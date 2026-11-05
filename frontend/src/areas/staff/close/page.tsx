@@ -50,8 +50,9 @@ export function CloseScreen() {
     await queryClient.invalidateQueries({ queryKey: ['plan-status'] });
   }
 
-  // toast-exempt: success screen, the Closing asked for screen replaces the form
+  // success-screen: the Closing asked for screen replaces the form
   const ask = useMutation({
+    meta: { success: 'Request to close the business sent' },
     mutationFn: () => requestClosure(mfaEnabled ? { totp_code: typed.trim() } : { password: typed }),
     onSuccess: async (saved) => {
       setTyped('');
@@ -60,7 +61,7 @@ export function CloseScreen() {
     },
     onError: () => setTyped(''),
   });
-  const cancel = useMutation({ mutationFn: cancelClosure, onSuccess: refresh, meta: { success: 'Closing cancelled' } });
+  const cancel = useMutation({ mutationFn: cancelClosure, onSuccess: refresh, meta: { success: 'Closing the business cancelled' } });
 
   if (closure.isError) {
     return (

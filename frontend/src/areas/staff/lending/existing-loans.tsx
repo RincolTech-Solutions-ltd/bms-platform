@@ -117,7 +117,7 @@ export function ExistingLoanForm({ api = existingLoans }: { api?: ExistingLoansA
     setRecorded(null);
   };
   const fieldErrors = (e: unknown): Record<string, string> => (e instanceof ExistingLoanError ? e.fields : {});
-  // toast-exempt: the check saves nothing; the loan it would record shows below the form
+  // toast-exempt: saves nothing: the check saves nothing; the loan it would record shows below the form
   const check = useMutation({
     mutationFn: () => api.check(request.body!),
     onSuccess: (loan) => {
@@ -126,7 +126,7 @@ export function ExistingLoanForm({ api = existingLoans }: { api?: ExistingLoansA
     },
     onError: (e) => setProblems(fieldErrors(e)),
   });
-  // toast-exempt: the loan waits for a second person's approval, and the Success note on this form says so
+  // toast-exempt: waits for approval: the loan waits for a second person's approval, and the Success note on this form says so
   const record = useMutation({
     mutationFn: () => api.record(request.body!, idempotencyKey),
     onSuccess: (loan) => {
@@ -211,8 +211,8 @@ function WaitingRow({ loan, api }: { loan: ExistingLoanSummary; api: ExistingLoa
   const queryClient = useQueryClient();
   const [reason, setReason] = useState('');
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ['lending', 'existing-loans'] });
-  const cancel = useMutation({ mutationFn: () => api.cancel(loan.loan_id ?? '', reason.trim()), onSuccess: refresh, meta: { success: 'Loan withdrawn' } });
-  // toast-exempt: it only sends the loan for approval again, and the row then says it waits in the approvals inbox
+  const cancel = useMutation({ mutationFn: () => api.cancel(loan.loan_id ?? '', reason.trim()), onSuccess: refresh, meta: { success: `${loan.loan_no ? `Existing loan ${loan.loan_no}` : 'Existing loan'} withdrawn` } });
+  // toast-exempt: waits for approval: it only sends the loan for approval again, and the row then says it waits in the approvals inbox
   const again = useMutation({ mutationFn: () => api.askAgain(loan.loan_id ?? ''), onSuccess: refresh });
   return (
     <li className="rt-card stack">

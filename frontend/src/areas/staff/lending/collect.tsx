@@ -98,7 +98,10 @@ export function CollectForm({ target }: { target: CollectTarget }) {
       finish();
       setIntent(made);
     },
-    meta: { success: 'Payment link made' },
+    meta: { success: (made: PaymentIntent) => {
+      const amount = made?.amount_minor ?? amountMinor;
+      return amount != null ? `Payment link for ${money(amount, made?.currency ?? target.currency)} made` : 'Payment link made';
+    } },
   });
 
   if (intent) {
@@ -194,7 +197,7 @@ export function CollectStatus({ target, initial, onNew }: { target: CollectTarge
   const cancel = useMutation({
     mutationFn: () => payments.cancelIntent(id),
     onSuccess: (view) => queryClient.setQueryData(['payments', 'intent', id], view),
-    meta: { success: 'Payment cancelled' },
+    meta: { success: () => (intent.amount_minor != null ? `Payment link for ${money(intent.amount_minor, intent.currency)} cancelled` : 'Payment link cancelled') },
   });
   // Sending the link to the payer's number by text message (issue #231): once per payment; the server refuses in plain words when
   // the business has text messages or mobile money switched off, and a repeat sends nothing.
@@ -209,11 +212,12 @@ export function CollectStatus({ target, initial, onNew }: { target: CollectTarge
   });
   const textWords = textAnswer ? linkTextWords(textAnswer, intent.payer_phone) : null;
   // A text that failed or expired cannot be sent again for this payment: this one is cancelled and a new link is made.
-  // toast-exempt: the screen moves to the new payment form, which is the answer.
   const renew = useMutation({
     mutationFn: async () => {
       if (isCancellable(status)) await payments.cancelIntent(id);
     },
+    // A link cancelled is a change (#824); with nothing to cancel the screen only moves to the new payment form.
+    meta: { success: () => (isCancellable(status) ? 'Old payment link cancelled' : null) },
     onSuccess: onNew,
   });
   const link = intent.redirect_url;

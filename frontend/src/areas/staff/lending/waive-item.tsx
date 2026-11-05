@@ -41,8 +41,9 @@ export function WaiveItemSheet({ loan, row, memberName, onClose }: {
     reason: '',
   });
   const step = waiveStep(draft, row, c);
-  // toast-exempt: success screen, the Waived screen replaces the form in the sheet
+  // success-screen: the Waived screen replaces the form in the sheet; one sent for approval raises no toast
   const save = useMutation({
+    meta: { success: (r: { executed?: boolean }) => (r?.executed ? `Waived on item ${row.no ?? ''}`.trim() : null) },
     mutationFn: (sent: { component: WaiveComponent; amount_minor: number; reason: string }) => lending.waiveItem(loanId, row.no ?? 0, sent, key),
     onSuccess: () => {
       finish();
@@ -78,12 +79,12 @@ export function WaiveItemSheet({ loan, row, memberName, onClose }: {
         title="Check the waiver"
         actions={
           <>
-            <BusyButton key="send" busy={save.isPending} type="button" className="rt-primary" onClick={() => save.mutate({ component: draft.component, amount_minor: step.amountMinor ?? 0, reason: draft.reason.trim() })}>
-              Send waiver of {money(step.amountMinor ?? 0, c)}
-            </BusyButton>
             <button type="button" onClick={() => setReviewing(false)}>
               Change it
             </button>
+            <BusyButton key="send" busy={save.isPending} type="button" className="rt-primary" onClick={() => save.mutate({ component: draft.component, amount_minor: step.amountMinor ?? 0, reason: draft.reason.trim() })}>
+              Send waiver of {money(step.amountMinor ?? 0, c)}
+            </BusyButton>
           </>
         }
       >

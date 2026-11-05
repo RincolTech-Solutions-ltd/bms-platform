@@ -1,13 +1,17 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createLazyRoute, useNavigate } from '@tanstack/react-router';
+import { Link, createLazyRoute, getRouteApi, useNavigate } from '@tanstack/react-router';
+import { RowChevron } from '../../../app/ui/ListRow';
+import { useCrumbLabel } from '../../../components/breadcrumbs';
 import { useRef, useState } from 'react';
 import { businessToday, daysBefore, retail, type Purchase } from '../../../api/retail';
 import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
 import { showDate } from './maths';
 import { holdsAt, PURCHASE_CREATE } from './permissions';
+import { ReceiptPhoto } from './receipt-photo';
 import { alreadyVoided, listIsStale, quantityWords, stateOf, unitHint, voidReasonOf, MIN_VOID_REASON } from './restock-correct-state';
-import { Gate, Problem, Success, money } from './ui';
+import { Gate, Problem, Success, money, useProfitAccess } from './ui';
+import { DeliveryWorth } from './restock';
 import { ListGroupBy, ViewSwitch, useListView } from './list-chain';
 import { PURCHASE_ALL, PURCHASE_NAMES, PURCHASE_ORDER, listUser } from './list-chain-state';
 import { useRestockVariantLevel } from './catalogue-variants';
@@ -80,8 +84,13 @@ export function CorrectPanel({ purchase, onDone, onCancel }: { purchase: Purchas
 
 export function RestockCard({ purchase, supplier, onDone }: { purchase: Purchase; supplier?: string; onDone: (message: string | null) => void }) {
   const { me } = useStaff();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const voided = purchase.status === 'voided';
+  // Issue #821: the server sends the worth only to someone who may read profit; nothing is worked out here for anyone else.
+  // A voided delivery will never sell, so it shows its total alone, as the server sends it (review of #850).
+  // A null worth: an item has no selling price yet, which the server says with has_unpriced_items.
+  const worth = !useProfitAccess() || voided ? undefined : purchase.has_unpriced_items ? null : purchase.sell_worth_minor;
   // A scoped caller's copy hides the other branches the restock touched (`partial`): the server would refuse the void with 403.
   const mayVoid = purchase.partial !== true && branchesOf(purchase).every((b) => holdsAt(me, PURCHASE_CREATE, b));
   return (
@@ -90,7 +99,7 @@ export function RestockCard({ purchase, supplier, onDone }: { purchase: Purchase
         <strong>{purchase.purchase_no}</strong> <span className={voided ? 'badge badge-warning' : 'badge badge-info'}>{stateOf(purchase)}</span>
       </p>
       <p className="hint">
-        Bought {showDate(purchase.purchased_on)} from {supplier || 'no supplier'}, {PAYMENT[purchase.payment_method ?? ''] ?? purchase.payment_method}. Total {money(purchase.total_minor ?? 0)}.
+        Bought {showDate(purchase.purchased_on)} from {supplier || 'no supplier'}, {PAYMENT[purchase.payment_method ?? ''] ?? purchase.payment_method}.{worth === undefined ? ` Total ${money(purchase.total_minor ?? 0)}.` : ''}
       </p>
       <ul>
         {(purchase.lines ?? []).map((l) => (
@@ -100,12 +109,22 @@ export function RestockCard({ purchase, supplier, onDone }: { purchase: Purchase
           </li>
         ))}
       </ul>
+      {worth !== undefined && <DeliveryWorth paid={purchase.total_minor ?? 0} worth={worth} label={`Purchase ${purchase.purchase_no ?? ''}`} />}
+      {/* Issue #830: an edited delivery names the one it replaces, which stays in this list marked Voided. */}
+      {purchase.note && <p className="hint" data-testid="purchase-note">{purchase.note}</p>}
+      <ReceiptPhoto kind="delivery" recordId={purchase.id} has={purchase.has_receipt_photo} canAdd={!voided && holdsAt(me, PURCHASE_CREATE, undefined)} />
       {voided && (
         <p className="hint" data-testid="void-note">
           Voided {showDate(purchase.voided_on)}. Reason: {purchase.void_reason}
         </p>
       )}
-      {!voided && !open && mayVoid && <p><button type="button" className="btn-sm" onClick={() => setOpen(true)} aria-label={`Correct purchase ${purchase.purchase_no}`}>Correct this purchase</button></p>}
+      {!voided && !open && mayVoid && (
+        <p className="cluster">
+          {/* Issue #830: the old app's Edit opens the Buy stock form filled in; saving goes through the same void and enters it again. */}
+          <button type="button" className="btn-sm" onClick={() => void navigate({ to: '/staff/retail/restock', search: { edit: purchase.id } as never })} aria-label={`Edit delivery ${purchase.purchase_no}`}>Edit</button>
+          <button type="button" className="btn-sm" onClick={() => setOpen(true)} aria-label={`Correct purchase ${purchase.purchase_no}`}>Correct this purchase</button>
+        </p>
+      )}
       {!voided && !mayVoid && <p className="hint">Only someone who manages every branch this purchase touched can correct it.</p>}
       {!voided && open && <CorrectPanel purchase={purchase} onDone={(m) => { setOpen(false); onDone(m); }} onCancel={() => setOpen(false)} />}
     </li>
@@ -173,3 +192,41 @@ export function RestocksPage() {
 }
 
 export const Route = createLazyRoute('/staff/retail/restocks')({ component: RestocksPage });
+
+// JUSTIFICATION-A3: a supplier's deliveries open one purchase (issue #820); the page is the list's own card, read by id.
+/** One purchase on its own page, the card of the list with its Edit and Correct this purchase. */
+export function PurchasePage({ purchaseId }: { purchaseId: string }) {
+  const [message, setMessage] = useState<string | null>(null);
+  const purchase = useQuery({ queryKey: ['retail', 'restocks', 'one', purchaseId], queryFn: () => retail.getPurchase(purchaseId) });
+  const suppliers = useQuery({ queryKey: ['retail', 'suppliers'], queryFn: () => retail.listSuppliers() });
+  const p = purchase.data;
+  useCrumbLabel(p?.purchase_no ? `Purchase ${p.purchase_no}` : undefined);
+  const supplier = (suppliers.data ?? []).find((s) => s.id === p?.supplier_id);
+  return (
+    <Gate screen="restock" title={p?.purchase_no ? `Purchase ${p.purchase_no}` : 'Purchase'}>
+      {message && <Success>{message}</Success>}
+      {purchase.isPending && <p className="loading">Loading</p>}
+      <Problem error={purchase.error} />
+      <ul style={{ listStyle: 'none', padding: 0 }} data-tour="purchase-card">
+        {p && <RestockCard purchase={p} supplier={supplier?.name} onDone={setMessage} />}
+      </ul>
+      <p data-tour="purchase-links">
+        {supplier?.id && (
+          <Link className="link-row" to="/staff/retail/catalogue/suppliers/$supplierId" params={{ supplierId: supplier.id }}>
+            {`More from ${supplier.name}`}<RowChevron />
+          </Link>
+        )}
+        <Link className="link-row" to="/staff/retail/restocks">{WORDS.pastPurchases}<RowChevron /></Link>
+      </p>
+    </Gate>
+  );
+}
+
+const purchaseRoute = getRouteApi('/staff/retail/restocks/$purchaseId');
+
+function PurchaseRoutePage() {
+  const { purchaseId } = purchaseRoute.useParams();
+  return <PurchasePage key={purchaseId} purchaseId={purchaseId} />;
+}
+
+export const PurchaseRoute = createLazyRoute('/staff/retail/restocks/$purchaseId')({ component: PurchaseRoutePage });

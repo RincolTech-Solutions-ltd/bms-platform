@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Product } from '../api/retail';
 import { SALE_ANSWER_MS } from './connectivity';
-import type { OutboxItem } from './outbox';
+import { waiting, type OutboxItem } from './outbox';
 
 /** A button that may be pressed: not disabled, and not a primary button whose form is still not ready (issue #526). */
 const ready = (b: unknown) => !(b as HTMLButtonElement).disabled && (b as HTMLElement).getAttribute('data-not-ready') !== 'true';
@@ -50,7 +50,8 @@ vi.mock('../api/retail', async (original) => {
 const { mockMe } = await import('../api/retail-mock');
 const { StaffContext } = await import('../areas/staff/context');
 const { RecordSale } = await import('../areas/staff/retail/sale');
-const { OfflineProvider } = await import('./offline-context');
+const { OfflineProvider, othersOnPhone, waitingNow } = await import('./offline-context');
+const { SyncStatus } = await import('./sync-status');
 const { testOffline } = await import('./test-kit');
 const { setAccessToken } = await import('../auth/session');
 const { RetailError } = await import('../api/retail');
@@ -143,7 +144,7 @@ describe('Record a sale offline', () => {
       buyer_name: 'Test Buyer 21',
       lines: [{ product_id: 'p2', qty: '2.000', unit_price_minor: 5000 }],
     });
-    expect(items[0]?.request.client_sale_id).toBe(items[0]?.id);
+    expect(items[0]?.request?.client_sale_id).toBe(items[0]?.id);
     expect(createSale).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
 
@@ -176,7 +177,7 @@ describe('Record a sale offline', () => {
     expect(screen.getByText('Offline, the price saved on this phone is used. You do not have permission to change it.')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save on this phone' }));
     expect(await screen.findByText('Sale saved on this phone')).toBeTruthy();
-    expect(offline.engine.snapshot().items[0]?.request.lines).toEqual([{ product_id: 'p2', qty: '1.000', unit_price_minor: 5000 }]);
+    expect(offline.engine.snapshot().items[0]?.request?.lines).toEqual([{ product_id: 'p2', qty: '1.000', unit_price_minor: 5000 }]);
   });
 
   it('says plainly when the items of the branch are not on the phone yet (issue #769)', async () => {
@@ -229,8 +230,8 @@ describe('Record a sale offline', () => {
     expect(item).toMatchObject({ id: key, key, state: 'queued' });
     // Priced online from the items as they were read, never from the copy on the phone (the next test pins the time).
     expect(item?.request).toMatchObject({ ...body, occurred_at: item?.occurredAt, recorded_offline: true });
-    expect(item?.request.prices_as_of).not.toBe(catalogue.pricesAsOf);
-    expect(String(item?.request.prices_as_of) <= String(item?.occurredAt)).toBe(true);
+    expect(item?.request?.prices_as_of).not.toBe(catalogue.pricesAsOf);
+    expect(String(item?.request?.prices_as_of) <= String(item?.occurredAt)).toBe(true);
   });
 
   // JUSTIFICATION-A3: a new test the review asks for (#769), not a mechanism.
@@ -248,7 +249,7 @@ describe('Record a sale offline', () => {
     await waitFor(() => expect(ready(save)).toBe(true));
     fireEvent.click(save);
     expect(await screen.findByText('Sale saved on this phone')).toBeTruthy();
-    expect(offline.engine.snapshot().items[0]?.request.prices_as_of).toBe(catalogue.pricesAsOf);
+    expect(offline.engine.snapshot().items[0]?.request?.prices_as_of).toBe(catalogue.pricesAsOf);
     cleanup();
 
     // A draft from before the read times were kept (no readAt on its line): the time is not known, so none is sent, never
@@ -264,7 +265,7 @@ describe('Record a sale offline', () => {
     fireEvent.click(record);
     expect(await screen.findByText('Sale saved on this phone')).toBeTruthy();
     const [kept] = again.engine.snapshot().items;
-    expect(kept?.request.recorded_offline).toBe(true);
+    expect(kept?.request?.recorded_offline).toBe(true);
     expect(kept?.request).not.toHaveProperty('prices_as_of');
   });
 
@@ -285,7 +286,7 @@ describe('Record a sale offline', () => {
     await waitFor(() => expect(ready(save)).toBe(true));
     fireEvent.click(save);
     expect(await screen.findByText('Sale saved on this phone')).toBeTruthy();
-    expect(offline.engine.snapshot().items[0]?.request.prices_as_of).toBe(catalogue.pricesAsOf);
+    expect(offline.engine.snapshot().items[0]?.request?.prices_as_of).toBe(catalogue.pricesAsOf);
   });
 
   // JUSTIFICATION-A3: a new test the review asks for (#769), not a mechanism.
@@ -308,8 +309,8 @@ describe('Record a sale offline', () => {
       fireEvent.click(save);
       expect(await screen.findByText('Sale saved on this phone')).toBeTruthy();
       const [item] = offline.engine.snapshot().items;
-      expect(item?.request.prices_as_of).toBe('2026-11-02T09:00:00.000Z');
-      expect(item?.request.occurred_at).toBe('2026-11-02T09:10:00.000Z');
+      expect(item?.request?.prices_as_of).toBe('2026-11-02T09:00:00.000Z');
+      expect(item?.request?.occurred_at).toBe('2026-11-02T09:10:00.000Z');
     } finally {
       vi.useRealTimers();
     }
@@ -343,7 +344,7 @@ describe('Record a sale offline', () => {
       fireEvent.click(await pick('cable', /^Test Cable 2.5mm/));
       at('09:10');
       await record();
-      expect(two.engine.snapshot().items[0]?.request.prices_as_of).toBe('2026-11-02T09:00:00.000Z');
+      expect(two.engine.snapshot().items[0]?.request?.prices_as_of).toBe('2026-11-02T09:00:00.000Z');
       cleanup();
       sessionStorage.clear();
 
@@ -356,7 +357,7 @@ describe('Record a sale offline', () => {
       at('09:07');
       fireEvent.click(option);
       await record();
-      expect(cached.engine.snapshot().items[0]?.request.prices_as_of).toBe('2026-11-02T09:00:00.000Z');
+      expect(cached.engine.snapshot().items[0]?.request?.prices_as_of).toBe('2026-11-02T09:00:00.000Z');
       cleanup();
       sessionStorage.clear();
 
@@ -375,7 +376,7 @@ describe('Record a sale offline', () => {
       expect(resolvePrices).toHaveBeenCalled();
       at('09:10');
       await record();
-      expect(listed.engine.snapshot().items[0]?.request.prices_as_of).toBe('2026-11-02T09:00:00.000Z');
+      expect(listed.engine.snapshot().items[0]?.request?.prices_as_of).toBe('2026-11-02T09:00:00.000Z');
     } finally {
       vi.useRealTimers();
     }
@@ -516,6 +517,108 @@ describe('Record a sale offline', () => {
     }
   });
 
+  // JUSTIFICATION-A3: the three tests issue #844 asks for, not a mechanism.
+  it('keeps the sale on the phone before the request goes, and a normal online save leaves nothing waiting (issue #844)', async () => {
+    listProducts.mockResolvedValue([bulb]);
+    const send = vi.fn();
+    const offline = testOffline(seller, { online: true, catalogue, deps: { send } });
+    if (!offline) throw new Error('a seller sells offline');
+    let onPhone: OutboxItem[] = [];
+    let answer = (_: unknown) => {};
+    createSale.mockImplementation(async (_body: unknown, key: string) => {
+      onPhone = await offline.store.outbox(offline.scope);
+      expect(onPhone.map((i) => i.id)).toEqual([key]);
+      return new Promise((resolve) => (answer = resolve));
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <StaffContext.Provider value={{ me: seller, branch }}>
+          <OfflineProvider value={offline}>
+            <SyncStatus />
+            <RecordSale />
+          </OfflineProvider>
+        </StaffContext.Provider>
+      </QueryClientProvider>,
+    );
+    await addBulbAndRecord();
+    await waitFor(() => expect(createSale).toHaveBeenCalledTimes(1));
+    // In flight from the form: the sync engine leaves it alone and the dot never says it waits.
+    await act(() => offline.engine.syncNow());
+    expect(send).not.toHaveBeenCalled();
+    expect(onPhone[0]?.formUntil).toBeGreaterThan(Date.now());
+    expect(waiting(offline.engine.snapshot().items, offline.engine.snapshot().formHeld)).toEqual([]);
+    // Sign-out still asks first: the sale is on the phone (the lead on the review of #859).
+    expect(waitingNow(offline)).toBe(1);
+    expect(screen.queryByText(/\d+ waiting/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /waiting to sync/ })).toBeNull();
+    expect(othersOnPhone(await offline.store.allOutbox(), 'test.example', 'test.example|someone-else')).toEqual([]);
+
+    await act(async () => answer({ id: 'sale-1', sale_no: 'RS00000081', total_minor: 5000 }));
+    await waitFor(() => expect(offline.engine.snapshot().items).toEqual([]));
+    expect(await offline.store.outbox(offline.scope)).toEqual([]);
+    expect(screen.queryByText(/\d+ waiting/)).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('takes the sale back off the phone when the server refuses it online, and shows the refusal (issue #844)', async () => {
+    listProducts.mockResolvedValue([bulb]);
+    const send = vi.fn();
+    const report = vi.fn();
+    const offline = testOffline(seller, { online: true, catalogue, deps: { send, report } });
+    if (!offline) throw new Error('a seller sells offline');
+    createSale.mockRejectedValue(new RetailError('This branch is closed for sales.', 422, 'branch_closed'));
+    screenWith(offline);
+    await addBulbAndRecord();
+    expect(await screen.findByText(/This branch is closed for sales./)).toBeTruthy();
+    await waitFor(async () => expect(await offline.store.outbox(offline.scope)).toEqual([]));
+    await act(() => offline.engine.syncNow());
+    expect(offline.engine.snapshot().items).toEqual([]);
+    expect(send).not.toHaveBeenCalled();
+    expect(report).not.toHaveBeenCalled();
+  });
+
+  it('leaves the sale on the phone when the app is killed during the wait, and the next start sends it once (issue #844)', async () => {
+    listProducts.mockResolvedValue([bulb]);
+    const offline = testOffline(seller, { online: true, catalogue });
+    if (!offline) throw new Error('a seller sells offline');
+    createSale.mockImplementation(() => new Promise(() => {}));
+    screenWith(offline);
+    await addBulbAndRecord();
+    await waitFor(() => expect(createSale).toHaveBeenCalledTimes(1));
+    const [, key] = createSale.mock.calls[0] as [unknown, string];
+    // The app is killed: the screen goes with no answer.
+    cleanup();
+    // JUSTIFICATION-A3: the restart-within-the-wait test the review of #859 asks for (item 7), not a mechanism.
+    // Started again within the wait: the sale shows as waiting at once (so sign-out would ask first), and is not sent yet.
+    const early = vi.fn();
+    const soon = testOffline(seller, { store: offline.store, online: true, deps: { send: early } });
+    if (!soon) throw new Error('a seller sells offline');
+    await soon.engine.load();
+    await soon.engine.sync();
+    expect(early).not.toHaveBeenCalled();
+    expect(waitingNow(soon)).toBe(1);
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <OfflineProvider value={soon}>
+          <SyncStatus />
+        </OfflineProvider>
+      </QueryClientProvider>,
+    );
+    expect(screen.getByRole('button', { name: /1 waiting to sync/ })).toBeTruthy();
+    cleanup();
+    // The next start after the wait, its own engine on the same phone.
+    const send = vi.fn(async (i: OutboxItem) => ({ status: 201, body: { id: 'sale-1', sale_no: 'RS00000082', key: i.key } }));
+    const next = testOffline(seller, { store: offline.store, online: true, deps: { send, now: () => Date.now() + SALE_ANSWER_MS + 60_000 } });
+    if (!next) throw new Error('a seller sells offline');
+    await next.engine.load();
+    await next.engine.sync();
+    await next.engine.sync();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[0]).toMatchObject({ id: key, key, request: { client_sale_id: key, recorded_offline: true } });
+    expect(next.engine.snapshot().items[0]).toMatchObject({ id: key, state: 'sent', sale: { saleNo: 'RS00000082' } });
+  });
+
   it('keeps a sale whose answer was lost before a reload with the same client sale id and a new key', async () => {
     const key = 'c0ffee00-0000-4000-8000-000000000769';
     const body = { branch_id: branch, payment_method: 'cash', lines: [{ product_id: 'p2', qty: '1.000', unit_price_minor: 5000 }], client_sale_id: key };
@@ -561,5 +664,33 @@ describe('Record a sale offline', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clear this sale' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Clear it' }));
     await waitFor(() => expect(screen.queryByTestId('lost-answer')).toBeNull());
+  });
+
+  // JUSTIFICATION-A3: a new test case, the review of #837 asks for the saved copy to be proven end to end.
+  it('keeps the low stock level when the copy is saved from the server, and says Only N left from it offline (issue #815)', async () => {
+    const { browserServices } = await import('./offline-context');
+    const { refreshCatalogue } = await import('./catalogue');
+    const { memoryStore, scopeOf } = await import('./store');
+    // The server's page of items for a branch, as GET /retail/products?branch_id= answers it: 4 left of a minimum of 10.
+    const page = { items: [{ ...bulb, qty: '4.000', low_stock_level: '10.000' }] };
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify(page), { status: 200, headers: { 'Content-Type': 'application/json', Date: 'Tue, 03 Nov 2026 09:00:00 GMT' } }));
+    const store = memoryStore();
+    const scope = scopeOf('test.example', seller.user_id ?? 'nobody');
+    try {
+      await refreshCatalogue(browserServices().source, seller, scope, store, new Date());
+    } finally {
+      vi.mocked(fetch).mockImplementation(noNetwork);
+    }
+    const saved = await store.catalogue(scope);
+    expect(saved?.products[branch]?.[0]?.low_stock_level).toBe('10.000');
+
+    const offline = testOffline(seller, { online: false, catalogue: saved });
+    if (!offline) throw new Error('a seller sells offline');
+    screenWith(offline);
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Find an item by name, code or category' }), { target: { value: 'bulb' } });
+    const option = await screen.findByRole('option', { name: /^Test Bulb 9W/ });
+    expect(option.querySelector('[data-testid="stock-warning"]')?.textContent).toBe('Only 4 left');
+    fireEvent.click(option);
+    await waitFor(() => expect(document.querySelector('.line-card [data-testid="stock-warning"]')?.textContent).toBe('Only 4 left'));
   });
 });

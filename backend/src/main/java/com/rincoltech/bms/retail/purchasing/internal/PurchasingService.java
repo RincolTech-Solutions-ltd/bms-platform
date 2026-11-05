@@ -12,6 +12,7 @@ import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Cursor;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.Versions;
+import com.rincoltech.bms.retail.catalogue.ReceiptPhotos;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue.PackUnit;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue.ProductSnapshot;
@@ -21,11 +22,14 @@ import com.rincoltech.bms.retail.purchasing.internal.PurchasingApi.PurchaseLineR
 import com.rincoltech.bms.retail.purchasing.internal.PurchasingApi.PurchasePage;
 import com.rincoltech.bms.retail.purchasing.internal.PurchasingApi.PurchaseRequest;
 import com.rincoltech.bms.retail.purchasing.internal.PurchasingApi.Supplier;
-import com.rincoltech.bms.retail.purchasing.internal.PurchasingApi.SupplierList;
+import com.rincoltech.bms.retail.purchasing.internal.PurchasingApi.SupplierDetails;
 import com.rincoltech.bms.retail.purchasing.internal.PurchasingApi.SupplierRequest;
 import com.rincoltech.bms.retail.purchasing.internal.PurchasingApi.UpdateSupplierRequest;
 import com.rincoltech.bms.retail.purchasing.internal.PurchasingApi.VoidPurchaseRequest;
 import com.rincoltech.bms.retail.purchasing.internal.PurchasingRepository.NewLine;
+import com.rincoltech.bms.retail.stock.ClosedTills;
+import com.rincoltech.bms.retail.stock.EntryDates;
+import com.rincoltech.bms.retail.stock.OfflineEntry;
 import com.rincoltech.bms.retail.stock.Quantities;
 import com.rincoltech.bms.retail.stock.QuickAddPurchase;
 import com.rincoltech.bms.retail.stock.RetailBooks;
@@ -46,10 +50,12 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.UUID;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -80,6 +86,12 @@ class PurchasingService implements QuickAddPurchase {
     private final AuditLog audit;
     private final RetailCapabilities capabilities;
     private final Validator validator;
+    private final EntryDates entryDates;
+    /** Answered by the cash book, which purchasing does not depend on (ADR-067 decision 13). */
+    private final ObjectProvider<ClosedTills> closedTills;
+
+    /** Issue #819: which restocks have a receipt photo, through the catalogue's port. */
+    private final ReceiptPhotos receiptPhotos;
 
     PurchasingService(
             PurchasingRepository repo,
@@ -93,7 +105,13 @@ class PurchasingService implements QuickAddPurchase {
             BusinessClock clock,
             AuditLog audit,
             RetailCapabilities capabilities,
-            Validator validator) {
+            Validator validator,
+            EntryDates entryDates,
+            ObjectProvider<ClosedTills> closedTills,
+            ReceiptPhotos receiptPhotos) {
+        this.receiptPhotos = receiptPhotos;
+        this.entryDates = entryDates;
+        this.closedTills = closedTills;
         this.repo = repo;
         this.catalogue = catalogue;
         this.stock = stock;
@@ -122,7 +140,15 @@ class PurchasingService implements QuickAddPurchase {
 
     @Transactional
     Supplier createSupplier(SupplierRequest r) {
-        Supplier s = new Supplier(UUID.randomUUID(), r.name().trim(), blankToNull(r.contact()), true, null, 1);
+        Supplier s = new Supplier(
+                UUID.randomUUID(),
+                r.name().trim(),
+                blankToNull(r.contact()),
+                true,
+                null,
+                1,
+                SuppliersService.merged(null, r.details()),
+                null);
         try {
             repo.insertSupplier(s, CurrentPrincipal.require().userId());
         } catch (DuplicateKeyException e) {
@@ -148,16 +174,23 @@ class PurchasingService implements QuickAddPurchase {
         if (name.isEmpty()) {
             throw ApiException.validation(List.of(new FieldProblem("name", "invalid", "The name must not be blank.")));
         }
+        SupplierDetails details = SuppliersService.merged(before.details(), r.details());
         Map<String, Object> was = new LinkedHashMap<>();
         Map<String, Object> now = new LinkedHashMap<>();
         change(was, now, "name", before.name(), name);
         change(was, now, "contact_changed", false, !java.util.Objects.equals(before.contact(), contact));
         change(was, now, "active", before.active(), active);
+        // Issue #820: which details changed, never what they hold.
+        List<String> detailsChanged = SuppliersService.changed(before.details(), details);
+        if (!detailsChanged.isEmpty()) {
+            was.put("details_changed", List.of());
+            now.put("details_changed", detailsChanged);
+        }
         if (now.isEmpty()) {
             return before;
         }
         try {
-            if (repo.updateSupplier(id, name, contact, active, expected) == 0) {
+            if (repo.updateSupplier(id, name, contact, active, details, expected) == 0) {
                 throw repo.supplier(id).map(s -> Versions.conflict(s.version())).orElseGet(ApiException::notFound);
             }
         } catch (DuplicateKeyException e) {
@@ -175,16 +208,30 @@ class PurchasingService implements QuickAddPurchase {
         }
     }
 
-    @Transactional(readOnly = true)
-    SupplierList suppliers() {
-        return new SupplierList(repo.suppliers());
-    }
-
     // ---- Purchases -----------------------------------------------------------------------
 
     @Transactional
     Outcome<Purchase> create(String idempotencyKey, PurchaseRequest r) {
-        return idempotency.once(idempotencyKey, "POST", PATH, r, Purchase.class, () -> record(r));
+        // A purchase kept on the phone offline is dated the day it was made (ADR-067 decision 13); the key covers the
+        // request without its offline block, so an online request whose answer was lost, sent again from the phone with
+        // when it was made, is still the same purchase.
+        // Issue #821: the stored answer carries no worth, so a replay shows it only to whoever may read profit.
+        return shown(idempotency.once(
+                idempotencyKey,
+                "POST",
+                PATH,
+                r.forKey(),
+                Purchase.class,
+                () -> record(r.dated(OfflineEntry.day(
+                        r.offline(),
+                        r.purchasedOn(),
+                        clock.now(),
+                        tenant.profile().timezone(),
+                        // An old entry is the owner's at every branch the delivery stocks.
+                        r.lines().stream()
+                                .flatMap(l -> l.qtyByBranch().stream().map(PurchasingApi.BranchQty::branchId))
+                                .distinct()
+                                .toList())))));
     }
 
     /**
@@ -226,8 +273,8 @@ class PurchasingService implements QuickAddPurchase {
                     null,
                     null));
         }
-        PurchaseRequest r =
-                new PurchaseRequest(null, clock.today(tenant.profile().timezone()), method, "Quick add", lines);
+        PurchaseRequest r = new PurchaseRequest(
+                null, clock.today(tenant.profile().timezone()), method, "Quick add", lines, null, null);
         // The bounds Buy stock's route checks before record(), so nothing Buy stock refuses is taken here; named by the
         // Quick add field the value came from.
         // Review of #716: a problem on the package line is named by the package fields it came from.
@@ -274,8 +321,19 @@ class PurchasingService implements QuickAddPurchase {
      * line's prices are the product's prices afterwards (latest restock wins), each change with its
      * own history row. Products are locked in id order first.
      */
-    private Purchase record(PurchaseRequest r) {
+    private Purchase record(PurchaseRequest sent) {
         LocalDate today = clock.today(tenant.profile().timezone());
+        // ADR-120: the app dates the purchase today when no date is sent.
+        PurchaseRequest r = sent.purchasedOn() != null
+                ? sent
+                : new PurchaseRequest(
+                        sent.supplierId(),
+                        today,
+                        sent.paymentMethod(),
+                        sent.note(),
+                        sent.lines(),
+                        sent.dateReason(),
+                        sent.offline());
         List<FieldProblem> problems = new ArrayList<>();
         if (r.purchasedOn().isAfter(today)) {
             problems.add(new FieldProblem("purchased_on", "invalid", "A purchase cannot be dated in the future."));
@@ -374,9 +432,26 @@ class PurchasingService implements QuickAddPurchase {
                     "Setting the selling price needs the permission to change prices. Leave the selling price empty.");
         }
         PurchaseLines.requireUseFromNowOn(r.lines().stream().anyMatch(PurchasingService::usesFromNowOn));
+        Set<UUID> into = new TreeSet<>();
         for (PurchaseLineRequest l : r.lines()) {
             for (BranchQty b : l.qtyByBranch()) {
                 branches.resolveStocking(PERMISSION, b.branchId());
+                into.add(b.branchId());
+            }
+        }
+        // ADR-120: an earlier date needs the owner's permission at every branch the goods go into, and a reason.
+        // A delivery kept offline was dated by the phone, not chosen (ADR-067 decision 13): past 7 days OfflineEntry
+        // asks for
+        // the owner.
+        EntryDates.Backdate backdate =
+                r.offline() != null ? null : entryDates.check(r.purchasedOn(), "purchased_on", r.dateReason(), into);
+        // Paid in cash or mobile money, it is money out of each branch's till: a closed day is the owner's (review of
+        // #839).
+        if (r.offline() != null
+                && (r.paymentMethod().equals("cash") || r.paymentMethod().equals("mobile_money"))) {
+            ClosedTills tills = closedTills.getIfAvailable();
+            if (tills != null) {
+                tills.requireOpen(r.offline(), r.purchasedOn(), today, into);
             }
         }
         products.forEach(catalogue::lock);
@@ -515,6 +590,14 @@ class PurchasingService implements QuickAddPurchase {
         after.put("payment_method", r.paymentMethod());
         after.put("lines", lines.size());
         audit.record(AuditLog.Entry.created("retail.purchase.created", PURCHASE, id, null, after));
+        entryDates.audit(
+                backdate, PURCHASE, id, into.size() == 1 ? into.iterator().next() : null);
+        entryDates.auditOffline(
+                r.offline(),
+                r.purchasedOn(),
+                PURCHASE,
+                id,
+                into.size() == 1 ? into.iterator().next() : null);
         Purchase made = repo.find(id).orElseThrow();
         if (sizesKept.isEmpty()) {
             return made;
@@ -581,20 +664,40 @@ class PurchasingService implements QuickAddPurchase {
                 ? Cursor.encode(
                         items.getLast().createdAt() + "|" + items.getLast().id())
                 : null;
-        return new PurchasePage(List.copyOf(items), next);
+        Map<UUID, Long> prices = new HashMap<>();
+        return new PurchasePage(
+                withReceiptPhotos(items).stream().map(p -> shown(p, prices)).toList(), next);
+    }
+
+    /** Issue #819 (ADR-124): marks the restocks that have a receipt photo, in one query. */
+    private List<Purchase> withReceiptPhotos(List<Purchase> purchases) {
+        Map<UUID, UUID> photos = receiptPhotos.newest(
+                ReceiptPhotos.Kind.DELIVERY,
+                purchases.stream().map(Purchase::id).toList());
+        return purchases.stream()
+                .map(p -> photos.containsKey(p.id()) ? p.withReceiptPhoto(true) : p)
+                .toList();
     }
 
     /** One restock with the quantities of the branches the caller may see; absent when it added stock to none of them. */
     @Transactional(readOnly = true)
     Purchase get(UUID id) {
+        return visible(id).map(p -> shown(p, new HashMap<>())).orElseThrow(ApiException::notFound);
+    }
+
+    /**
+     * The check of {@link #get} in the caller's transaction, empty instead of 404, so a caller inside another read (the
+     * receipt photo's access rule, ADR-124) never marks that transaction for rollback.
+     */
+    java.util.Optional<Purchase> visible(UUID id) {
         List<UUID> filter = CurrentPrincipal.require().branchFilter(PERMISSION, null);
         if (filter != null && filter.isEmpty()) {
-            throw ApiException.notFound();
+            return java.util.Optional.empty();
         }
         UUID own = ownRecordsOnly();
         return repo.find(id, filter)
                 .filter(p -> own == null || own.equals(p.createdBy()))
-                .orElseThrow(ApiException::notFound);
+                .map(p -> withReceiptPhotos(List.of(p)).getFirst());
     }
 
     /**
@@ -606,6 +709,60 @@ class PurchasingService implements QuickAddPurchase {
         return principal.hasPermission("retail.profit.read") ? null : principal.userId();
     }
 
+    // JUSTIFICATION-A3: issue #821 adds one computed read to every restock response; no existing method carries it.
+    /**
+     * Issue #821 (ADR-126): for a holder of {@code retail.profit.read}, the restock with what its goods should sell for (each
+     * line's base quantity, as the caller sees it, times the selling price the line set, else the item's current one) and the
+     * expected profit; for anyone else the restock as it is, without either field.
+     */
+    private Outcome<Purchase> shown(Outcome<Purchase> o) {
+        return new Outcome<>(shown(o.body(), new HashMap<>()), o.replayed());
+    }
+
+    private Purchase shown(Purchase p, Map<UUID, Long> prices) {
+        if (!showsWorth(p, CurrentPrincipal.get())) {
+            return p;
+        }
+        return p.withWorth(worth(
+                p.lines(),
+                id -> prices.computeIfAbsent(
+                        id,
+                        k -> catalogue.find(k).map(ProductSnapshot::sellMinor).orElse(0L))));
+    }
+
+    /**
+     * The worth of the lines at the price each line set, else the item's current one ({@code current}, 0 for an item
+     * deleted or unknown); null when an item has no selling price yet (review of #850, issue #852).
+     */
+    static Long worth(List<PurchasingApi.PurchaseLine> lines, java.util.function.Function<UUID, Long> current) {
+        long worth = 0;
+        for (PurchasingApi.PurchaseLine l : lines) {
+            long sell = l.sellMinor() != null ? l.sellMinor() : current.apply(l.productId());
+            if (sell <= 0) {
+                return null;
+            }
+            worth = Math.addExact(worth, Quantities.value(new BigDecimal(l.qtyTotal()), sell));
+        }
+        return worth;
+    }
+
+    // JUSTIFICATION-A3: the checks moved out of shown() so a unit test proves the no-principal case (review of #850).
+    /**
+     * Issue #821: whether the caller sees the worth of {@code p}. Never without a principal (an internal caller), on a voided
+     * restock (its stock went back out, so it never sells) or on one the caller sees no line of; otherwise only with
+     * {@code retail.profit.read} at every branch the caller sees it stock, as a branch-bound figure needs (ADR-017).
+     */
+    static boolean showsWorth(Purchase p, Optional<Principal> caller) {
+        if (caller.isEmpty() || !"posted".equals(p.status()) || p.lines().isEmpty()) {
+            return false;
+        }
+        Principal principal = caller.get();
+        return principal.hasPermission("retail.profit.read")
+                && p.lines().stream()
+                        .flatMap(l -> l.qtyByBranch().stream())
+                        .allMatch(b -> principal.may("retail.profit.read", b.branchId()));
+    }
+
     // ---- Void a restock (issue #351, ADR-044) -----------------------------------------------
 
     static final int MIN_REASON = 5;
@@ -613,8 +770,37 @@ class PurchasingService implements QuickAddPurchase {
 
     @Transactional
     Outcome<Purchase> voidPurchase(String idempotencyKey, UUID id, VoidPurchaseRequest r) {
-        return idempotency.once(
-                idempotencyKey, "POST", PATH + "/" + id + "/void", r, Purchase.class, () -> voidNow(id, r));
+        return shown(idempotency.once(
+                idempotencyKey, "POST", PATH + "/" + id + "/void", r, Purchase.class, () -> voidNow(id, r)));
+    }
+
+    /** The reason an edited restock is voided with (issue #830). */
+    static final String EDIT_REASON = "Edited: entered again with the changes";
+
+    /**
+     * Edit a delivery, the owner's old app's word (issue #830): in one transaction the restock is voided by {@link #voidNow}
+     * (issue #351) and the request is recorded as a new restock whose note names the one it replaces, so a refusal of either
+     * (its stock moved, an item switched off, a date not allowed) leaves the old restock as it was.
+     * JUSTIFICATION-A3: the review of #830 asks the void and the new restock to be one server call; both steps are reused.
+     */
+    @Transactional
+    Outcome<Purchase> replace(String idempotencyKey, UUID id, PurchaseRequest r) {
+        return shown(idempotency.once(idempotencyKey, "POST", PATH + "/" + id + "/replace", r, Purchase.class, () -> {
+            Purchase old = voidNow(id, new VoidPurchaseRequest(EDIT_REASON));
+            String link = "Replaces " + old.purchaseNo() + ", edited";
+            String typed = blankToNull(r.note());
+            String note = typed == null || typed.equals(link) ? link : typed + ". " + link;
+            return record(new PurchaseRequest(
+                    r.supplierId(),
+                    r.purchasedOn(),
+                    r.paymentMethod(),
+                    note.length() > 300 ? note.substring(0, 300) : note,
+                    r.lines(),
+                    // ADR-120: the edited delivery is a new entry; an earlier day is the owner's, with a reason.
+                    r.dateReason(),
+                    // Edits stay online only (issue #812).
+                    null));
+        }));
     }
 
     /**
@@ -722,7 +908,10 @@ class PurchasingService implements QuickAddPurchase {
                 null,
                 Map.of("status", "posted"),
                 Map.of("status", "voided", "reason", reason, "purchase_no", seen.purchaseNo())));
-        return repo.find(id, principal.branchFilter(PERMISSION, null)).orElseThrow();
+        // Review of #846: the answer says whether the restock has a receipt photo, as its read does.
+        return withReceiptPhotos(List.of(
+                        repo.find(id, principal.branchFilter(PERMISSION, null)).orElseThrow()))
+                .getFirst();
     }
 
     private static String plain(BigDecimal qty) {

@@ -5195,6 +5195,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/entry-locations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How far from the shop each of these sales or usage and damage entries was made, in plain words; never the coordinates. An entry with a location at a branch outside the caller's scope is left out */
+        get: operations["listRetailEntryDistances"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/entry-warnings/confirmations": {
         parameters: {
             query?: never;
@@ -5266,8 +5283,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Add an item to a category
-         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         * Add an item to a category, in set-up or in place while recording an expense (ADR-118)
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied. ADR-118: without retail.expense.manage the category must be active (422 category_inactive) and requires_explanation may not be true (403). With reuse_existing an active item of the same name is answered with 200 instead of 409 duplicate_item; a switched off one is 409 item_switched_off
          */
         post: operations["createRetailExpenseItem"];
         delete?: never;
@@ -5314,6 +5331,61 @@ export interface paths {
          * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
          */
         post: operations["createRetailExpense"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/expenses/receipt-photos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send the photo of an expense's paper receipt before the expense: PNG, JPEG or WebP, 5 MB, re-encoded without metadata; pass the answer's photo_id as receipt_document_id (FR-RET-89) */
+        post: operations["uploadRetailExpenseReceiptPhoto"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/expenses/{expense_id}/receipt-photo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The receipt photo of an expense, from the same origin (FR-RET-89) */
+        get: operations["getRetailExpenseReceiptPhoto"];
+        put?: never;
+        /** Add the photo of the paper receipt to an expense already recorded (FR-RET-89) */
+        post: operations["addRetailExpenseReceiptPhoto"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/expenses/{expense_id}/replace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Edit an expense: void it and record the request in its place, in one transaction (issue #830); M
+         * @description The old expense is voided with the reason "Edited: entered again with the changes" and the new one, at the same branch, carries an explanation naming it; a refusal of either changes nothing. Needs retail.expense.record at the branch as well, and, as every cash book route, retail.till.close (ADR-055). An amount that would wait for an administrator (ADR-091) is 422 edit_needs_approval.
+         */
+        post: operations["replaceRetailExpense"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6454,6 +6526,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/purchases/{purchase_id}/receipt-photo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The receipt photo of a delivery, from the same origin (FR-RET-89) */
+        get: operations["getRetailPurchaseReceiptPhoto"];
+        put?: never;
+        /** Add the photo of the paper receipt to a delivery: PNG, JPEG or WebP, 5 MB, re-encoded without metadata (FR-RET-89) */
+        post: operations["addRetailPurchaseReceiptPhoto"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/purchases/{purchase_id}/replace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Edit a delivery: void the restock and record the request in its place, in one transaction (issue #830); M */
+        post: operations["replaceRetailPurchase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/purchases/{purchase_id}/void": {
         parameters: {
             query?: never;
@@ -6871,6 +6978,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/reports/stock-health/damage-share": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Damaged and used as a share of the stock that passed through, per item and shop (issue #822)
+         * @description The base is the stock at the start of the first day plus what came in during the period (ADR-127). This month by default. Only the shops where the caller holds retail.profit.read; a branch_id outside them or of another business is 404 unknown_branch
+         */
+        get: operations["getRetailDamageShare"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/reports/supplier-payables": {
         parameters: {
             query?: never;
@@ -7135,6 +7262,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/sales/{sale_id}/receipt-photo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The receipt photo of a sale, from the same origin (FR-RET-89) */
+        get: operations["getRetailSaleReceiptPhoto"];
+        put?: never;
+        /** Add the photo of the paper receipt to a sale: PNG, JPEG or WebP, 5 MB, re-encoded without metadata (FR-RET-89) */
+        post: operations["addRetailSaleReceiptPhoto"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/sales/{sale_id}/receipt/link": {
         parameters: {
             query?: never;
@@ -7262,6 +7407,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/savings/sales-staff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Savings records of every month for sales staff, newest first
+         * @description Issue #799, ADR-115: only while the Owner's setting salespeople_see_savings_amount is on, else 403 permission_denied; the branch must be one where the caller may sell (retail.sale.create). Records of every month (issue #827), at the branches where the caller may sell.
+         */
+        get: operations["listRetailSalesStaffSavings"];
+        put?: never;
+        /**
+         * Record the day's savings as sales staff (FR-RET-18 to FR-RET-20); M
+         * @description Issue #799, ADR-115: only while the Owner's setting salespeople_see_savings_amount is on, else 403 permission_denied; the branch must be one where the caller may sell (retail.sale.create).
+         */
+        post: operations["createRetailSalesStaffSavings"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/savings/sales-staff/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Savings of every month for sales staff, by shop, year, month and person, with totals
+         * @description Issue #799, ADR-115: only while the Owner's setting salespeople_see_savings_amount is on, else 403 permission_denied; the branch must be one where the caller may sell (retail.sale.create). Issue #827: active records only, amounts saved only.
+         */
+        get: operations["getRetailSalesStaffSavingsGroups"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/savings/sales-staff/suggestion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The day's savings suggestion for sales staff (FR-RET-18)
+         * @description Issue #799, ADR-115: only while the Owner's setting salespeople_see_savings_amount is on, else 403 permission_denied; the branch must be one where the caller may sell (retail.sale.create).
+         */
+        get: operations["getRetailSalesStaffSavingsSuggestion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/savings/suggestion": {
         parameters: {
             query?: never;
@@ -7320,6 +7529,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/shop-locations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The active branches with whether each has a location set; never the coordinates */
+        get: operations["listRetailShopLocations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/shop-locations/{branch_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set a shop's location to where the owner's phone is now (Use where I am now); audited without the coordinates; 422 invalid_location out of range */
+        put: operations["setRetailShopLocation"];
+        post?: never;
+        /** Clear a shop's location; audited */
+        delete: operations["clearRetailShopLocation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/stock": {
         parameters: {
             query?: never;
@@ -7365,6 +7609,40 @@ export interface paths {
         put?: never;
         /** Correct the quantity of an item at a branch with a reason; an adjustment that is not shrinkage (issue #351); M */
         post: operations["correctRetailStockQuantity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/stock/items/{product_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One item's stock in each shop the caller may read (issue #813) */
+        get: operations["getRetailItemStock"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/stock/items/{product_id}/movements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every movement of one item newest first, with the shop's balance after each (issue #813); a branch outside the caller's scope is 404 */
+        get: operations["listRetailItemMovements"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -7670,11 +7948,28 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Suppliers */
+        /** Suppliers, or those a search finds by name, type or phone (FR-RET-90) */
         get: operations["listRetailSuppliers"];
         put?: never;
-        /** Add a supplier (FR-RET-06) */
+        /** Add a supplier (FR-RET-06, FR-RET-90) */
         post: operations["createRetailSupplier"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/suppliers/types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The supplier types already used (FR-RET-90) */
+        get: operations["listRetailSupplierTypes"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -7688,7 +7983,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** One supplier with its details and last delivery date (FR-RET-90) */
+        get: operations["getRetailSupplier"];
         put?: never;
         post?: never;
         delete?: never;
@@ -7696,6 +7992,23 @@ export interface paths {
         head?: never;
         /** Edit or deactivate a supplier (#146); never deleted */
         patch: operations["updateRetailSupplier"];
+        trace?: never;
+    };
+    "/api/v1/retail/suppliers/{supplier_id}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The supplier's deliveries (restocks), the newest day first, paged (FR-RET-90) */
+        get: operations["listRetailSupplierDeliveries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/retail/suppliers/{supplier_id}/open-items": {
@@ -7898,6 +8211,58 @@ export interface paths {
         put?: never;
         /** Report stock used or damaged, valued at cost (FR-RET-07); M */
         post: operations["reportRetailUsage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/usage/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Past usage and damage grouped by shop, month, category and item with totals (issue #816) */
+        get: operations["summariseRetailUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/usage/{report_id}/receipt-photo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The receipt photo of a usage or damage entry, from the same origin (FR-RET-89) */
+        get: operations["getRetailUsageReceiptPhoto"];
+        put?: never;
+        /** Add the photo of the paper receipt to a usage or damage entry: PNG, JPEG or WebP, 5 MB, re-encoded without metadata (FR-RET-89) */
+        post: operations["addRetailUsageReceiptPhoto"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/usage/{report_id}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Undo a usage or damage entry with a reason: the stock goes back, the entry is kept and marked undone, once (FR-RET-88) */
+        post: operations["undoRetailUsage"];
         delete?: never;
         options?: never;
         head?: never;
@@ -11276,6 +11641,8 @@ export interface components {
             /** @description True when the tenant has switched report runs on (setting reports_enabled, ADR-038); the PWA shows the Reports tab only then */
             reports_enabled?: boolean;
             roles?: components["schemas"]["RoleAssignment"][];
+            /** @description True while the Owner lets salespeople see and change the savings amount (ADR-115, issue #799): the PWA offers the Savings screen to a seller only then */
+            salespeople_see_savings_amount?: boolean;
             /** @description The business's currency (ISO 4217): forms type and show money in it before the record they make carries one (issue #289) */
             tenant_currency?: string;
             /** @description The business's time zone, in which mfa_due_by is a day's end (ADR-046) */
@@ -12788,6 +13155,8 @@ export interface components {
             branch_id?: string;
             /** Format: date */
             business_date?: string;
+            /** @description Why the entry has a date before today; needed then, and only a holder of retail.entry.backdate may send such a date (ADR-120). Leave the date out and the server dates it today */
+            date_reason?: string;
             /** Format: uuid */
             party_id: string;
             /** Format: int64 */
@@ -13029,6 +13398,11 @@ export interface components {
             cash_takings_minor?: number;
             /**
              * Format: int64
+             * @description Issue #814, ADR-115 decision 11: cash expected less the day's savings (plus their voids), never less the cash purchases; present only without retail.profit.read, while the owner's setting salespeople_see_savings_amount is on. Below zero when the savings are more than the cash expected; the form then shows 0 and says so (issue #847)
+             */
+            expected_after_savings_minor?: number;
+            /**
+             * Format: int64
              * @description Present only with retail.profit.read in the record's branch
              */
             expected_minor?: number;
@@ -13042,12 +13416,12 @@ export interface components {
             repayments_in_minor?: number;
             /**
              * Format: int64
-             * @description Present only with retail.profit.read in the record's branch
+             * @description Present with retail.profit.read in the branch, or while the owner's setting salespeople_see_savings_amount is on (issue #814, ADR-115 decision 11)
              */
             savings_minor?: number;
             /**
              * Format: int64
-             * @description Present only with retail.profit.read in the record's branch
+             * @description Present only with retail.profit.read in the record's branch; without it the voids are folded into expected_after_savings_minor only (issue #847)
              */
             savings_voids_minor?: number;
         };
@@ -13072,6 +13446,9 @@ export interface components {
             branch_id?: string;
             /** Format: date */
             business_date?: string;
+            /** @description Why the entry has a date before today; needed then, and only a holder of retail.entry.backdate may send such a date (ADR-120). Leave the date out and the server dates it today */
+            date_reason?: string;
+            offline?: components["schemas"]["RetailOfflineEntry"];
             reference?: string;
         };
         /** @description Issue #345: one barcode of a product, for its base unit or one pack size */
@@ -13199,6 +13576,8 @@ export interface components {
             credit_sale_recognition?: "on_sale" | "on_payment";
             customer_accounts?: boolean;
             documents?: boolean;
+            /** @description Issue #807 (ADR-119): My stock shows everyone who may read stock at a shop how many of each item every active shop holds (quantities only); true, the default, unless the owner switched it off */
+            other_shops_stock?: boolean;
             price_lists?: boolean;
             /**
              * @description What kind of business this is (issue #424, ADR-092): a preset of the switches, never a mode; shops (the default), stores_and_shops, wholesale or wholesale_and_shops
@@ -13361,6 +13740,7 @@ export interface components {
         RetailCashItemRequest: {
             name: string;
             requires_explanation?: boolean;
+            reuse_existing?: boolean;
         };
         RetailCashParty: {
             active?: boolean;
@@ -13453,7 +13833,7 @@ export interface components {
         RetailControlsCard: {
             /** Format: int64 */
             count?: number;
-            /** @description voided_sales, quick_cancels, returns, credit_writeoffs, price_overrides, discounts, below_cost, restock_voids or quantity_corrections; the key to ask groups and records for */
+            /** @description voided_sales, quick_cancels, returns, credit_writeoffs, price_overrides, discounts, below_cost, restock_voids, quantity_corrections or usage_undos; the key to ask groups and records for */
             metric?: string;
             /** Format: int64 */
             previous_count?: number;
@@ -14054,6 +14434,63 @@ export interface components {
             /** Format: int64 */
             usage_cost_minor?: number;
         };
+        /** @description Damaged and used as a share of the stock that passed through, per item and per shop (issue #822, ADR-127). Only for retail.profit.read, and only the shops where it is held */
+        RetailDamageShare: {
+            /** @description Shops with something damaged or used first, highest share first */
+            branches?: components["schemas"]["RetailDamageShareBranch"][];
+            /** Format: date */
+            from?: string;
+            /** Format: date */
+            to?: string;
+        };
+        /** @description One shop: its total over every item that passed through it, and the items damaged or used, highest share first */
+        RetailDamageShareBranch: {
+            /** @description Sum of base_qty over every item of the shop, each in its smallest unit */
+            base_qty?: string;
+            /** Format: uuid */
+            branch_id?: string;
+            /**
+             * Format: int32
+             * @description Absent when base_qty is 0
+             */
+            damaged_pct?: number;
+            damaged_qty?: string;
+            items?: components["schemas"]["RetailDamageShareItem"][];
+            /**
+             * Format: int32
+             * @description Absent when base_qty is 0
+             */
+            used_pct?: number;
+            used_qty?: string;
+        };
+        /** @description One item in one shop: what was damaged and what was used, each as a share of the stock that passed through (issue #822, ADR-127). Quantities in the item's smallest unit */
+        RetailDamageShareItem: {
+            /** @description The stock that passed through: the stock at the start of the first day plus what came in during the period (deliveries, stock moved in, and a starting stock first set in it); opening_qty plus received_qty */
+            base_qty?: string;
+            code?: string;
+            /**
+             * Format: int32
+             * @description damaged_qty over base_qty as a whole percent, half up; absent when base_qty is 0
+             */
+            damaged_pct?: number;
+            /** @description Damaged in the period; an undone entry is left out */
+            damaged_qty?: string;
+            description?: string;
+            /** @description Stock at the start of the first day; none when it was below zero */
+            opening_qty?: string;
+            /** Format: uuid */
+            product_id?: string;
+            /** @description What came in during the period: deliveries, stock moved in, a starting stock first set; a voided one is left out */
+            received_qty?: string;
+            unit?: string;
+            /**
+             * Format: int32
+             * @description used_qty over base_qty as a whole percent, half up; absent when base_qty is 0
+             */
+            used_pct?: number;
+            /** @description Used in the shop in the period; an undone entry is left out */
+            used_qty?: string;
+        };
         RetailDashboard: {
             /**
              * Format: date
@@ -14416,6 +14853,27 @@ export interface components {
             sale_id?: string;
             sale_no?: string;
         };
+        /** @description ADR-122: where the phone was when the entry was made, as the phone reported it. Optional; never returned, only the distance from the shop to holders of retail.entry_location.read */
+        RetailDeviceLocation: {
+            /**
+             * Format: double
+             * @description Metres, as the phone reports it
+             * @example 15
+             */
+            accuracy_m?: number;
+            /**
+             * Format: double
+             * @description Degrees north
+             * @example 0.3136
+             */
+            latitude?: number;
+            /**
+             * Format: double
+             * @description Degrees east
+             * @example 32.5811
+             */
+            longitude?: number;
+        };
         RetailDocument: {
             /** Format: uuid */
             branch_id?: string;
@@ -14519,6 +14977,27 @@ export interface components {
             /** Format: uuid */
             product_id: string;
             screen: string;
+        };
+        RetailEntryDistance: {
+            /**
+             * Format: int64
+             * @description How sure the phone was, in metres; absent with no location
+             */
+            accuracy_m?: number;
+            /**
+             * Format: int64
+             * @description Metres from the shop, rounded as the words say; only when located
+             */
+            distance_m?: number;
+            /** Format: uuid */
+            id?: string;
+            /** @description located, no_location or shop_not_set */
+            state?: string;
+            /** @description 40 m from the shop, 3.2 km from the shop, no location or shop location not set */
+            words?: string;
+        };
+        RetailEntryDistanceList: {
+            items?: components["schemas"]["RetailEntryDistance"][];
         };
         /** @description Issue #353, ADR-093: the item's recent history the entry screens warn against: Buy stock, Sell, Move stock and Count stock call this once per item. The thresholds are sent so the screens use the server's */
         RetailEntryNorms: {
@@ -14738,9 +15217,12 @@ export interface components {
             business_date?: string;
             /** Format: uuid */
             category_id: string;
+            /** @description Why the entry has a date before today; needed then, and only a holder of retail.entry.backdate may send such a date (ADR-120). Leave the date out and the server dates it today */
+            date_reason?: string;
             explanation?: string;
             /** Format: uuid */
             item_id: string;
+            offline?: components["schemas"]["RetailOfflineEntry"];
             /** Format: uuid */
             party_id?: string;
             /** Format: uuid */
@@ -15121,6 +15603,35 @@ export interface components {
              * @description Selling price of one unit in minor units; null when the list gives none
              */
             sell_price_minor?: number;
+            unit?: string;
+        };
+        /** @description The item in one shop or store */
+        RetailItemShop: {
+            /**
+             * Format: int64
+             * @description The shop's average buying price per piece (ADR-079); Present only with retail.profit.read
+             */
+            avg_cost_minor?: number;
+            /** Format: uuid */
+            branch_id?: string;
+            /** @description A closed branch, listed only while it still holds the item */
+            closed?: boolean;
+            code?: string;
+            name?: string;
+            negative?: boolean;
+            qty?: string;
+        };
+        /** @description The top of the item page (issue #813) */
+        RetailItemStock: {
+            active?: boolean;
+            category?: string;
+            code?: string;
+            description?: string;
+            /** Format: uuid */
+            product_id?: string;
+            shops?: components["schemas"]["RetailItemShop"][];
+            /** @description The sum over the shops listed */
+            total_qty?: string;
             unit?: string;
         };
         /** @description An item without sizes that becomes one size or colour of the item */
@@ -15544,6 +16055,19 @@ export interface components {
             category?: components["schemas"]["RetailCategoryHint"];
             /** @description At most 5 items, those holding the typed name first, then those a few letters apart */
             did_you_mean?: components["schemas"]["RetailNameHint"][];
+        };
+        /** @description Sent only by an entry kept on the phone while offline (ADR-067 decision 13): it is dated by when it was made, and a date field sent with it is not used. Made more than 2 minutes before online_as_of is refused (offline_clock_behind); made more than 7 days ago needs retail.entry.backdate at every branch it touches, else it is refused (offline_entry_too_old) */
+        RetailOfflineEntry: {
+            /**
+             * Format: date-time
+             * @description When the entry was made on the phone
+             */
+            occurred_at: string;
+            /**
+             * Format: date-time
+             * @description The server's time when the phone was last online
+             */
+            online_as_of: string;
         };
         RetailOfflineFailure: {
             /** Format: uuid */
@@ -16463,6 +16987,8 @@ export interface components {
              * @description Issue #384: the id of the photo of the item this size belongs to, which it shows while it has none of its own; absent when the item has none
              */
             item_photo_id?: string;
+            /** @description Issue #815: with branch_id, the quantity at or below which the item is low at that branch: the branch's own minimum, else the item's, else low_stock_threshold of the stock list (ADR-029). The sale screen says Only N left at or below it, and Out of stock at zero */
+            low_stock_level?: string;
             /** @description True when the branch balance is below zero */
             negative?: boolean;
             /** @description The pack sizes of the product; present only while the units capability is on */
@@ -16549,6 +17075,15 @@ export interface components {
             /** Format: uuid */
             created_by?: string;
             currency?: string;
+            /**
+             * Format: int64
+             * @description Issue #821 (ADR-126): sell_worth_minor less total_minor. Present only to a holder of retail.profit.read
+             */
+            expected_profit_minor?: number;
+            /** @description Issue #819, ADR-124: a photo of the paper receipt is on the delivery */
+            has_receipt_photo?: boolean;
+            /** @description Issue #821 (ADR-126): true, for a holder of retail.profit.read, when an item on a line has no selling price yet, or the line sets none and its item was deleted or is unknown (issue #852); sell_worth_minor and expected_profit_minor are then absent */
+            has_unpriced_items?: boolean;
             /** Format: uuid */
             id?: string;
             lines?: components["schemas"]["RetailPurchaseLine"][];
@@ -16559,6 +17094,11 @@ export interface components {
             purchase_no?: string;
             /** Format: date */
             purchased_on?: string;
+            /**
+             * Format: int64
+             * @description Issue #821 (ADR-126): what the goods should sell for, each line's quantity in base units times the selling price the line set, else the item's current selling price. Present only to a holder of retail.profit.read
+             */
+            sell_worth_minor?: number;
             /** @description posted, or voided once corrected by a void (issue #351); a voided restock is never deleted */
             status?: string;
             /** Format: uuid */
@@ -16821,15 +17361,18 @@ export interface components {
             next_cursor?: string;
         };
         RetailPurchaseRequest: {
+            /** @description Why the purchase has a date before today; needed then (ADR-120) */
+            date_reason?: string;
             lines: components["schemas"]["RetailPurchaseLineRequest"][];
             note?: string;
+            offline?: components["schemas"]["RetailOfflineEntry"];
             /** @description cash, mobile_money, bank, or credit: owed to the supplier, who is then required (issue #557) */
             payment_method: string;
             /**
              * Format: date
-             * @description Not in the future
+             * @description Defaults to today; not in the future, and before today only from a holder of retail.entry.backdate at every branch of the lines, with date_reason (ADR-120)
              */
-            purchased_on: string;
+            purchased_on?: string;
             /**
              * Format: uuid
              * @description Required for a credit purchase
@@ -17172,6 +17715,10 @@ export interface components {
             /** @description The link with https://, for the WhatsApp message */
             url?: string;
         };
+        RetailReceiptPhotoAdded: {
+            /** Format: uuid */
+            photo_id?: string;
+        };
         RetailReceiptPreview: {
             printed?: components["schemas"]["RetailReceiptPrint"];
             /** Format: uuid */
@@ -17272,6 +17819,8 @@ export interface components {
              * @description The branch that receives the money; defaults to the advance's branch
              */
             branch_id?: string;
+            /** @description Why the entry has a date before today; needed then, and only a holder of retail.entry.backdate may send such a date (ADR-120). Leave the date out and the server dates it today */
+            date_reason?: string;
             /** @enum {string} */
             method: "cash" | "mobile_money" | "bank";
             /** Format: date */
@@ -17400,6 +17949,8 @@ export interface components {
             device?: components["schemas"]["RetailSaleDevice"];
             /** Format: date */
             due_date?: string;
+            /** @description Issue #819, ADR-124: a photo of the paper receipt is on the sale */
+            has_receipt_photo?: boolean;
             historical?: boolean;
             /** Format: uuid */
             id?: string;
@@ -17636,6 +18187,7 @@ export interface components {
              */
             due_date?: string;
             lines: components["schemas"]["RetailSaleLineRequest"][];
+            location?: components["schemas"]["RetailDeviceLocation"];
             /**
              * Format: date-time
              * @description ADR-067: when the sale happened on the device; the sale is dated that day in the business's time zone. Up to five minutes ahead is recorded as now; further ahead is 422 occurred_at_in_future, or for a sale recorded offline now with a clock_ahead clash
@@ -17919,6 +18471,14 @@ export interface components {
             credit?: components["schemas"]["RetailSalesSummaryMethod"];
             mobile_money?: components["schemas"]["RetailSalesSummaryMethod"];
         };
+        RetailSavedDay: {
+            /** Format: int64 */
+            amount_minor?: number;
+            /** Format: date */
+            business_date?: string;
+            /** Format: uuid */
+            id?: string;
+        };
         RetailSavings: {
             /**
              * Format: int64
@@ -17942,7 +18502,7 @@ export interface components {
             overwritten?: boolean;
             /**
              * Format: int64
-             * @description Present only with retail.profit.read in the record's branch
+             * @description Present only with retail.profit.read in the record's branch and only on a voided record: an active record is a saved day, whose suggestion is sent to no one (issue #799)
              */
             suggested_minor?: number;
             /** Format: int64 */
@@ -17971,15 +18531,41 @@ export interface components {
             overwritten?: boolean;
             /**
              * Format: int64
-             * @description Present only with retail.profit.read in the record's branch
+             * @description Present only with retail.profit.read in the record's branch and only on a voided record: an active record is a saved day, whose suggestion is sent to no one (issue #799)
              */
             suggested_minor?: number;
             /** Format: int64 */
             total_sold_minor?: number;
         };
+        RetailSavingsGroups: {
+            shops?: components["schemas"]["RetailSavingsShop"][];
+            /** Format: int64 */
+            total_minor?: number;
+        };
+        RetailSavingsMonth: {
+            /**
+             * Format: int32
+             * @description 1 to 12
+             */
+            month?: number;
+            people?: components["schemas"]["RetailSavingsPerson"][];
+            /** Format: int64 */
+            total_minor?: number;
+        };
         RetailSavingsPage: {
             items?: components["schemas"]["RetailSavings"][];
             next_cursor?: string;
+        };
+        RetailSavingsPerson: {
+            name?: string;
+            records?: components["schemas"]["RetailSavedDay"][];
+            /** Format: int64 */
+            total_minor?: number;
+            /**
+             * Format: uuid
+             * @description Null on a record brought in from an earlier system with no person
+             */
+            user_id?: string;
         };
         RetailSavingsReport: {
             currency?: string;
@@ -17999,9 +18585,19 @@ export interface components {
             branch_id?: string;
             /** Format: date */
             business_date?: string;
+            /** @description Why the entry has a date before today; needed then, and only a holder of retail.entry.backdate may send such a date (ADR-120). Leave the date out and the server dates it today */
+            date_reason?: string;
+            offline?: components["schemas"]["RetailOfflineEntry"];
             /** @description Optional, even when the amount differs from the suggestion */
             overwrite_reason?: string;
             suggestion_token: string;
+        };
+        RetailSavingsShop: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: int64 */
+            total_minor?: number;
+            years?: components["schemas"]["RetailSavingsYear"][];
         };
         RetailSavingsSuggestion: {
             /**
@@ -18030,17 +18626,24 @@ export interface components {
             existing_amount_minor?: number;
             /** Format: uuid */
             existing_id?: string;
-            /** @description True when this caller may save an amount different from the suggestion: with retail.savings.overwrite, or with salespeople_see_savings_amount on when no saved record of the day was voided (replacing a saved amount needs retail.savings.overwrite; ADR-115) */
+            /** @description True when this caller may save an amount different from the suggestion: with retail.savings.overwrite, or with salespeople_see_savings_amount on when no saved record of the day was voided (replacing a saved amount needs retail.savings.overwrite; ADR-115); false once the day has an active savings record (issue #799) */
             may_change_amount?: boolean;
             /**
              * Format: int64
-             * @description Present only with retail.profit.read in the record's branch
+             * @description Present only with retail.profit.read in the record's branch; absent for every caller once the day has an active savings record (issue #799)
              */
             suggested_minor?: number;
             /** @description Opaque; echo it on the create call */
             suggestion_token: string;
             /** Format: int64 */
             total_sold_minor?: number;
+        };
+        RetailSavingsYear: {
+            months?: components["schemas"]["RetailSavingsMonth"][];
+            /** Format: int64 */
+            total_minor?: number;
+            /** Format: int32 */
+            year?: number;
         };
         /** @description Another branch in the caller's scope where the same item sells faster, and what to move there */
         RetailSellsBetterAt: {
@@ -18050,6 +18653,31 @@ export interface components {
             sold_last90?: string;
             /** @description Whole units to move: what that branch sells in cover_days, less its stock, at most what this branch holds above slow_months of its own sales */
             suggested_qty?: string;
+        };
+        RetailShopLocation: {
+            /** Format: int64 */
+            accuracy_m?: number;
+            /** Format: uuid */
+            branch_id?: string;
+            code?: string;
+            has_location?: boolean;
+            name?: string;
+            /** Format: date-time */
+            set_at?: string;
+        };
+        RetailShopLocationList: {
+            items?: components["schemas"]["RetailShopLocation"][];
+        };
+        /** @description Issue #807: how many of an item one shop holds, nothing else of it */
+        RetailShopQty: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** @description True for the shop the list was read for */
+            here?: boolean;
+            name?: string;
+            /** @description Below zero in this shop */
+            negative?: boolean;
+            qty?: string;
         };
         RetailShrinkageBranch: {
             /** Format: uuid */
@@ -18267,7 +18895,7 @@ export interface components {
             /** Format: uuid */
             branch_id: string;
             /**
-             * @description The quantity the form showed when it was opened; 409 stock_moved when it has changed since, with current_qty, the quantity now
+             * @description The quantity the form showed when it was opened, below zero when the shelf list shows that; 409 stock_moved when it has changed since, with current_qty, the quantity now
              * @example 12.5
              */
             expected_qty: string;
@@ -18335,6 +18963,8 @@ export interface components {
         RetailStockMovement: {
             /** Format: date-time */
             at?: string;
+            /** @description The item page (issue #813): what the branch held of the item just after this movement, over its whole history in movement order; absent on the list across items */
+            balance_after?: string;
             /** Format: uuid */
             branch_id?: string;
             /** Format: uuid */
@@ -18343,6 +18973,13 @@ export interface components {
             code?: string;
             correction?: components["schemas"]["RetailStockMovementCorrection"];
             description?: string;
+            /**
+             * Format: int32
+             * @description On a usage or damage movement (issue #818): how many lines its entry has, all of which an undo puts back, whatever the list's filter or page
+             */
+            entry_lines?: number;
+            /** @description On a usage or damage movement (issue #819, ADR-124): a photo of the paper receipt is on its entry */
+            has_receipt_photo?: boolean;
             historical?: boolean;
             /** Format: uuid */
             id?: string;
@@ -18355,12 +18992,18 @@ export interface components {
             note?: string;
             /** Format: uuid */
             product_id?: string;
+            /**
+             * Format: int64
+             * @description The item page (issue #813), on a sale: the sale line's total less its cost; Present only with retail.profit.read
+             */
+            profit_minor?: number;
             qty?: string;
             /** Format: uuid */
             reverses_movement_id?: string;
             /** Format: uuid */
             source_id?: string;
             source_type?: string;
+            undone?: components["schemas"]["RetailStockMovementUndone"];
             unit?: string;
             /**
              * Format: int64
@@ -18377,6 +19020,15 @@ export interface components {
         RetailStockMovementPage: {
             items?: components["schemas"]["RetailStockMovement"][];
             next_cursor?: string;
+        };
+        /** @description Present on a usage or damage movement whose entry was undone (issue #818): who, when, why */
+        RetailStockMovementUndone: {
+            /** Format: date-time */
+            at?: string;
+            /** Format: uuid */
+            by?: string;
+            by_name?: string;
+            reason?: string;
         };
         RetailStockPage: {
             /** Format: uuid */
@@ -18409,6 +19061,8 @@ export interface components {
              * @description Present only to whoever sells, oversees selling, sets prices or reads cost (retail.sale.create, retail.sale.all_sellers, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
              */
             sell_minor?: number;
+            /** @description Issue #807 (ADR-119): the quantity in every active shop of the business, this shop first and marked here, a shop with none at 0; quantities only, whatever the caller's branch scope. Absent while the owner has switched other shops' stock off or fewer than two shops would be listed */
+            shops?: components["schemas"]["RetailShopQty"][];
             standard_pack?: components["schemas"]["RetailStandardPack"];
             unit?: string;
         };
@@ -18531,10 +19185,19 @@ export interface components {
         RetailSupplier: {
             active?: boolean;
             contact?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description The date added, set by the server
+             */
             created_at?: string;
+            details?: components["schemas"]["RetailSupplierDetails"];
             /** Format: uuid */
             id?: string;
+            /**
+             * Format: date
+             * @description Issue #820: the day of the newest restock from this supplier that is not voided, among those the caller may list; never typed
+             */
+            last_delivery_on?: string;
             name?: string;
             /**
              * Format: int32
@@ -18862,6 +19525,38 @@ export interface components {
         RetailSupplierCreditVoidRequest: {
             reason: string;
         };
+        /** @description A restock from the supplier; it opens as the restock itself */
+        RetailSupplierDelivery: {
+            /** Format: uuid */
+            id?: string;
+            /**
+             * Format: int32
+             * @description How many lines added stock at the branches the caller may read
+             */
+            lines?: number;
+            purchase_no?: string;
+            /** Format: date */
+            purchased_on?: string;
+            voided?: boolean;
+        };
+        RetailSupplierDeliveryPage: {
+            items?: components["schemas"]["RetailSupplierDelivery"][];
+            next_cursor?: string;
+        };
+        RetailSupplierDetails: {
+            address?: string;
+            /** @description Shown only to those who may edit suppliers (retail.catalogue.manage) */
+            bank_account?: string;
+            country?: string;
+            email?: string;
+            notes?: string;
+            /** @description As typed, for example 30 days */
+            payment_terms?: string;
+            /** @description A short free label, for example Wholesaler */
+            supplier_type?: string;
+            /** @description A web address, with or without https:// */
+            website?: string;
+        };
         RetailSupplierList: {
             items?: components["schemas"]["RetailSupplier"][];
         };
@@ -19041,8 +19736,10 @@ export interface components {
         RetailSupplierPaymentReverseRequest: {
             reason: string;
         };
+        /** @description Every field but the name is optional (issue #820) */
         RetailSupplierRequest: {
             contact?: string;
+            details?: components["schemas"]["RetailSupplierDetails"];
             name: string;
         };
         /** @description What happened with one supplier between from and to, with the running balance (issue #557) */
@@ -19096,10 +19793,15 @@ export interface components {
             /** Format: uuid */
             source_id?: string;
         };
-        /** @description Omitted fields are unchanged; an empty contact clears it */
+        /** @description The supplier types already used, the most used first */
+        RetailSupplierTypes: {
+            items?: string[];
+        };
+        /** @description Omitted fields are unchanged; an empty contact or detail clears it */
         RetailSupplierUpdate: {
             active?: boolean;
             contact?: string;
+            details?: components["schemas"]["RetailSupplierDetails"];
             name?: string;
         };
         /** @description Issue #395: the pack sizes and price list prices copied to new sizes, and the prices that were not */
@@ -19210,6 +19912,8 @@ export interface components {
             note?: string;
         };
         RetailTransferRequest: {
+            /** @description Why the move has a date before today; needed then (ADR-120) */
+            date_reason?: string;
             /**
              * Format: uuid
              * @description The source branch; defaults to the caller's one branch
@@ -19217,6 +19921,7 @@ export interface components {
             from_branch_id?: string;
             lines: components["schemas"]["RetailTransferLineRequest"][];
             note?: string;
+            offline?: components["schemas"]["RetailOfflineEntry"];
             /**
              * Format: uuid
              * @description The destination branch; any active branch of the tenant
@@ -19224,7 +19929,7 @@ export interface components {
             to_branch_id: string;
             /**
              * Format: date
-             * @description Defaults to today; not in the future
+             * @description Defaults to today; not in the future, and before today only from a holder of retail.entry.backdate at the source branch, with date_reason (ADR-120)
              */
             transfer_date?: string;
         };
@@ -19383,12 +20088,105 @@ export interface components {
             branch_id?: string;
             kind: string;
             lines: components["schemas"]["RetailUsageLineRequest"][];
+            location?: components["schemas"]["RetailDeviceLocation"];
             /**
              * Format: date
              * @description Defaults to today; not in the future
              */
             occurred_on?: string;
+            offline?: components["schemas"]["RetailOfflineEntry"];
             reason: string;
+        };
+        RetailUsageSummary: {
+            /** @description Every level group_by accepts: branch, month, category and item */
+            available_levels?: string[];
+            /** @description The tenant's currency; a retail tenant keeps its books in one currency */
+            currency?: string;
+            /** @description The level these groups are: one of available_levels */
+            group_by?: string;
+            /** @description True when more groups remain: next_to (month) or next_offset (the rest) */
+            has_more?: boolean;
+            items?: components["schemas"]["RetailUsageSummaryGroup"][];
+            /** @description The chain the request asked for, in order */
+            levels?: string[];
+            /** @description The level under this one in the chain; absent at the end of the chain */
+            next_level?: string;
+            /**
+             * Format: int32
+             * @description Branch, category and item: ask again with offset = next_offset
+             */
+            next_offset?: number;
+            /**
+             * Format: date
+             * @description Month level: the day before the oldest month shown; ask again with to = next_to
+             */
+            next_to?: string;
+        };
+        RetailUsageSummaryGroup: {
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in every branch the figures cover: what was taken out, at the cost each record carries
+             */
+            cost_minor?: number;
+            /**
+             * Format: int64
+             * @description Records of stock damaged
+             */
+            damaged_count?: number;
+            /**
+             * Format: date
+             * @description First calendar day of the month; month level only
+             */
+            from?: string;
+            /** @description A branch id, a category id, a product id, or the month (2026-10); pass it back as branch_id, category_id or item_id, or use from and to for a month */
+            key?: string;
+            /** @description The branch, category or item name, or the month key */
+            label?: string;
+            /** @description Units taken out, without a sign; item level only */
+            quantity?: string;
+            /**
+             * Format: int64
+             * @description Records in the group: one per item taken out, as the list shows them
+             */
+            records_count?: number;
+            /**
+             * Format: date
+             * @description Last calendar day of the month; month level only
+             */
+            to?: string;
+            /** @description The item's unit; item level only */
+            unit?: string;
+            /**
+             * Format: int64
+             * @description Records of stock used in the shop
+             */
+            used_count?: number;
+        };
+        RetailUsageUndoRequest: {
+            reason: string;
+        };
+        /** @description An entry undone (issue #818): the stock is back, the entry kept */
+        RetailUsageUndone: {
+            /** Format: uuid */
+            branch_id?: string;
+            /**
+             * Format: int32
+             * @description How many items of the entry went back into stock, every line of it
+             */
+            items_back?: number;
+            kind?: string;
+            reason?: string;
+            /** Format: uuid */
+            report_id?: string;
+            /** Format: date-time */
+            undone_at?: string;
+            /** Format: uuid */
+            undone_by?: string;
+            /**
+             * Format: date
+             * @description The business day the stock went back and the reversal is dated
+             */
+            undone_on?: string;
         };
         /** @description The usual size of a pack in a smaller unit, and what it is for */
         RetailUsualPack: {
@@ -19617,6 +20415,9 @@ export interface components {
             branch_id?: string;
             /** Format: date */
             business_date?: string;
+            /** @description Why the entry has a date before today; needed then, and only a holder of retail.entry.backdate may send such a date (ADR-120). Leave the date out and the server dates it today */
+            date_reason?: string;
+            offline?: components["schemas"]["RetailOfflineEntry"];
             purpose?: string;
             /** Format: date-time */
             withdrawn_at?: string;
@@ -20018,6 +20819,8 @@ export interface components {
             external_reference?: string;
             /** Format: uuid */
             id?: string;
+            /** @description The provider's payment code (confirmation code) of a deposit paid by mobile money or card, as on the member's text message. Filled only by GET .../transactions; always null in the answers of a deposit, withdrawal, reversal or action, which do not look it up */
+            payment_code?: string;
             payment_method_key?: string;
             reason?: string;
             receipt_no?: string;
@@ -20943,6 +21746,8 @@ export interface components {
             credit_sale_recognition?: "on_sale" | "on_payment";
             customer_accounts?: boolean;
             documents?: boolean;
+            /** @description Show every shop's quantity on My stock to everyone who may read stock (issue #807) */
+            other_shops_stock?: boolean;
             price_lists?: boolean;
             /**
              * @description The kind of business: sets units, price_lists, customer_accounts, documents, purchasing and transfer_receipt to its preset (branch_roles and returns are left as they are); a flag sent in the same change wins
@@ -29976,6 +30781,31 @@ export interface operations {
             };
         };
     };
+    listRetailEntryDistances: {
+        parameters: {
+            query: {
+                /** @description sale or usage */
+                source: string;
+                /** @description The entries' ids, at most 100 */
+                id: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailEntryDistanceList"];
+                };
+            };
+        };
+    };
     confirmRetailEntryWarning: {
         parameters: {
             query?: never;
@@ -30187,6 +31017,112 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApprovalWaiting"];
+                };
+            };
+        };
+    };
+    uploadRetailExpenseReceiptPhoto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailReceiptPhotoAdded"];
+                };
+            };
+        };
+    };
+    getRetailExpenseReceiptPhoto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                expense_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+        };
+    };
+    addRetailExpenseReceiptPhoto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                expense_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailReceiptPhotoAdded"];
+                };
+            };
+        };
+    };
+    replaceRetailExpense: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                expense_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailExpenseRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailExpense"];
                 };
             };
         };
@@ -32345,6 +33281,85 @@ export interface operations {
             };
         };
     };
+    getRetailPurchaseReceiptPhoto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                purchase_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+        };
+    };
+    addRetailPurchaseReceiptPhoto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                purchase_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailReceiptPhotoAdded"];
+                };
+            };
+        };
+    };
+    replaceRetailPurchase: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                purchase_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailPurchaseRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailPurchase"];
+                };
+            };
+        };
+    };
     voidRetailPurchase: {
         parameters: {
             query?: never;
@@ -32985,6 +34000,30 @@ export interface operations {
             };
         };
     };
+    getRetailDamageShare: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailDamageShare"];
+                };
+            };
+        };
+    };
     getRetailSupplierPayables: {
         parameters: {
             query?: {
@@ -33442,6 +34481,57 @@ export interface operations {
             };
         };
     };
+    getRetailSaleReceiptPhoto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+        };
+    };
+    addRetailSaleReceiptPhoto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailReceiptPhotoAdded"];
+                };
+            };
+        };
+    };
     createRetailSaleReceiptLink: {
         parameters: {
             query?: never;
@@ -33701,6 +34791,106 @@ export interface operations {
             };
         };
     };
+    listRetailSalesStaffSavings: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+                include_voided?: boolean;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSavingsPage"];
+                };
+            };
+        };
+    };
+    createRetailSalesStaffSavings: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailSavingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSavings"];
+                };
+            };
+        };
+    };
+    getRetailSalesStaffSavingsGroups: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSavingsGroups"];
+                };
+            };
+        };
+    };
+    getRetailSalesStaffSavingsSuggestion: {
+        parameters: {
+            query?: {
+                branch_id?: string;
+                date?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSavingsSuggestion"];
+                };
+            };
+        };
+    };
     getRetailSavingsSuggestion: {
         parameters: {
             query?: {
@@ -33798,6 +34988,72 @@ export interface operations {
             };
         };
     };
+    listRetailShopLocations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailShopLocationList"];
+                };
+            };
+        };
+    };
+    setRetailShopLocation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailDeviceLocation"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailShopLocation"];
+                };
+            };
+        };
+    };
+    clearRetailShopLocation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     listRetailStock: {
         parameters: {
             query?: {
@@ -33887,6 +35143,56 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApprovalWaiting"];
+                };
+            };
+        };
+    };
+    getRetailItemStock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailItemStock"];
+                };
+            };
+        };
+    };
+    listRetailItemMovements: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailStockMovementPage"];
                 };
             };
         };
@@ -34411,7 +35717,9 @@ export interface operations {
     };
     listRetailSuppliers: {
         parameters: {
-            query?: never;
+            query?: {
+                q?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -34453,6 +35761,48 @@ export interface operations {
             };
         };
     };
+    listRetailSupplierTypes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSupplierTypes"];
+                };
+            };
+        };
+    };
+    getRetailSupplier: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                supplier_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSupplier"];
+                };
+            };
+        };
+    };
     updateRetailSupplier: {
         parameters: {
             query?: never;
@@ -34477,6 +35827,31 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailSupplier"];
+                };
+            };
+        };
+    };
+    listRetailSupplierDeliveries: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                supplier_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSupplierDeliveryPage"];
                 };
             };
         };
@@ -34830,6 +36205,112 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailUsageReport"];
+                };
+            };
+        };
+    };
+    summariseRetailUsage: {
+        parameters: {
+            query: {
+                group_by: string;
+                level?: string;
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+                category_id?: string;
+                item_id?: string;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailUsageSummary"];
+                };
+            };
+        };
+    };
+    getRetailUsageReceiptPhoto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+        };
+    };
+    addRetailUsageReceiptPhoto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailReceiptPhotoAdded"];
+                };
+            };
+        };
+    };
+    undoRetailUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailUsageUndoRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailUsageUndone"];
                 };
             };
         };

@@ -22,6 +22,7 @@ import com.rincoltech.bms.retail.cashbook.internal.CashbookRepository.CategoryRo
 import com.rincoltech.bms.retail.cashbook.internal.CashbookRepository.ExpenseRow;
 import com.rincoltech.bms.retail.cashbook.internal.CashbookRepository.ItemRow;
 import com.rincoltech.bms.retail.cashbook.internal.CashbookRepository.PartyRow;
+import com.rincoltech.bms.retail.stock.EntryDates;
 import com.rincoltech.bms.retail.stock.RetailBooks;
 import com.rincoltech.bms.retail.stock.RetailBranchContext;
 import java.time.Instant;
@@ -116,11 +117,26 @@ class ExpenseService {
 
     /** An expense checked and ready to write, under the branch-day lock. */
     private record Checked(
-            UUID branch, LocalDate date, CategoryRow category, ItemRow item, PartyRow party, String explanation) {}
+            UUID branch,
+            LocalDate date,
+            EntryDates.Backdate backdate,
+            CategoryRow category,
+            ItemRow item,
+            PartyRow party,
+            String explanation,
+            /* Issue #819: the receipt photo the expense names, null when none or when its file is gone. */
+            UUID receipt) {
+
+        /** The same expense with another explanation (issue #838: the edit's link is added after the check). */
+        Checked withExplanation(String words) {
+            return new Checked(branch, date, backdate, category, item, party, words, receipt);
+        }
+    }
 
     @Transactional
     Outcome<ExpenseOutcome> create(String key, ExpenseRequest r) {
-        return idempotency.once(key, "POST", PATH, r, ExpenseOutcome.class, () -> recordOrAsk(r));
+        // The key covers the request without its offline block (ADR-067 decision 13).
+        return idempotency.once(key, "POST", PATH, r.forKey(), ExpenseOutcome.class, () -> recordOrAsk(r));
     }
 
     /**
@@ -129,7 +145,7 @@ class ExpenseService {
      */
     private ExpenseOutcome recordOrAsk(ExpenseRequest r) {
         UUID branch = branchContext.resolve(CashbookSupport.EXPENSE_RECORD, r.branchId());
-        Checked c = check(branch, r);
+        Checked c = check(branch, r, false);
         Approvals.Rule rule = approvals.rule(ExpenseAction.TYPE);
         if (rule.asks(r.amountMinor())) {
             ExpenseRequest fixed = new ExpenseRequest(
@@ -140,7 +156,12 @@ class ExpenseService {
                     r.partyId(),
                     r.amountMinor(),
                     r.explanation(),
-                    r.receiptDocumentId());
+                    r.receiptDocumentId(),
+                    c.backdate() == null ? null : c.backdate().reason(),
+                    // The approval keeps the resolved date c.date() above (for an entry kept offline, the day it was
+                    // made, issue #812) and the offline block, so the approval checks the closed till again and the
+                    // expense is audited as dated by the phone when it is written.
+                    r.offline());
             UUID id = UUID.randomUUID();
             Approvals.Outcome o = approvals.request(
                     new ActionRequest(
@@ -168,11 +189,33 @@ class ExpenseService {
     void recordApproved(UUID id, Map<String, Object> payload, UUID makerId) {
         ExpenseRequest r = mapper.convertValue(payload, ExpenseRequest.class);
         // A refusal here makes the request stale with its reason: the approvals module's one stale policy (ADR-091).
-        write(id, check(r.branchId(), r), r, makerId);
+        write(id, check(r.branchId(), r, true), r, makerId);
     }
 
-    private Checked check(UUID branch, ExpenseRequest r) {
-        LocalDate date = support.businessDate(r.businessDate(), "business_date");
+    /**
+     * ADR-120: the maker's date is gated when they ask; on approval the date fixed then is kept (it may be before the day
+     * of the approval) and its reason, if any, is audited with the expense.
+     */
+    private Checked check(UUID branch, ExpenseRequest r, boolean approved) {
+        return check(branch, r, approved, null);
+    }
+
+    /** As above for an edit, which may keep the receipt of the expense it replaces ({@code replacing}). */
+    private Checked check(UUID branch, ExpenseRequest r, boolean approved, UUID replacing) {
+        LocalDate date;
+        EntryDates.Backdate backdate;
+        if (approved) {
+            date = support.businessDate(r.businessDate(), "business_date");
+            // Kept offline: a till closed since it was asked is the owner's, judged with the approver's permissions
+            // (the lead's decision on the third review of #839).
+            support.requireOpen(r.offline(), date, support.today(), List.of(branch));
+            backdate = support.entryDates().approved(date, r.dateReason());
+        } else {
+            CashbookSupport.Dated dated =
+                    support.entryDate(r.businessDate(), "business_date", r.dateReason(), branch, r.offline());
+            date = dated.date();
+            backdate = dated.backdate();
+        }
         // The savings cap reads the day's expenses under the same lock (ADR-080 decision 3).
         repo.lockBranchDay(branch, date);
         CategoryRow category = repo.category(r.categoryId(), false)
@@ -198,15 +241,50 @@ class ExpenseService {
                     .orElseThrow(() -> ApiException.validation(
                             List.of(new FieldProblem("party_id", "unknown_party", "No such active beneficiary."))));
         }
-        if (r.receiptDocumentId() != null
-                && documents
-                        .find(r.receiptDocumentId())
-                        .filter(d -> RECEIPT_SUBJECT.equals(d.subjectType()))
-                        .isEmpty()) {
-            throw ApiException.validation(
-                    List.of(new FieldProblem("receipt_document_id", "unknown_document", "No such uploaded receipt.")));
+        UUID receipt = checkReceipt(r.receiptDocumentId(), approved, replacing);
+        return new Checked(branch, date, backdate, category, item, party, explanation, receipt);
+    }
+
+    /**
+     * Issue #819 (ADR-124, the lead's decision on the review of #846): a receipt photo is named by one expense only, and only
+     * by the person who sent it, so a photo id never makes a receipt readable anywhere else: 409 {@code receipt_taken}
+     * otherwise. An edit keeps the receipt of the expense it replaces; an approval names the receipt its maker sent.
+     */
+    private UUID checkReceipt(UUID documentId, boolean approved, UUID replacing) {
+        if (documentId == null) {
+            return null;
         }
-        return new Checked(branch, date, category, item, party, explanation);
+        Documents.StoredDocument d = documents
+                .find(documentId)
+                .filter(x -> RECEIPT_SUBJECT.equals(x.subjectType()))
+                .orElseThrow(() -> ApiException.validation(List.of(
+                        new FieldProblem("receipt_document_id", "unknown_document", "No such uploaded receipt."))));
+        if (replacing != null && (replacing.equals(d.subjectId()) || repo.namesReceipt(replacing, documentId))) {
+            return documentId;
+        }
+        UUID caller = CurrentPrincipal.require().userId();
+        boolean sender = approved || java.util.Objects.equals(d.createdBy(), caller);
+        // An expense waiting for an administrator names its photo in its request (review of #846); on approval, it.
+        boolean waiting = !approved
+                && approvals
+                        .pendingWith(ExpenseAction.TYPE, "receipt_document_id", documentId.toString())
+                        .isPresent();
+        if (!sender || waiting || repo.receiptTaken(documentId, d.subjectId())) {
+            throw new ApiException(
+                    org.springframework.http.HttpStatus.CONFLICT,
+                    "receipt_taken",
+                    "Receipt photo taken",
+                    "This receipt photo belongs to another expense or was sent by someone else. Add the photo again.");
+        }
+        if (!documents.stored(documentId)) {
+            // The lead's decision on the second review of #846: an expense is never recorded naming a photo whose
+            // file is gone (a photo no expense named for a day loses it to the nightly sweep); 422 in words.
+            throw ApiException.validation(List.of(new FieldProblem(
+                    "receipt_document_id",
+                    "receipt_gone",
+                    "This receipt photo is no longer kept. Add the photo again.")));
+        }
+        return documentId;
     }
 
     private Expense write(UUID id, Checked c, ExpenseRequest r, UUID by) {
@@ -232,7 +310,7 @@ class ExpenseService {
                 amount,
                 support.currency(),
                 explanation,
-                r.receiptDocumentId(),
+                c.receipt(),
                 support.now(),
                 by,
                 entry);
@@ -242,6 +320,9 @@ class ExpenseService {
         after.put("item", item.name());
         after.put("amount_minor", amount);
         audit.record(AuditLog.Entry.created("retail.expense.created", "retail.expense", id, branch, after));
+        support.entryDates().audit(c.backdate(), "retail.expense", id, branch);
+        // Dated by the phone (issue #812), audited once the expense exists, on approval for one that waited.
+        support.entryDates().auditOffline(r.offline(), date, "retail.expense", id, branch);
         return view(repo.expense(id, false).orElseThrow());
     }
 
@@ -274,10 +355,23 @@ class ExpenseService {
                 ? Cursor.encode(
                         items.getLast().createdAt() + "|" + items.getLast().id())
                 : null;
-        return new ExpensePage(items.stream().map(ExpenseService::view).toList(), next);
+        // ADR-124: the receipt sent with an expense, else the newest photo added to it later, through core.documents.
+        Map<UUID, UUID> later = documents.newestOf(
+                RECEIPT_SUBJECT,
+                items.stream()
+                        .filter(e -> e.receiptDocumentId() == null)
+                        .map(ExpenseRow::id)
+                        .toList());
+        return new ExpensePage(
+                items.stream().map(e -> view(e, later.get(e.id()))).toList(), next);
     }
 
     static Expense view(ExpenseRow e) {
+        return view(e, null);
+    }
+
+    /** {@code addedLater}: the photo added to an expense recorded without a receipt (ADR-124), else null. */
+    static Expense view(ExpenseRow e, UUID addedLater) {
         return new Expense(
                 e.id(),
                 e.branchId(),
@@ -291,7 +385,7 @@ class ExpenseService {
                 e.currency(),
                 e.amountMinor(),
                 e.explanation(),
-                e.receiptDocumentId(),
+                e.receiptDocumentId() != null ? e.receiptDocumentId() : addedLater,
                 e.by(),
                 e.byName(),
                 e.createdAt(),
@@ -303,37 +397,115 @@ class ExpenseService {
 
     @Transactional
     Outcome<Expense> voidExpense(String key, UUID id, VoidRequest r) {
-        return idempotency.once(key, "POST", PATH + "/" + id + "/void", r, Expense.class, () -> {
-            Principal principal = CurrentPrincipal.require();
-            ExpenseRow row = repo.expense(id, true)
-                    .filter(x -> principal.may(CashbookSupport.VOID, x.branchId()))
-                    .orElseThrow(ApiException::notFound);
-            if (row.voided().voided()) {
-                throw CashbookSupport.alreadyVoided();
+        return idempotency.once(
+                key, "POST", PATH + "/" + id + "/void", r, Expense.class, () -> voidNow(id, CashbookSupport.reason(r)));
+    }
+
+    /** The reason an edited expense is voided with (issue #830). */
+    static final String EDIT_REASON = "Edited: entered again with the changes";
+
+    /**
+     * Edit an expense, the owner's old app's word (issue #830): in one transaction the expense is voided (FR-RET-28) and the
+     * request is recorded as a new expense at the same branch whose explanation names the one it replaces, so a refusal of
+     * either leaves the old expense as it was. An edit whose new amount would wait for an administrator (ADR-091) is refused
+     * with 422 {@code edit_needs_approval}: the old expense is never voided while its replacement waits.
+     */
+    @Transactional
+    Outcome<Expense> replace(String key, UUID id, ExpenseRequest r) {
+        return idempotency.once(key, "POST", PATH + "/" + id + "/replace", r, Expense.class, () -> {
+            Expense old = voidNow(id, EDIT_REASON);
+            ExpenseRequest edited = new ExpenseRequest(
+                    old.branchId(),
+                    r.businessDate(),
+                    r.categoryId(),
+                    r.itemId(),
+                    r.partyId(),
+                    r.amountMinor(),
+                    // Issue #838: the typed words are checked as typed (explanation_required), and only then
+                    // is the link added; the link alone never meets an item's need for an explanation.
+                    r.explanation(),
+                    r.receiptDocumentId(),
+                    r.dateReason(),
+                    // Edits stay online only (issue #812).
+                    null);
+            UUID branch = branchContext.resolve(CashbookSupport.EXPENSE_RECORD, old.branchId());
+            // ADR-120: the edited expense is a new entry; an earlier day is the owner's, with a reason, audited.
+            Checked typed = check(branch, edited, false, id);
+            Checked c = typed.withExplanation(linked(typed.explanation(), old.itemName(), old.businessDate()));
+            if (approvals.rule(ExpenseAction.TYPE).asks(edited.amountMinor())) {
+                throw ApiException.rule(
+                        "edit_needs_approval",
+                        "This amount needs an administrator's approval, so it cannot be edited in place. Delete the expense"
+                                + " and record it again.");
             }
-            if (row.historical()) {
-                throw CashbookSupport.historicalRecord();
-            }
-            // The same branch-day lock as the savings create and the expense create (ADR-080 decision 3).
-            repo.lockBranchDay(row.branchId(), row.businessDate());
-            String reason = CashbookSupport.reason(r);
-            Instant at = support.now();
-            if (row.journalEntryId() != null) {
-                books.reverse(
-                        row.journalEntryId(),
-                        support.dayOf(at),
-                        CashPostings.ref("Void expense", id),
-                        CashPostings.voidKey(CashPostings.EXPENSE, id));
-            }
-            repo.markVoided("retail_expenses", id, principal.userId(), reason, at);
-            audit.record(new AuditLog.Entry(
-                    "retail.expense.voided",
-                    "retail.expense",
-                    id,
-                    row.branchId(),
-                    Map.of("business_date", row.businessDate().toString()),
-                    Map.of("reason", reason)));
-            return view(repo.expense(id, false).orElseThrow());
+            return write(
+                    UUID.randomUUID(), c, edited, CurrentPrincipal.require().userId());
         });
+    }
+
+    /** The longest explanation an expense keeps (V34 {@code explanation varchar(500)}). */
+    static final int MAX_EXPLANATION = 500;
+
+    /**
+     * The explanation of an edited expense: what was typed, then the words that name the one it replaces (issue #838). An
+     * old expense with no item name is named "the expense entry", as the screen's mock does. Past 500 characters the typed
+     * part is cut, never the link, so the screen still finds and strips the link on the next edit.
+     */
+    static String linked(String typed, String oldItemName, LocalDate oldDate) {
+        String own = CashbookSupport.blankToNull(typed);
+        String name = CashbookSupport.blankToNull(oldItemName);
+        String link =
+                "Replaces the " + (name == null ? "expense" : name.strip()) + " entry of " + oldDate + ", edited.";
+        if (own == null) {
+            return link;
+        }
+        int room = Math.max(0, MAX_EXPLANATION - link.length() - 1);
+        // Cut at a whole character, never inside a pair of UTF-16 units (an emoji), which would store a lone half.
+        int cut = own.length() <= room ? own.length() : room;
+        if (cut > 0 && cut < own.length() && Character.isHighSurrogate(own.charAt(cut - 1))) {
+            cut--;
+        }
+        String kept = own.substring(0, cut).stripTrailing();
+        return kept.isEmpty() ? link : kept + " " + link;
+    }
+
+    private Expense voidNow(UUID id, String reason) {
+        Principal principal = CurrentPrincipal.require();
+        ExpenseRow row = repo.expense(id, true)
+                .filter(x -> principal.may(CashbookSupport.VOID, x.branchId()))
+                .orElseThrow(ApiException::notFound);
+        if (row.voided().voided()) {
+            throw CashbookSupport.alreadyVoided();
+        }
+        if (row.historical()) {
+            throw CashbookSupport.historicalRecord();
+        }
+        // The same branch-day lock as the savings create and the expense create (ADR-080 decision 3).
+        repo.lockBranchDay(row.branchId(), row.businessDate());
+        Instant at = support.now();
+        if (row.journalEntryId() != null) {
+            books.reverse(
+                    row.journalEntryId(),
+                    support.dayOf(at),
+                    CashPostings.ref("Void expense", id),
+                    CashPostings.voidKey(CashPostings.EXPENSE, id));
+        }
+        repo.markVoided("retail_expenses", id, principal.userId(), reason, at);
+        audit.record(new AuditLog.Entry(
+                "retail.expense.voided",
+                "retail.expense",
+                id,
+                row.branchId(),
+                Map.of("business_date", row.businessDate().toString()),
+                Map.of("reason", reason)));
+        return viewWithPhoto(repo.expense(id, false).orElseThrow());
+    }
+
+    /** One expense as the list shows it, with a photo added later (review of #846), so no answer reads differently. */
+    private Expense viewWithPhoto(ExpenseRow e) {
+        UUID later = e.receiptDocumentId() != null
+                ? null
+                : documents.newestOf(RECEIPT_SUBJECT, List.of(e.id())).get(e.id());
+        return view(e, later);
     }
 }

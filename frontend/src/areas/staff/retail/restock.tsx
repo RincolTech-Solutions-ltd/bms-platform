@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, createLazyRoute, useRouterState } from '@tanstack/react-router';
+import { Link, createLazyRoute, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
 import { RETAIL_CURRENCY, businessToday, retail, type Product, type Supplier, type Purchase, type PurchasePayment, type PurchaseRequest } from '../../../api/retail';
 import { branchLabel } from '../../../auth/branch';
@@ -7,15 +7,18 @@ import { parseMinor } from '../../../components/money';
 import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
 import { lineTotalMinor, parseQty, qtyString, showDate, showQty } from './maths';
-import { chosenUnitHint, redraftOf } from './restock-correct-state';
+import { chosenUnitHint, listIsStale, redraftOf } from './restock-correct-state';
 import { Gate, Money, Note, Problem, ProductPicker, money, useProfitAccess } from './ui';
 import { ScanBar } from './scan';
 import { PACK_UNUSABLE, plusOne, scanInto, touchedLine } from './barcode-state';
-import { ScreenToast, useItemAdded } from './toast';
-import { TRANSFER, UNITS, canUse, capabilityOn, holdsAt } from './permissions';
+import { ScreenToast, sayDone, useItemAdded } from './toast';
+import { BACKDATE, PROFIT, TRANSFER, UNITS, canUse, capabilityOn, holdsAt } from './permissions';
+import { entryDate } from './cash-state';
+import { DateField } from './cash-ui';
 import { NextSteps } from './next-steps';
 import { usualBuyingPack } from './ladder-state';
 import { OWN_PRICE_KEEPS_SIZE, baseCostMinor, baseQtyMilli, buyingPacks, chosenPack, deliveredFactor, mayKeepSize, packPriceMinor, quantityIn, sameFactor, unitWord, unitWords } from './units-state';
+import { ActionBar } from '../../../app/ui/ActionBar';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { Field, FieldsNeededNote } from '../../../app/ui/Field';
 import { WORDS, howManyInEach, useFromNowOn } from '../../../app/glossary';
@@ -25,6 +28,8 @@ import { entryWarnings, type EntryWarning } from './entry-checks-state';
 import { useEntryChecks, useEntryNorms } from './entry-checks';
 import { AddByName } from '../../../app/ui/EmptyChoice';
 import { PickerWithAdd } from '../../../app/ui/PickerWithAdd';
+import { EditNeedsInternet, KeptOnPhone, OfflineFormNote, isKept, useEntrySave } from '../../../offline/keep-entry';
+import { RECEIPT_LATER, ReceiptPhotoChoice, bounded, sendReceiptPhotoAfter } from './receipt-photo';
 
 // Restock (FR-RET-06): supplier, lines with cost, sell price and a quantity per branch. Saving sets
 // the product's cost and sell price in the same transaction and leaves a price history row.
@@ -93,10 +98,51 @@ export function restockTotal(lines: RestockLine[]): number {
   }, 0);
 }
 
-export function buildPurchase(input: { supplierId: string; purchasedOn: string; method: PurchasePayment; lines: RestockLine[] }): PurchaseRequest {
+// JUSTIFICATION-A3: issue #821 adds the delivery's worth and the block that shows it on Buy stock and Past purchases.
+/**
+ * Issue #821 (ADR-126): what the goods on the form should sell for, as the server reckons a saved delivery: each line's quantity
+ * in the item's own unit times the selling price on the line, else the item's current price. A line not yet right counts what
+ * can be read of it. Null when an item has no selling price yet (review of #850): the worth is then not known.
+ */
+export function restockWorth(lines: RestockLine[]): number | null {
+  if (lines.some((l) => (parseMinor(l.sell, RETAIL_CURRENCY) ?? l.product.sell_minor ?? 0) <= 0)) return null;
+  return lines.reduce((sum, l) => {
+    const sell = parseMinor(l.sell, RETAIL_CURRENCY) ?? l.product.sell_minor ?? 0;
+    const factor = lineFactor(l);
+    const milli = Object.values(l.qtyByBranch).reduce((s, q) => {
+      const entered = branchQty(q) ?? 0;
+      return s + (factor === undefined ? entered : (baseQtyMilli(entered, factor ?? undefined) ?? 0));
+    }, 0);
+    return sum + lineTotalMinor(sell, milli);
+  }, 0);
+}
+
+/**
+ * Issue #821: the delivery's cost, what it should sell for and the expected profit (a loss said as one), one line each. With an
+ * item that has no selling price yet (a null worth), the cost and that sentence instead of the other two. With no line yet (an
+ * undefined worth), the cost alone, as the server leaves both fields out of a delivery with no line (issue #852).
+ */
+export function DeliveryWorth({ paid, worth, label }: { paid: number; worth: number | null | undefined; label: string }) {
+  const known = worth !== null && worth !== undefined;
+  const profit = known ? worth - paid : 0;
+  return (
+    <>
+      <dl className="rt-figures" aria-label={label} data-testid="delivery-worth">
+        <div><dt>Total cost</dt><dd><Money minor={paid} /></dd></div>
+        {known && <div><dt>Should sell for</dt><dd><Money minor={worth} /></dd></div>}
+        {known && <div><dt>{profit < 0 ? 'Expected loss' : 'Expected profit'}</dt><dd><strong><Money minor={Math.abs(profit)} /></strong></dd></div>}
+      </dl>
+      {worth === null && <p className="hint" data-testid="unpriced-note">Some items have no selling price yet.</p>}
+    </>
+  );
+}
+
+export function buildPurchase(input: { supplierId: string; purchasedOn?: string; dateReason?: string; method: PurchasePayment; lines: RestockLine[] }): PurchaseRequest {
   return {
     ...(input.supplierId ? { supplier_id: input.supplierId } : {}),
-    purchased_on: input.purchasedOn,
+    // ADR-120: no date for today, so the server dates the purchase itself; an owner's earlier day goes with its reason.
+    ...(input.purchasedOn ? { purchased_on: input.purchasedOn } : {}),
+    ...(input.dateReason ? { date_reason: input.dateReason } : {}),
     payment_method: input.method,
     lines: input.lines.map((l) => ({
       product_id: l.product.id ?? '',
@@ -137,6 +183,8 @@ export function creditNeedsSupplier(method: PurchasePayment, supplierId: string)
 export interface RestockDraft {
   supplierId: string;
   purchasedOn: string;
+  /** Why the owner chose an earlier day (ADR-120). */
+  dateReason?: string;
   method: PurchasePayment;
   lines: RestockLine[];
 }
@@ -162,7 +210,18 @@ export function supplierOptions(all: Supplier[], chosenId: string): Supplier[] {
   return all.filter((s) => s.active !== false || s.id === chosenId);
 }
 
-export function RestockForm({ onSaved, draftName, initial, again = false }: { onSaved?: (p: Purchase, context: RestockContext) => void; draftName?: string; initial?: RestockDraft; again?: boolean }) {
+export function RestockForm({ onSaved, draftName, fixSearch, fromEdit = false, initial, again = false, replaces }: {
+  onSaved?: (p: Purchase, context: RestockContext) => void;
+  draftName?: string;
+  /** Opened from Edit (issue #830): online only, like an edit, even when the delivery was voided already. */
+  fromEdit?: boolean;
+  /** Where Fix finds this form again for an entry kept on the phone (issue #812): Buy again opens on its purchase. */
+  fixSearch?: Record<string, string>;
+  initial?: RestockDraft;
+  again?: boolean;
+  /** Edit a delivery (issue #830): saving voids this purchase (the correct-this-purchase path) and saves the form as a new one that names it. */
+  replaces?: Purchase;
+}) {
   const { me, branch } = useStaff();
   const canProfit = useProfitAccess();
   // A new selling price applies in every shop, so only someone who may change prices sets it here (ADR-055); Purchasing given
@@ -184,21 +243,56 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
   const setMethod = field('method');
   const setLines = (f: (ls: RestockLine[]) => RestockLine[]) => setDraft((d) => ({ ...d, lines: f(d.lines) }));
   const suppliers = useQuery({ queryKey: ['retail', 'suppliers'], queryFn: () => retail.listSuppliers() });
-
-  // toast-exempt: success screen, the purchase saved screen that replaces the form
+  // ADR-120: only the owner, at every branch the goods go into, sees the date and may choose an earlier one.
+  const into = [...new Set(lines.flatMap((l) => Object.keys(l.qtyByBranch)))];
+  // Issue #812: offline, or when the network drops, a new delivery is kept on the phone; an edit stays online only. Offline the
+  // phone dates it and no date box shows, so a draft's earlier day never holds the save (second review of #839).
+  const entries = useEntrySave();
+  const dated = entryDate(into.every((b) => holdsAt(me, BACKDATE, b)) && holdsAt(me, BACKDATE, undefined), entries.offlineMode ? businessToday() : purchasedOn, draft.dateReason, businessToday());
+  // Issue #819: the optional receipt photo goes after the delivery is saved and said, never holding the form, and never with one
+  // kept on the phone; it is cleared on every save, so it never goes with the next delivery.
+  const [receipt, setReceipt] = useState<File | null>(null);
+  // success-screen: the purchase saved screen that replaces the form; an edited delivery goes back to Past purchases (issue #830)
   const save = useMutation({
+    meta: { success: ({ saved }: { saved: Purchase }) => (replaces ? 'Delivery updated' : saved?.purchase_no ? `Purchase ${saved.purchase_no} saved` : 'Purchase saved') },
     mutationFn: async () => {
       const supplierName = (suppliers.data ?? []).find((x) => x.id === supplierId)?.name ?? '';
       const before = Object.fromEntries(lines.map((l) => [l.product.id ?? '', { sell: l.product.sell_minor, cost: l.product.cost_minor }]));
-      const saved = await retail.createPurchase(buildPurchase({ supplierId, purchasedOn, method, lines }), key);
-      return { saved, context: { supplierName, before } };
+      // Edit (issue #830): one call voids the old delivery and saves this one naming it, in one transaction on the server, so
+      // any refusal (its stock moved, an item switched off) leaves the old delivery as it was. The draft's key covers a retry.
+      const request = buildPurchase({ supplierId, purchasedOn: dated.sent?.date, dateReason: dated.sent?.reason, method, lines });
+      if (replaces?.id) return { saved: await retail.replacePurchase(replaces.id, request, key), context: { supplierName, before } };
+      // Opened from Edit (a delivery voided already, entered again): online only like an edit, so a dropped connection is an
+      // error on the form, never an entry kept on the phone (fifth review of #839). The draft's key covers a retry.
+      if (fromEdit) return { saved: await retail.createPurchase(request, key), context: { supplierName, before } };
+      const saved = await entries.save(
+        {
+          kind: 'purchase', body: request, key, branchId: here ?? branches[0]?.id ?? '',
+          detail: [supplierName, `${lines.length} ${lines.length === 1 ? 'item' : 'items'}`].filter(Boolean).join(', '),
+          fix: { to: '/staff/retail/restock', ...(fixSearch ? { search: fixSearch } : {}), draftName: draftName ?? `restock:${me.user_id ?? ''}`, draft },
+        },
+        () => retail.createPurchase(request, key),
+      );
+      return isKept(saved) ? saved : { saved, context: { supplierName, before } };
     },
-    onSuccess: ({ saved, context }) => {
+    onSuccess: (result) => {
+      setReceipt(null);
+      if (!isKept(result)) {
+        // Edit (issue #830): with no new photo chosen, the edited delivery keeps the photo of the one it replaces, as an expense does.
+        if (receipt || !replaces?.id || !replaces.has_receipt_photo) sendReceiptPhotoAfter('delivery', result.saved.id, receipt);
+        else void bounded((signal) => retail.receiptPhoto('delivery', replaces.id ?? '', signal)).then((b) => sendReceiptPhotoAfter('delivery', result.saved.id, new File([b], 'receipt', { type: b.type })), () => sayDone(RECEIPT_LATER));
+      }
       entry.saved();
+      if (isKept(result)) {
+        discard();
+        return;
+      }
+      const { saved, context } = result;
       finish();
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       onSaved?.(saved, context);
     },
+    onError: (e) => { if (replaces && listIsStale(e)) void queryClient.invalidateQueries({ queryKey: ['retail'] }); },
   });
 
   const unitsOn = capabilityOn(me, 'retail', UNITS);
@@ -249,7 +343,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
 
   const problems = lines.map(restockLineProblem);
   const supplierProblem = creditNeedsSupplier(method, supplierId);
-  const blocked = lines.length === 0 || problems.some((p) => p !== null) || supplierProblem !== null;
+  const blocked = lines.length === 0 || problems.some((p) => p !== null) || supplierProblem !== null || dated.reasonMissing;
   // Issue #353: each line against the item's own purchases, said before saving, never blocking.
   const norms = useEntryNorms(lines.map((l) => l.product.id));
   const warnings = lines.flatMap((l, i): EntryWarning[] => {
@@ -263,9 +357,14 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
     });
   });
   const entry = useEntryChecks('buy', here, warnings, () => save.mutate(), lines);
+  // An edit is never kept on the phone (PR #832), also one of a delivery voided already that Edit enters again (lead's
+  // decision on the fourth review of #839): offline it never becomes a new purchase in the outbox.
+  const editOffline = (replaces !== undefined || fromEdit) && entries.offlineMode;
 
+  if (entries.kept) return <KeptOnPhone item={entries.kept} onNew={entries.another} newLabel="Record another delivery" />;
   return (
-    <form onSubmit={(e) => { e.preventDefault(); if (!blocked && !save.isPending) entry.check(); }}>
+    <form onSubmit={(e) => { e.preventDefault(); if (!blocked && !save.isPending && !editOffline) entry.check(); }}>
+      {editOffline ? <EditNeedsInternet /> : entries.offlineMode && <OfflineFormNote what="delivery" />}
       <Note>Saving a purchase changes the buying and selling price of every item below to the values you enter. The change is recorded in the price history.</Note>
       <FieldsNeededNote />
 
@@ -306,11 +405,11 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
         )}
       />
       </div>
-      <label htmlFor="bought-on">Bought on</label>
-      <input id="bought-on" type="date" max={businessToday()} value={purchasedOn} onChange={(e) => setPurchasedOn(e.target.value)} />
-      {again && purchasedOn < businessToday() && (
+      {/* Issue #812: a delivery kept on the phone is dated when it was made, so no date is asked offline. */}
+      {!entries.offlineMode && <DateField id="bought-on" label="Bought on" entry={dated} value={dated.day} reason={draft.dateReason} onChange={setPurchasedOn} onReason={(dateReason) => setDraft((d) => ({ ...d, dateReason }))} />}
+      {again && dated.earlier && (
         <p role="note" className="alert alert-warning" data-testid="date-warning">
-          This purchase is dated {showDate(purchasedOn)}. The cash book of that day may be banked already, and saving will change its figures. Use today's date unless the goods really arrived then.
+          This purchase is dated {showDate(dated.day)}. The cash book of that day may be banked already, and saving will change its figures. Use today's date unless the goods really arrived then.
         </p>
       )}
 
@@ -408,12 +507,20 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
       </fieldset>
       {supplierProblem && <p role="alert" className="rt-flag" data-testid="credit-needs-supplier">{supplierProblem}</p>}
 
-      <p className="rt-total" aria-live="polite" data-testid="restock-total">Total cost <Money minor={restockTotal(lines)} /></p>
+      {/* Issue #821: who reads profit at every branch on the form sees what the delivery should sell for; anyone else, the total cost as before. */}
+      {canProfit && into.every((b) => holdsAt(me, PROFIT, b)) ? (
+        <div className="rt-total rt-total-figures" aria-live="polite" data-testid="restock-total"><DeliveryWorth paid={restockTotal(lines)} worth={lines.length ? restockWorth(lines) : undefined} label="This delivery" /></div>
+      ) : (
+        <p className="rt-total" aria-live="polite" data-testid="restock-total">Total cost <Money minor={restockTotal(lines)} /></p>
+      )}
+      <ReceiptPhotoChoice id="restock-receipt" file={receipt} onChange={setReceipt} />
       <Problem error={save.error} />
-      <BusyButton type="submit" className="rt-primary" data-tour="restock-save" busy={save.isPending} notReady={blocked}>Save the purchase</BusyButton>
+      <ActionBar>
+        <BusyButton type="submit" className="rt-primary" data-tour="restock-save" busy={save.isPending} notReady={blocked}>{replaces ? 'Save changes' : 'Save the purchase'}</BusyButton>
+      </ActionBar>
 
       {lines.length > 0 && !save.isPending && (
-        <button type="button" onClick={() => { discard(); save.reset(); }}>Clear this purchase</button>
+        <button type="button" onClick={() => { discard(); setReceipt(null); save.reset(); }}>Clear this purchase</button>
       )}
       {toast}
     </form>
@@ -479,25 +586,45 @@ export function RestockSaved({ purchase, context, onNew }: { purchase: Purchase;
  * A voided restock entered again (issue #351): the form opens with its lines, supplier, date and payment, in a draft of its own, and
  * a line says which restock it replaces. Nothing is saved until the person saves it.
  */
-function Again({ purchaseId, onSaved }: { purchaseId: string; onSaved: (p: Purchase, context: RestockContext) => void }) {
+export function Again({ purchaseId, onSaved, edit = false, onEdited }: {
+  purchaseId: string;
+  onSaved: (p: Purchase, context: RestockContext) => void;
+  edit?: boolean;
+  /** An edit saved (issue #830); a delivery found voided already is entered again instead and ends in onSaved. */
+  onEdited?: (p: Purchase, context: RestockContext) => void;
+}) {
   const { me } = useStaff();
   const loaded = useQuery({
-    queryKey: ['retail', 'restock-again', purchaseId],
+    queryKey: ['retail', edit ? 'restock-edit' : 'restock-again', purchaseId],
     queryFn: async () => {
       const purchase = await retail.getPurchase(purchaseId);
       const products = await Promise.all((purchase.lines ?? []).map((l) => retail.getProduct(l.product_id ?? '')));
-      return { purchase, draft: redraftOf(purchase, products, businessToday()) };
+      // Edit keeps the delivery's own date, as the old app did; the date warning says when that day may be banked.
+      const draft = redraftOf(purchase, products, businessToday());
+      return { purchase, draft: edit && purchase.purchased_on ? { ...draft, purchasedOn: purchase.purchased_on } : draft };
     },
     gcTime: 0,
   });
   if (loaded.isPending) return <p className="loading">Loading</p>;
   if (!loaded.data) return <Problem error={loaded.error} />;
+  const { purchase } = loaded.data;
+  // Issue #830: Edit a delivery that is still recorded; one voided already is entered again as before.
+  if (edit && purchase.status !== 'voided') {
+    return (
+      <>
+        <Note>
+          You are editing delivery {purchase.purchase_no}. Change what was wrong, then save. The old entry is kept in Past purchases, marked Voided, and the new one says it replaces it.
+        </Note>
+        <RestockForm draftName={`restock-edit:${me.user_id ?? ''}:${purchaseId}`} initial={loaded.data.draft} onSaved={onEdited ?? onSaved} again replaces={purchase} />
+      </>
+    );
+  }
   return (
     <>
       <Note>
-        You are entering purchase {loaded.data.purchase.purchase_no} again{loaded.data.purchase.status === 'voided' ? ', which you voided' : ''}. Check each quantity, unit and price, then save.
+        You are entering purchase {purchase.purchase_no} again{purchase.status === 'voided' ? ', which you voided' : ''}. Check each quantity, unit and price, then save.
       </Note>
-      <RestockForm draftName={`restock-again:${me.user_id ?? ''}:${purchaseId}`} initial={loaded.data.draft} onSaved={onSaved} again />
+      <RestockForm draftName={`restock-again:${me.user_id ?? ''}:${purchaseId}`} fixSearch={edit ? { edit: purchaseId } : { again: purchaseId }} fromEdit={edit} initial={loaded.data.draft} onSaved={onSaved} again />
     </>
   );
 }
@@ -505,12 +632,16 @@ function Again({ purchaseId, onSaved }: { purchaseId: string; onSaved: (p: Purch
 export function RestockPage() {
   const [done, setDone] = useState<{ purchase: Purchase; context: RestockContext } | null>(null);
   const [round, setRound] = useState(0);
-  const again = (useRouterState({ select: (state) => state.location.search }) as { again?: string }).again;
+  const { again, edit } = useRouterState({ select: (state) => state.location.search }) as { again?: string; edit?: string };
+  const navigate = useNavigate();
   return (
     <Gate screen="restock" title={WORDS.buyStock}>
       <Link className="link-row" data-tour="restock-past" to="/staff/retail/restocks">Past purchases, to correct a mistake<RowChevron /></Link>
       {done ? (
         <RestockSaved purchase={done.purchase} context={done.context} onNew={() => { setDone(null); setRound((n) => n + 1); }} />
+      ) : typeof edit === 'string' && edit !== '' ? (
+        // Issue #830: as in the old app, saving an edit goes back to the list, where the new delivery names the one it replaces.
+        <Again purchaseId={edit} edit onEdited={() => void navigate({ to: '/staff/retail/restocks' })} onSaved={(purchase, context) => setDone({ purchase, context })} />
       ) : typeof again === 'string' && again !== '' ? (
         <Again purchaseId={again} onSaved={(purchase, context) => setDone({ purchase, context })} />
       ) : (

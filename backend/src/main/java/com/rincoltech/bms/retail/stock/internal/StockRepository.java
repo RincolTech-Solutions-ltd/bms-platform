@@ -7,6 +7,7 @@ import com.rincoltech.bms.retail.stock.Quantities;
 import com.rincoltech.bms.retail.stock.internal.StockApi.Correction;
 import com.rincoltech.bms.retail.stock.internal.StockApi.MovementCorrection;
 import com.rincoltech.bms.retail.stock.internal.StockApi.MovementRow;
+import com.rincoltech.bms.retail.stock.internal.StockApi.MovementUndone;
 import com.rincoltech.bms.retail.stock.internal.StockApi.OpenStocktake;
 import com.rincoltech.bms.retail.stock.internal.StockApi.StandardPack;
 import com.rincoltech.bms.retail.stock.internal.StockApi.StockRow;
@@ -136,7 +137,8 @@ class StockRepository {
                                     rs.getBigDecimal("reserved_qty").signum() == 0
                                             ? null
                                             : Quantities.format(rs.getBigDecimal("reserved_qty")),
-                                    standardPack(rs));
+                                    standardPack(rs),
+                                    null);
                         },
                         match != null))
                 .list();
@@ -350,6 +352,43 @@ class StockRepository {
             Instant afterCreated,
             UUID afterId,
             int limit) {
+        return movements(branchIds, productId, from, to, kinds, zone, newestFirst, afterCreated, afterId, limit, false);
+    }
+
+    /**
+     * As above; with {@code withBalance} (the item page, issue #813, which always names the product) each row also carries
+     * the branch's balance of the item just after it and, on a sale, the sale line's profit. The balance is a running sum
+     * over the item's whole history in each branch, taken before the dates, kinds and cursor narrow the rows, so the page
+     * stays one query whatever it holds.
+     */
+    List<MovementRow> movements(
+            List<UUID> branchIds,
+            UUID productId,
+            LocalDate from,
+            LocalDate to,
+            List<String> kinds,
+            String zone,
+            boolean newestFirst,
+            Instant afterCreated,
+            UUID afterId,
+            int limit,
+            boolean withBalance) {
+        if (branchIds != null && branchIds.isEmpty()) {
+            return List.of();
+        }
+        boolean ledger = withBalance && productId != null;
+        String source = ledger
+                ? "(SELECT m.*, sum(m.qty) OVER (PARTITION BY m.branch_id ORDER BY m.occurred_at, m.id) AS balance_after"
+                        + " FROM retail_stock_movements m WHERE m.product_id = :productId"
+                        + (branchIds == null ? "" : " AND m.branch_id IN (:branchIds)")
+                        + ") retail_stock_movements"
+                : "retail_stock_movements";
+        String extra = ledger ? """
+                       , balance_after,
+                       (SELECT l.line_total_minor - l.line_cost_minor FROM retail_sale_lines l
+                         WHERE l.id = retail_stock_movements.source_line_id AND retail_stock_movements.kind = 'sale'
+                           AND retail_stock_movements.reverses_movement_id IS NULL) AS profit_minor
+                  """ : ", NULL::numeric AS balance_after, NULL::bigint AS profit_minor\n";
         StringBuilder sql = new StringBuilder("""
                 SELECT id, occurred_at, branch_id, product_id, kind, qty, unit_cost_minor, source_type,
                        source_id, reverses_movement_id, historical, note, recorded_by,
@@ -359,14 +398,26 @@ class StockRepository {
                        (SELECT p.code FROM retail_products p WHERE p.id = retail_stock_movements.product_id) AS product_code,
                        (SELECT p.description FROM retail_products p WHERE p.id = retail_stock_movements.product_id) AS product_description,
                        (SELECT u.name FROM retail_products p JOIN retail_units u ON u.id = p.unit_id
-                         WHERE p.id = retail_stock_movements.product_id) AS product_unit
-                  FROM retail_stock_movements WHERE true
-                """);
+                         WHERE p.id = retail_stock_movements.product_id) AS product_unit,
+                       undo.undone_at, undo.undone_by, undo.undo_reason, undo.undone_by_name, entry.entry_lines
+                """)
+                .append(extra)
+                .append(" FROM ")
+                .append(source)
+                // Issue #818: an entry undone, read once per row; the lateral names only its own columns.
+                .append(" LEFT JOIN LATERAL (SELECT d.created_at AS undone_at, d.undone_by, d.reason AS undo_reason,"
+                        + " uu.full_name AS undone_by_name FROM retail_usage_undos d LEFT JOIN users uu ON uu.id ="
+                        + " d.undone_by WHERE retail_stock_movements.source_type = 'retail.usage'"
+                        + " AND d.tenant_id = retail_stock_movements.tenant_id"
+                        + " AND d.report_id = retail_stock_movements.source_id) undo ON true")
+                // The lines of the entry, counted on the server: the list may be filtered to one item or paged.
+                .append(" LEFT JOIN LATERAL (SELECT count(*) AS entry_lines FROM retail_stock_movements e"
+                        + " WHERE retail_stock_movements.source_type = 'retail.usage'"
+                        + " AND e.tenant_id = retail_stock_movements.tenant_id AND e.source_type = 'retail.usage'"
+                        + " AND e.source_id = retail_stock_movements.source_id) entry ON true")
+                .append(" WHERE true");
         Map<String, Object> params = new LinkedHashMap<>();
         if (branchIds != null) {
-            if (branchIds.isEmpty()) {
-                return List.of();
-            }
             sql.append(" AND branch_id IN (:branchIds)");
             params.put("branchIds", branchIds);
         }
@@ -431,7 +482,21 @@ class StockRepository {
                                 : new MovementCorrection(
                                         rs.getString("correction_reason"),
                                         Quantities.format(rs.getBigDecimal("correction_old")),
-                                        Quantities.format(rs.getBigDecimal("correction_new")))))
+                                        Quantities.format(rs.getBigDecimal("correction_new"))),
+                        rs.getBigDecimal("balance_after") == null
+                                ? null
+                                : Quantities.format(rs.getBigDecimal("balance_after")),
+                        rs.getObject("profit_minor", Long.class),
+                        rs.getTimestamp("undone_at") == null
+                                ? null
+                                : new MovementUndone(
+                                        rs.getTimestamp("undone_at").toInstant(),
+                                        rs.getObject("undone_by", UUID.class),
+                                        rs.getString("undone_by_name"),
+                                        rs.getString("undo_reason")),
+                        rs.getInt("entry_lines") > 0 ? rs.getInt("entry_lines") : null,
+                        // Issue #819: marked by StockService through the receipt photo port, not read here.
+                        null))
                 .list();
     }
 

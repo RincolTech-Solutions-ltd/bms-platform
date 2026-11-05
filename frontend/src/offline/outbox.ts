@@ -1,13 +1,15 @@
 import type { SalePayment, SaleRequest } from '../api/retail';
+import { SALE_ANSWER_MS } from './connectivity';
 
 // The outbox of sales made offline (issue #458, ADR-067): what one queued sale holds, the order they go in, the backoff
 // between tries, and how an answer from the server changes an item. Pure, so the sync engine and the tests share it.
 
 /**
  * queued: waiting its turn; sending: on its way (sent again with the same key after a reload); failed: refused; sent: done;
- * discarded: a manager discarded it, so it is never sent again and goes after a day.
+ * discarded: a manager discarded it, so it is never sent again and goes after a day; held: the server keeps its key under the
+ * person who made it and a try went out under someone else's sign-in (issue #852), so it waits, unchanged, for its maker.
  */
-export type OutboxState = 'queued' | 'sending' | 'failed' | 'sent' | 'discarded';
+export type OutboxState = 'queued' | 'sending' | 'failed' | 'sent' | 'discarded' | 'held';
 
 /** A line as the provisional receipt shows it. */
 export interface OutboxLine {
@@ -17,19 +19,39 @@ export interface OutboxLine {
   totalMinor: number;
 }
 
+/** The other daily forms kept on the phone while offline (issue #812, ADR-067 decision 13). */
+export type EntryKind = 'expense' | 'savings' | 'banking' | 'withdrawal' | 'purchase' | 'transfer' | 'usage';
+
+/** An entry that is not a sale: the route it goes to, the body as the form built it, and how to show and fix it. */
+export interface OutboxEntry {
+  kind: EntryKind;
+  path: string;
+  body: Record<string, unknown>;
+  /** What it is in a few plain words, for the list and the toasts: "Expense, Transport, Fuel". */
+  words: string;
+  /** Where to fix a refused entry: the form's route, and its draft as it was saved, put back under the form's draft name. */
+  fix?: { to: string; search?: Record<string, string>; draftName: string; draft: unknown };
+  /** Sent online first and its answer lost: the server may record it under its key yet, so a first refusal is not final. */
+  lost?: boolean;
+}
+
 export interface OutboxItem {
-  /** The client sale id, made when the draft started; the server stores it on the sale. */
+  /** The client sale id, made when the draft started; the server stores it on the sale. For an entry, its Idempotency-Key. */
   id: string;
   /** The business host and the person: an item is only ever seen and sent by the person who made it, on that business. */
   scope: string;
   /** The Idempotency-Key of the request. */
   key: string;
-  request: SaleRequest;
-  /** When the sale happened on this device (ISO). */
+  /** A sale's request; absent for an entry, whose body is in {@link entry}. */
+  request?: SaleRequest;
+  /** Present for an entry that is not a sale (issue #812). */
+  entry?: OutboxEntry;
+  /** When the sale or entry was made on this device (ISO). */
   occurredAt: string;
   branchId: string;
   branchName: string;
-  method: SalePayment;
+  /** A sale's payment method; absent for an entry. */
+  method?: SalePayment;
   totalMinor: number;
   lines: OutboxLine[];
   /** OFF- and the first eight characters of the client sale id, until the server's number replaces it. */
@@ -42,6 +64,8 @@ export interface OutboxItem {
   firstServerTryAt?: number;
   /** Not sent before this time (epoch ms). */
   nextAttemptAt: number;
+  /** How many times the server refused this item under its key (issue #812: a lost entry is Fixed only after two). */
+  refusals?: number;
   /** The server's refusal of a failed item, or the last reason a try did not go through. */
   error?: { code?: string; message: string };
   /** A failed item reported to the server (POST /retail/offline-failures), and what a manager decided there. */
@@ -49,9 +73,18 @@ export interface OutboxItem {
   decision?: 'open' | 'retry' | 'discarded' | 'recorded';
   /** The server's sale, once sent. */
   sale?: { id: string; saleNo: string };
+  /** An entry the server took: its id, and whether it waits for an administrator to approve it (ADR-091). */
+  recorded?: { id: string; waiting: boolean };
   sentAt?: number;
   /** When the phone learnt that a manager discarded it (epoch ms). */
   discardedAt?: number;
+  /**
+   * In flight from the form (issue #844): the form wrote the item at save and its own request waits for an answer until
+   * about this time (epoch ms), so no engine, of this tab or another, sends it before then. The form that holds it is known
+   * only in memory (the engine's own list): a form that got no answer clears this at once, and an app killed during the
+   * wait leaves it to pass, so the next start counts the item as waiting and sends it once this time is over.
+   */
+  formUntil?: number;
 }
 
 /** 5 s, 15 s, 1 min, 5 min, then every 15 min (ADR-067 decision 4). */
@@ -88,12 +121,36 @@ export function inOrder(items: OutboxItem[]): OutboxItem[] {
  */
 export function nextToSend(items: OutboxItem[], now: number): OutboxItem | undefined {
   const head = inOrder(items).find((i) => i.state === 'queued' || i.state === 'sending');
-  return head && head.nextAttemptAt <= now ? head : undefined;
+  return head && dueAt(head, now) <= now ? head : undefined;
 }
 
-/** What waits to sync: queued and failed items (a failed one waits for a manager or another try). */
-export function waiting(items: OutboxItem[]): OutboxItem[] {
-  return inOrder(items).filter((i) => i.state !== 'sent' && i.state !== 'discarded');
+/** How long past the form's own wait an item stays the form's (issue #844): the time the form takes to settle it. */
+export const FORM_SLACK_MS = 5_000;
+
+/** The longest a form ever holds an item (issue #844): the 8 second wait of a sale or an entry, and the slack. */
+export const FORM_HOLD_MAX_MS = SALE_ANSWER_MS + FORM_SLACK_MS;
+
+/**
+ * When an item may go: its backoff, and not before its form's hold ends (issue #844). A hold further ahead than any form
+ * ever holds (the phone's clock was moved back since) is not believed, so an item is never kept from sending for hours.
+ */
+export function dueAt(item: OutboxItem, now: number): number {
+  return formMayHold(item, now) ? Math.max(item.nextAttemptAt, item.formUntil ?? 0) : item.nextAttemptAt;
+}
+
+/** A form's request for it may still be on its way (issue #844): its hold has not passed, and is no further ahead than any form holds. */
+export function formMayHold(item: OutboxItem, now: number): boolean {
+  const until = item.formUntil ?? 0;
+  return until > now && until - now <= FORM_HOLD_MAX_MS;
+}
+
+/**
+ * What waits to sync: queued, failed and held items (a failed one waits for a manager or another try, a held one for its
+ * maker). An item a form of this app is still waiting on (`formHeld`, the engine's own list, issue #844) is not, so a
+ * normal online save never shows "1 waiting"; one left by an app that was killed is, at once, whatever its `formUntil`.
+ */
+export function waiting(items: OutboxItem[], formHeld: readonly string[] = []): OutboxItem[] {
+  return inOrder(items).filter((i) => i.state !== 'sent' && i.state !== 'discarded' && !formHeld.includes(i.id));
 }
 
 /** The items a manager discarded, shown as such until they go after a day. */
@@ -116,11 +173,23 @@ export function waitingWords(count: number): string {
 /** 409 codes that mean an earlier request for the same sale has not finished yet (issue #769, ADR-067 decision 4). */
 export const IN_PROGRESS_CODES = ['idempotency_in_progress', 'client_sale_in_progress'];
 
+/** 422: another person in the business stored this key (issue #852). For the outbox it is never a refusal: see {@link classify}. */
+export const OTHER_USER_CODE = 'idempotency_key_other_user';
+
+/**
+ * What a held item says (issue #852): it is kept as it is and goes when its maker signs in again. Never "enter it again":
+ * the maker's own request may have recorded it under its key already.
+ */
+export function heldWords(name?: string): string {
+  return `This was saved by ${name?.trim() || 'the person who made it'}; it is sent when they sign in again.`;
+}
+
 /** The answer to one try, as the engine reads it. */
 export type SendOutcome =
-  | { kind: 'sent'; sale: { id: string; saleNo: string } }
+  | { kind: 'sent'; sale?: { id: string; saleNo: string }; recorded?: { id: string; waiting: boolean } }
   | { kind: 'retry'; code?: string; message: string; answered?: boolean }
   | { kind: 'auth' }
+  | { kind: 'held' }
   | { kind: 'refused'; code?: string; message: string };
 
 /**
@@ -129,11 +198,15 @@ export type SendOutcome =
  * Issue #769: a 409 saying the same sale is still in progress (an earlier request under its key or its client sale id has
  * not finished) means try again later, never a refusal, and does not count towards giving up, so the item is never failed,
  * reported or discarded while that earlier request may still record the sale.
+ * Issue #852: a 422 `idempotency_key_other_user` means the try went out under another person's sign-in (a shared phone);
+ * the server keeps the key, and maybe the sale or entry, under its maker. The item is held, never failed, re-keyed or
+ * sent under anyone else, and goes again with its own key once its maker signs in.
  */
 export function classify(status: number, body: unknown): SendOutcome {
   const b = (body ?? {}) as { id?: string; sale_no?: string; code?: string; detail?: string; errors?: { field?: string; message?: string }[] };
   if (status >= 200 && status < 300 && b.id) return { kind: 'sent', sale: { id: b.id, saleNo: b.sale_no ?? '' } };
   if (status === 401) return { kind: 'auth' };
+  if (status === 422 && b.code === OTHER_USER_CODE) return { kind: 'held' };
   if (status === 409 && IN_PROGRESS_CODES.includes(b.code ?? '')) {
     return { kind: 'retry', code: b.code, message: 'The server is still recording this sale.', answered: false };
   }
@@ -146,11 +219,36 @@ export function classify(status: number, body: unknown): SendOutcome {
   return { kind: 'refused', code: b.code, message: [b.detail, fields].filter(Boolean).join(' ') || `Refused by the server (${status}).` };
 }
 
+/**
+ * The answer to an entry that is not a sale (issue #812): any 2xx took it, with its id, or with the approval it waits for
+ * (ADR-091: an expense worth the business's amount waits for an administrator, as it does online). Every other answer reads
+ * as a sale's does, so a refusal keeps the server's words and the same answers are tried again later.
+ */
+export function classifyEntry(status: number, body: unknown): SendOutcome {
+  const b = (body ?? {}) as { id?: string; approval_id?: string };
+  if (status >= 200 && status < 300) {
+    const waiting = typeof b.approval_id === 'string' && b.id === undefined;
+    return { kind: 'sent', recorded: { id: b.id ?? b.approval_id ?? '', waiting } };
+  }
+  const read = classify(status, body);
+  if (read.kind === 'retry' && IN_PROGRESS_CODES.includes(read.code ?? '')) return { ...read, message: 'The server is still recording this entry.' };
+  // Any other 409 of an entry is a clash the person must look at (the savings suggestion changed, the day is saved): a refusal.
+  if (status === 409) {
+    const b = (body ?? {}) as { code?: string; detail?: string };
+    return { kind: 'refused', code: b.code, message: b.detail ?? 'The server refused it: something changed since it was made.' };
+  }
+  // A field problem's own words say what is wrong ("That day's till is closed. Ask the owner to enter it."), not the
+  // general line above them.
+  const fields = ((body ?? {}) as { errors?: { message?: string }[] }).errors?.map((e) => e.message).filter(Boolean).join(' ');
+  if (read.kind === 'refused' && read.code === 'validation_failed' && fields) return { ...read, message: fields };
+  return read;
+}
+
 /** The item after one try. */
 export function applyOutcome(item: OutboxItem, outcome: SendOutcome, now: number): OutboxItem {
   switch (outcome.kind) {
     case 'sent':
-      return { ...item, state: 'sent', sale: outcome.sale, sentAt: now, error: undefined };
+      return { ...item, state: 'sent', sale: outcome.sale, recorded: outcome.recorded, sentAt: now, error: undefined };
     case 'retry': {
       const attempts = item.attempts + 1;
       if (outcome.answered) {
@@ -163,7 +261,7 @@ export function applyOutcome(item: OutboxItem, outcome: SendOutcome, now: number
             attempts,
             serverTries,
             firstServerTryAt,
-            error: { code: GAVE_UP_CODE, message: `The server did not take this sale after ${serverTries} tries: ${outcome.message}` },
+            error: { code: GAVE_UP_CODE, message: `The server did not take this ${item.entry ? 'entry' : 'sale'} after ${serverTries} tries: ${outcome.message}` },
             decision: undefined,
             failureId: undefined,
           };
@@ -174,9 +272,12 @@ export function applyOutcome(item: OutboxItem, outcome: SendOutcome, now: number
     }
     case 'auth':
       return { ...item, state: 'queued' };
+    case 'held':
+      // The same id, key and request; no try or refusal is counted against it (issue #852).
+      return { ...item, state: 'held', error: { code: OTHER_USER_CODE, message: heldWords() } };
     case 'refused':
       if (outcome.code === DISCARDED_CODE) return markDiscarded(item, now, outcome.message);
-      return { ...item, state: 'failed', attempts: item.attempts + 1, error: { code: outcome.code, message: outcome.message }, decision: undefined, failureId: undefined };
+      return { ...item, state: 'failed', attempts: item.attempts + 1, refusals: (item.refusals ?? 0) + 1, error: { code: outcome.code, message: outcome.message }, decision: undefined, failureId: undefined };
   }
 }
 
@@ -194,6 +295,11 @@ export function markDiscarded(item: OutboxItem, now: number, message?: string): 
     discardedAt: now,
     error: { code: DISCARDED_CODE, message: message ?? 'A manager discarded this sale, so it is not recorded.' },
   };
+}
+
+/** Entries (not sales) sent in the last day, newest first, so the sheet can say they were sent. */
+export function sentEntries(items: OutboxItem[]): OutboxItem[] {
+  return inOrder(items).filter((i) => i.entry && i.state === 'sent').reverse();
 }
 
 /** Sent and discarded items past {@link KEEP_SENT_MS} are dropped. */

@@ -1,7 +1,9 @@
 package com.rincoltech.bms.retail.cashbook.internal;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.rincoltech.bms.retail.stock.OfflineEntry;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -22,7 +24,17 @@ import java.util.UUID;
 final class CashbookApi {
 
     static final String PROFIT_ONLY = "Present only with retail.profit.read in the record's branch";
+    /** Issue #814: the day's savings on the expected-to-bank answer. */
+    static final String SAVINGS_LINE = "Present with retail.profit.read in the branch, or while the owner's setting"
+            + " salespeople_see_savings_amount is on (issue #814, ADR-115 decision 11)";
+    /** Issue #799: a saved day's suggestion is sent to no one; only a voided record keeps it, for profit read. */
+    static final String SAVED_DAY_SUGGESTION =
+            "Present only with retail.profit.read in the record's branch and only on a voided record: an active record"
+                    + " is a saved day, whose suggestion is sent to no one (issue #799)";
+
     static final long MAX_MINOR = 10_000_000_000_000L;
+    static final String DATE_REASON = "Why the entry has a date before today; needed then, and only a holder of"
+            + " retail.entry.backdate may send such a date (ADR-120). Leave the date out and the server dates it today";
 
     private CashbookApi() {}
 
@@ -58,7 +70,7 @@ final class CashbookApi {
             Integer sortOrder) {}
 
     @Schema(name = "RetailCashItemRequest")
-    record ItemRequest(@NotBlank @Size(max = 100) String name, Boolean requiresExplanation) {}
+    record ItemRequest(@NotBlank @Size(max = 100) String name, Boolean requiresExplanation, Boolean reuseExisting) {}
 
     @Schema(name = "RetailCashItemPatch")
     record ItemPatch(@Size(max = 100) String name, Boolean requiresExplanation, Boolean active) {}
@@ -91,7 +103,10 @@ final class CashbookApi {
             @Schema(description = "Opaque; echo it on the create call", requiredMode = Schema.RequiredMode.REQUIRED)
             String suggestionToken,
 
-            @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = PROFIT_ONLY)
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description = PROFIT_ONLY + "; absent for every caller once the day has an active savings record"
+                            + " (issue #799)")
             Long suggestedMinor,
 
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = PROFIT_ONLY)
@@ -117,7 +132,8 @@ final class CashbookApi {
             @Schema(
                     description = "True when this caller may save an amount different from the suggestion: with"
                             + " retail.savings.overwrite, or with salespeople_see_savings_amount on when no saved record of"
-                            + " the day was voided (replacing a saved amount needs retail.savings.overwrite; ADR-115)")
+                            + " the day was voided (replacing a saved amount needs retail.savings.overwrite; ADR-115);"
+                            + " false once the day has an active savings record (issue #799)")
             boolean mayChangeAmount) {}
 
     @Schema(name = "RetailSavingsRequest")
@@ -132,7 +148,24 @@ final class CashbookApi {
             Long amountMinor,
 
             @Size(max = 300) @Schema(description = "Optional, even when the amount differs from the suggestion")
-            String overwriteReason) {}
+            String overwriteReason,
+
+            @Size(max = 300) @Schema(description = DATE_REASON)
+            String dateReason,
+
+            @Valid OfflineEntry offline) {
+
+        /** An earlier day the owner chose, with its reason, is judged as sent online (ADR-067 decision 13). */
+        SavingsRequest {
+            offline = OfflineEntry.unlessChosen(offline, dateReason);
+        }
+
+        /** What the Idempotency-Key covers: the request without its offline block (ADR-067 decision 13). */
+        SavingsRequest forKey() {
+            return new SavingsRequest(
+                    branchId, businessDate, suggestionToken, amountMinor, overwriteReason, dateReason, null);
+        }
+    }
 
     @Schema(name = "RetailSavings")
     record Savings(
@@ -144,7 +177,7 @@ final class CashbookApi {
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = PROFIT_ONLY)
             Long amountMinor,
 
-            @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = PROFIT_ONLY)
+            @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = SAVED_DAY_SUGGESTION)
             Long suggestedMinor,
 
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = PROFIT_ONLY)
@@ -162,6 +195,36 @@ final class CashbookApi {
     @Schema(name = "RetailSavingsPage")
     record SavingsPage(List<Savings> items, String nextCursor) {}
 
+    // JUSTIFICATION-A3: issue #827 asks for four nested levels with a total each; one record per level is the smallest
+    // shape.
+    /**
+     * Issue #827: the active savings records a seller may see, grouped by shop, year, month and the person who saved, with
+     * the sum of the amount saved at each level. Amounts saved only: no profit, no suggestion, no sales.
+     */
+    @Schema(name = "RetailSavingsGroups")
+    record SavingsGroups(long totalMinor, List<SavingsShop> shops) {}
+
+    @Schema(name = "RetailSavingsShop")
+    record SavingsShop(UUID branchId, long totalMinor, List<SavingsYear> years) {}
+
+    @Schema(name = "RetailSavingsYear")
+    record SavingsYear(int year, long totalMinor, List<SavingsMonth> months) {}
+
+    @Schema(name = "RetailSavingsMonth")
+    record SavingsMonth(@Schema(description = "1 to 12") int month, long totalMinor, List<SavingsPerson> people) {}
+
+    @Schema(name = "RetailSavingsPerson")
+    record SavingsPerson(
+            @Schema(description = "Null on a record brought in from an earlier system with no person")
+            UUID userId,
+
+            String name,
+            long totalMinor,
+            List<SavedDay> records) {}
+
+    @Schema(name = "RetailSavedDay")
+    record SavedDay(UUID id, LocalDate businessDate, long amountMinor) {}
+
     // --------------------------------------------------------------------------------- banking
 
     @Schema(name = "RetailBankingExpected")
@@ -177,10 +240,13 @@ final class CashbookApi {
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = PROFIT_ONLY)
             Long cashPurchasesMinor,
 
-            @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = PROFIT_ONLY)
+            @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = SAVINGS_LINE)
             Long savingsMinor,
 
-            @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = PROFIT_ONLY)
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description = PROFIT_ONLY
+                            + "; without it the voids are folded into expected_after_savings_minor only (issue #847)")
             Long savingsVoidsMinor,
 
             long expensesMinor,
@@ -195,6 +261,15 @@ final class CashbookApi {
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = PROFIT_ONLY)
             Long expectedMinor,
 
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Issue #814, ADR-115 decision 11: cash expected less the day's savings (plus their voids),"
+                                    + " never less the cash purchases; present only without retail.profit.read, while the owner's"
+                                    + " setting salespeople_see_savings_amount is on. Below zero when the savings are more"
+                                    + " than the cash expected; the form then shows 0 and says so (issue #847)")
+            Long expectedAfterSavingsMinor,
+
             long bankedSoFarMinor) {}
 
     @Schema(name = "RetailBankingRequest")
@@ -203,7 +278,23 @@ final class CashbookApi {
             LocalDate businessDate,
             @NotNull @Positive @Max(MAX_MINOR) Long amountMinor,
             Instant bankedAt,
-            @Size(max = 100) String reference) {}
+            @Size(max = 100) String reference,
+
+            @Size(max = 300) @Schema(description = DATE_REASON)
+            String dateReason,
+
+            @Valid OfflineEntry offline) {
+
+        /** An earlier day the owner chose, with its reason, is judged as sent online (ADR-067 decision 13). */
+        BankingRequest {
+            offline = OfflineEntry.unlessChosen(offline, dateReason);
+        }
+
+        /** What the Idempotency-Key covers: the request without its offline block (ADR-067 decision 13). */
+        BankingRequest forKey() {
+            return new BankingRequest(branchId, businessDate, amountMinor, bankedAt, reference, dateReason, null);
+        }
+    }
 
     @Schema(name = "RetailBanking")
     record Banking(
@@ -250,7 +341,23 @@ final class CashbookApi {
             LocalDate businessDate,
             @NotNull @Positive @Max(MAX_MINOR) Long amountMinor,
             Instant withdrawnAt,
-            @Size(max = 300) String purpose) {}
+            @Size(max = 300) String purpose,
+
+            @Size(max = 300) @Schema(description = DATE_REASON)
+            String dateReason,
+
+            @Valid OfflineEntry offline) {
+
+        /** An earlier day the owner chose, with its reason, is judged as sent online (ADR-067 decision 13). */
+        WithdrawalRequest {
+            offline = OfflineEntry.unlessChosen(offline, dateReason);
+        }
+
+        /** What the Idempotency-Key covers: the request without its offline block (ADR-067 decision 13). */
+        WithdrawalRequest forKey() {
+            return new WithdrawalRequest(branchId, businessDate, amountMinor, withdrawnAt, purpose, dateReason, null);
+        }
+    }
 
     @Schema(name = "RetailWithdrawal")
     record Withdrawal(
@@ -284,7 +391,37 @@ final class CashbookApi {
             UUID partyId,
             @NotNull @Positive @Max(MAX_MINOR) Long amountMinor,
             @Size(max = 500) String explanation,
-            UUID receiptDocumentId) {}
+            UUID receiptDocumentId,
+
+            @Size(max = 300) @Schema(description = DATE_REASON)
+            String dateReason,
+
+            @Valid OfflineEntry offline) {
+
+        /** An earlier day the owner chose, with its reason, is judged as sent online (ADR-067 decision 13). */
+        ExpenseRequest {
+            offline = OfflineEntry.unlessChosen(offline, dateReason);
+        }
+
+        /**
+         * What the Idempotency-Key covers: the request without its offline block (ADR-067 decision 13) and without its receipt
+         * photo (issue #819, ADR-124): a phone that keeps an expense whose answer was lost drops the photo from the copy it
+         * sends later, and that copy is the same expense under the same key.
+         */
+        ExpenseRequest forKey() {
+            return new ExpenseRequest(
+                    branchId,
+                    businessDate,
+                    categoryId,
+                    itemId,
+                    partyId,
+                    amountMinor,
+                    explanation,
+                    null,
+                    dateReason,
+                    null);
+        }
+    }
 
     @Schema(name = "RetailExpense")
     record Expense(
@@ -321,7 +458,10 @@ final class CashbookApi {
             @NotNull UUID partyId,
             UUID takenByPartyId,
             @NotNull @Positive @Max(MAX_MINOR) Long principalMinor,
-            @Size(max = 300) String purpose) {}
+            @Size(max = 300) String purpose,
+
+            @Size(max = 300) @Schema(description = DATE_REASON)
+            String dateReason) {}
 
     @Schema(name = "RetailRepaymentRequest")
     record RepaymentRequest(
@@ -333,7 +473,10 @@ final class CashbookApi {
             @NotBlank @Schema(allowableValues = {"cash", "mobile_money", "bank"})
             String method,
 
-            LocalDate paidOn) {}
+            LocalDate paidOn,
+
+            @Size(max = 300) @Schema(description = DATE_REASON)
+            String dateReason) {}
 
     @Schema(name = "RetailRepayment")
     record Repayment(
@@ -491,7 +634,7 @@ final class CashbookApi {
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = PROFIT_ONLY)
             Long amountMinor,
 
-            @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = PROFIT_ONLY)
+            @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = SAVED_DAY_SUGGESTION)
             Long suggestedMinor,
 
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = PROFIT_ONLY)

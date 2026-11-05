@@ -11,6 +11,9 @@ import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue.ProductSnapshot;
+import com.rincoltech.bms.retail.stock.EntryDates;
+import com.rincoltech.bms.retail.stock.EntryLocations;
+import com.rincoltech.bms.retail.stock.OfflineEntry;
 import com.rincoltech.bms.retail.stock.Quantities;
 import com.rincoltech.bms.retail.stock.RetailBooks;
 import com.rincoltech.bms.retail.stock.RetailBooks.Leg;
@@ -53,6 +56,10 @@ class UsageService {
     private final CurrentTenant tenant;
     private final BusinessClock clock;
     private final AuditLog audit;
+    /** The audit row of usage kept on the phone offline and dated by the phone (issue #812). */
+    private final EntryDates entryDates;
+
+    private final EntryLocations locations;
 
     UsageService(
             JdbcClient jdbc,
@@ -63,7 +70,11 @@ class UsageService {
             RetailBranchContext branches,
             CurrentTenant tenant,
             BusinessClock clock,
-            AuditLog audit) {
+            AuditLog audit,
+            EntryDates entryDates,
+            EntryLocations locations) {
+        this.entryDates = entryDates;
+        this.locations = locations;
         this.jdbc = jdbc;
         this.catalogue = catalogue;
         this.stock = stock;
@@ -77,14 +88,22 @@ class UsageService {
 
     @Transactional
     Outcome<UsageReport> report(String idempotencyKey, UsageRequest r) {
-        return idempotency.once(idempotencyKey, "POST", PATH, r, UsageReport.class, () -> record(r));
+        // The key never covers where the phone was (ADR-122: a retry from a phone that has moved is the same request)
+        // nor
+        // the offline block (ADR-067 decision 13: an online request whose answer was lost, sent again from the phone
+        // with
+        // when it was made, is still the same usage).
+        return idempotency.once(idempotencyKey, "POST", PATH, r.forKey(), UsageReport.class, () -> record(r));
     }
 
     private UsageReport record(UsageRequest r) {
         // Usage and damage only take stock out, so a branch that keeps no goods may still report them (ADR-041).
         UUID branch = branches.resolve("retail.usage.report", r.branchId());
         LocalDate today = clock.today(tenant.profile().timezone());
-        LocalDate on = r.occurredOn() == null ? today : r.occurredOn();
+        // An entry kept on the phone offline is dated the day it was made (ADR-067 decision 13).
+        LocalDate requested = OfflineEntry.day(
+                r.offline(), r.occurredOn(), clock.now(), tenant.profile().timezone(), List.of(branch));
+        LocalDate on = requested == null ? today : requested;
         List<FieldProblem> problems = new ArrayList<>();
         if (on.isAfter(today)) {
             problems.add(new FieldProblem("occurred_on", "invalid", "Usage cannot be dated in the future."));
@@ -182,11 +201,14 @@ class UsageService {
                             l.lineCostMinor())
                     .update();
         }
+        // ADR-122: where the phone was, when it said; never in the audit entry.
+        locations.record(EntryLocations.USAGE, id, branch, r.location());
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("kind", r.kind());
         after.put("reason", reason);
         after.put("lines", lines.size());
         audit.record(AuditLog.Entry.created("retail.usage.reported", USAGE, id, branch, after));
+        entryDates.auditOffline(r.offline(), on, USAGE, id, branch);
         UsageReport report = new UsageReport(id, branch, r.kind(), reason, on, currency, total, lines, clock.now(), by);
         return StockService.mayReadCost(branch) ? report : withoutCost(report);
     }

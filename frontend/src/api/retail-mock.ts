@@ -2,12 +2,12 @@ import type {
   ApprovalWaiting,
   Barcode,
   AllBranchesRow, Category, EntryConfirmation, EntryNorms, NameHints, CapabilitiesRead, Family, Pack, Customer, InFlightReport, LocationRow, PriceChange, DailyProfit, DailyProfitRow, Product, Purchase, RetailApi, Sale, SaleLine, SimilarProduct, StockMovement, Stocktake, StockByLocation, StockRow,
-  Supplier, Transfer, Unit, Usage, UsualPackRequest, Valuation, ValuationRow,
+  Supplier, SupplierDelivery, SupplierDetails, Transfer, Unit, Usage, UsualPackRequest, Valuation, ValuationRow,
 } from './retail';
 import type { SalesQuery } from './retail';
 import { NO_SUPPLIER, RetailError, businessToday, daysBefore } from './retail';
 import { summariseChain } from './retail-chain-mock';
-import { summarisePurchases, summariseStock } from './retail-grouping-mock';
+import { summarisePurchases, summariseStock, summariseUsage } from './retail-grouping-mock';
 import { retailMessage } from './retail-errors';
 import { foldText } from '../app/ui/fold';
 import type { Me } from './client';
@@ -50,10 +50,10 @@ const TILL_PERMISSIONS = ['retail.savings.record', 'retail.banking.record', 'ret
 const CASHIER_PERMISSIONS = [...SALES_PERMISSIONS, ...TILL_PERMISSIONS];
 const ADMIN_PERMISSIONS = [
   ...SALES_PERMISSIONS, 'retail.catalogue.manage', 'retail.price.edit', 'retail.sale.void',
-  'retail.stocktake.commit', 'retail.purchase.create', 'retail.stock.transfer', 'retail.profit.read', 'core.settings.manage', 'retail.branch_role.manage', 'retail.pricelist.manage', 'retail.pricelist.use', 'retail.credit.manage', 'retail.credit.write_off', 'retail.credit.override', 'retail.document.issue', 'retail.sale.return', 'retail.controls.read', 'retail.sale.all_sellers', 'core.billing.read',
+  'retail.stocktake.commit', 'retail.purchase.create', 'retail.stock.transfer', 'retail.profit.read', 'core.settings.manage', 'retail.branch_role.manage', 'retail.pricelist.manage', 'retail.pricelist.use', 'retail.credit.manage', 'retail.credit.write_off', 'retail.credit.override', 'retail.document.issue', 'retail.sale.return', 'retail.controls.read', 'retail.sale.all_sellers', 'core.billing.read', 'retail.entry_location.read',
   'retail.savings.record', 'retail.savings.overwrite', 'retail.banking.record', 'retail.expense.record', 'retail.expense.manage',
   'retail.withdrawal.record', 'retail.advance.create', 'retail.advance.repay', 'retail.cashbook.read', 'retail.cashbook.void', 'retail.payable.manage',
-  'retail.till.close',
+  'retail.till.close', 'retail.entry.backdate',
 ];
 
 /** A fake signed-in user for the mock session, so the app runs without a backend. */
@@ -114,6 +114,12 @@ export function setMockProfitAccess(allowed: boolean): void {
   profitAccess = allowed;
 }
 
+let supplierEditAccess = true;
+/** Issue #820: whether the session may edit suppliers, and so read their bank account number. */
+export function setMockSupplierEdit(allowed: boolean): void {
+  supplierEditAccess = allowed;
+}
+
 // Issue #353: the mock keeps no entry history of its own, so no screen warns unless a test or a screenshot sets one here.
 const entryNormsSet = new Map<string, Partial<EntryNorms>>();
 /** Confirmed entry warnings, newest last, for the tests to read. */
@@ -135,6 +141,29 @@ interface MockProduct {
 
 /** The mock's page size for credit buyers, as the API's default limit is 50. */
 const CUSTOMER_PAGE = 50;
+const SUPPLIER_DELIVERY_PAGE = 20;
+
+// JUSTIFICATION-A3: the mock has no supplier details to merge until issue #820; the server's merge rule needs its twin here.
+/**
+ * Issue #820: a supplier's details after a write, as the server leaves them: an omitted field unchanged, an empty one cleared,
+ * a bad email or web address refused in the server's words.
+ */
+function mergedDetails(before: SupplierDetails | undefined, typed: SupplierDetails | undefined): SupplierDetails {
+  const out: Record<string, string> = { ...(before ?? {}) } as Record<string, string>;
+  for (const [key, value] of Object.entries(typed ?? {})) {
+    if (value === undefined || value === null) continue;
+    const text = String(value).trim();
+    if (text === '') delete out[key];
+    else out[key] = text;
+  }
+  if (out.email && out.email !== before?.email && !/^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/.test(out.email)) {
+    refuse(422, 'validation_failed', 'That email does not look right. Write it like name@example.com.');
+  }
+  if (out.website && out.website !== before?.website && !/^(https?:\/\/)?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+(\/\S*)?$/i.test(out.website)) {
+    refuse(422, 'validation_failed', 'That web address does not look right. Write it like example.com.');
+  }
+  return out as SupplierDetails;
+}
 
 const CATEGORIES: Category[] = ['Cables', 'Lighting', 'Fittings', 'Solar'].map((name, i) => ({
   id: `00000000-0000-4000-8000-0000000c${String(i + 1).padStart(4, '0')}`,
@@ -161,8 +190,8 @@ const PRODUCTS: MockProduct[] = [
   costMinor: costMinor as number, sellMinor: sellMinor as number,
 }));
 
-/** The server's level filter: out is zero or less, low is at or below 5 (so it includes out). */
-const atLevel = (qty: number, level?: 'out' | 'low'): boolean => level === undefined || qty <= (level === 'out' ? 0 : 5);
+/** The server's level filter: out is zero or less, low is at or below 10 (issue #830; so it includes out). */
+const atLevel = (qty: number, level?: 'out' | 'low'): boolean => level === undefined || qty <= (level === 'out' ? 0 : 10);
 const toMilli = (text: string): number => Math.round(Number(text) * 1000);
 /** A quantity without trailing zeros: 10.000 is 10. */
 const plainQty = (q: string): string => (q.includes('.') ? q.replace(/0+$/, '').replace(/\.$/, '') : q);
@@ -281,8 +310,9 @@ export function createMockRetail(): RetailApi {
   // Branch roles and capabilities of this mock instance (ADR-033): every branch both, every capability off. A store is read
   // from the branch's flag (setMockStores, ADR-104) and is never stored as a role.
   const roles = new Map<string, 'shop' | 'both'>();
+  const located = new Set<string>();
   const roleOf = (branch: string): 'store' | 'shop' | 'both' => (storeBranches.includes(branch) ? 'store' : roles.get(branch) ?? 'both');
-  let caps: { value: Record<string, unknown>; version: number } = { value: { profile: 'shops', slow_mover_months: 4, slow_mover_min_sold: 0 }, version: 1 };
+  let caps: { value: Record<string, unknown>; version: number } = { value: { profile: 'shops', slow_mover_months: 4, slow_mover_min_sold: 0, other_shops_stock: true }, version: 1 };
   const twoStep = () => transferReceipt || caps.value['transfer_receipt'] === true;
   const read = (): CapabilitiesRead => ({ capabilities: { ...caps.value, ...Object.fromEntries(MOCK_FLAGS.map((k) => [k, caps.value[k] === true])) }, version: caps.version });
   const balances = new Map<string, number>();
@@ -398,6 +428,18 @@ export function createMockRetail(): RetailApi {
     { id: 's0000000-0000-4000-8000-000000000001', name: 'Test Supplier 01', active: true, version: 1 },
     { id: 's0000000-0000-4000-8000-000000000002', name: 'Test Forwarder 01', active: true, version: 1 },
   ];
+  // Issue #820: a supplier's restocks, the newest day first, and the day of the newest one not voided.
+  const deliveriesOf = (id: string): SupplierDelivery[] => purchases
+    .filter((p) => p.supplier_id === id)
+    .sort((a, b) => (b.purchased_on ?? '').localeCompare(a.purchased_on ?? ''))
+    .map((p) => ({ id: p.id, purchase_no: p.purchase_no, purchased_on: p.purchased_on, voided: p.status === 'voided', lines: (p.lines ?? []).length }));
+  const supplierRead = (s: Supplier): Supplier => {
+    const last = deliveriesOf(s.id ?? '').find((d) => !d.voided)?.purchased_on;
+    // The bank account is the editors' alone, as on the server.
+    const { bank_account: bank, ...open } = s.details ?? {};
+    const details = supplierEditAccess && bank ? { ...open, bank_account: bank } : open;
+    return { ...s, details, ...(last ? { last_delivery_on: last } : {}) };
+  };
   const stocktakes = new Map<string, Stocktake>();
   const sales: (Sale & { costTotal: number })[] = [];
   const usageCostByDay = new Map<string, number>();
@@ -848,6 +890,20 @@ export function createMockRetail(): RetailApi {
         return familyOf(familyId);
       }),
     photo: (photoId) => run(() => photos.get(photoId) ?? refuse(404, 'not_found', 'That could not be found.')),
+    // Issue #819: a receipt photo is kept under its record, the newest shown, as the server does.
+    addReceiptPhoto: (kind, recordId, file) => run(() => {
+      if (file.size > 5 * 1024 * 1024) refuse(413, 'file_too_large', 'The photo is larger than 5 MB.');
+      const id = nextId('d');
+      photos.set(id, file);
+      photos.set(`${kind}:${recordId}`, file);
+      return { photo_id: id };
+    }),
+    sendExpenseReceiptPhoto: (file) => run(() => {
+      const id = nextId('d');
+      photos.set(id, file);
+      return { photo_id: id };
+    }),
+    receiptPhoto: (kind, recordId) => run(() => photos.get(`${kind}:${recordId}`) ?? refuse(404, 'not_found', 'That could not be found.')),
 
     priceHistory: (id) => run(() => ((find(id) && history.get(id)) || undefined)?.map((h) => (profitAccess ? h : { ...h, old_cost_minor: undefined, new_cost_minor: undefined })) || [{ id: nextId('h'), at: '2026-09-01T08:00:00Z', source: 'initial', new_sell_minor: find(id).sellMinor, currency: 'UGX', ...(profitAccess ? { new_cost_minor: find(id).costMinor } : {}) }]),
 
@@ -1061,7 +1117,11 @@ export function createMockRetail(): RetailApi {
     listStock: ({ branchId, query, categoryId: category, negativeOnly, level, includeInactive }) =>
       delay([...products.values()].filter((p) => (includeInactive || p.active !== false) && matches(p, query) && (!category || categoryId(p.category) === category)).map((p): StockRow => {
         const milli = bal(branchId, p.id);
-        return cost({ product_id: p.id, code: p.code, description: p.description, category_id: categoryId(p.category), category: p.category, unit: p.unit, qty: fromMilli(milli), negative: milli < 0, sell_minor: p.sellMinor, ...stockPack(p.id) }, { cost_minor: p.costMinor });
+        // Issue #807: every shop's quantity, this one first, while the owner's switch is on (the server's rule, StockService).
+        // Every mock branch is active and keeps goods; with one there is no list, as on the server.
+        const shops = caps.value.other_shops_stock === false || MOCK_BRANCHES.length < 2 ? undefined : [...MOCK_BRANCHES].sort((a, b) => Number(b.id === branchId) - Number(a.id === branchId))
+          .map((b) => ({ branch_id: b.id, name: b.name, qty: fromMilli(bal(b.id, p.id)), negative: bal(b.id, p.id) < 0, here: b.id === branchId }));
+        return cost({ product_id: p.id, code: p.code, description: p.description, category_id: categoryId(p.category), category: p.category, unit: p.unit, qty: fromMilli(milli), negative: milli < 0, sell_minor: p.sellMinor, ...stockPack(p.id), ...(shops ? { shops } : {}) }, { cost_minor: p.costMinor });
       }).filter((r) => (!negativeOnly || r.negative) && atLevel(Number(r.qty), level))),
 
     listSales: ({ cursor, ...q }) => {
@@ -1143,13 +1203,36 @@ export function createMockRetail(): RetailApi {
       }));
       return delay({ items, ...(start + CUSTOMER_PAGE < all.length ? { next_cursor: String(start + CUSTOMER_PAGE) } : {}) });
     },
-    listSuppliers: () => delay([...suppliers]),
+    // Issue #820: the search finds a name, a type or the digits of a phone; the last delivery date and the deliveries are read
+    // from the restocks, as the server reads them.
+    listSuppliers: (q) => {
+      const text = (q?.query ?? '').trim().toLowerCase();
+      const digits = text.replace(/\D/g, '').replace(/^(256|0)/, '');
+      return delay(suppliers
+        .filter((s) => !text || (s.name ?? '').toLowerCase().includes(text) || (s.details?.supplier_type ?? '').toLowerCase().includes(text)
+          || (digits.length >= 4 && (s.contact ?? '').replace(/\D/g, '').includes(digits)))
+        .map(supplierRead));
+    },
+    getSupplier: (id) => run(() => {
+      const s = suppliers.find((x) => x.id === id);
+      return s ? supplierRead(s) : refuse(404, 'not_found', 'The resource does not exist.');
+    }),
+    listSupplierDeliveries: (id, { cursor }) => run(() => {
+      if (!suppliers.some((x) => x.id === id)) return refuse(404, 'not_found', 'The resource does not exist.');
+      const all = deliveriesOf(id);
+      const start = cursor ? Number(cursor) : 0;
+      return { items: all.slice(start, start + SUPPLIER_DELIVERY_PAGE), ...(start + SUPPLIER_DELIVERY_PAGE < all.length ? { next_cursor: String(start + SUPPLIER_DELIVERY_PAGE) } : {}) };
+    }),
+    listSupplierTypes: () => delay([...new Set(suppliers.map((s) => s.details?.supplier_type?.trim()).filter((t): t is string => !!t))]),
     createSupplier: (body) =>
       run(() => {
         clash(suppliers as { id: string; name: string }[], '', body.name, 'duplicate_supplier', 'supplier');
-        const s: Supplier = { id: nextId('s'), name: body.name.trim(), active: true, version: 1, ...(body.contact?.trim() ? { contact: body.contact.trim() } : {}) };
+        const s: Supplier = {
+          id: nextId('s'), name: body.name.trim(), active: true, version: 1, created_at: new Date().toISOString(),
+          details: mergedDetails(undefined, body.details), ...(body.contact?.trim() ? { contact: body.contact.trim() } : {}),
+        };
         suppliers.push(s);
-        return s;
+        return supplierRead(s);
       }),
 
     updateSupplier: (id, version, body) =>
@@ -1163,8 +1246,9 @@ export function createMockRetail(): RetailApi {
         }
         if (body.contact !== undefined) s.contact = body.contact.trim() || undefined;
         s.active = body.active ?? s.active;
+        s.details = mergedDetails(s.details, body.details);
         s.version = (s.version ?? 1) + 1;
-        return { ...s };
+        return supplierRead(s);
       }),
 
     createCustomer: (body) =>
@@ -1254,10 +1338,10 @@ export function createMockRetail(): RetailApi {
         total += lineTotal(l.cost_minor, qtyTotal);
         return { id: nextId('p'), line_no: n + 1, product_id: p.id, code: p.code, description: p.description, cost_minor: l.cost_minor, sell_minor: p.sellMinor, qty_total: fromMilli(qtyTotal), qty_by_branch: l.qty_by_branch, line_total_minor: lineTotal(l.cost_minor, qtyTotal), base_unit: p.unit };
       });
-      const made: Purchase = { id: nextId('6'), purchase_no: `P-${String(seq).padStart(6, '0')}`, ...(body.supplier_id ? { supplier_id: body.supplier_id } : {}), purchased_on: body.purchased_on, payment_method: body.payment_method, currency: 'UGX', lines, total_minor: total, status: 'posted' };
+      const made: Purchase = { id: nextId('6'), purchase_no: `P-${String(seq).padStart(6, '0')}`, ...(body.supplier_id ? { supplier_id: body.supplier_id } : {}), purchased_on: body.purchased_on ?? today(), payment_method: body.payment_method, currency: 'UGX', lines, total_minor: total, status: 'posted', ...(body.note ? { note: body.note } : {}) };
       purchases.push({ ...made, before });
       if (body.payment_method === 'credit' && body.supplier_id) {
-        purchasingApi.recordCreditRestock({ id: made.id ?? '', purchase_no: made.purchase_no ?? '', supplier_id: body.supplier_id, date: body.purchased_on, total_minor: total });
+        purchasingApi.recordCreditRestock({ id: made.id ?? '', purchase_no: made.purchase_no ?? '', supplier_id: body.supplier_id, date: made.purchased_on ?? today(), total_minor: total });
       }
       return made;
       })),
@@ -1283,12 +1367,25 @@ export function createMockRetail(): RetailApi {
     stockHistory: ({ productId, branchId }) =>
       run(() => ({ items: stockLog.filter((m) => m.product_id === productId && m.branch_id === branchId).reverse() })),
 
+    usageSummary: (q) =>
+      run(() => summariseUsage(stockLog, q, {
+        cost: profitAccess,
+        branchName: (id) => MOCK_BRANCHES.find((b) => b.id === id)?.name ?? 'Branch',
+        product: (id) => {
+          const p = id ? products.get(id) : undefined;
+          return p ? { name: p.description, categoryId: categoryId(p.category), categoryName: p.category, unit: p.unit } : undefined;
+        },
+        day: (m) => businessToday(new Date(m.at ?? '')),
+      })),
+
     usageHistory: ({ from, to, branchId, productId }) =>
       run(() => ({
         items: stockLog
           // The business day, as the server's from and to (StockService.movements, the tenant's time zone), never the UTC day.
           .filter((m) => (m.kind === 'usage' || m.kind === 'damage') && businessToday(new Date(m.at ?? '')) >= from && businessToday(new Date(m.at ?? '')) <= to
             && (!branchId || m.branch_id === branchId) && (!productId || m.product_id === productId))
+          // Issue #818: the entry's whole line count, as the server counts it, whatever the filter.
+          .map((m) => (m.source_type === 'retail.usage' ? { ...m, entry_lines: stockLog.filter((x) => x.source_type === 'retail.usage' && x.source_id === m.source_id).length } : m))
           .reverse(),
       })),
 
@@ -1365,22 +1462,45 @@ export function createMockRetail(): RetailApi {
         return voided;
       })),
 
+    // Issue #830: as the server's one transaction, a new delivery the mock would refuse is refused before the old one is voided.
+    replacePurchase: async (id, body, key) => {
+      for (const l of body.lines) if (find(l.product_id).active === false) refuse(422, 'product_inactive', 'This item is switched off.');
+      const old = await mock.voidPurchase(id, 'Edited: entered again with the changes', `${key}-void`);
+      return mock.createPurchase({ ...body, note: `Replaces ${old.purchase_no ?? ''}, edited` }, key);
+    },
+
     createUsage: (body, key) =>
       run(() => once(`usage|${key}`, body, (): Usage => {
       const branchId = body.branch_id ?? BRANCH_A;
       body.lines.forEach((l) => guard(branchId, l.product_id, toMilli(l.qty)));
       let costTotal = 0;
+      const reportId = nextId('7');
       const lines = body.lines.map((l, n) => {
         const p = find(l.product_id);
         const lineCost = lineTotal(p.costMinor, toMilli(l.qty));
         move(branchId, p.id, -toMilli(l.qty));
-        logMove(cost({ branch_id: branchId, product_id: p.id, code: p.code, description: p.description, unit: p.unit, kind: body.kind === 'used' ? 'usage' : 'damage', qty: `-${l.qty}`, source_type: 'retail.usage', note: body.reason }, { unit_cost_minor: p.costMinor, line_cost_minor: lineCost }));
+        logMove(cost({ branch_id: branchId, product_id: p.id, code: p.code, description: p.description, unit: p.unit, kind: body.kind === 'used' ? 'usage' : 'damage', qty: `-${l.qty}`, source_type: 'retail.usage', source_id: reportId, note: body.reason }, { unit_cost_minor: p.costMinor, line_cost_minor: lineCost }));
         costTotal += lineCost;
         return cost({ line_no: n + 1, product_id: p.id, code: p.code, description: p.description, qty: l.qty }, { unit_cost_minor: p.costMinor, line_cost_minor: lineCost });
       });
       usageCostByDay.set(today(), (usageCostByDay.get(today()) ?? 0) + costTotal);
-      return cost({ id: nextId('7'), branch_id: branchId, kind: body.kind, reason: body.reason, occurred_on: body.occurred_on ?? today(), currency: 'UGX', lines }, { cost_total_minor: costTotal });
+      return cost({ id: reportId, branch_id: branchId, kind: body.kind, reason: body.reason, occurred_on: body.occurred_on ?? today(), currency: 'UGX', lines }, { cost_total_minor: costTotal });
       })),
+
+    // Issue #818: every line of the entry goes back and is marked undone, once; the entry is kept.
+    undoUsage: (reportId, reason) =>
+      run(() => {
+        const moved = stockLog.filter((m) => m.source_type === 'retail.usage' && m.source_id === reportId);
+        if (moved.length === 0) refuse(404, 'not_found', 'That could not be found.');
+        if (moved.some((m) => m.undone)) refuse(409, 'usage_undone', 'This entry has been undone already.');
+        const undone = { at: new Date().toISOString(), by: mockMe('admin').user_id, by_name: 'Test Admin', reason: reason.trim() };
+        moved.forEach((m) => {
+          move(m.branch_id ?? BRANCH_A, m.product_id ?? '', toMilli((m.qty ?? '0').replace(/^-/, '')));
+          m.undone = undone;
+        });
+        const first = moved[0];
+        return { report_id: reportId, branch_id: first?.branch_id, kind: first?.kind === 'damage' ? 'damaged' : 'used', items_back: moved.length, undone_on: today(), undone_at: undone.at, undone_by: undone.by, reason: undone.reason };
+      }),
 
     createStocktake: (body) => {
       const branchId = body.branch_id ?? BRANCH_A;
@@ -1527,6 +1647,19 @@ export function createMockRetail(): RetailApi {
       return delay({ branch_id: branchId, code: b?.code, name: b?.name, role, can_sell: true });
     },
 
+    // ADR-122: the mock keeps whether a shop has a location, never where; every entry reads no location.
+    entryDistances: (_source, ids) => delay(ids.map((id) => ({ id, state: 'no_location', words: 'no location' }))),
+    shopLocations: () => delay(MOCK_BRANCHES.map((b) => ({ branch_id: b.id, code: b.code, name: b.name, has_location: located.has(b.id) }))),
+    setShopLocation: (branchId) => {
+      const b = MOCK_BRANCHES.find((x) => x.id === branchId);
+      located.add(branchId);
+      return delay({ branch_id: branchId, code: b?.code, name: b?.name, has_location: true, set_at: new Date().toISOString() });
+    },
+    clearShopLocation: (branchId) => {
+      located.delete(branchId);
+      return delay(undefined);
+    },
+
     capabilities: () => delay(read()),
 
     // The server's rule (RetailCapabilityGroup): a profile writes its preset first, then the flags sent win.
@@ -1541,6 +1674,7 @@ export function createMockRetail(): RetailApi {
       // The slow mover rules of Stock health (issue #414), whole numbers in the server's ranges.
       if (typeof body.slow_mover_months === 'number') next.slow_mover_months = body.slow_mover_months;
       if (typeof body.slow_mover_min_sold === 'number') next.slow_mover_min_sold = body.slow_mover_min_sold;
+      if (typeof body.other_shops_stock === 'boolean') next.other_shops_stock = body.other_shops_stock;
       caps = { value: next, version: caps.version + 1 };
       return delay(read());
     },

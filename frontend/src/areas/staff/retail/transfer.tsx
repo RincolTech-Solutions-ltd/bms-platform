@@ -9,7 +9,9 @@ import { ToStock } from './analytics-ui';
 import { parseQty, showQty } from './maths';
 import { buildTransfer, lineMilli, linePack, transferLineHint, transferProblem, withPacks, type TransferDraft } from './transfer-state';
 import { milliOf } from './maths';
-import { TRANSFER, TRANSFER_RECEIPT, UNITS, capabilityOn, holdsAt, needsOf } from './permissions';
+import { BACKDATE, TRANSFER, TRANSFER_RECEIPT, UNITS, capabilityOn, holdsAt, needsOf } from './permissions';
+import { dateFields, entryDate } from './cash-state';
+import { DateField } from './cash-ui';
 import { BranchRequired, Gate, NoStockHere, PacksAndPiecesFields, ProductPicker, Problem, money, useProfitAccess, useStockingBranch } from './ui';
 import { ScanBar } from './scan';
 import { NextSteps, mayCountAt } from './next-steps';
@@ -25,6 +27,7 @@ import { entryWarnings } from './entry-checks-state';
 import { useEntryChecks, useEntryNorms } from './entry-checks';
 import { EmptyChoice } from '../../../app/ui/EmptyChoice';
 import { canManageBranches } from '../branches/state';
+import { KeptOnPhone, OfflineFormNote, isKept, useEntrySave } from '../../../offline/keep-entry';
 
 // Move stock to another branch (FR-RET-16). The branch chosen at the top of the page is the one the
 // stock leaves; it moves at cost, so nothing is gained or lost. One idempotency key per draft, kept
@@ -55,14 +58,36 @@ export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId:
   const queryClient = useQueryClient();
   const { me } = useStaff();
   const label = useBranchLabel();
-  const { key, draft, setDraft, finish, discard } = usePersistedDraft<TransferDraft>(
+  const { key, draft, setDraft, finish, discard, name } = usePersistedDraft<TransferDraft>(
     `transfer:${me.user_id ?? ''}:${fromBranchId}`,
     { toBranchId: '', transferDate: businessToday(), note: '', lines: [] },
   );
+  // ADR-120: only the owner sees the date, at the source and, for a move that completes now, at the destination too; nothing
+  // is sent for today and the server dates the move itself.
+  const receivedLater = capabilityOn(me, 'retail', TRANSFER_RECEIPT);
+  const ownersHere = holdsAt(me, BACKDATE, fromBranchId) && (receivedLater || !draft.toBranchId || holdsAt(me, BACKDATE, draft.toBranchId));
+  // Issue #812: offline, or when the network drops, the move is kept on the phone and sent later. Offline the phone dates it
+  // and no date box shows, so a draft's earlier day never holds the save (second review of #839).
+  const entries = useEntrySave();
+  const dated = entryDate(ownersHere, entries.offlineMode ? businessToday() : draft.transferDate, draft.dateReason, businessToday());
+  const body = { ...buildTransfer(fromBranchId, { ...draft, transferDate: dated.sent?.date ?? '' }), ...dateFields(dated, 'transfer_date') };
+  // success-screen: Move stock shows the summary of the move in place of the form, and the toast says it too (#824)
   const save = useMutation({
-    mutationFn: () => retail.createTransfer(buildTransfer(fromBranchId, draft), key),
+    mutationFn: () => entries.save(
+      {
+        kind: 'transfer', body, key, branchId: fromBranchId,
+        detail: `to ${label(draft.toBranchId)}, ${draft.lines.length} ${draft.lines.length === 1 ? 'item' : 'items'}`,
+        fix: { to: '/staff/retail/transfer', draftName: name, draft },
+      },
+      () => retail.createTransfer(body, key),
+    ),
+    meta: { success: (t: Transfer) => (t?.status === 'in_transit' ? `Stock sent to ${label(t.to_branch_id)}` : `Stock moved to ${label(t?.to_branch_id)}`) },
     onSuccess: (t) => {
       entry.saved();
+      if (isKept(t)) {
+        discard();
+        return;
+      }
       finish();
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       onSaved?.(t);
@@ -113,7 +138,7 @@ export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId:
       if (p) setDraft((d) => (d.lines.length > 0 ? d : { ...d, lines: [{ product: p, qty: prefill.qty }] }));
     }, () => undefined);
   }, [prefill, draft.lines.length, draft.toBranchId, destinations, fromBranchId, setDraft]);
-  const problem = transferProblem(fromBranchId, draft);
+  const problem = transferProblem(fromBranchId, draft) ?? (dated.reasonMissing ? 'Say why the date is earlier than today.' : null);
   // With the two-step transfer on (ADR-033) the stock leaves now and is counted at the destination once received.
   const sends = capabilityOn(me, 'retail', TRANSFER_RECEIPT);
   // Issue #353: each line against the item's own moves (or its purchases while it has few moves), said before saving, never blocking.
@@ -123,8 +148,10 @@ export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId:
   }));
   const entry = useEntryChecks('move', fromBranchId, warnings, () => save.mutate(), draft.lines);
 
+  if (entries.kept) return <KeptOnPhone item={entries.kept} onNew={entries.another} newLabel="Move more stock" />;
   return (
     <form onSubmit={(e) => { e.preventDefault(); if (!problem && !save.isPending) entry.check(); }}>
+      {entries.offlineMode && <OfflineFormNote what="stock move" />}
       <p>From: {label(fromBranchId)}</p>
       <NoStockHere branchId={fromBranchId} />
       <div data-tour="transfer-to">
@@ -186,8 +213,7 @@ export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId:
         );
       })}
 
-      <label htmlFor="transfer-date">Date</label>
-      <input id="transfer-date" type="date" max={businessToday()} value={draft.transferDate} onChange={(e) => update({ transferDate: e.target.value })} />
+      {!entries.offlineMode && <DateField id="transfer-date" label="Date" entry={dated} value={dated.day} reason={draft.dateReason} onChange={(transferDate) => update({ transferDate })} onReason={(dateReason) => update({ dateReason })} />}
       <label htmlFor="transfer-note">Note (optional)</label>
       <input id="transfer-note" maxLength={300} value={draft.note} onChange={(e) => update({ note: e.target.value })} />
 

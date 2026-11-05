@@ -29,6 +29,9 @@ export type AllBranchesRow = S['RetailAllBranchesRow'];
 export type StockBranch = S['RetailStockBranch'];
 export type AllBranchesStock = { branches: StockBranch[]; items: AllBranchesRow[]; closed_branches?: number };
 export type BranchRole = S['RetailBranchRole'];
+export type EntryDistance = S['RetailEntryDistance'];
+export type ShopLocation = S['RetailShopLocation'];
+export type DeviceLocation = S['RetailDeviceLocation'];
 export type RetailCapabilities = S['RetailCapabilities'];
 export type CapabilityChange = S['UpdateRetailCapabilitiesRequest'];
 /** The capabilities with the settings version they were read at, the If-Match of the next change. */
@@ -44,6 +47,10 @@ export type ProductChange = S['UpdateRetailProductRequest'];
 export type Family = S['RetailFamily'];
 export type NewFamily = S['CreateRetailFamilyRequest'];
 export type FamilyChange = S['UpdateRetailFamilyRequest'];
+/** Issue #819 (ADR-124): the four records a receipt photo goes on, and the path of each under /api/v1/retail. */
+export type ReceiptKind = 'sale' | 'delivery' | 'usage' | 'expense';
+export const RECEIPT_RECORDS: Record<ReceiptKind, string> = { sale: 'sales', delivery: 'purchases', usage: 'usage', expense: 'expenses' };
+export type ReceiptPhotoAdded = S['RetailReceiptPhotoAdded'];
 export type AddVariants = S['AddRetailVariantsRequest'];
 export type MakeFamily = S['RetailMakeFamilyRequest'];
 /** Issue #697: the sizes and colours the shop's items have, offered again on Add an item. */
@@ -168,6 +175,10 @@ export type SupplierCreditRequest = S['RetailSupplierCreditRequest'];
 export type SupplierCreditLineRequest = S['RetailSupplierCreditLineRequest'];
 export type SupplierCreditPage = S['RetailSupplierCreditList'];
 export type Supplier = S['RetailSupplier'];
+/** Issue #820: a supplier's optional details; `bank_account` only for those who may edit suppliers. */
+export type SupplierDetails = S['RetailSupplierDetails'];
+export type SupplierDelivery = S['RetailSupplierDelivery'];
+export type SupplierDeliveryPage = S['RetailSupplierDeliveryPage'];
 export type SaleRequest = S['RetailSaleRequest'];
 export type Sale = S['RetailSale'];
 /** `sale_*` and `unit_factor` are present only for a line entered in a pack; `qty` and `unit_price_minor` are always per base unit. */
@@ -199,6 +210,7 @@ export type PurchasePage = S['RetailPurchasePage'];
 export type PurchaseLine = S['RetailPurchaseLine'];
 export type UsageRequest = S['RetailUsageRequest'];
 export type Usage = S['RetailUsageReport'];
+export type UsageUndone = S['RetailUsageUndone'];
 export type StocktakeRequest = S['RetailStocktakeRequest'];
 export type Stocktake = S['RetailStocktake'];
 export type OpenStocktake = S['RetailOpenStocktake'];
@@ -225,6 +237,7 @@ export type InFlightTransfer = S['RetailInFlightTransfer'];
 export type Savings = S['RetailSavings'];
 export type SavingsRequest = S['RetailSavingsRequest'];
 export type SavingsSuggestion = S['RetailSavingsSuggestion'];
+export type SavingsGroups = S['RetailSavingsGroups'];
 export type Banking = S['RetailBanking'];
 export type BankingRequest = S['RetailBankingRequest'];
 export type BankingExpected = S['RetailBankingExpected'];
@@ -350,6 +363,22 @@ export function salesSummaryParams({ level, chain, branchId, from, to, buyer, pa
 /** The levels a restocks summary can group by (issue #350). */
 export type PurchaseLevel = 'branch' | 'year' | 'month' | 'supplier' | 'day' | 'category' | 'item' | 'variant';
 
+/** Past usage and damage grouped (issue #816): the level asked for, the whole chain, and what was opened above. */
+export interface UsageSummaryQuery {
+  level: UsageLevel;
+  chain: UsageLevel[];
+  branchId?: string;
+  from?: string;
+  to?: string;
+  categoryId?: string;
+  itemId?: string;
+  offset?: number;
+  signal?: AbortSignal;
+}
+export type UsageLevel = 'branch' | 'month' | 'category' | 'item';
+export type UsageSummary = S['RetailUsageSummary'];
+export type UsageSummaryGroup = S['RetailUsageSummaryGroup'];
+
 /** The levels a stock summary can group by: the items themselves are the stock list (issue #350). */
 export type StockChainLevel = 'branch' | 'category';
 
@@ -447,6 +476,12 @@ export interface RetailApi {
   clearFamilyPhoto(familyId: string): Promise<Family>;
   /** The image of a photo (`photo_id` or `item_photo_id`), from the same origin; `small` is the 240 px copy for cards and pickers. */
   photo(photoId: string, signal?: AbortSignal, small?: boolean): Promise<Blob>;
+  /** Issue #819 (ADR-124): adds the photo of the paper receipt to a saved sale, delivery, usage entry or expense. */
+  addReceiptPhoto(kind: ReceiptKind, recordId: string, file: Blob, signal?: AbortSignal): Promise<ReceiptPhotoAdded>;
+  /** The expense form's photo, sent before the expense; its `photo_id` goes in as `receipt_document_id`. */
+  sendExpenseReceiptPhoto(file: Blob, signal?: AbortSignal): Promise<ReceiptPhotoAdded>;
+  /** The receipt photo of a record, from the same origin; 404 when it has none. */
+  receiptPhoto(kind: ReceiptKind, recordId: string, signal?: AbortSignal): Promise<Blob>;
   /** The pack sizes of an item (the units capability, issue #194); 404 capability_not_enabled while it is off. */
   listPacks(productId: string): Promise<Pack[]>;
   /** Issue #624: `purpose` (buy, sell or both) and the pack's own selling price `sell_minor` are optional. */
@@ -477,6 +512,8 @@ export interface RetailApi {
   stockHistory(q: { productId: string; branchId: string; cursor?: string; limit?: number; signal?: AbortSignal }): Promise<{ items: StockMovement[]; next_cursor?: string }>;
   /** Stock used and damaged, newest first, in the days given and the caller's branch scope (#145); a blank branch or item means all. */
   usageHistory(q: { from: string; to: string; branchId?: string; productId?: string; cursor?: string; signal?: AbortSignal }): Promise<{ items: StockMovement[]; next_cursor?: string }>;
+  /** Undo a usage or damage entry with a reason (issue #818): the stock goes back, the entry is kept and marked undone. */
+  undoUsage(reportId: string, reason: string): Promise<UsageUndone>;
   listStock(q: { branchId: string; query?: string; categoryId?: string; negativeOnly?: boolean; level?: StockLevel; includeInactive?: boolean; signal?: AbortSignal }): Promise<StockRow[]>;
   /** One page of sales, newest first, narrowed by the filters (#145). */
   listSales(q: SalesQuery): Promise<SalePage>;
@@ -492,9 +529,15 @@ export interface RetailApi {
   listCustomers(): Promise<Customer[]>;
   /** The credit buyers screen: server-side search and cursor paging. */
   listCustomerPage(q: { query?: string; cursor?: string; signal?: AbortSignal }): Promise<CustomerPage>;
-  listSuppliers(): Promise<Supplier[]>;
-  createSupplier(body: { name: string; contact?: string }): Promise<Supplier>;
-  updateSupplier(id: string, version: number, body: { name?: string; contact?: string; active?: boolean }): Promise<Supplier>;
+  /** Every supplier, or those `query` finds by name, phone or type (issue #820). */
+  listSuppliers(q?: { query?: string; signal?: AbortSignal }): Promise<Supplier[]>;
+  getSupplier(id: string): Promise<Supplier>;
+  /** The supplier's deliveries (restocks), the newest day first, a page at a time (issue #820). */
+  listSupplierDeliveries(id: string, q: { cursor?: string; signal?: AbortSignal }): Promise<SupplierDeliveryPage>;
+  /** The supplier types already used, the most used first, for the form's suggestions. */
+  listSupplierTypes(): Promise<string[]>;
+  createSupplier(body: { name: string; contact?: string; details?: SupplierDetails }): Promise<Supplier>;
+  updateSupplier(id: string, version: number, body: { name?: string; contact?: string; active?: boolean; details?: SupplierDetails }): Promise<Supplier>;
   createCustomer(body: { name: string; contact?: string }): Promise<Customer>;
   /** The price lists, their items and customer groups (the price_lists capability, issue #195); 404 capability_not_enabled while it is off. */
   listPriceLists(): Promise<PriceList[]>;
@@ -621,11 +664,15 @@ export interface RetailApi {
   listPurchases(q: { branchId?: string; from?: string; to?: string; supplierId?: string; categoryId?: string; productId?: string; status?: 'posted' | 'voided'; cursor?: string; limit?: number; signal?: AbortSignal }): Promise<PurchasePage>;
   /** Groups of restocks at one level of a chain (shop, year, month, supplier, day, category, item); `next_to` (time levels) or `next_offset` continues (#350). */
   purchasesSummary(q: PurchasesSummaryQuery): Promise<PurchasesSummary>;
+  /** Past usage and damage by shop, month, category and item, summed on the server (issue #816); cost only with retail.profit.read. */
+  usageSummary(q: UsageSummaryQuery): Promise<UsageSummary>;
   /** Groups of the stock list by shop or category with the number of items and their value (#350). */
   stockSummary(q: StockSummaryQuery): Promise<StockSummary>;
   getPurchase(id: string): Promise<Purchase>;
   /** Voids a restock by reversal, once (retail.purchase.create at every branch it touched); takes the Idempotency-Key of its form. */
   voidPurchase(id: string, reason: string, idempotencyKey: string): Promise<Purchase>;
+  /** Edit a delivery (issue #830): voids it and records the body in its place, in one call; a refusal changes nothing. */
+  replacePurchase(id: string, body: PurchaseRequest, idempotencyKey: string): Promise<Purchase>;
   createUsage(body: UsageRequest, idempotencyKey: string): Promise<Usage>;
   createStocktake(body: StocktakeRequest): Promise<Stocktake>;
   /** Issue #636: `acknowledged` names the big drops ticked on the review; the server refuses with 409 while one is left out. */
@@ -647,6 +694,14 @@ export interface RetailApi {
   branchRoles(): Promise<BranchRole[]>;
   /** A selling branch's role; a store is marked with sells_goods on Branches, never here (ADR-104). */
   setBranchRole(branchId: string, role: 'shop' | 'both'): Promise<BranchRole>;
+  /** ADR-122: how far from the shop these sales or usage entries were made, in words (retail.entry_location.read); never coordinates. */
+  entryDistances(source: 'sale' | 'usage', ids: string[]): Promise<EntryDistance[]>;
+  /** ADR-122: the branches with whether each has a location set (core.settings.manage); never coordinates. */
+  shopLocations(): Promise<ShopLocation[]>;
+  /** ADR-122: sets a shop's location to where this phone is now. */
+  setShopLocation(branchId: string, where: DeviceLocation): Promise<ShopLocation>;
+  /** ADR-122: clears a shop's location. */
+  clearShopLocation(branchId: string): Promise<void>;
   /** The tenant's capabilities and profile (administrators only, ADR-033 section 1). */
   capabilities(): Promise<CapabilitiesRead>;
   /** Switches the profile or flags under If-Match; the server audits the old and new values. */
@@ -668,9 +723,13 @@ export interface RetailApi {
   // The cash book (FR-RET-17 to FR-RET-29, ADR-022). Every write takes the Idempotency-Key of its draft;
   // a void takes one too. Figures the schema marks "present only with retail.profit.read" are absent
   // from a body for any other caller, and the screens never infer them.
-  savingsSuggestion(q: { branchId: string; date: string }): Promise<SavingsSuggestion>;
-  createSavings(body: SavingsRequest, idempotencyKey: string): Promise<Savings>;
-  listSavings(q: CashQuery): Promise<Savings[]>;
+  // `salesStaff` (issue #799, ADR-115): the routes for a seller without the till, open only while the owner's switch is on;
+  // the same bodies, every month's records (issue #827).
+  savingsSuggestion(q: { branchId: string; date: string; salesStaff?: boolean }): Promise<SavingsSuggestion>;
+  createSavings(body: SavingsRequest, idempotencyKey: string, opts?: { salesStaff?: boolean }): Promise<Savings>;
+  listSavings(q: CashQuery & { salesStaff?: boolean }): Promise<Savings[]>;
+  /** Issue #827: a seller's savings of every month by shop, year, month and person, with the amount saved at each level. */
+  savingsGroups(q: { branchIds?: string[]; from?: string; to?: string }): Promise<SavingsGroups>;
   voidSavings(id: string, reason: string, idempotencyKey: string): Promise<Savings>;
   bankingExpected(q: { branchId: string; date: string }): Promise<BankingExpected>;
   createBanking(body: BankingRequest, idempotencyKey: string): Promise<Banking>;
@@ -683,13 +742,15 @@ export interface RetailApi {
   createExpenseCategory(body: { name: string }): Promise<ExpenseCategory>;
   /** `version` is the one the list showed; the server answers 409 version_conflict when it is stale. */
   updateExpenseCategory(id: string, body: { name?: string; active?: boolean }, version: number): Promise<ExpenseCategory>;
-  createExpenseItem(categoryId: string, body: { name: string; requires_explanation?: boolean }): Promise<ExpenseItem>;
+  createExpenseItem(categoryId: string, body: { name: string; requires_explanation?: boolean; reuse_existing?: boolean }): Promise<ExpenseItem>;
   updateExpenseItem(categoryId: string, itemId: string, body: { name?: string; active?: boolean; requires_explanation?: boolean }, version: number): Promise<ExpenseItem>;
   listCashParties(q?: { kind?: CashPartyKind }): Promise<CashParty[]>;
   createCashParty(body: CashPartyRequest): Promise<CashParty>;
   createExpense(body: ExpenseRequest, idempotencyKey: string): Promise<Expense | ApprovalWaiting>;
   listExpenses(q: CashQuery & { categoryId?: string; itemId?: string }): Promise<Expense[]>;
   voidExpense(id: string, reason: string, idempotencyKey: string): Promise<Expense>;
+  /** Edit an expense (issue #830): voids it and records the body in its place, in one call; a refusal changes nothing. */
+  replaceExpense(id: string, body: ExpenseRequest, idempotencyKey: string): Promise<Expense>;
   createAdvance(body: AdvanceRequest, idempotencyKey: string): Promise<Advance>;
   listAdvances(q: CashQuery & { partyId?: string; openOnly?: boolean }): Promise<Advance[]>;
   getAdvance(id: string): Promise<Advance>;
@@ -867,6 +928,27 @@ const realRetail: RetailApi = {
     return result.data as Blob;
   },
 
+  // JUSTIFICATION-A3: issue #819 adds three routes per record kind; each typed path needs its own call.
+  async addReceiptPhoto(kind, recordId, file, signal) {
+    return postFile<ReceiptPhotoAdded>(`/api/v1/retail/${RECEIPT_RECORDS[kind]}/${encodeURIComponent(recordId)}/receipt-photo`, file, 'receipt', {}, { signal });
+  },
+
+  async sendExpenseReceiptPhoto(file, signal) {
+    return postFile<ReceiptPhotoAdded>('/api/v1/retail/expenses/receipt-photos', file, 'receipt', {}, { signal });
+  },
+
+  async receiptPhoto(kind, recordId, signal) {
+    const result = await (kind === 'sale'
+      ? api.GET('/api/v1/retail/sales/{sale_id}/receipt-photo', { params: { path: { sale_id: recordId } }, parseAs: 'blob', signal })
+      : kind === 'delivery'
+        ? api.GET('/api/v1/retail/purchases/{purchase_id}/receipt-photo', { params: { path: { purchase_id: recordId } }, parseAs: 'blob', signal })
+        : kind === 'usage'
+          ? api.GET('/api/v1/retail/usage/{report_id}/receipt-photo', { params: { path: { report_id: recordId } }, parseAs: 'blob', signal })
+          : api.GET('/api/v1/retail/expenses/{expense_id}/receipt-photo', { params: { path: { expense_id: recordId } }, parseAs: 'blob', signal }));
+    if (!result.response.ok || !result.data) throw new RetailError('The receipt photo could not be shown.', result.response.status, 'photo_unavailable');
+    return result.data as Blob;
+  },
+
   async listPacks(productId) {
     return unwrap(await api.GET('/api/v1/retail/products/{product_id}/units', { params: { path: { product_id: productId } } })).items ?? [];
   },
@@ -961,6 +1043,10 @@ const realRetail: RetailApi = {
     return { items: page.items ?? [], ...(page.next_cursor ? { next_cursor: page.next_cursor } : {}) };
   },
 
+  async undoUsage(reportId, reason) {
+    return unwrap(await api.POST('/api/v1/retail/usage/{report_id}/undo', { params: { path: { report_id: reportId } }, body: { reason } }));
+  },
+
   async listStock({ branchId, query, categoryId, negativeOnly, level, includeInactive, signal }) {
     const rows: StockRow[] = [];
     let cursor: string | undefined;
@@ -1029,8 +1115,21 @@ const realRetail: RetailApi = {
     return unwrap(await api.GET('/api/v1/retail/customers', { params: { query: { query: query || undefined, limit: 50, cursor } }, signal }));
   },
 
-  async listSuppliers() {
-    return unwrap(await api.GET('/api/v1/retail/suppliers')).items ?? [];
+  async listSuppliers(q) {
+    const query = q?.query?.trim();
+    return unwrap(await api.GET('/api/v1/retail/suppliers', { params: { query: { q: query || undefined } }, signal: q?.signal })).items ?? [];
+  },
+
+  async getSupplier(id) {
+    return unwrap(await api.GET('/api/v1/retail/suppliers/{supplier_id}', { params: { path: { supplier_id: id } } }));
+  },
+
+  async listSupplierDeliveries(id, { cursor, signal }) {
+    return unwrap(await api.GET('/api/v1/retail/suppliers/{supplier_id}/deliveries', { params: { path: { supplier_id: id }, query: { cursor: cursor || undefined } }, signal }));
+  },
+
+  async listSupplierTypes() {
+    return unwrap(await api.GET('/api/v1/retail/suppliers/types')).items ?? [];
   },
 
   async createSupplier(body) {
@@ -1420,6 +1519,20 @@ const realRetail: RetailApi = {
     );
   },
 
+  async usageSummary({ level, chain, branchId, from, to, categoryId, itemId, offset, signal }) {
+    return unwrap(
+      await api.GET('/api/v1/retail/usage/summary', {
+        params: {
+          query: {
+            group_by: chain.join(','), level, branch_id: branchId ? [branchId] : undefined, from: from || undefined, to: to || undefined,
+            category_id: categoryId || undefined, item_id: itemId || undefined, offset: offset || undefined,
+          },
+        },
+        signal,
+      }),
+    );
+  },
+
   async stockSummary({ level, chain, branchId, categoryId, query, negativeOnly, stockLevel, includeClosed, includeInactive, offset, signal }) {
     return unwrap(
       await api.GET('/api/v1/retail/stock/summary', {
@@ -1440,6 +1553,10 @@ const realRetail: RetailApi = {
 
   async voidPurchase(id, reason, key) {
     return unwrap(await api.POST('/api/v1/retail/purchases/{purchase_id}/void', { params: { path: { purchase_id: id }, header: { 'Idempotency-Key': key } }, body: { reason } }));
+  },
+
+  async replacePurchase(id, body, key) {
+    return unwrap(await api.POST('/api/v1/retail/purchases/{purchase_id}/replace', { params: { path: { purchase_id: id }, header: { 'Idempotency-Key': key } }, body }));
   },
 
   async createUsage(body, key) {
@@ -1482,6 +1599,25 @@ const realRetail: RetailApi = {
 
   async setBranchRole(branchId, role) {
     return unwrap(await api.PUT('/api/v1/retail/branch-roles/{branch_id}', { params: { path: { branch_id: branchId } }, body: { role } }));
+  },
+
+  async entryDistances(source, ids) {
+    if (ids.length === 0) return [];
+    return unwrap(await api.GET('/api/v1/retail/entry-locations', { params: { query: { source, id: ids } } })).items ?? [];
+  },
+
+  async shopLocations() {
+    return unwrap(await api.GET('/api/v1/retail/shop-locations')).items ?? [];
+  },
+
+  async setShopLocation(branchId, where) {
+    return unwrap(await api.PUT('/api/v1/retail/shop-locations/{branch_id}', { params: { path: { branch_id: branchId } }, body: where }));
+  },
+
+  async clearShopLocation(branchId) {
+    const result = await api.DELETE('/api/v1/retail/shop-locations/{branch_id}', { params: { path: { branch_id: branchId } } });
+    // 204 has no body, so unwrap is only for the refusal.
+    if (!result.response.ok) unwrap(result);
   },
 
   async capabilities() {
@@ -1557,16 +1693,30 @@ const realRetail: RetailApi = {
   },
 
   // The cash book. Lists read every page of the window asked for (200 a page, the most the server allows).
-  async savingsSuggestion({ branchId, date }) {
-    return unwrap(await api.GET('/api/v1/retail/savings/suggestion', { params: { query: { branch_id: branchId, date } } }));
+  async savingsSuggestion({ branchId, date, salesStaff }) {
+    const query = { branch_id: branchId, date };
+    return unwrap(salesStaff
+      ? await api.GET('/api/v1/retail/savings/sales-staff/suggestion', { params: { query } })
+      : await api.GET('/api/v1/retail/savings/suggestion', { params: { query } }));
   },
 
-  async createSavings(body, key) {
-    return unwrap(await api.POST('/api/v1/retail/savings', { body, params: { header: { 'Idempotency-Key': key } } }));
+  async createSavings(body, key, opts) {
+    const params = { header: { 'Idempotency-Key': key } };
+    return unwrap(opts?.salesStaff
+      ? await api.POST('/api/v1/retail/savings/sales-staff', { body, params })
+      : await api.POST('/api/v1/retail/savings', { body, params }));
+  },
+
+  async savingsGroups({ branchIds, from, to }) {
+    const query = { branch_id: branchIds && branchIds.length > 0 ? branchIds : undefined, from: from || undefined, to: to || undefined };
+    return unwrap(await api.GET('/api/v1/retail/savings/sales-staff/groups', { params: { query } }));
   },
 
   async listSavings(q) {
-    return allPages((cursor) => api.GET('/api/v1/retail/savings', { params: { query: { ...cashParams(q), limit: 200, cursor } } }));
+    return allPages((cursor) => {
+      const query = { ...cashParams(q), limit: 200, cursor };
+      return q.salesStaff ? api.GET('/api/v1/retail/savings/sales-staff', { params: { query } }) : api.GET('/api/v1/retail/savings', { params: { query } });
+    });
   },
 
   async voidSavings(id, reason, key) {
@@ -1645,6 +1795,10 @@ const realRetail: RetailApi = {
 
   async voidExpense(id, reason, key) {
     return unwrap(await api.POST('/api/v1/retail/expenses/{expense_id}/void', { params: { path: { expense_id: id }, header: { 'Idempotency-Key': key } }, body: { reason } }));
+  },
+
+  async replaceExpense(id, body, key) {
+    return unwrap(await api.POST('/api/v1/retail/expenses/{expense_id}/replace', { params: { path: { expense_id: id }, header: { 'Idempotency-Key': key } }, body }));
   },
 
   async createAdvance(body, key) {

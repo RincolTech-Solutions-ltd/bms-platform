@@ -27,9 +27,9 @@ export interface CashbookEnv {
   waiting: (actionType: string, amountMinor: number) => ApprovalWaiting | null;
 }
 
-type Keys = 'savingsSuggestion' | 'createSavings' | 'listSavings' | 'voidSavings' | 'bankingExpected' | 'createBanking' | 'listBankings' | 'voidBanking'
+type Keys = 'savingsSuggestion' | 'createSavings' | 'listSavings' | 'savingsGroups' | 'voidSavings' | 'bankingExpected' | 'createBanking' | 'listBankings' | 'voidBanking'
   | 'createWithdrawal' | 'listWithdrawals' | 'voidWithdrawal' | 'listExpenseCategories' | 'createExpenseCategory' | 'updateExpenseCategory'
-  | 'createExpenseItem' | 'updateExpenseItem' | 'listCashParties' | 'createCashParty' | 'createExpense' | 'listExpenses' | 'voidExpense'
+  | 'createExpenseItem' | 'updateExpenseItem' | 'listCashParties' | 'createCashParty' | 'createExpense' | 'listExpenses' | 'voidExpense' | 'replaceExpense'
   | 'createAdvance' | 'listAdvances' | 'getAdvance' | 'voidAdvance' | 'createRepayment' | 'voidRepayment' | 'cashDaily' | 'bankingReport'
   | 'expensesReport' | 'advancesReport';
 
@@ -114,7 +114,8 @@ export function createCashbookMock(env: CashbookEnv): Pick<RetailApi, Keys> {
 
   const savingsRow = (r: (typeof savings)[number]): Savings => ({
     ...common(r), total_sold_minor: r.total_sold, overwritten: r.overwritten,
-    ...(env.profit() ? { amount_minor: r.amount, suggested_minor: r.suggested } : {}),
+    // Issue #799: a saved day shows only what was saved; the suggestion stays only on a voided record.
+    ...(env.profit() ? { amount_minor: r.amount, ...(r.voided ? { suggested_minor: r.suggested } : {}) } : {}),
   });
   const bankingRow = (r: (typeof bankings)[number]): Banking => {
     const f = figures(r.branch_id, r.business_date);
@@ -200,6 +201,30 @@ export function createCashbookMock(env: CashbookEnv): Pick<RetailApi, Keys> {
       })),
 
     listSavings: (q) => delay(newestFirst(savings.filter((r) => inWindow(r, q))).map(savingsRow)),
+    // JUSTIFICATION-A3: RetailApi gained savingsGroups (issue #827); the mock must answer it with its four levels and totals.
+    // The active records by shop, year, month and person (the mock has one person), newest day first, with totals.
+    savingsGroups: (q) => {
+      const live = savings.filter((r) => inWindow(r, { ...q, includeVoided: false }))
+        .sort((a, b) => b.business_date.localeCompare(a.business_date));
+      const sum = (xs: { total_minor: number }[]) => xs.reduce((n, x) => n + x.total_minor, 0);
+      const by = <T,>(xs: T[], key: (x: T) => string): [string, T[]][] => {
+        const m = new Map<string, T[]>();
+        for (const x of xs) m.set(key(x), [...(m.get(key(x)) ?? []), x]);
+        return [...m];
+      };
+      const shops = by(live, (r) => r.branch_id).map(([branch_id, rs]) => {
+        const years = by(rs, (r) => r.business_date.slice(0, 4)).map(([year, ys]) => {
+          const months = by(ys, (r) => r.business_date.slice(5, 7)).map(([month, ms]) => {
+            const records = ms.map((r) => ({ id: r.id, business_date: r.business_date, amount_minor: r.amount }));
+            const people = [{ user_id: USER.by, name: USER.by_name, total_minor: records.reduce((n, x) => n + x.amount_minor, 0), records }];
+            return { month: Number(month), total_minor: sum(people), people };
+          });
+          return { year: Number(year), total_minor: sum(months), months };
+        });
+        return { branch_id, total_minor: sum(years), years };
+      });
+      return delay({ total_minor: sum(shops), shops });
+    },
     voidSavings: (id, reason, key) => run(() => once(`void|${key}`, { id, reason }, () => savingsRow(voidIt(savings.find((r) => r.id === id), reason)))),
 
     bankingExpected: ({ branchId, date }) =>
@@ -264,8 +289,17 @@ export function createCashbookMock(env: CashbookEnv): Pick<RetailApi, Keys> {
       run(() => {
         const c = categories.find((x) => x.id === categoryId);
         if (!c) return refuse(404, 'not_found', 'Not found.');
-        if ((c.items ?? []).some((i) => i.name?.toLowerCase() === body.name.trim().toLowerCase())) refuse(409, 'duplicate_item', 'Duplicate.');
-        const item = { id: nextId('e'), name: body.name.trim(), requires_explanation: body.requires_explanation ?? false, active: true, version: 1 };
+        // ADR-118 as the server (issue #810): without retail.expense.manage the category must be active and the item may
+        // not ask for an explanation. The mock takes a session with profit access for the owner's, who manages the lists.
+        if (!env.profit() && c.active === false) refuse(422, 'category_inactive', 'This category is switched off. Pick another one.');
+        if (!env.profit() && body.requires_explanation) refuse(403, 'permission_denied', 'Asking for an explanation on an item needs permission to manage expenses.');
+        // ADR-118: with reuse_existing an active item of the same name is picked again, a switched off one refused.
+        const spaced = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
+        const same = (c.items ?? []).find((i) => spaced(i.name ?? '') === spaced(body.name));
+        if (same && body.reuse_existing && same.active !== false) return { ...same };
+        if (same && body.reuse_existing) refuse(409, 'item_switched_off', 'This category has an item with that name that the owner switched off. Ask the owner to switch it on again.');
+        if (same) refuse(409, 'duplicate_item', 'Duplicate.');
+        const item = { id: nextId('e'), name: body.name.trim().replace(/\s+/g, ' '), requires_explanation: body.requires_explanation ?? false, active: true, version: 1 };
         c.items = [...(c.items ?? []), item];
         return { ...item };
       }),
@@ -274,7 +308,10 @@ export function createCashbookMock(env: CashbookEnv): Pick<RetailApi, Keys> {
         const item = categories.find((x) => x.id === categoryId)?.items?.find((i) => i.id === itemId);
         if (!item) return refuse(404, 'not_found', 'Not found.');
         if (item.version !== version) refuse(409, 'version_conflict', 'Stale.');
-        Object.assign(item, { ...(body.name ? { name: body.name.trim() } : {}), ...(body.active !== undefined ? { active: body.active } : {}), ...(body.requires_explanation !== undefined ? { requires_explanation: body.requires_explanation } : {}), version: (item.version ?? 1) + 1 });
+        // Issue #810: a rename is stored with one space between words, and a name the category has already is refused.
+        const named = body.name?.trim().replace(/\s+/g, ' ');
+        if (named && (categories.find((x) => x.id === categoryId)?.items ?? []).some((i) => i.id !== itemId && (i.name ?? '').trim().replace(/\s+/g, ' ').toLowerCase() === named.toLowerCase())) refuse(409, 'duplicate_item', 'This category has an item with that name already.');
+        Object.assign(item, { ...(named ? { name: named } : {}), ...(body.active !== undefined ? { active: body.active } : {}), ...(body.requires_explanation !== undefined ? { requires_explanation: body.requires_explanation } : {}), version: (item.version ?? 1) + 1 });
         return { ...item };
       }),
 
@@ -304,6 +341,26 @@ export function createCashbookMock(env: CashbookEnv): Pick<RetailApi, Keys> {
     listExpenses: (q) =>
       delay(newestFirst(expenses.filter((r) => inWindow(r, q) && (!q.categoryId || r.category_id === q.categoryId) && (!q.itemId || r.item_id === q.itemId))).map(expenseRow)),
     voidExpense: (id, reason, key) => run(() => once(`void|${key}`, { id, reason }, () => expenseRow(voidIt(expenses.find((r) => r.id === id), reason)))),
+    // Issue #830: as the server's one transaction, every refusal comes before the old expense is voided.
+    replaceExpense: (id, body, key) =>
+      run(() => once(`replace-expense|${key}`, { id, body }, () => {
+        const old = expenses.find((r) => r.id === id);
+        const category = categories.find((c) => c.id === body.category_id);
+        if (!category?.items?.some((i) => i.id === body.item_id)) refuse(422, 'item_not_in_category', 'The item is not in the category.');
+        if (!category?.active) refuse(422, 'category_inactive', 'Inactive.');
+        // Issue #838: the typed words are checked as typed; the link added below is never the explanation.
+        if (category?.items?.find((i) => i.id === body.item_id)?.requires_explanation && (body.explanation ?? '').trim().length < 3) refuse(422, 'explanation_required', 'Explanation required.');
+        if (env.waiting('retail_expense', body.amount_minor)) refuse(422, 'edit_needs_approval', 'This amount needs an administrator\'s approval, so it cannot be edited in place. Delete the expense and record it again.');
+        const fresh = base(old?.branch_id, body.business_date, 'x');
+        const was = expenseRow(voidIt(old, 'Edited: entered again with the changes'));
+        const link = `Replaces the ${was.item_name?.trim() || 'expense'} entry of ${was.business_date ?? ''}, edited.`;
+        // Past 500 characters the typed part is cut, never the link (issue #838).
+        const own = body.explanation?.trim().slice(0, 500 - link.length - 1).trimEnd();
+        const explanation = own ? `${own} ${link}` : link;
+        const row = { ...fresh, amount: body.amount_minor, category_id: body.category_id, item_id: body.item_id, ...(body.party_id ? { party_id: body.party_id } : {}), explanation };
+        expenses.push(row);
+        return expenseRow(row);
+      })),
 
     createAdvance: (body, key) =>
       run(() => once(`advance|${key}`, body, (): Advance => {

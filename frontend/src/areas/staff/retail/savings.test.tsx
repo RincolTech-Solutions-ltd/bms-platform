@@ -28,7 +28,8 @@ describe('savings form', () => {
     expect(out).not.toContain('UGX 20,000');
     expect(out).not.toContain('UGX 40,000');
     expect(out).not.toContain('savings-amount');
-    expect(out).toContain('for="savings-date"');
+    // ADR-120: the app dates the savings today; only the owner sees the date.
+    expect(out).not.toContain('savings-date');
   });
 
   it('shows a caller with profit read the suggestion and the profit and lets them type an amount', () => {
@@ -64,7 +65,8 @@ describe('savings form', () => {
 describe('savings records', () => {
   const rows: Savings[] = [
     { id: 'r1', branch_id: branch, business_date: today, total_sold_minor: 100000, amount_minor: 20000, overwritten: true, by_name: 'Test User 01', voided: false, historical: false },
-    { id: 'r2', branch_id: branch, business_date: daysBefore(today, 40), total_sold_minor: 50000, by_name: 'Test User 02', voided: true, void_reason: 'Entered twice', historical: false },
+    // The same month as r1, so both are in the group that opens first (issue #816 grouped the list).
+    { id: 'r2', branch_id: branch, business_date: today, total_sold_minor: 50000, by_name: 'Test User 02', voided: true, void_reason: 'Entered twice', historical: false },
   ];
   const seeded = () => {
     const client = new QueryClient();
@@ -104,6 +106,9 @@ describe('a new record shown at once', () => {
     // A list of rows under the same prefix that is not the records list (a report, an export) is left alone.
     const rowsReport = ['retail', 'savings', 'report', '2026-10-01', '2026-10-31'];
     const longer = ['retail', 'savings', [branch], '2026-10-01', '2026-10-31', 'by-day'];
+    // A seller sees the grouped view since issue #827, refetched after the save; a list under the old sales staff key is left alone.
+    const salesStaff = ['retail', 'savings', [branch], '2026-10-01', '2026-10-31', 'sales-staff'];
+    client.setQueryData(salesStaff, []);
     client.setQueryData(rowsReport, [{ id: 'r1' }]);
     client.setQueryData(longer, []);
     client.setQueryData(mine, []);
@@ -122,6 +127,7 @@ describe('a new record shown at once', () => {
     expect(client.getQueryData(short)).toEqual([]);
     expect(client.getQueryData(rowsReport)).toEqual([{ id: 'r1' }]);
     expect(client.getQueryData(longer)).toEqual([]);
+    expect(client.getQueryData(salesStaff)).toEqual([]);
   });
 });
 
@@ -129,13 +135,19 @@ describe('savings rules', () => {
   const input = { branchId: branch, date: today, suggestion: withAmounts, amount: '', reason: '', canOverwrite: true };
 
   it('sends only the token when nothing is typed, and echoes the token always', () => {
-    expect(planSavings(input).request).toEqual({ branch_id: branch, business_date: today, suggestion_token: 'tok-1' });
+    expect(planSavings(input).request).toEqual({ branch_id: branch, suggestion_token: 'tok-1' });
+  });
+
+  it('sends a date only for the owner\'s earlier day, with its reason (ADR-120)', () => {
+    const earlier = daysBefore(today, 2);
+    expect(planSavings({ ...input, date: earlier, sent: { date: earlier, reason: 'Found the slip' } }).request)
+      .toEqual({ branch_id: branch, business_date: earlier, date_reason: 'Found the slip', suggestion_token: 'tok-1' });
   });
 
   it('sends no amount and no reason to a caller without profit read, whatever was typed', () => {
     const plan = planSavings({ ...input, suggestion: withoutAmounts, amount: '99999', reason: 'because I can' });
     expect(plan.problem).toBeNull();
-    expect(plan.request).toEqual({ branch_id: branch, business_date: today, suggestion_token: 'tok-1' });
+    expect(plan.request).toEqual({ branch_id: branch, suggestion_token: 'tok-1' });
     expect('amount_minor' in plan.request).toBe(false);
     expect('overwrite_reason' in plan.request).toBe(false);
   });

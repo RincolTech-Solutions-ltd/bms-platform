@@ -11,6 +11,7 @@ import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Cursor;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.Search;
+import com.rincoltech.bms.retail.catalogue.ReceiptPhotos;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.stock.Quantities;
 import com.rincoltech.bms.retail.stock.RetailBooks;
@@ -26,6 +27,7 @@ import com.rincoltech.bms.retail.stock.internal.StockApi.BranchBalance;
 import com.rincoltech.bms.retail.stock.internal.StockApi.MovementPage;
 import com.rincoltech.bms.retail.stock.internal.StockApi.MovementRow;
 import com.rincoltech.bms.retail.stock.internal.StockApi.OpenStocktake;
+import com.rincoltech.bms.retail.stock.internal.StockApi.ShopQty;
 import com.rincoltech.bms.retail.stock.internal.StockApi.StockBranch;
 import com.rincoltech.bms.retail.stock.internal.StockApi.StockPage;
 import com.rincoltech.bms.retail.stock.internal.StockApi.StockRow;
@@ -61,8 +63,9 @@ class StockService {
     /**
      * A product at or below this quantity is low stock (#145). One constant for every tenant until a
      * retail settings group exists; the settings catalogue holds only core and lending keys today.
+     * Ten, the old app's rule (issue #830); an item's own minimum still wins.
      */
-    static final long LOW_STOCK_MILLI = 5_000;
+    static final long LOW_STOCK_MILLI = 10_000;
 
     static final String LEVEL_OUT = "out";
     static final String LEVEL_LOW = "low";
@@ -78,6 +81,7 @@ class StockService {
     private final BusinessClock clock;
     private final AuditLog audit;
     private final RetailCapabilities capabilities;
+    private final ReceiptPhotos receiptPhotos;
 
     StockService(
             StockRepository repo,
@@ -88,7 +92,9 @@ class StockService {
             CurrentTenant tenant,
             BusinessClock clock,
             AuditLog audit,
-            RetailCapabilities capabilities) {
+            RetailCapabilities capabilities,
+            ReceiptPhotos receiptPhotos) {
+        this.receiptPhotos = receiptPhotos;
         this.repo = repo;
         this.ledger = ledger;
         this.catalogue = catalogue;
@@ -226,27 +232,63 @@ class StockService {
         // ADR-055: a storekeeper sees no selling price.
         boolean price = RetailCatalogue.maySeePrices(CurrentPrincipal.require());
         boolean packs = capabilities.enabled(RetailCapabilities.UNITS);
+        // Issue #807 (ADR-119): every active shop's quantity, this shop first, read for the whole page in one query.
+        List<Branch> shops = shopsListed(branch);
+        Map<UUID, Map<UUID, BigDecimal>> held = shops.isEmpty() || items.isEmpty()
+                ? Map.of()
+                : repo.balances(
+                        items.stream().map(StockRow::productId).toList(),
+                        shops.stream().map(Branch::id).toList());
         return new StockPage(
                 branch,
                 items.stream()
-                        .map(r -> cost && price && packs
-                                ? r
-                                : new StockRow(
-                                        r.productId(),
-                                        r.code(),
-                                        r.description(),
-                                        r.categoryId(),
-                                        r.category(),
-                                        r.unit(),
-                                        r.qty(),
-                                        r.negative(),
-                                        price ? r.sellMinor() : null,
-                                        cost ? r.costMinor() : null,
-                                        r.reservedQty(),
-                                        packs ? r.standardPack() : null))
+                        .map(r -> new StockRow(
+                                r.productId(),
+                                r.code(),
+                                r.description(),
+                                r.categoryId(),
+                                r.category(),
+                                r.unit(),
+                                r.qty(),
+                                r.negative(),
+                                price ? r.sellMinor() : null,
+                                cost ? r.costMinor() : null,
+                                r.reservedQty(),
+                                packs ? r.standardPack() : null,
+                                shops.isEmpty()
+                                        ? null
+                                        : shops.stream()
+                                                .map(b -> {
+                                                    BigDecimal q = held.getOrDefault(r.productId(), Map.of())
+                                                            .getOrDefault(b.id(), BigDecimal.ZERO);
+                                                    return new ShopQty(
+                                                            b.id(),
+                                                            b.name() == null ? b.code() : b.name(),
+                                                            Quantities.format(q),
+                                                            q.signum() < 0,
+                                                            b.id().equals(branch));
+                                                })
+                                                .toList()))
                         .toList(),
                 Quantities.format(lowStock()),
                 next);
+    }
+
+    /**
+     * Issue #807 (ADR-119): the shops whose quantities My stock lists for {@code here}, here first and then every other active
+     * shop that keeps goods; none while the owner has switched it off or the business has only one shop.
+     */
+    private List<Branch> shopsListed(UUID here) {
+        if (!capabilities.showsOtherShopsStock()) {
+            return List.of();
+        }
+        // The listed branch is always in, so its own quantity is never dropped, even when it keeps no goods (a closed
+        // one is refused by resolve before this and never listed).
+        List<Branch> active = branches.activeStocking(here);
+        List<Branch> out =
+                new ArrayList<>(active.stream().filter(b -> b.id().equals(here)).toList());
+        active.stream().filter(b -> !b.id().equals(here)).forEach(out::add);
+        return out.size() > 1 ? out : List.of();
     }
 
     @Transactional(readOnly = true)
@@ -259,6 +301,21 @@ class StockService {
             boolean newestFirst,
             Integer limit,
             String cursor) {
+        return movements(branchIds, productId, from, to, kinds, newestFirst, limit, cursor, false);
+    }
+
+    /** As above; {@code withBalance} adds each row's running balance and a sale's profit (the item page, issue #813). */
+    @Transactional(readOnly = true)
+    MovementPage movements(
+            List<UUID> branchIds,
+            UUID productId,
+            LocalDate from,
+            LocalDate to,
+            List<String> kinds,
+            boolean newestFirst,
+            Integer limit,
+            String cursor,
+            boolean withBalance) {
         Principal principal = CurrentPrincipal.require();
         List<UUID> filter = principal.branchFilter("retail.stock.read", branchIds);
         int size = limit == null ? DEFAULT_LIMIT : Math.clamp(limit, 1, MAX_LIMIT);
@@ -273,35 +330,49 @@ class StockService {
                 newestFirst,
                 after == null ? null : after.at(),
                 after == null ? null : after.id(),
-                size + 1);
+                size + 1,
+                withBalance);
         boolean more = rows.size() > size;
         List<MovementRow> items = more ? rows.subList(0, size) : rows;
         String next = more
                 ? Cursor.encode(items.getLast().at() + "|" + items.getLast().id())
                 : null;
+        // Issue #819 (ADR-124): which usage and damage entries have a receipt photo, through the catalogue's port.
+        Map<UUID, UUID> photos = receiptPhotos.newest(
+                ReceiptPhotos.Kind.USAGE,
+                items.stream()
+                        .filter(m -> m.entryLines() != null)
+                        .map(MovementRow::sourceId)
+                        .toList());
         return new MovementPage(
                 items.stream()
-                        .map(m -> mayReadCost(m.branchId())
-                                ? m
-                                : new MovementRow(
-                                        m.id(),
-                                        m.at(),
-                                        m.branchId(),
-                                        m.productId(),
-                                        m.code(),
-                                        m.description(),
-                                        m.unit(),
-                                        m.kind(),
-                                        m.qty(),
-                                        null,
-                                        null,
-                                        m.sourceType(),
-                                        m.sourceId(),
-                                        m.reversesMovementId(),
-                                        m.historical(),
-                                        m.note(),
-                                        m.by(),
-                                        m.correction()))
+                        .map(m -> {
+                            boolean cost = mayReadCost(m.branchId());
+                            return new MovementRow(
+                                    m.id(),
+                                    m.at(),
+                                    m.branchId(),
+                                    m.productId(),
+                                    m.code(),
+                                    m.description(),
+                                    m.unit(),
+                                    m.kind(),
+                                    m.qty(),
+                                    cost ? m.unitCostMinor() : null,
+                                    cost ? m.lineCostMinor() : null,
+                                    m.sourceType(),
+                                    m.sourceId(),
+                                    m.reversesMovementId(),
+                                    m.historical(),
+                                    m.note(),
+                                    m.by(),
+                                    m.correction(),
+                                    m.balanceAfter(),
+                                    cost ? m.profitMinor() : null,
+                                    m.undone(),
+                                    m.entryLines(),
+                                    m.entryLines() == null ? null : photos.containsKey(m.sourceId()));
+                        })
                         .toList(),
                 next);
     }

@@ -54,8 +54,9 @@ controls.
   writes in another, so the flood cannot take the connection pool from other tenants either.
 - **Sign-in limits** (ADR-059, issue #426, revised after the review of #433).
   - **The lock is the limit.** Five wrong passwords in a row lock a sign-in address for 15 minutes (FR-IAM-05). An
-    account keeps its count and lock in its own row; any other address typed (the email in lower case or the phone in
-    E.164, within one tenant and one kind of account) keeps them in `sign_in_address_failures` (V78), keyed by the
+    account keeps its count and lock in its own row; any other address typed (the email in lower case with every
+    whitespace character removed, inside it too, issue #823, or the phone in E.164, within one tenant and one kind of
+    account) keeps them in `sign_in_address_failures` (V78), keyed by the
     SHA-256 of the address, with the same statement. **What is true:** after five failures an address of nobody answers
     exactly as an account (the same 423 `account_locked` and words, for the same time, before any hash), across
     restarts and floods; both paths do the same database work. **What is not hidden:** an address of nobody forgets its
@@ -75,6 +76,18 @@ controls.
     passwords every 15 minutes. It is accepted because without it the same person could guess the password; the owner
     gets back in through the reset, an admin or the operator (ADR-059, Consequences).
   Member sign-in (FR-IAM-09, P2) is not built; it will use the same lock and per-IP budget.
+- **One form of a staff email** (issue #823). Before any lookup (staff and operator sign-in, forgot password) and any save
+  (invitation, edit, the first administrator), the server removes every whitespace character from a typed email, at the
+  ends and inside (spaces, tabs, line breaks, the non-breaking space and the other Unicode spaces, and the zero width
+  space, word joiner and byte order mark a copy and paste carries), and lower cases it (`kernel.EmailAddresses`); the
+  screen does the same, but the server is the guard. The zero width non-joiner and joiner (U+200C, U+200D) are kept
+  (issue #857): some scripts need them, so removing one would make another address. Operator accounts are cleaned the
+  same way: the sign-in looks them up in that form and `deploy/sql/create-platform-user.sql` saves them in it (issue #857).
+  A stored email still holding a space after `V135` is reported after every migrate, each reason on its own, and fixed by
+  hand (`docs/runbooks/staff-email-left-over.md`), because such a person is looked up as the colleague whose email the
+  cleaned form is, and their wrong tries would lock that colleague. The per-address limit and the lock key use the same form, so typing spaces into an address does
+  not give a guesser fresh buckets or a fresh lock: the limits and the lockout behave as before. A login without `@` is
+  read as a phone by its own check (`kernel.PhoneNumbers`), whose meaning spaces do not change.
 - One-time codes, invitation and setup tokens, recovery codes and refresh tokens are stored as
   SHA-256 hashes only.
 - TOTP secrets are encrypted at rest with the application data key (8.7). TOTP is RFC 6238
@@ -415,6 +428,7 @@ platform API and holds no tenant permissions.
 | `retail.advance.create` | Y | | | | | | | | | | | |
 | `retail.advance.repay` | Y | | | | | | | | | | | |
 | `retail.cashbook.void` | Y | | | | | | | | | | | |
+| `retail.entry.backdate` | Y | | | | | | | | | | | |
 | `retail.branch_role.manage` | Y | | | | | | | | | | | |
 | `retail.pricelist.manage` | Y | | | | | | | | | | | |
 | `retail.pricelist.use` | Y | | | | | | | | | | | |
@@ -427,6 +441,7 @@ platform API and holds no tenant permissions.
 | `retail.purchase.approve` | Y | | | | | | | | | | | |
 | `retail.document.issue` | Y | | | | | | | | | | | |
 | `retail.controls.read` | Y | | | | | | | | | | | |
+| `retail.entry_location.read` | Y | | | | | | | | | | | |
 | `retail.order.manage` | Y | | | | | | | Y | | | | |
 | `retail.advisor.use` | Y | | | | | | | | | | | |
 | `retail.advisor.configure` | Y | | | | | | | | | | | |
@@ -447,6 +462,12 @@ Notes:
   moves it later (`PUT /platform/tenants/{tenant_id}/go-live`), since a later date reopens the window for bringing loans in. An approved bring-in is reversed only
   through `loan_bring_in_reversal`, with the same maker and checker permissions, never decided by its maker, and only
   while the loan has no transaction in the app and no penalty charge (ADR-071 decision 9).
+- Every shop's stock on My stock (issue #807, ADR-119): `retail.stock.read` at the branch listed by `GET /retail/stock` also
+  returns, on each row, the quantity of that item in every active branch of the business that keeps goods, whatever the
+  caller's scope at those branches. Quantities only: the other branches' cost, average buying price, value and movements stay
+  behind their own permission and scope (ADR-017), and the row's own cost fields keep `retail.profit.read` at the listed
+  branch. The owner turns it off with `other_shops_stock` (`core.settings.manage`, audited as `retail.capabilities.changed`).
+  No permission is added and no role changes in the matrix above.
 - Retail AI brief (issue #422, migration `V125`, ADR-037 as amended): `retail.advisor.use` reads the shop brief on Home
   and `retail.advisor.configure` reads and sets the assistant's switch and caps at `/staff/assistant` (switching on also needs
   `core.settings.manage`). Both are seeded to the administrators only, so switching the assistant on shows the brief to nobody
@@ -482,7 +503,11 @@ Notes:
   operator's daily SMS cap and the approval of sender ids are the platform operator's only (issues #212 and #218 seed no new
   permission: the operator's `PUT /platform/tenants/{tenant_id}/sms` and `.../sms/sender-ids/{sender_id}` use
   `platform.tenants.manage` and their reads `platform.tenants.read`, and the database refuses these changes from any transaction
-  bound to a tenant). A tenant can lower its caps under the operator's and choose only a sender id the operator approved for it;
+  bound to a tenant). SMS delivery reports and the SMS use report (issue #215, migration `V130`) seed no new permission either:
+  the provider's `POST /channels/sms/africastalking/delivery-reports/{token}` is public on the callback host and holds only the
+  path token (`BMS_SMS_CALLBACK_TOKEN`), and `core.sms_usage` is read with `core.reports.financial` (tenant admin, branch
+  manager, accountant, auditor), covering the whole business, offered only to a business with SMS on or SMS history; the
+  definer function that applies a report refuses any transaction bound to a tenant. A tenant can lower its caps under the operator's and choose only a sender id the operator approved for it;
   a test message goes only to the sink or the environment's allow-list, never to a number a user typed in a live environment; the assistant can be switched on only for tenants in `BMS_AI_ENABLED_TENANTS`; Ask BMS answers only for tenants in `BMS_HELP_ASK_TENANTS`, sends a provider nothing but the question scrubbed of phones, IDs, emails, long figures and names and the help articles the asker may read, stores only the question's hash, and never uses Claude (ADR-096); the setup helper sends a business's list (typed, the text of a file, or a photo drawn again without its metadata) and its category, unit and item names to the same providers only for tenants in `BMS_SETUP_AI_TENANTS`, never the member list (a borrower is matched by phone on the server), keeps nothing of the list but a row of counts, and saves nothing until the owner taps in the import's own check (ADR-102); collections can be
   switched on only while the tenant's own payment account is verified (`merchant_account_not_verified`); saving, testing and removing that account need `core.payment_account.manage` (migration V57; the tenant admin only, because it redirects where every repayment is paid; saving and removing also ask for a current authenticator code, and the other holders are emailed), reading its status `core.settings.read` (the key's last four characters only go to a holder of the account permission), the platform console reads its status through `platform.tenants.read` and may release an account with `platform.tenants.manage` (audited); a member's SMS opt-out is added with `lending.members.update`, but narrowing it (`all` to `reminders`) or lifting it needs `core.settings.manage` and a reason that goes into the audit row (stopping less is the administrator's; the screens ask for a confirmation first); a test message that would really go out obeys the operator's switch, the tenant's switch, the opt-out list and the caps, checked and reserved under one lock per business so concurrent tests cannot pass a cap together. Running a report run needs
   the report's own permission (a pack needs all seven); loan officers still see only their own loans.
@@ -550,16 +575,39 @@ Notes:
   unless the caller holds `retail.profit.read`, and the profit routes refuse without it. On a
   branch-bound row the permission must cover that row's branch (`principal.may`, ADR-017), so a
   user with profit read at branch A only sees no cost on branch B's stock, movements, sales or
-  valuation (review F5); tenant-wide products and price history need it in any branch. The sales
+  valuation (review F5); tenant-wide products and price history need it in any branch. A restock's
+  `sell_worth_minor` and `expected_profit_minor` (issue #821, ADR-126) need it at every branch the caller sees the restock
+  stock, and are added after the idempotency store, so a replayed answer never carries them to anyone else. A replay
+  itself answers only the person who stored the key (issue #852, ADR-026 decision 5): another person in the business who
+  sends the same Idempotency-Key, on any route, gets 422 `idempotency_key_other_user`, nothing is done, and the stored
+  answer (a restock's total and lines, a sale, a receipt) is never read into their response. The damage and
+  use share of Stock health (issue #822, ADR-127) is its own route, `GET /retail/reports/stock-health/damage-share`, guarded
+  by `retail.profit.read`: anyone else gets 403 and no figures, and it answers only the branches where the caller holds it
+  (a branch outside them, or of another business, is 404). The item page
+  (issue #813, ADR-121: `GET /retail/stock/items/{product_id}` and its `/movements`) declares `retail.stock.read` and shows
+  every quantity and running balance to whoever holds it, in the branches it covers; a shop's average buying price, a
+  movement's cost and a sale's `profit_minor` follow the same per-branch `retail.profit.read` rule, and a `branch_id` outside
+  the caller's `retail.stock.read` scope is 404, never an empty page that would confirm the branch. The sales
   summary (`GET /retail/sales/summary`, issues #328 and #341) is a sum at every level of its grouping chain (shop, year, month, salesperson, day, category, item), so its `profit_minor` is offered only when the caller holds
   `retail.profit.read` in every branch the figures cover (the requested branches within the `retail.sale.read` scope, or
   every branch when none were asked for and the scope is all of them) and is absent otherwise: a profit summed over some
   branches whose profit the caller may not read would otherwise read as the whole; a caller who holds `retail.profit.read` at one branch only sees the profit of a level only after choosing that branch, and sees it at no level while the shop level lists the others. The salesperson level shows the name of the user who made each sale (from `users`, a deactivated user included) and ranks colleagues by what they sold, so it is management information: it is available only to a caller who holds `retail.profit.read` in every branch the figures cover (the permission the matrix already uses for the retail margins and analysis, and the rule of `profit_minor`), so a manager with profit read at branch A only can rank sellers at A (`branch_id=A`) and not at B or across both; any other caller gets 403 `permission_denied` for the `seller` level or the `seller_id` filter of the summary, `available_levels` leaves `seller` out, and the PWA hides it from Group by and from the default chain. The sales list is no way round it: its `seller_id` filter has the same rule (403), and a row or a sale carries `created_by` and `voided_by` only for a caller who holds `retail.profit.read` at that sale's branch, or when the id is the caller's own, else they are null, so a cashier cannot group the list by person and sum a colleague's takings. It needs no new permission.
-  The restocks summary (`GET /retail/purchases/summary`, issue #350) and the stock summary (`GET /retail/stock/summary`) follow the same
+  The restocks summary (`GET /retail/purchases/summary`, issue #350), the stock summary (`GET /retail/stock/summary`) and the usage and
+  damage summary (`GET /retail/usage/summary`, issue #816) follow the same
   rule for what they add up at cost: `total_minor` and `cost_minor` are present only when the caller holds `retail.profit.read` in every
   branch the figures cover, and the counts, quantities and the value at the selling price need only the list's own permission
-  (`retail.purchase.create` and `retail.stock.read`) and its branch scope. The restock cards under a group are the existing restocks list, which already shows each line's cost and the total to a holder of `retail.purchase.create`; the summaries add no new exposure there, and their cost figures follow the stricter `retail.profit.read` rule only because they are sums across restocks. Probing the list with `product_id` or `category_id` finds only restocks that put that product into a branch the caller may read.
+  (`retail.purchase.create` and `retail.stock.read`) and its branch scope. The totals of the cash book record lists (issue #816) are
+  summed in the browser from the rows the list already returned under `retail.cashbook.read`, so they show no amount the rows do not:
+  a row without an amount (a seller's savings record without the Owner's switch) leaves its group without a total. The restock cards under a group are the existing restocks list, which already shows each line's cost and the total to a holder of `retail.purchase.create`; the summaries add no new exposure there, and their cost figures follow the stricter `retail.profit.read` rule only because they are sums across restocks. Probing the list with `product_id` or `category_id` finds only restocks that put that product into a branch the caller may read.
   The sales role holds no `core.*` permission; the PWA reads the user's branches from `/me`.
+- The date of an entry (issue #811, ADR-120, migration `V131`): `retail.entry.backdate` ("date an entry earlier than today, with
+  a reason") is the tenant admin's only, scoped by branch like every retail permission and given to no other seeded role. The
+  server dates expenses, savings, banking, withdrawals, advances, repayments, Buy stock and Move stock today on the business
+  clock; anyone else who sends an earlier date, a banking or withdrawal time included, is refused with 403 `date_not_today`,
+  and the PWA shows them no date box. A holder must give a reason, which is written with the date and the day it was entered
+  in the audit row `retail.entry.backdated`, so a late entry that changes a closed day's cash book is always traceable to a
+  person and a reason. Sales are unchanged: online they are dated by the server, offline they keep the time they were made
+  (ADR-067).
 - Storekeeper and Purchasing (issue #399, ADR-055, migration `V73`). The storekeeper (`retail_storekeeper`) holds
   `retail.stock.read`, `retail.stock.transfer`, `retail.stocktake.commit` and `retail.usage.report`: it sends stock from the
   stores and shops it works in, receives what arrives there (with the `transfer_receipt` capability), counts stock and
@@ -646,10 +694,11 @@ Notes:
   deliberate change from the pilot, where every signed-in user could record advances and their
   payments (open question 6). Adding a cash party of kind `owner`, `staff` or `related_entity` needs
   `retail.expense.manage`; the sales role may add a beneficiary of kind `supplier` or `other` on the fly with
-  `retail.expense.record`. One rule covers every profit-derived figure: the day's profit, the
+  `retail.expense.record`, and an expense item to an active category in place, never flagged as needing an explanation
+  (ADR-118). One rule covers every profit-derived figure: the day's profit, the
   savings suggestion, `suggested_minor` and **every response field that carries a savings amount**
   need `retail.profit.read` and are absent, not null, without it (a savings amount is half the
-  profit, so it leaks it), and so does `cash_purchases_minor` and every figure embedding it, because a restock total is a purchase total at cost (a caller without `retail.profit.read`, the sales role included, is shown `cash_expected_minor` only: takings less voids, expenses and advances paid out, plus repayments, before cash purchases and savings; ADR-022 decision 13, relaxable by the Owner, open question 8); a caller without `retail.profit.read` cannot send a savings amount at all (422 `amount_requires_profit_access`) and never sees `overwritten`, unless the Owner (only the Owner, 403 `owner_only` for anyone else) turns on `salespeople_see_savings_amount` (ADR-115): then that caller sees the suggestion and may change it within the cap before the day is saved, sees the saved amount only on records made while the setting is on and only when holding `retail.savings.record`, and is never sent the cap, the profit, the expenses or any other gated figure (an amount above the cap is refused in words that do not state it; by trying amounts the cap can still be found, which the owner accepted, owner decision D124); the profit can still be worked out from the suggestion, which the setting's help text says plainly; replacing a saved amount needs `retail.savings.overwrite` for every caller; the audit payload of a savings record carries neither the amount nor
+  profit, so it leaks it), and so does `cash_purchases_minor` and every figure embedding it, because a restock total is a purchase total at cost (a caller without `retail.profit.read`, the sales role included, is shown `cash_expected_minor` only: takings less voids, expenses and advances paid out, plus repayments, before cash purchases and savings; ADR-022 decision 13, relaxable by the Owner, open question 8; while `salespeople_see_savings_amount` is on, a caller who may bank is also shown the day's savings and the cash expected less them, never cash purchases or the net figure, issue #814, ADR-115 decision 11); a caller without `retail.profit.read` cannot send a savings amount at all (422 `amount_requires_profit_access`) and never sees `overwritten`, unless the Owner (only the Owner, 403 `owner_only` for anyone else) turns on `salespeople_see_savings_amount` (ADR-115): then that caller sees the suggestion and may change it within the cap before the day is saved, sees the saved amount on every record of any month when holding `retail.savings.record` or `retail.sale.create` for its branch (issues #799 and #827); a seller without the till records the branch's savings through the sales staff routes, declared with `retail.sale.create` and refused 403 while the setting is off, so the till's routes and their checks are unchanged (ADR-115 decision 8), and is never sent the cap, the profit, the expenses or any other gated figure (an amount above the cap is refused in words that do not state it; by trying amounts the cap can still be found, which the owner accepted, owner decision D124); the profit can still be worked out from the suggestion, which the setting's help text says plainly; replacing a saved amount needs `retail.savings.overwrite` for every caller; the audit payload of a savings record carries neither the amount nor
   the suggestion (FR-RET-19, ADR-022 decision 12). Voiding needs `retail.cashbook.void`. No cash
   book approval action is registered (open question 3); if one is, its row joins section 8.4 with a
   threshold set first.
@@ -741,6 +790,18 @@ Notes:
   reads quantities only, and a seller who sees only their own figures gets the last price of their own sales. `GET /retail/products/name-hints` needs `retail.catalogue.manage`, the permission that adds items. A confirmation
   only writes an audit row on an item of the caller's business, with the warning's kind and its numbers and no text from the
   client; its branch is kept only when the caller works there.
+- `retail.entry_location.read` (issue #826, ADR-122, migration V132) reads how far from the shop each sale and each usage
+  or damage entry was made, in words, through `GET /retail/entry-locations`, scoped by branch. It tells where a named person
+  was, so it is the tenant administrator's alone by default; a business gives it to an owner's custom role only on purpose.
+  Nobody reads the coordinates through the API, the owner included; sellers see no location or distance, their own
+  included. Setting a shop's location is `core.settings.manage`. The coordinates are personal data: never logged (rule 9),
+  never in the audit log (a shop location change records `has_location` only), never in an idempotency or client sale id
+  hash, never in a refused offline sale's stored request, and deleted when a closed business is removed (ADR-090). The phone
+  asks once with a plain reason; the staff note is the help article `where-a-sale-is-made`.
+- `retail.sale.void` also undoes a usage or damage entry (issue #818, ADR-123, migration V133, no permission added): whoever
+  may take back a sale at a branch may take back a wrong "used in the shop" or damage entry there, with a reason, once, and
+  nobody else; a storekeeper who reports usage cannot undo it. The undo is audited (`retail.usage.undone`) and shown on
+  Controls; no approval is asked, since no money changes hands.
 - `retail.controls.read` (issue #357, ADR-047, migration V66) opens the read-only Controls page: voids, returns, credit write-offs (ADR-087, valued at the amount owed, never the loss), changed prices,
   discounts, sales below cost and sales cancelled at once, by shop, by named person, by day and by reason. It names staff and compares
   them by a rate (a cancelled sale is credited to the person whose sale it was, the approver is shown apart and never ranked), so it is the tenant administrator's alone by default and a business gives it to an owner's or an auditor's custom
@@ -985,6 +1046,7 @@ the lending module is switched on (runbook `docs/runbooks/`, onboarding a tenant
 | Database passwords (`bms_owner`, `bms_app`, `bms_platform`) | Host env file, mode 600, owned by the deploy user | On staff change, and yearly |
 | Access token signing key pair (`BMS_TOKEN_SIGNING_JWK`, an EC P-256 private JWK with its `kid`) | Host env file | Yearly; two keys valid during rotation (one is configured today) |
 | Application data key (`BMS_DATA_KEY`, 32 bytes base64, and `BMS_DATA_KEY_ID`; encrypts TOTP secrets and any other field-level encrypted value) | Host env file | Key id stored with each ciphertext; re-encryption job on rotation |
+| Platform import key (`BMS_IMPORT_KEY`, 32 bytes base64, issue #128, customer data onboarding spec section 6.2): wraps each import run's data key (AES-256-GCM, bound to the business and the run); the run's key encrypts the run's quarantined files in 64 KiB AES-256-GCM segments bound to their batch | Host env file, never in git, never logged; optional, uploads answer 503 `imports_key_missing` when unset (dev and test make one at each start) | Not rotated while a run holds files: changing it makes every quarantined file unreadable, so it is changed only when no run is between upload and purge (#139 deletes each run's wrapped key at purge) |
 | Object storage credentials | Host env file; bucket-scoped token | Yearly |
 | SMS aggregator and payment gateway credentials | Host env file | Per provider policy |
 | Web Push (ADR-050): `BMS_PUSH_VAPID_PRIVATE_KEY` (with `BMS_PUSH_VAPID_PUBLIC_KEY`, `BMS_PUSH_SUBJECT`, `BMS_PUSH_EXTRA_ENDPOINT_HOSTS`) | Host env file; optional, push is off when unset | Made once per environment with `npx web-push generate-vapid-keys`; rotating strands every device until its next staff page load |
@@ -1144,6 +1206,7 @@ Detailed requirements are NFR-DP-01 to NFR-DP-08 in chapter 4. Design consequenc
 | SIM swap used to take over a member portal | PIN plus OTP only at activation and reset; SMS notice to the member on PIN reset; staff can revoke portal access |
 | Forged payment callback | Signature verification plus status query before booking (FR-PAY-02) |
 | Replayed payment callback | Idempotency on the provider reference (FR-PAY-03) |
+| Another person's Idempotency-Key sent to read their stored answer | A replay answers only the person who stored the key; anyone else in the business gets 422 `idempotency_key_other_user`, nothing is done and nothing of the stored answer is shown (issue #852, ADR-026 decision 5) |
 | Leaked backup | Backups encrypted before upload; private bucket; 30-day retention |
 | Enumeration of member records across the member portal | Ownership check returns 404, UUIDs not sequential |
 | Sign-up flood or a stranger consuming the shared host | Rate limits, honeypot, email confirmation, operator verification before anything is provisioned (ADR-024) |

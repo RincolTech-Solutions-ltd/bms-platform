@@ -30,19 +30,19 @@ describe('Toast', () => {
     expect(screen.queryByRole('status')).toBeNull();
   });
 
-  it('shows for six seconds, then goes', () => {
+  it('shows for about four seconds, then goes (#824)', () => {
     vi.useFakeTimers();
     const { result } = renderHook(() => useToast());
     act(() => result.current.show('Saved.', 'info'));
     const { container, unmount } = render(<>{result.current.toast}</>);
     expect(container.querySelector('.toast-info')).not.toBeNull();
     unmount();
-    expect(TOAST_MS).toBe(6000);
+    expect(TOAST_MS).toBe(4000);
     act(() => vi.advanceTimersByTime(TOAST_MS));
     expect(result.current.toast).toBeNull();
   });
 
-  it('stays twice as long, 12 seconds, when it carries an Undo (D79)', () => {
+  it('stays twice as long, 8 seconds, when it carries an Undo (D79)', () => {
     vi.useFakeTimers();
     const { result } = renderHook(() => useToast());
     act(() => result.current.show('Pack switched off', 'success', { label: 'Undo', run: () => undefined }));
@@ -127,7 +127,7 @@ describe('DoneToast (#682)', () => {
     expect(screen.queryByRole('status')).toBeNull();
   });
 
-  it('carries Undo when the write names how to take it back, runs it once and says Undone', async () => {
+  it('carries Undo when the write names how to take it back, runs it once and says what it undid', async () => {
     const back = vi.fn(() => Promise.resolve());
     function Toggle() {
       const save = useMutation({ mutationFn: () => Promise.resolve({ name: 'Test Pack', executed: true }), meta: { success: 'Pack switched off', undo: () => back } });
@@ -140,7 +140,7 @@ describe('DoneToast (#682)', () => {
     fireEvent.click(undo);
     fireEvent.click(undo);
     expect(back).toHaveBeenCalledTimes(1);
-    expect((await screen.findByText('Undone')).closest('.toast')?.className).toBe('toast toast-success');
+    expect((await screen.findByText('Undone: Pack switched off')).closest('.toast')?.className).toBe('toast toast-success');
   });
 
   it('shows Undo busy while its request runs, and keeps the toast up until it answers (review of #685)', async () => {
@@ -156,7 +156,7 @@ describe('DoneToast (#682)', () => {
     expect(screen.getByRole('button', { name: 'Undo' })).toBeTruthy();
     vi.useRealTimers();
     await act(async () => answer());
-    expect((await screen.findByText('Undone')).closest('.toast')?.className).toBe('toast toast-success');
+    expect((await screen.findByText('Undone: Pack switched off')).closest('.toast')?.className).toBe('toast toast-success');
     expect(back).toHaveBeenCalledTimes(1);
   });
 

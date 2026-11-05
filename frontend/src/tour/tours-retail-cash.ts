@@ -37,7 +37,8 @@ export const productsPage: Tour = {
   // Version 7: the app always makes the item code, never typed (issue #562).
   // Version 8: the search and the category chips come first, and on a phone an item is a row that opens it (issue #690).
   // Version 9: the item's unit is its single unit (issue #709, ADR-110).
-  version: 9,
+  // Version 10: the filter says Deleted only and Show deleted too, the old app's words (issue #830).
+  version: 10,
   title: 'This page: items',
   audience: (me) => held(me, CATALOGUE) && held(me, STOCK_READ),
   autoStart: false,
@@ -47,7 +48,7 @@ export const productsPage: Tour = {
     step({ id: 'add', target: 'product-add', title: 'Add an item', body: 'Tap here to add something you sell. Pick the category first, then type the name, choose its single unit, such as piece, and type the price. The app gives it the next code of the category, such as BLB-0001: you never type one. Adding from the category\'s own page saves picking the category.' }),
     step({ id: 'sizes', target: 'product-add-sizes', title: 'Sizes and colours', body: 'Sell one design in several sizes or prints? Tap here and type the sizes and the colours once. Each one gets its own price, stock and item code.' }),
     step({ id: 'join', target: 'product-join-sizes', title: 'One item per size?', body: 'If you typed each size as its own item, tap here to join them. Each keeps its stock and history.' }),
-    step({ id: 'filters', target: 'product-filters', title: 'Narrow the list', body: 'Choose Inactive to see items you no longer sell.' }),
+    step({ id: 'filters', target: 'product-filters', title: 'Narrow the list', body: 'Choose Deleted only or Show deleted too to see items you no longer sell.' }),
     step({ id: 'edit', target: 'product-list', title: 'Change an item', body: 'Tap an item on a phone, or Edit on a laptop, to change its name, category or single unit. Moving it to another category keeps its item code. Tap Stock to see how much of it you hold.' }),
     // Issue #412: the low-stock level is on the item's page, under Edit.
     step({ id: 'minimum', target: 'product-list', title: 'Warn me when stock is below', body: 'Open an item to set when you are told it is running low. On a phone tap the item; on a laptop tap Edit. Set one level for every shop and store, or a different one for a shop. With no level, you are told when it would run out within 14 days.' }),
@@ -115,14 +116,15 @@ export const sizesPage: Tour = {
 export const categoriesPage: Tour = {
   id: 'page-categories',
   // Version 3: the app always makes the item code, never typed (issue #562).
-  version: 3,
+  // Version 4: Delete and Show deleted, the old app's words (issue #830).
+  version: 4,
   title: 'This page: categories',
   audience: (me) => held(me, CATALOGUE) && held(me, STOCK_READ),
   autoStart: false,
   page: '/staff/retail/catalogue/categories',
   steps: [
     step({ id: 'add', target: 'named-add', title: 'Add a category', body: 'Tap here and type a name, such as Bulbs. The app makes the code start from the name, such as BLB, and shows it. The category\'s page can change it.' }),
-    step({ id: 'list', target: 'named-list', title: 'Open a category', body: 'Tap Open to see its items and add new ones there. Tap Rename to fix a name. Tap Switch off to stop new items using it. Old items keep it.' }),
+    step({ id: 'list', target: 'named-list', title: 'Open a category', body: 'Tap Open to see its items and add new ones there. Tap Rename to fix a name. Tap Delete to hide one you no longer use; old items keep it, and Show deleted brings it back.' }),
   ],
 };
 
@@ -146,28 +148,47 @@ export const categoryPage: Tour = {
 export const unitsPage: Tour = {
   id: 'page-units',
   // Version 2: the page is in two parts, Single units and Packages (issue #709, ADR-110).
-  version: 2,
+  // Version 3: Delete and Show deleted, the old app's words (issue #830).
+  version: 3,
   title: 'This page: units',
   audience: (me) => held(me, CATALOGUE) && held(me, STOCK_READ),
   autoStart: false,
   page: '/staff/retail/catalogue/units',
   steps: [
     step({ id: 'add', target: 'named-add', title: 'Single units and packages', body: 'Your shop already has the usual ones, such as piece, kg, dozen and box. A single unit is one thing a customer can buy on its own. A package holds single units. Add your own here and under Packages.' }),
-    step({ id: 'list', target: 'named-list', title: 'Rename or switch off', body: 'Tap Rename to fix a name. Tap Switch off to stop new items using it. Old items keep it. Tap Items to see them.' }),
+    step({ id: 'list', target: 'named-list', title: 'Rename or delete', body: 'Tap Rename to fix a name. Tap Delete to hide one you no longer use; old items keep it, and Show deleted brings it back. Tap Items to see them.' }),
   ],
 };
 
 export const suppliersPage: Tour = {
   id: 'page-suppliers',
   // Version 2 follows the glossary: Buy stock, Count stock, Customers who owe and the other plain words (issue #547).
-  version: 2,
+  // Version 3 adds the search and the supplier's own page (issue #820).
+  version: 3,
   title: 'This page: suppliers',
   audience: (me) => held(me, CATALOGUE) && held(me, PURCHASE),
   autoStart: false,
   page: '/staff/retail/catalogue/suppliers',
   steps: [
-    step({ id: 'add', target: 'person-add', optional: true, title: 'Add a supplier', body: 'Tap here and type the name and a phone number. You pick a supplier when you buy stock.' }),
-    step({ id: 'list', target: 'person-list', title: 'Your suppliers', body: 'Tap Edit to fix a name or phone. Tap Switch off for a supplier you no longer use. Past purchases keep it.' }),
+    step({ id: 'add', target: 'person-add', optional: true, title: 'Add a supplier', body: 'Tap here and type the name. A phone, email, payment terms and the other details are optional. You pick a supplier when you buy stock.' }),
+    step({ id: 'search', target: 'person-search', title: 'Find a supplier', body: 'Type a name, a phone number or a supplier type, such as Wholesaler. The list narrows as you type.' }),
+    step({ id: 'list', target: 'person-list', title: 'Your suppliers', body: 'Each card shows the phone and the last delivery. Tap Call, Text or WhatsApp to reach them. Tap Details and deliveries to see everything about a supplier.' }),
+  ],
+};
+
+// JUSTIFICATION-A3: a page tour for the new supplier page (issue #820), of the same shape as the page tours around it.
+export const supplierPage: Tour = {
+  id: 'page-supplier',
+  version: 1,
+  title: 'This page: one supplier',
+  audience: (me) => held(me, CATALOGUE) && held(me, PURCHASE),
+  autoStart: false,
+  page: '/staff/retail/catalogue/suppliers/$supplierId',
+  steps: [
+    step({ id: 'details', target: 'supplier-details', title: 'The details', body: 'The type, phone, email, address, payment terms and notes, the day the supplier was added and the last delivery. The last delivery comes from your purchases, so you never type it.' }),
+    step({ id: 'contact', target: 'supplier-contact', title: 'Reach them', body: 'Tap Call, Text or WhatsApp for the phone, Email to write, or Website to open their page.' }),
+    step({ id: 'edit', target: 'supplier-edit', optional: true, title: 'Edit or switch off', body: 'Tap Edit to change any detail. Tap Switch off for a supplier you no longer use. Past purchases keep it.' }),
+    step({ id: 'deliveries', target: 'supplier-deliveries', title: 'Deliveries', body: 'Every purchase from this supplier, the newest first. Tap one to open it.' }),
   ],
 };
 
@@ -264,7 +285,8 @@ export const bankingReportPage: Tour = {
 
 export const expensesPage: Tour = {
   id: 'page-expenses',
-  version: 1,
+  // Version 2: Edit and Delete on each expense, the old app's words (issue #830).
+  version: 2,
   title: 'This page: expenses',
   audience: (me) => held(me, EXPENSE_RECORD),
   autoStart: false,
@@ -273,7 +295,7 @@ export const expensesPage: Tour = {
     step({ id: 'form', target: 'expense-form', title: 'Record an expense', body: 'Pick the date, the category and the item. Type the amount. Some items ask you to explain. Then tap save.' }),
     step({ id: 'lists', target: 'expenses-lists-link', needs: [EXPENSE_MANAGE, CASHBOOK_READ], optional: true, title: 'Change what you can pick', body: 'Tap Expense lists to add a category or an item.' }),
     step({ id: 'report', target: 'expenses-report-link', optional: true, title: 'Totals', body: 'Tap Expenses report to see the totals by category, item, shop or month.' }),
-    step({ id: 'records', target: 'expense-records', needs: [CASHBOOK_READ], optional: true, title: 'Expense records', body: 'Choose the dates to list what was spent. If one was a mistake, tap Void and give the reason.' }),
+    step({ id: 'records', target: 'expense-records', needs: [CASHBOOK_READ], optional: true, title: 'Expense records', body: 'Choose the dates to list what was spent. If one was a mistake, tap Edit to change it, or Delete to take it out of the cash book.' }),
   ],
 };
 
@@ -403,7 +425,7 @@ export const customerAgeingPage: Tour = {
 };
 
 export const RETAIL_CASH_TOURS: readonly Tour[] = [
-  productsPage, sizesNewPage, sizesJoinPage, sizesPage, categoriesPage, categoryPage, unitsPage, suppliersPage, buyersPage, importPage, shopSetupPage, labelsPage,
+  productsPage, sizesNewPage, sizesJoinPage, sizesPage, categoriesPage, categoryPage, unitsPage, suppliersPage, supplierPage, buyersPage, importPage, shopSetupPage, labelsPage,
   bankingPage, bankingReportPage, expensesPage, expensesReportPage, expenseListsPage, withdrawalsPage, advancesPage, cashSummaryPage, savingsPage,
   branchRolesPage, customerGroupsPage, customerAgeingPage,
 ];

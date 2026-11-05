@@ -15,6 +15,7 @@ import { ShortLinkCard } from './short-link';
 import { Hint } from '../../app/ui/Hint';
 import { useHashSection } from '../../app/ui/useHashSection';
 import { sayDone } from './retail/toast';
+import { ShopLocationsCard } from './retail/entry-location';
 
 // Business set-up (FR-TEN-08): name, logo, theme colour and receipt footer, with a checklist a new
 // tenant admin lands on until it is dismissed. The logo is checked and re-encoded by the API; the
@@ -419,10 +420,14 @@ export function Setup() {
               Salespeople can see and change the savings amount
             </label>
             <p id="salespeople-savings-hint" className="hint">
-              A salesperson who sees the savings amount can work out the day&apos;s profit from it. Only you, the owner, can change this.
+              Anyone who sells at a shop can then open its Savings, change the amount, save it and see the savings of every month with their
+              amounts, including days saved before you turned this on. A salesperson who sees the savings amount can work out the
+              day&apos;s profit from it. Only you, the owner, can change this.
             </p>
           </fieldset>
         )}
+
+        {hasRetail(me.modules) && permissions.includes('core.settings.manage') && <ShopLocationsCard />}
 
         {permissions.includes('core.data_export.run') && <DataExportCard modules={me.modules} zone={me.tenant_timezone} />}
 

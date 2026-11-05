@@ -33,7 +33,7 @@ export function UploadStatement({ onUploaded }: { onUploaded: (s: PaymentStateme
       return statements.upload(file, file.name, from && to ? { from, to } : undefined);
     },
     onSuccess: (r) => onUploaded(r.detail, r.replayed),
-    meta: { success: 'Statement uploaded' },
+    meta: { success: () => (file?.name ? `Statement ${file.name} uploaded` : 'Statement uploaded') },
   });
   const problem = file ? fileProblem(file) : null;
   const lines = upload.error instanceof FormError ? Object.entries(upload.error.fields ?? {}) : [];
@@ -162,7 +162,7 @@ export function StatementView({ detail, canMark }: { detail: PaymentStatementDet
 /** The statements uploaded before, newest first; one can be opened again to see how its lines matched. */
 export function PastStatements({ onOpen }: { onOpen: (detail: PaymentStatementDetail) => void }) {
   const list = useQuery({ queryKey: ['payments', 'statements'], queryFn: statements.list });
-  // toast-exempt: opening reads a past statement and changes nothing; the statement shown below is the answer
+  // toast-exempt: saves nothing: opening reads a past statement and changes nothing; the statement shown below is the answer
   const open = useMutation({ mutationFn: (id: string) => statements.get(id), onSuccess: onOpen });
   const items = list.data ?? [];
   return (
@@ -195,7 +195,7 @@ export function ReconciliationPage() {
   const run = useMutation({
     mutationFn: reconciliation.run,
     onSuccess: (r) => queryClient.setQueryData(['payments', 'reconciliation'], r),
-    meta: { success: 'Reconciliation run' },
+    meta: { success: 'Payment reconciliation run' },
   });
   if (!allowed) {
     return (

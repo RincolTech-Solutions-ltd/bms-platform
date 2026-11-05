@@ -7,9 +7,12 @@ import { usePersistedDraft } from './idempotency';
 import { parseQty, qtyString } from './maths';
 import { BranchRequired, Gate, Problem, ProductPicker, useStockingBranch } from './ui';
 import { canUse, needsOf } from './permissions';
+import { LocationAsk, useWhereNow } from './entry-location';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { ActionBar } from '../../../app/ui/ActionBar';
 import { RowChevron } from '../../../app/ui/ListRow';
+import { KeptOnPhone, OfflineFormNote, isKept, useEntrySave } from '../../../offline/keep-entry';
+import { ReceiptPhotoChoice, sendReceiptPhotoAfter } from './receipt-photo';
 
 // Usage and damage (FR-RET-07): items taken out of stock for use in the shop or because they are
 // damaged, with a reason. Valued at cost by the server; no cost is shown here.
@@ -28,7 +31,7 @@ export function buildUsage(input: { branchId: string; kind: 'used' | 'damaged'; 
 export function UsageForm({ branchId, onSaved }: { branchId: string; onSaved?: (u: Usage) => void }) {
   const queryClient = useQueryClient();
   const { me } = useStaff();
-  const { key, draft, setDraft, finish, discard } = usePersistedDraft<{ kind: 'used' | 'damaged'; reason: string; lines: Line[] }>(
+  const { key, draft, setDraft, finish, discard, name } = usePersistedDraft<{ kind: 'used' | 'damaged'; reason: string; lines: Line[] }>(
     `usage:${me.user_id ?? ''}:${branchId}`,
     { kind: 'used', reason: '', lines: [] },
   );
@@ -36,20 +39,48 @@ export function UsageForm({ branchId, onSaved }: { branchId: string; onSaved?: (
   const setKind = (k: 'used' | 'damaged') => setDraft((d) => ({ ...d, kind: k }));
   const setReason = (r: string) => setDraft((d) => ({ ...d, reason: r }));
   const setLines = (f: (ls: Line[]) => Line[]) => setDraft((d) => ({ ...d, lines: f(d.lines) }));
+  // ADR-122: where the phone is goes with the entry when it says; nothing waits for it.
+  const where = useWhereNow();
+  // success-screen: with onSaved the Usage and damage page opens its Saved screen, and the toast says it too (#824)
+  // Issue #812: offline, or when the network drops, the usage or damage is kept on the phone and sent later.
+  const entries = useEntrySave();
+  // Issue #819: the optional receipt photo goes after the entry is saved and said, never holding the form; it is cleared on every
+  // save, also one kept on the phone, so it never goes with the next entry.
+  const [receipt, setReceipt] = useState<File | null>(null);
   const save = useMutation({
-    mutationFn: () => retail.createUsage(buildUsage({ branchId, kind, reason, lines }), key),
+    mutationFn: async () => {
+      // ADR-122: where the phone was, read as it saves; kept with the entry when it waits on the phone.
+      const body = { ...buildUsage({ branchId, kind, reason, lines }), ...where.now() };
+      return entries.save(
+        {
+          kind: 'usage', body, key, branchId,
+          detail: `${kind === 'damaged' ? 'damaged' : 'used'}, ${lines.length} ${lines.length === 1 ? 'item' : 'items'}`,
+          fix: { to: '/staff/retail/usage', draftName: name, draft },
+        },
+        () => retail.createUsage(body, key),
+      );
+    },
     onSuccess: (u) => {
+      setReceipt(null);
+      if (!isKept(u)) sendReceiptPhotoAfter('usage', u.id, receipt);
+      if (isKept(u)) {
+        discard();
+        return;
+      }
       finish();
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       onSaved?.(u);
     },
-    // With onSaved the Usage and damage page opens its Saved screen, which says it.
-    meta: { success: (u: Usage) => (onSaved ? null : u?.kind === 'damaged' ? 'Damage recorded' : 'Usage recorded') },
+    meta: { success: (u: Usage) => (u?.kind === 'damaged' ? 'Damage recorded, stock reduced' : 'Usage recorded, stock reduced') },
   });
   const valid = lines.length > 0 && reason.trim() !== '' && lines.every((l) => parseQty(l.qty) !== null);
 
+  if (entries.kept) return <KeptOnPhone item={entries.kept} onNew={entries.another} />;
   return (
     <form onSubmit={(e) => { e.preventDefault(); if (valid && !save.isPending) save.mutate(); }}>
+      {entries.offlineMode && <OfflineFormNote what="usage or damage record" />}
+      <LocationAsk where={where} />
+
       <fieldset data-tour="usage-kind">
         <legend>What happened?</legend>
         {(['used', 'damaged'] as const).map((k) => (
@@ -80,13 +111,14 @@ export function UsageForm({ branchId, onSaved }: { branchId: string; onSaved?: (
           <button type="button" className="btn-ghost" aria-label={`Remove ${l.product.description}`} onClick={() => setLines((ls) => ls.filter((_, n) => n !== i))}>Remove</button>
         </div>
       ))}
+      <ReceiptPhotoChoice id="usage-receipt" file={receipt} onChange={setReceipt} />
       <Problem error={save.error} />
       <ActionBar>
         <BusyButton type="submit" className="rt-primary" data-tour="usage-save" busy={save.isPending} notReady={!valid}>Save</BusyButton>
       </ActionBar>
 
       {(lines.length > 0 || reason !== '') && !save.isPending && (
-        <button type="button" onClick={() => { discard(); save.reset(); }}>Clear this form</button>
+        <button type="button" onClick={() => { discard(); setReceipt(null); save.reset(); }}>Clear this form</button>
       )}
     </form>
   );

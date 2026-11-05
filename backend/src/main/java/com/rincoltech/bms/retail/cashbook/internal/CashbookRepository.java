@@ -136,11 +136,27 @@ class CashbookRepository {
                         """).params(name, exceptId, exceptId).query(Long.class).single() > 0;
     }
 
+    /**
+     * A stored item name as it is compared (ADR-118 decision 2, issue #810): every run of spaces, tabs or line breaks is one
+     * space, then the spaces around it go, so a name stored before names were tidied ("\tFuel", "Generator  fuel") still
+     * matches what the caller sends, which {@code SetupService.itemName} tidied the same way. The spaces are named one by
+     * one ({@code SetupService.SPACES}), so Java and PostgreSQL agree. Wrapped in functions, the name no longer uses the
+     * V34 index on {@code lower(name)}; the read is within one category of a business, a short list (issue #810).
+     */
+    static final String SPACED_NAME = "lower(btrim(regexp_replace(name, '[ \\t\\n\\r\\f\\v]+', ' ', 'g')))";
+
+    Optional<ItemRow> itemNamed(UUID categoryId, String name) {
+        return jdbc.sql("SELECT id, category_id, name, requires_explanation, active, version FROM retail_expense_items"
+                        + " WHERE category_id = ? AND " + SPACED_NAME + " = lower(?)"
+                        + " ORDER BY active DESC, id LIMIT 1")
+                .params(categoryId, name)
+                .query((rs, n) -> item(rs))
+                .optional();
+    }
+
     boolean itemNameTaken(UUID categoryId, String name, UUID exceptId) {
-        return jdbc.sql("""
-                        SELECT count(*) FROM retail_expense_items
-                         WHERE category_id = ? AND lower(name) = lower(?) AND (CAST(? AS uuid) IS NULL OR id <> ?)
-                        """)
+        return jdbc.sql("SELECT count(*) FROM retail_expense_items WHERE category_id = ? AND " + SPACED_NAME
+                                + " = lower(?) AND (CAST(? AS uuid) IS NULL OR id <> ?)")
                         .params(categoryId, name, exceptId, exceptId)
                         .query(Long.class)
                         .single()
@@ -163,11 +179,16 @@ class CashbookRepository {
                         """).params(name, accountId, active, sortOrder, id).update();
     }
 
-    void insertItem(UUID id, UUID categoryId, String name, boolean requiresExplanation, UUID by) {
-        jdbc.sql("""
+    /** False when the name was taken by a transaction that committed after the caller's check (ADR-118). */
+    boolean insertItem(UUID id, UUID categoryId, String name, boolean requiresExplanation, UUID by) {
+        return jdbc.sql("""
                         INSERT INTO retail_expense_items (id, tenant_id, category_id, name, requires_explanation, created_by)
                         VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?)
-                        """).params(id, categoryId, name, requiresExplanation, by).update();
+                        ON CONFLICT (tenant_id, category_id, lower(name)) DO NOTHING
+                        """)
+                        .params(id, categoryId, name, requiresExplanation, by)
+                        .update()
+                == 1;
     }
 
     void updateItem(UUID id, String name, boolean requiresExplanation, boolean active) {
@@ -553,6 +574,18 @@ class CashbookRepository {
                 .list();
     }
 
+    /** Every active savings record of the branches in the window, newest day first (issue #827, the grouped view). */
+    List<SavingsRow> activeSavings(List<UUID> branches, LocalDate from, LocalDate to) {
+        Filter f = new Filter()
+                .branches("t.branch_id", branches)
+                .dates("t.business_date", from, to)
+                .live("t", false);
+        return jdbc.sql(SAVINGS_SELECT + f.sql + " ORDER BY t.business_date DESC, t.id")
+                .params(f.params)
+                .query((rs, n) -> savings(rs))
+                .list();
+    }
+
     // ---- banking
 
     private static final String BANKING_SELECT = """
@@ -797,6 +830,24 @@ class CashbookRepository {
                 .param("by", by)
                 .param("entry", entryId)
                 .update();
+    }
+
+    /** Issue #819: the receipt is already named by an expense, or was added to one. */
+    boolean receiptTaken(UUID documentId, UUID subjectId) {
+        return jdbc.sql(
+                        "SELECT EXISTS (SELECT 1 FROM retail_expenses WHERE receipt_document_id = :doc OR id = :subject)")
+                .param("doc", documentId)
+                .param("subject", subjectId)
+                .query(Boolean.class)
+                .single();
+    }
+
+    /** Issue #819: the expense names this receipt. */
+    boolean namesReceipt(UUID expenseId, UUID documentId) {
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM retail_expenses WHERE id = ? AND receipt_document_id = ?)")
+                .params(expenseId, documentId)
+                .query(Boolean.class)
+                .single();
     }
 
     Optional<ExpenseRow> expense(UUID id, boolean forUpdate) {

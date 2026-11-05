@@ -92,6 +92,20 @@ export const usageHistoryPage: Tour = {
   ],
 };
 
+export const itemPage: Tour = {
+  id: 'page-item',
+  version: 1,
+  title: 'This page: one item',
+  audience: (me) => held(me, STOCK_READ),
+  autoStart: false,
+  page: '/staff/retail/items/$productId',
+  steps: [
+    retail({ id: 'shops', target: 'item-page-shops', title: 'In stock in each shop', body: 'See how many of this item each shop holds now.' }),
+    retail({ id: 'filters', target: 'item-page-filters', title: 'Narrow the list', body: 'Choose one shop, or the first and last day, to see only those movements.' }),
+    retail({ id: 'moves', target: 'item-page-moves', title: 'Check the count', body: 'Every delivery, sale, move, use, damage and count, newest first. Each line shows what the shop held just after it.' }),
+  ],
+};
+
 export const transferPage: Tour = {
   id: 'page-transfer',
   // Version 2 adds the Scan here step (issue #345, ADR-070).
@@ -183,8 +197,9 @@ export const marginsPage: Tour = {
 
 export const stockHealthPage: Tour = {
   id: 'page-stock-health',
-  // Version 2 added the slow movers step (issue #414), version 3 the why-low step (issue #412).
-  version: 3,
+  // Version 2 added the slow movers step (issue #414), version 3 the why-low step (issue #412), version 4 the damage and use
+  // share for owners (issue #822).
+  version: 4,
   title: 'This page: stock health',
   audience: (me) => held(me, STOCK_READ),
   autoStart: false,
@@ -196,6 +211,8 @@ export const stockHealthPage: Tour = {
     // Issue #412: why a row is on the reorder list, and where its level is set.
     retail({ id: 'why-low', target: 'health-results', title: 'Why it needs buying', body: 'Each item to reorder says why. It is below the minimum you set, or it runs out soon at the pace it sells. Tap Set a level to choose "Warn me when stock is below" for it.' }),
     retail({ id: 'slow', target: 'health-slow', title: 'Slow movers', body: 'Items that sell, but slowly: the months it takes to sell what you hold. If it sells better at another branch, tap Move to send some there. Managers who see costs also see the money tied up.' }),
+    // Issue #822, ADR-127: only a person who may see profit gets the section, so only they get the step.
+    retail({ id: 'damage-share', target: 'health-damage-share', needs: ['retail.profit.read'], optional: true, title: 'Damage and use as a share', body: 'See how much of each item was damaged or used. Each share is out of the stock at the start plus what came in. The highest come first.' }),
   ],
 };
 
@@ -229,6 +246,6 @@ export const evaluationPage: Tour = {
 };
 
 export const RETAIL_REPORT_TOURS: readonly Tour[] = [
-  retailHomePage, restockPage, usagePage, usageHistoryPage, transferPage, transfersPage, valuationPage, profitPage,
+  retailHomePage, restockPage, usagePage, usageHistoryPage, itemPage, transferPage, transfersPage, valuationPage, profitPage,
   salesAnalysisPage, marginsPage, stockHealthPage, creditControlPage, evaluationPage,
 ];

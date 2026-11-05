@@ -48,6 +48,9 @@ class BusinessClosureIT extends IntegrationTest {
     @Autowired
     ClosureService closures;
 
+    @Autowired
+    com.rincoltech.bms.core.documents.QuarantineStorage quarantine;
+
     LocalDate today;
 
     /** The businesses this test made. */
@@ -140,6 +143,14 @@ class BusinessClosureIT extends IntegrationTest {
         db.sql("""
                         INSERT INTO retail_customers (id, tenant_id, name, contact)
                         VALUES (?, ?, 'Test Customer 01', '+256700000002')
+                        """).params(UUID.randomUUID(), b.t().tenantId()).update();
+        // A supplier's details (V134, issue #849): SupplierDetailsErasure clears them with the removal.
+        db.sql("""
+                        INSERT INTO retail_suppliers (id, tenant_id, name, contact, email, address, country, website,
+                            payment_terms, bank_account, supplier_type, notes)
+                        VALUES (?, ?, 'Test Supplier 01', '+256700000004', 'orders@supplier-test.example',
+                            'Plot 1, Test Street', 'Uganda', 'supplier-test.example', '30 days', '0000111122',
+                            'Wholesaler', 'Ask for Test Person 01.')
                         """).params(UUID.randomUUID(), b.t().tenantId()).update();
         db.sql("""
                         INSERT INTO retail_sales (id, tenant_id, branch_id, sale_no, sale_date, payment_method, buyer_name,
@@ -489,6 +500,18 @@ class BusinessClosureIT extends IntegrationTest {
                         id,
                         saleTotal))
                 .isEqualTo(1);
+        // Issue #849: the supplier's bank account number, email, address and every other detail are gone.
+        assertThat(count(
+                        "SELECT count(*) FROM retail_suppliers WHERE tenant_id = ? AND (bank_account IS NOT NULL"
+                                + " OR email IS NOT NULL OR address IS NOT NULL OR country IS NOT NULL"
+                                + " OR website IS NOT NULL OR payment_terms IS NOT NULL"
+                                + " OR supplier_type IS NOT NULL OR notes IS NOT NULL"
+                                + " OR name = 'Test Supplier 01' OR contact = '+256700000004')",
+                        id))
+                .isZero();
+        assertThat(count("SELECT count(*) FROM retail_suppliers WHERE tenant_id = ?", id))
+                .as("the supplier row stays for the money records that name it")
+                .isPositive();
         // The audit trails keep what happened (amounts, dates, ids, codes) and lose who it was about.
         assertThat(count(
                         "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND (data::text ~ ? OR ip IS NOT NULL)",
@@ -525,6 +548,11 @@ class BusinessClosureIT extends IntegrationTest {
                 .isEqualTo(1);
         assertThat(count(
                         "SELECT count(*) FROM retail_sales WHERE tenant_id = ? AND buyer_name = 'Test Buyer 01'", kept))
+                .isEqualTo(1);
+        assertThat(count(
+                        "SELECT count(*) FROM retail_suppliers WHERE tenant_id = ? AND bank_account = '0000111122'"
+                                + " AND email = 'orders@supplier-test.example' AND address = 'Plot 1, Test Street'",
+                        kept))
                 .isEqualTo(1);
         assertThat(count(
                         "SELECT count(*) FROM users WHERE tenant_id = ? AND lower(email) = lower(?)",
@@ -630,7 +658,7 @@ class BusinessClosureIT extends IntegrationTest {
      * with personal data fails here until its module's eraser covers it.
      */
     @Test
-    void frTen09_theRemovalLeavesNoPersonalDataInAnyTable() {
+    void frTen09_theRemovalLeavesNoPersonalDataInAnyTable() throws java.io.IOException {
         TestDatabase.Fixture t = TestDatabase.tenant("close-all", true, true);
         businesses.add(t.tenantId());
         RlsIsolationIT.seedOneRowInEveryTable(t);
@@ -731,7 +759,20 @@ class BusinessClosureIT extends IntegrationTest {
                 .sql("UPDATE tenant_closures SET keep_until = ? WHERE id = ?")
                 .params(today.minusDays(1), closureId)
                 .update();
+        // A quarantined import file (#128) has no documents row; the purge deletes it by its prefix.
+        java.nio.file.Path file = java.nio.file.Files.createTempFile("closure-quarantine", ".bin");
+        java.nio.file.Files.write(file, new byte[] {1, 2, 3});
+        com.rincoltech.bms.kernel.TenantContext.callAs(
+                t.tenantId(), () -> quarantine.put(UUID.randomUUID(), UUID.randomUUID(), file));
+        java.nio.file.Files.delete(file);
+        assertThat(com.rincoltech.bms.kernel.TenantContext.callAs(
+                        t.tenantId(), () -> quarantine.list().toList()))
+                .hasSize(1);
         assertThat(closures.purgeDue()).isGreaterThanOrEqualTo(1);
+        assertThat(com.rincoltech.bms.kernel.TenantContext.callAs(
+                        t.tenantId(), () -> quarantine.list().toList()))
+                .as("the quarantined file is deleted with the business")
+                .isEmpty();
         List<String> kept = new ArrayList<>();
         for (String table : RlsIsolationIT.tenantOwnedTables()) {
             if (List.of("tenants", "users", "tenant_closures").contains(table)) {

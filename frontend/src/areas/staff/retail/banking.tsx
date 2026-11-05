@@ -5,8 +5,8 @@ import { BusyButton } from '../../../app/ui/BusyButton';
 import { businessToday, retail, type Banking, type BankingDay, type BankingExpected } from '../../../api/retail';
 import { useStaff } from '../context';
 import { alreadyBankedLabel, bankingPrefill } from './banking-state';
-import { amountOrNull, clockTime, flagWords, groupByShopMonth, warningWords, type BankingFlag } from './cash-state';
-import { DateField, ImportedBadge, RecordsByShop, Saved, Warnings, WindowFields, useReadScope, useSavedFor, useWindow } from './cash-ui';
+import { amountOrNull, clockTime, dateFields, flagWords, groupByShopMonth, warningWords, type BankingFlag } from './cash-state';
+import { DateField, ImportedBadge, RecordsByShop, Saved, Warnings, WindowFields, useEntryDate, useReadScope, useSavedFor, useWindow } from './cash-ui';
 import { usePersistedDraft } from './idempotency';
 import { CASHBOOK_READ, holds, needsOf } from './permissions';
 import { ScreenLink } from './screen-link';
@@ -15,13 +15,16 @@ import { BranchRequired, Gate, Problem, money, useBranchName, useSingleBranch } 
 import { showDate } from './transfers';
 import { ActionBar } from '../../../app/ui/ActionBar';
 import { Hint } from '../../../app/ui/Hint';
+import { KeptOnPhone, OfflineFormNote, isKept, useEntrySave } from '../../../offline/keep-entry';
 
 // Cash banked (FR-RET-21 to FR-RET-23). The server works out what to expect: every caller sees "Cash
 // expected" (takings less what was paid out of the till). Only a caller with retail.profit.read also gets
 // the cash restock cost, the savings and the net amount to bank, and only then the flag, the difference and
-// the warning after a save. Several deposits on one day are allowed.
+// the warning after a save. While the owner's savings switch is on, the server also sends anyone else the
+// savings set aside and the cash expected less them (issue #814), never the cash restock cost. Several deposits
+// on one day are allowed.
 
-interface BankingDraft { date: string; amount: string | null; reference: string }
+interface BankingDraft { date: string; dateReason?: string; amount: string | null; reference: string }
 
 export function ExpectedFigures({ expected, date }: { expected: BankingExpected; date?: string }) {
   return (
@@ -34,6 +37,13 @@ export function ExpectedFigures({ expected, date }: { expected: BankingExpected;
       {expected.cash_purchases_minor !== undefined && <p className="rt-row"><span>Stock bought with cash, at cost</span><strong>{money(expected.cash_purchases_minor)}</strong></p>}
       {expected.savings_minor !== undefined && <p className="rt-row"><span>Savings set aside</span><strong>{money(expected.savings_minor)}</strong></p>}
       {expected.expected_minor !== undefined && <p className="rt-row"><span>Expected to bank</span><strong>{money(expected.expected_minor)}</strong></p>}
+      {expected.expected_minor === undefined && expected.expected_after_savings_minor !== undefined && (
+        // Issue #847: never a negative amount; 0, as the amount banked is filled, and the reason in plain words.
+        <>
+          <p className="rt-row"><span>Expected to bank</span><strong>{money(Math.max(0, expected.expected_after_savings_minor))}</strong></p>
+          <Hint>{expected.expected_after_savings_minor < 0 ? 'Savings are more than the cash in the till today.' : 'Cash expected less the savings set aside.'}</Hint>
+        </>
+      )}
       <p className="rt-row"><span>{alreadyBankedLabel(date ?? expected.business_date, businessToday())}</span><strong>{money(expected.banked_so_far_minor ?? 0)}</strong></p>
     </div>
   );
@@ -42,26 +52,44 @@ export function ExpectedFigures({ expected, date }: { expected: BankingExpected;
 export function BankingForm({ branchId, onSaved }: { branchId: string; onSaved?: (saved: Banking) => void }) {
   const queryClient = useQueryClient();
   const { me } = useStaff();
-  const { key, draft, setDraft, finish } = usePersistedDraft<BankingDraft>(`banking:${me.user_id ?? ''}:${branchId}`, { date: businessToday(), amount: null, reference: '' });
-  const expected = useQuery({ queryKey: ['retail', 'banking-expected', branchId, draft.date], queryFn: () => retail.bankingExpected({ branchId, date: draft.date }) });
+  const { key, draft, setDraft, finish, discard, name } = usePersistedDraft<BankingDraft>(`banking:${me.user_id ?? ''}:${branchId}`, { date: businessToday(), amount: null, reference: '' });
+  const entry = useEntryDate(branchId, draft.date, draft.dateReason);
+  const expected = useQuery({ queryKey: ['retail', 'banking-expected', branchId, entry.day], queryFn: () => retail.bankingExpected({ branchId, date: entry.day }) });
   const shown = draft.amount ?? bankingPrefill(expected.data);
   const minor = amountOrNull(shown);
-  // toast-exempt: success screen, the Saved panel replaces the form
+  // Issue #812: offline, or when the network drops, the banking is kept on the phone; the figures wait for the network.
+  const entries = useEntrySave();
+  const body = { branch_id: branchId, ...dateFields(entry), amount_minor: minor ?? 0, ...(draft.reference.trim() ? { reference: draft.reference.trim() } : {}) };
+  // success-screen: the Saved panel replaces the form
   const save = useMutation({
-    mutationFn: () => retail.createBanking({ branch_id: branchId, business_date: draft.date, amount_minor: minor ?? 0, ...(draft.reference.trim() ? { reference: draft.reference.trim() } : {}) }, key),
+    mutationFn: () => entries.save(
+      { kind: 'banking', body, key, branchId, detail: draft.reference.trim() || undefined, amountMinor: body.amount_minor, fix: { to: '/staff/retail/banking', draftName: name, draft } },
+      () => retail.createBanking(body, key),
+    ),
+    meta: { success: (saved: Banking) => {
+      const amount = saved?.amount_minor ?? minor;
+      return amount != null ? `Banking of ${money(amount)} saved` : 'Banking for the day saved';
+    } },
     onSuccess: (saved) => {
+      if (isKept(saved)) {
+        discard();
+        return;
+      }
       finish();
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       onSaved?.(saved);
     },
   });
-  const blocked = minor === null || expected.isPending || save.isPending;
+  // Offline the date is the phone's (issue #812): the figures and the owner's earlier day wait for the network.
+  const blocked = minor === null || ((expected.isPending || entry.reasonMissing) && !entries.offlineMode) || save.isPending;
+  if (entries.kept) return <KeptOnPhone item={entries.kept} onNew={entries.another} />;
   return (
     <form onSubmit={(e) => { e.preventDefault(); if (!blocked) save.mutate(); }}>
-      <DateField id="banking-date" label="Date" value={draft.date} onChange={(date) => setDraft((d) => ({ ...d, date, amount: null }))} />
+      {entries.offlineMode && <OfflineFormNote what="banking" />}
+      {!entries.offlineMode && <DateField id="banking-date" label="Date" entry={entry} value={entry.day} reason={draft.dateReason} onChange={(date) => setDraft((d) => ({ ...d, date, amount: null }))} onReason={(dateReason) => setDraft((d) => ({ ...d, dateReason }))} />}
       {expected.isError && <Problem error={expected.error} />}
-      {expected.isPending && <p className="loading">Loading</p>}
-      {expected.data && <ExpectedFigures expected={expected.data} date={draft.date} />}
+      {expected.isPending && !entries.offlineMode && <p className="loading">Loading</p>}
+      {expected.data && <ExpectedFigures expected={expected.data} date={entry.day} />}
       <label htmlFor="banking-amount">Amount banked</label>
       <input id="banking-amount" inputMode="numeric" value={shown} onChange={(e) => setDraft((d) => ({ ...d, amount: e.target.value }))} aria-invalid={shown.trim() !== '' && minor === null} />
       {shown.trim() !== '' && minor === null && <p role="alert" className="rt-flag">Enter the amount in whole shillings.</p>}
@@ -110,6 +138,9 @@ export function BankingRecords({ onVoided }: { onVoided?: (message: string) => v
           rows={rows.data}
           empty="Nothing banked in this period."
           what="banking record"
+          list="bankings"
+          figures={{ amount: (r) => r.amount_minor }}
+          totalWord="Banked"
           voidWith={(row, reason, key) => retail.voidBanking(row.id ?? '', reason, key)}
           onVoided={() => onVoided?.('Banking record voided.')}
           renderRow={(row) => (

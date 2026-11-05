@@ -55,7 +55,27 @@ final class StockApi {
             String reservedQty,
 
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = STANDARD_PACK)
-            StandardPack standardPack) {}
+            StandardPack standardPack,
+
+            // JUSTIFICATION-A3: the one response field and its element type the issue asks for, no new mechanism.
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Issue #807 (ADR-119): the quantity in every active shop of the business, this shop first and"
+                                    + " marked here, a shop with none at 0; quantities only, whatever the caller's branch scope."
+                                    + " Absent while the owner has switched other shops' stock off or fewer than two shops would be listed")
+            List<ShopQty> shops) {}
+
+    @Schema(name = "RetailShopQty", description = "Issue #807: how many of an item one shop holds, nothing else of it")
+    record ShopQty(
+            UUID branchId,
+            String name,
+            String qty,
+
+            @Schema(description = "Below zero in this shop") boolean negative,
+
+            @Schema(description = "True for the shop the list was read for")
+            boolean here) {}
 
     static final String STANDARD_PACK =
             "Issue #650: the pack the stock is shown in (packs and pieces); absent while the units"
@@ -187,7 +207,40 @@ final class StockApi {
             String note,
             UUID by,
 
-            @JsonInclude(JsonInclude.Include.NON_NULL) MovementCorrection correction) {}
+            @JsonInclude(JsonInclude.Include.NON_NULL) MovementCorrection correction,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    type = "string",
+                    description = "The item page (issue #813): what the branch held of the item just after this"
+                            + " movement, over its whole history in movement order; absent on the list across items")
+            String balanceAfter,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "The item page (issue #813), on a sale: the sale line's total less its cost; " + COST_ONLY)
+            Long profitMinor,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL) MovementUndone undone,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description = "On a usage or damage movement (issue #818): how many lines its entry has, all of"
+                            + " which an undo puts back, whatever the list's filter or page")
+            Integer entryLines,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "On a usage or damage movement (issue #819, ADR-124): a photo of the paper receipt is on"
+                                    + " its entry")
+            Boolean hasReceiptPhoto) {}
+
+    @Schema(
+            name = "RetailStockMovementUndone",
+            description = "Present on a usage or damage movement whose entry was undone (issue #818): who, when, why")
+    record MovementUndone(Instant at, UUID by, String byName, String reason) {}
 
     @Schema(
             name = "RetailStockMovementCorrection",
@@ -327,14 +380,16 @@ final class StockApi {
                     description = "The quantity there should be, not the difference")
             BigDecimal newQty,
 
+            // No lower bound: a quantity below zero (imported history, ADR-020 decision 4) is the one most in need of a
+            // correction, and the form sends it as it showed it (issue #804).
             @NotNull
-            @PositiveOrZero
             @Digits(integer = 11, fraction = 3)
             @Schema(
                     type = "string",
                     example = "12.5",
-                    description = "The quantity the form showed when it was opened; 409 stock_moved when it has "
-                            + "changed since, with current_qty, the quantity now")
+                    description =
+                            "The quantity the form showed when it was opened, below zero when the shelf list "
+                                    + "shows that; 409 stock_moved when it has changed since, with current_qty, the quantity now")
             BigDecimal expectedQty,
 
             @NotNull

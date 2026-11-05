@@ -59,6 +59,20 @@ function unwrap<T>(result: { data?: T; error?: unknown; response: Response }, fa
   return result.data;
 }
 
+// Every whitespace character the server removes from an email (kernel.EmailAddresses, issue #823): \s covers the spaces, tabs,
+// the non-breaking space and the other Unicode spaces; the rest are the characters \s leaves out that a copy and paste can carry.
+// The zero width non-joiner and joiner (U+200C, U+200D) stay: some scripts need them, so an address may hold one (issue #857).
+const EMAIL_WHITESPACE = new RegExp(`[\\s${String.fromCharCode(0x85, 0x180e, 0x200b, 0x2060)}]`, 'g');
+
+/** An email as the server looks it up and saves it: no whitespace anywhere, lower case (issue #823). */
+export const cleanEmail = (typed: string): string => typed.replace(EMAIL_WHITESPACE, '').toLowerCase();
+
+/**
+ * What the sign-in and Forgot password boxes send: an email (it has an @) cleaned as the server cleans it; a phone only trimmed,
+ * because the server reads a phone by its own format check. The server cleans again; this only keeps the screen in step.
+ */
+export const signInLogin = (typed: string): string => (typed.includes('@') ? cleanEmail(typed) : typed.trim());
+
 /**
  * Asks for a reset link for an email or phone. Resolves with the words to show, whether or not an account matched: the server
  * never says, and neither may the page.

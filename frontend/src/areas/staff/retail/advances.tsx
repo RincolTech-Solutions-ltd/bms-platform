@@ -5,11 +5,12 @@ import { BusyButton } from '../../../app/ui/BusyButton';
 import { Segmented } from '../../../app/ui/Segmented';
 import { businessToday, retail, type Advance, type AdvanceReport, type Repayment } from '../../../api/retail';
 import { useStaff } from '../context';
-import { amountOrNull, enteredBy, voidOffered } from './cash-state';
-import { DateField, ImportedBadge, RecordsByShop, Saved, VoidAction, useMayVoid, useReadScope, useSavedFor } from './cash-ui';
+import { amountOrNull, dateFields, enteredBy, voidOffered } from './cash-state';
+import { DateField, ImportedBadge, RecordsByShop, Saved, VoidAction, useEntryDate, useMayVoid, useReadScope, useSavedFor } from './cash-ui';
 import { usePersistedDraft } from './idempotency';
 import { PartyPicker, useCashParties } from './party-picker';
 import { CASHBOOK_READ, holds } from './permissions';
+import { ContactLinks } from './contact-links';
 import { ScreenLink } from './screen-link';
 import { useToast } from './toast';
 import { BranchRequired, Gate, Problem, money, useBranchName, useSingleBranch } from './ui';
@@ -43,7 +44,7 @@ export function repaymentProblem(advance: Advance | undefined, amountText: strin
   return null;
 }
 
-interface AdvanceDraft { date: string; partyId: string; takenById: string; principal: string; purpose: string }
+interface AdvanceDraft { date: string; dateReason?: string; partyId: string; takenById: string; principal: string; purpose: string }
 
 export function AdvanceForm({ branchId, onSaved }: { branchId: string; onSaved?: (saved: Advance) => void }) {
   const queryClient = useQueryClient();
@@ -51,11 +52,16 @@ export function AdvanceForm({ branchId, onSaved }: { branchId: string; onSaved?:
   const { key, draft, setDraft, finish } = usePersistedDraft<AdvanceDraft>(`advance:${me.user_id ?? ''}:${branchId}`, { date: businessToday(), partyId: '', takenById: '', principal: '', purpose: '' });
   const parties = useCashParties();
   const minor = amountOrNull(draft.principal);
-  // toast-exempt: success screen, the Saved panel replaces the form
+  const entry = useEntryDate(branchId, draft.date, draft.dateReason);
+  // success-screen: the Saved panel replaces the form
   const save = useMutation({
+    meta: { success: (saved: Advance) => {
+      const amount = saved?.principal_minor ?? minor;
+      return `Advance${amount != null ? ` of ${money(amount)}` : ''}${saved?.party_name ? ` to ${saved.party_name}` : ''} saved`;
+    } },
     mutationFn: () =>
       retail.createAdvance({
-        branch_id: branchId, business_date: draft.date, party_id: draft.partyId, principal_minor: minor ?? 0,
+        branch_id: branchId, ...dateFields(entry), party_id: draft.partyId, principal_minor: minor ?? 0,
         ...(draft.takenById ? { taken_by_party_id: draft.takenById } : {}), ...(draft.purpose.trim() ? { purpose: draft.purpose.trim() } : {}),
       }, key),
     onSuccess: (saved) => {
@@ -64,11 +70,11 @@ export function AdvanceForm({ branchId, onSaved }: { branchId: string; onSaved?:
       onSaved?.(saved);
     },
   });
-  const blocked = draft.partyId === '' || minor === null || save.isPending;
+  const blocked = draft.partyId === '' || minor === null || entry.reasonMissing || save.isPending;
   const update = (patch: Partial<AdvanceDraft>) => setDraft((d) => ({ ...d, ...patch }));
   return (
     <form onSubmit={(e) => { e.preventDefault(); if (!blocked) save.mutate(); }}>
-      <DateField id="advance-date" label="Date" value={draft.date} onChange={(date) => update({ date })} />
+      <DateField id="advance-date" label="Date" entry={entry} value={entry.day} reason={draft.dateReason} onChange={(date) => update({ date })} onReason={(dateReason) => update({ dateReason })} />
       <PartyPicker
         id="advance-party" label="Who is the advance for?" parties={parties.data ?? []} loading={parties.data === undefined} load={parties} kinds={[...ADVANCE_KINDS]} listed={[...ADVANCE_KINDS]} value={draft.partyId}
         onChange={(partyId) => update({ partyId })} noneLabel="Choose who it is for" addLabel="Add a new person or company"
@@ -91,7 +97,7 @@ export function AdvanceForm({ branchId, onSaved }: { branchId: string; onSaved?:
   );
 }
 
-interface RepaymentDraft { date: string; advanceId: string; method: 'cash' | 'mobile_money' | 'bank'; amount: string }
+interface RepaymentDraft { date: string; dateReason?: string; advanceId: string; method: 'cash' | 'mobile_money' | 'bank'; amount: string }
 
 export function RepaymentForm({ branchId, onSaved }: { branchId: string; onSaved?: (saved: Repayment, advance: Advance) => void }) {
   const queryClient = useQueryClient();
@@ -102,16 +108,21 @@ export function RepaymentForm({ branchId, onSaved }: { branchId: string; onSaved
   const open = useQuery({ queryKey: ['retail', 'advances', 'open'], queryFn: () => retail.listAdvances({ openOnly: true }), enabled: canList });
   const advance = (open.data ?? []).find((a) => a.id === draft.advanceId);
   const problem = repaymentProblem(advance, draft.amount);
-  // toast-exempt: success screen, the Saved panel replaces the form
+  const entry = useEntryDate(branchId, draft.date, draft.dateReason);
+  // success-screen: the Saved panel replaces the form
   const save = useMutation({
-    mutationFn: () => retail.createRepayment(draft.advanceId, { branch_id: branchId, amount_minor: amountOrNull(draft.amount) ?? 0, method: draft.method, paid_on: draft.date }, key),
+    meta: { success: (saved: Repayment) => {
+      const amount = saved?.amount_minor ?? amountOrNull(draft.amount);
+      return `Repayment${amount != null ? ` of ${money(amount)}` : ''}${advance?.party_name ? ` from ${advance.party_name}` : ''} saved`;
+    } },
+    mutationFn: () => retail.createRepayment(draft.advanceId, { branch_id: branchId, amount_minor: amountOrNull(draft.amount) ?? 0, method: draft.method, ...dateFields(entry, 'paid_on') }, key),
     onSuccess: (saved) => {
       finish();
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       if (advance) onSaved?.(saved, advance);
     },
   });
-  const blocked = problem !== null || save.isPending;
+  const blocked = problem !== null || entry.reasonMissing || save.isPending;
   const update = (patch: Partial<RepaymentDraft>) => setDraft((d) => ({ ...d, ...patch }));
   return (
     <form onSubmit={(e) => { e.preventDefault(); if (!blocked) save.mutate(); }}>
@@ -142,7 +153,7 @@ export function RepaymentForm({ branchId, onSaved }: { branchId: string; onSaved
       <input id="repay-amount" inputMode="numeric" value={draft.amount} onChange={(e) => update({ amount: e.target.value })} aria-invalid={draft.amount.trim() !== '' && problem !== null} />
       {advance && <p className="hint">Still owed on this advance: {money(advance.balance_minor ?? 0)}.</p>}
       {draft.amount.trim() !== '' && problem && <p role="alert" className="rt-flag">{problem}</p>}
-      <DateField id="repay-date" label="Date" value={draft.date} onChange={(date) => update({ date })} />
+      <DateField id="repay-date" label="Date" entry={entry} value={entry.day} reason={draft.dateReason} onChange={(date) => update({ date })} onReason={(dateReason) => update({ dateReason })} />
       <p className="hint">The money goes into this shop's till or account.</p>
       <Problem error={save.error} />
       <BusyButton busy={save.isPending} type="submit" className="rt-primary" notReady={blocked}>
@@ -168,6 +179,9 @@ export function AdvanceList({ onOpen }: { onOpen: (id: string) => void }) {
           rows={rows.data}
           empty={openOnly ? 'No advance has a balance.' : 'No advances recorded yet.'}
           what="advance"
+          list="advances"
+          figures={{ amount: (a) => a.principal_minor, owed: (a) => a.balance_minor }}
+          totalWord="Advanced"
           renderRow={(a) => (
             <>
               <strong>{a.advance_no}</strong> <span className="muted">{showDate(a.business_date)}</span>
@@ -185,7 +199,13 @@ export function AdvanceList({ onOpen }: { onOpen: (id: string) => void }) {
   );
 }
 
-export function AdvanceDetailView({ advance, onVoided }: { advance: Advance; onVoided?: (message: string) => void }) {
+/** The phone or other contact saved on a party, by its id, for the Call, Text and WhatsApp links (issue #817). */
+function usePartyContact(): (partyId: string | undefined) => string | undefined {
+  const parties = useCashParties();
+  return (partyId) => (parties.data ?? []).find((p) => p.id === partyId)?.contact;
+}
+
+export function AdvanceDetailView({ advance, contact, onVoided }: { advance: Advance; contact?: string; onVoided?: (message: string) => void }) {
   const mayVoid = useMayVoid()(advance.branch_id);
   const shopName = useBranchName();
   const repayments = advance.repayments ?? [];
@@ -197,6 +217,7 @@ export function AdvanceDetailView({ advance, onVoided }: { advance: Advance; onV
       <div className="table-wrap"><table>
         <tbody>
           <tr><td>For</td><td className="num">{advance.party_name}</td></tr>
+          {contact && <tr><td>Contact</td><td className="num">{contact}</td></tr>}
           {advance.taken_by_name && <tr><td>Taken by</td><td className="num">{advance.taken_by_name}</td></tr>}
           <tr><td>Date</td><td className="num">{showDate(advance.business_date)}</td></tr>
           <tr><td>Shop</td><td className="num">{shopName(advance.branch_id)}</td></tr>
@@ -206,6 +227,7 @@ export function AdvanceDetailView({ advance, onVoided }: { advance: Advance; onV
           <tr><td>Still owed</td><td className="num"><strong>{money(advance.balance_minor ?? 0)}</strong></td></tr>
         </tbody>
       </table></div>
+      <ContactLinks contact={contact} name={advance.party_name} />
       <p className="hint">{enteredBy(advance.by_name, advance.at)}{advance.voided && advance.void_reason ? `. Voided because: ${advance.void_reason}` : ''}</p>
       {voidOffered(advance, mayVoid) && (
         <>
@@ -234,29 +256,32 @@ export function AdvanceDetailView({ advance, onVoided }: { advance: Advance; onV
 
 function AdvanceDetail({ id, onClose, onVoided }: { id: string; onClose: () => void; onVoided: (message: string) => void }) {
   const advance = useQuery({ queryKey: ['retail', 'advance', id], queryFn: () => retail.getAdvance(id) });
+  const contactOf = usePartyContact();
   return (
     <>
       <button type="button" onClick={onClose}>Back to the list</button>
       {advance.isError && <Problem error={advance.error} />}
       {advance.isPending && <p className="loading">Loading</p>}
-      {advance.data && <AdvanceDetailView advance={advance.data} onVoided={onVoided} />}
+      {advance.data && <AdvanceDetailView advance={advance.data} contact={contactOf(advance.data.party_id)} onVoided={onVoided} />}
     </>
   );
 }
 
-export function OutstandingView({ report }: { report: AdvanceReport }) {
+export function OutstandingView({ report, contactOf }: { report: AdvanceReport; contactOf?: (partyId: string | undefined) => string | undefined }) {
   const parties = report.items ?? [];
   if (parties.length === 0) return <p className="empty-state">No advance has a balance.</p>;
   return (
     <>
       <ul style={{ listStyle: 'none', padding: 0 }}>
-        {parties.map((p) => (
+        {parties.map((p) => ({ p, contact: contactOf?.(p.party_id) })).map(({ p, contact }) => (
           <li key={p.party_id} className="rt-card">
             <strong>{p.party_name}</strong>
+            {contact && <p className="hint">{contact}</p>}
             <p className="rt-row"><span>Advanced</span><span>{money(p.principal_minor ?? 0)}</span></p>
             <p className="rt-row"><span>Repaid</span><span>{money(p.repaid_minor ?? 0)}</span></p>
             <p className="rt-row"><span>Owes</span><strong>{money(p.balance_minor ?? 0)}</strong></p>
             <p className="hint">{p.count} {p.count === 1 ? 'advance' : 'advances'}, the oldest from {showDate(p.oldest_advance_date)}</p>
+            <ContactLinks contact={contact} name={p.party_name} />
           </li>
         ))}
       </ul>
@@ -268,11 +293,12 @@ export function OutstandingView({ report }: { report: AdvanceReport }) {
 function Outstanding() {
   const scope = useReadScope();
   const report = useQuery({ queryKey: ['retail', 'advances-report', scope], queryFn: () => retail.advancesReport({ branchIds: scope }) });
+  const contactOf = usePartyContact();
   return (
     <section aria-label="Outstanding advances">
       {report.isError && <Problem error={report.error} />}
       {report.isPending && <p className="loading">Loading</p>}
-      {report.data && <OutstandingView report={report.data} />}
+      {report.data && <OutstandingView report={report.data} contactOf={contactOf} />}
     </section>
   );
 }

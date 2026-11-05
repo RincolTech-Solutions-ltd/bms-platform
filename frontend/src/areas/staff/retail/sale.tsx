@@ -20,7 +20,7 @@ import { buildSaleRequest, defaultPrice, draftProblem, draftTotal, lineFigures, 
 import { MIN_REASON, hasNoPrice, isOverride, pricedLines, receiptNote, reasonOk, sourceNote } from './price-state';
 import { chosenPack, enteredPriceMinor, enteredQty, quantityIn, sellingPacks, unitWord, unitWords } from './units-state';
 import { EmptyState } from '../../../components/states';
-import { BranchRequired, Gate, NoStockHere, Note, ProductPicker, Problem, money, useBranchRoles, useProfitAccess, useStockingBranch } from './ui';
+import { BranchRequired, Gate, NoStockHere, Note, ProductPicker, Problem, StockWarning, money, useBranchRoles, useProfitAccess, useStockingBranch } from './ui';
 import { branchLabel } from '../../../auth/branch';
 import type { BranchRole } from '../../../api/retail';
 import { BRANCH_ROLES, CREDIT_OVERRIDE, CUSTOMER_ACCOUNTS, PRICELIST_MANAGE, PRICELIST_USE, PRICE_LISTS, PRICE_OVERRIDE, UNITS, branchesWhere, capabilityOn, holds, holdsAt, needsOf, sellingBranches } from './permissions';
@@ -49,6 +49,8 @@ import { dropWords } from './stocktake';
 import { useBranchHold } from '../branch-picker';
 import { SELL_COUNT_NOTE, savingCount, unfinishedKey } from './unfinished-counts';
 import { icons } from '../../../components/icons';
+import { LocationAsk, useWhereNow } from './entry-location';
+import { ReceiptPhotoChoice, sendReceiptPhotoAfter } from './receipt-photo';
 
 // Record a sale (FR-RET-04, FR-RET-05). One idempotency key per draft, kept with the draft in this
 // tab until the sale is saved or the draft is cleared: a double tap, a retry after a lost answer or a
@@ -138,7 +140,9 @@ export function SaleBar({ children }: { children: ReactNode }) {
  * One line of the sale being made. The unit choice is drawn only while the tenant has the units capability
  * (`unitsOn`) and the item has active pack sizes; otherwise the line is exactly what it was before packs.
  */
-export function SaleLineCard({ line, index, unitsOn, price, offlinePrice, fresh, slide = false, notes, onFlashed, onQty, onPrice, onUnit, onReason, onReset, onRemove }: {
+export function SaleLineCard({ line, index, unitsOn, price, offlinePrice, fresh, slide = false, warnStock = false, notes, onFlashed, onQty, onPrice, onUnit, onReason, onReset, onRemove }: {
+  /** Issue #815, Record sale: Out of stock or Only N left under the item's name, from the stock read when it was picked. */
+  warnStock?: boolean;
   /** Set on the line just added or topped up, a new number each time: it flashes once (Hillary, 23 Oct 2026). */
   fresh?: number;
   /** Set while the line just went on the sale as a new line: it slides in (#508). */
@@ -176,6 +180,7 @@ export function SaleLineCard({ line, index, unitsOn, price, offlinePrice, fresh,
     <div className={`rt-card line-card${slide ? ' line-new' : ''}`}>
       {fresh !== undefined && <span key={fresh} className="line-added" aria-hidden="true" onAnimationEnd={onFlashed} />}
       <strong>{line.product.description}</strong>
+      {warnStock && <> <StockWarning product={line.product} /></>}
       {packs.length > 0 && (
         <div>
           <label htmlFor={`unit-${i}`}>Sell by</label>
@@ -243,6 +248,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
   const offline = useOffline();
   const online = useOnline();
   const offlineMode = offline !== null && !online;
+  const where = useWhereNow();
   const { key, draft, setDraft, finish, discard } = usePersistedDraft<SaleDraft>(`sale:${me.user_id ?? ''}:${branchId}`, {
     branchId, method: 'cash', customerId: '', newBuyerName: '', newBuyerContact: '', dueDate: '', lines: [],
   });
@@ -277,28 +283,45 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
 
   // The client sale id is the draft's key, so a sale whose answer was lost and that is kept to send later is never twice.
   // The request is kept with the draft once sent: until the server answers, the same request is all that can go again.
-  // toast-exempt: success screen, the sale complete screen headed Sale saved through onSaved
+  // success-screen: the sale complete screen headed Sale saved through onSaved
   // Issue #769: on a weak connection a cash, mobile money or bank sale with no answer within SALE_ANSWER_MS, or lost on the
   // network, goes to the outbox at once under the same key, with when it was taken (recorded offline), and the provisional
   // receipt shows. The answer that comes later is ignored here; the server finds the sale by its client sale id, or answers
   // from the key, whose hash leaves the delivery fields out, so the sale is recorded once (ADR-067 decision 5).
+  // Issue #819: the optional receipt photo goes after the sale is recorded and said, never holding the form, and never with a
+  // sale kept on the phone; it is cleared on every save, kept or sent, so it never goes with the next sale.
+  const [receipt, setReceipt] = useState<File | null>(null);
   const save = useMutation({
+    meta: { success: (r: { sale: Sale } | { kept: OutboxItem }) => (r && 'kept' in r ? 'Sale saved on this phone' : r?.sale?.total_minor !== undefined ? `Sale of ${money(r.sale.total_minor)} saved` : 'Sale saved') },
     mutationFn: async ({ body, at, pricesAt }: { body: SaleRequest; at: string; pricesAt?: string }): Promise<{ sale: Sale } | { kept: OutboxItem }> => {
-      const asked = retail.createSale(body, key);
-      if (!offline || !mayKeepOnPhone({ body })) return { sale: await asked };
+      if (!offline || !mayKeepOnPhone({ body })) return { sale: await retail.createSale(body, key) };
+      // Priced online from the items as they were read (`pricesAt`), never from Save's time or the copy on the phone; absent
+      // when not known, and the server then holds each price to today's.
+      const item = offlineSale({ draft: shown, clientSaleId: key, sent: { body, at }, key, scope: offline.scope, branchName, pricesAsOf: pricesAt, now: new Date() });
+      // Issue #844: the sale is on the phone before its request goes, in flight from this form, so the sync engine leaves it
+      // alone, the dot does not count it, and a phone that dies during the wait sends it on its next start. A phone that
+      // cannot write it now still sends it online.
+      const held = await offline.engine.hold(item, SALE_ANSWER_MS).catch(() => false);
+      const answered = () => (held ? offline.engine.formAnswered(item.id).catch(() => undefined) : Promise.resolve());
       try {
-        return { sale: await answerWithin(asked, SALE_ANSWER_MS) };
+        const sale = await answerWithin(retail.createSale(body, key), SALE_ANSWER_MS);
+        await answered();
+        return { sale };
       } catch (e) {
-        // Only no answer in time or a network failure (fetch's TypeError); a 401 or any refusal is a RetailError and stays here.
+        // Only no answer in time or a network failure (fetch's TypeError); a 401 or any refusal is a RetailError and stays here,
+        // shown in the form as today, and the sale is taken off the phone.
         // A write is never refreshed and sent again inside the client (only reads are), so the race is the sale request alone.
-        if (!(e instanceof NoAnswer || e instanceof TypeError)) throw e;
+        if (!(e instanceof NoAnswer || e instanceof TypeError)) {
+          await answered();
+          throw e;
+        }
         // With no session left (a refused refresh, a sign-out) the sale is never kept as saved: the person is told to sign in.
         // The request may still have been recorded, so the form stays locked (`sent` kept) and Try again sends the same sale.
-        if (!getAccessToken()) throw new Error(`${retailMessage({ code: 'unauthenticated' }, 401)} Then tap Try again: the same sale is sent, never twice.`);
-        // Priced online from the items as they were read (`pricesAt`), never from Save's time or the copy on the phone; absent
-        // when not known, and the server then holds each price to today's.
-        const item = offlineSale({ draft: shown, clientSaleId: key, sent: { body, at }, key, scope: offline.scope, branchName, pricesAsOf: pricesAt, now: new Date() });
-        await offline.engine.queue(item);
+        if (!getAccessToken()) {
+          await answered();
+          throw new Error(`${retailMessage({ code: 'unauthenticated' }, 401)} Then tap Try again: the same sale is sent, never twice.`);
+        }
+        await (held ? offline.engine.formUnanswered(item.id) : offline.engine.queue(item));
         return { kept: item };
       }
     },
@@ -307,6 +330,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       if (e instanceof RetailError) setDraft((d) => ({ ...d, sent: undefined }));
     },
     onSuccess: (done) => {
+      setReceipt(null);
+      if (!('kept' in done)) sendReceiptPhotoAfter('sale', done.sale.id, receipt);
       if ('kept' in done) {
         // The sale goes to the server from the outbox: its confirmed warnings are recorded and forgotten, as for a sent sale.
         entry.saved();
@@ -334,7 +359,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       setDraft((d) => ({ ...d, customerId: c.id ?? '', newBuyerName: '', newBuyerContact: '' }));
       setAddingBuyer(false);
     },
-    meta: { success: 'Customer added' },
+    meta: { success: (c: { name?: string }) => (c?.name ? `Customer ${c.name} added` : 'Customer added') },
   });
   const update = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
   const setLine = (i: number, patch: { qty?: string; price?: string; typed?: boolean; reason?: string }) =>
@@ -611,7 +636,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
   });
   /** Sends the sale as the screen shows it now (or the request already sent, which is all that can go again). */
   const send = () => {
-    const body = draft.sent?.body ?? { ...buildSaleRequest(shown, pricing, accounts), ...(offline ? { client_sale_id: key } : {}) };
+    // ADR-122: where the phone is goes with the sale when it says, and stays with a request sent again.
+    const body = draft.sent?.body ?? { ...buildSaleRequest(shown, pricing, accounts), ...(offline ? { client_sale_id: key } : {}), ...where.now() };
     const at = draft.sent?.at ?? new Date().toISOString();
     // The oldest read of the items and, with price lists, of the resolved prices: what the form priced the sale from (#769).
     // A line whose read time is not known (a draft from before #769, a scan found in a copy) leaves it unknown: no
@@ -624,8 +650,9 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
   };
   const entry = useEntryChecks('sell', branchId, warnings, send, draft.lines);
   const lost = locked && !save.isPending && !(save.error instanceof RetailError);
-  // toast-exempt: success screen, the queued notice: the provisional receipt headed Sale saved on this phone through onQueued
+  // success-screen: the queued notice, the provisional receipt headed Sale saved on this phone through onQueued
   const keep = useMutation({
+    meta: { success: 'Sale saved on this phone' },
     mutationFn: async () => {
       if (!offline) throw new Error('Offline sales are not available');
       const item = offlineSale({
@@ -641,6 +668,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
         // A name typed for the receipt while online goes with a sale the network then made wait (issue #760).
         buyerName: draft.newBuyerName.trim() || (draft.cashName ?? '').trim(),
         buyerContact: draft.newBuyerName.trim() ? undefined : draft.cashPhone,
+        // ADR-122: where the phone is, kept with the sale in the outbox until it is sent.
+        location: where.now().location,
         now: new Date(),
       });
       await offline.engine.queue(item);
@@ -648,6 +677,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     },
     onSuccess: (item) => {
       finish();
+      setReceipt(null);
       if (offline?.connectivity.online()) void offline.engine.sync();
       onQueued?.(item);
     },
@@ -666,6 +696,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     discard();
     setAddingBuyer(false);
     setReceived('');
+    setReceipt(null);
     setConfirmClear(false);
     save.reset();
   };
@@ -688,6 +719,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       }}
     >
       {offlineMode && <OfflineNote branchId={branchId} />}
+      <LocationAsk where={where} />
       <fieldset disabled={locked} className="sale-lock" style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
       <div data-tour="sale-search">
         {offlineMode ? <OfflineProductPicker branchId={branchId} onAdd={(p) => add(p, offline?.catalogue?.pricesAsOf)} /> : (
@@ -695,6 +727,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
             id="sale-search"
             branchId={branchId}
             showPrice
+            warnStock
             onAdd={(p, readAt) => add(p, readAt ? new Date(readAt).toISOString() : undefined)}
             notFound={(term, clear, hold) => (
               <ScreenToast.Provider value={show}>
@@ -739,6 +772,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
           line={l}
           index={i}
           unitsOn={unitsOn}
+          warnStock
           fresh={fresh !== null && fresh.index === i ? fresh.n : undefined}
           slide={fresh !== null && fresh.index === i && fresh.created}
           onFlashed={() => setFresh(null)}
@@ -915,6 +949,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
         </div>
       )}
       {keep.error && <p role="alert" className="alert alert-danger">This phone could not keep the sale: {keep.error.message}</p>}
+      <ReceiptPhotoChoice id="sale-receipt" file={receipt} onChange={setReceipt} />
       <SaleBar>
         <BusyButton type="submit" className="rt-primary sale-bar-action" busy={save.isPending || keep.isPending} notReady={problem !== null && !locked} data-tour="sale-save">
           {offlineMode && mayKeepOnPhone(draft.sent) ? 'Save on this phone' : lost ? 'Try again' : (

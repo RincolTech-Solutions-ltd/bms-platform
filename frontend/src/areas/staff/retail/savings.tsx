@@ -1,32 +1,39 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { businessToday, retail, type Savings } from '../../../api/retail';
 import { useStaff } from '../context';
-import { DateField, RecordsByShop, Saved, WindowFields, useReadScope, useSavedFor, useWindow } from './cash-ui';
+import { monthLabel } from './cash-state';
+import { DateField, RecordsByShop, Saved, WindowFields, useEntryDate, useReadScope, useSavedFor, useWindow } from './cash-ui';
 import { usePersistedDraft } from './idempotency';
-import { CASHBOOK_READ, SAVINGS_OVERWRITE, SAVINGS_RECORD, holds } from './permissions';
+import { CASHBOOK_READ, SALE_CREATE, SAVINGS_OVERWRITE, SAVINGS_RECORD, holds, savesAsSalesStaff } from './permissions';
 import { SAVINGS_REASONS, afterSavingsConflict, nowAboveWords, planSavings, reasonText, seesAmounts } from './savings-state';
 import { ScreenLink } from './screen-link';
 import { useToast } from './toast';
-import { BranchRequired, Gate, Note, Problem, money, useSingleBranch } from './ui';
+import { BranchRequired, Gate, Note, Problem, money, useBranchName, useSingleBranch } from './ui';
 import { showDate } from './transfers';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { ActionBar } from '../../../app/ui/ActionBar';
 import { KeyFigure } from '../../../app/ui/KeyFigure';
+import { KeptOnPhone, OfflineFormNote, isKept, useEntrySave } from '../../../offline/keep-entry';
 
 // Daily savings (FR-RET-18 to FR-RET-20): per shop per day. The server suggests half the day's profit; a
 // caller without retail.profit.read never sees the profit, the suggestion or any amount, and sends none:
 // the standard amount is recorded for them. When the owner turns on "Salespeople can see and change the savings amount"
 // (issue #768, ADR-115) that caller sees the suggestion, may change the amount, and sees what was saved; never the profit, the
-// expenses or the most the day allows (an amount above it is refused in words that do not state it). Every save echoes the suggestion token the form was shown; if
+// expenses or the most the day allows (an amount above it is refused in words that do not state it). With that switch on, a seller
+// without the till (issue #799) uses the sales staff routes and sees every month's savings by shop, year, month and person with
+// the amount saved at each level (issue #827, as the owner's old app did), with no void. Every save echoes the suggestion token the form was shown; if
 // sales changed since, the server answers 409 suggestion_changed with the new token and writes nothing.
 // The day may save at most its profit less its expenses (ADR-080): the screen shows the three figures and
 // says so under the amount before anything is sent. The reason for a changed amount is optional (#538).
 
-interface SavingsDraft { date: string; amount: string; reason: string; other: string }
+interface SavingsDraft { date: string; dateReason?: string; amount: string; reason: string; other: string }
 
 const EMPTY = { amount: '', reason: '', other: '' };
+
+/** The last part of a query key read through the sales staff routes (issue #799). */
+export const SALES_STAFF_KEY = 'sales-staff';
 
 /**
  * Put a new record at the top of the savings lists already loaded that would show it: their key is
@@ -35,7 +42,8 @@ const EMPTY = { amount: '', reason: '', other: '' };
  */
 export function showInRecords(client: QueryClient, saved: Savings) {
   const day = saved.business_date ?? '';
-  // Only the records list itself: exactly five parts, the branch ids (undefined for all) and a from and to date.
+  // Only the records list itself: five parts, the branch ids (undefined for all) and a from and to date. A seller's grouped
+  // view (issue #827, key ['retail', 'savings-groups', ...]) is refetched by the save's invalidation of the ['retail'] prefix.
   const holds = (key: readonly unknown[]): boolean => {
     if (key.length !== 5) return false;
     const [, , scope, from, to] = key;
@@ -52,30 +60,52 @@ export function showInRecords(client: QueryClient, saved: Savings) {
 export function SavingsForm({ branchId, onSaved }: { branchId: string; onSaved?: (saved: Savings) => void }) {
   const queryClient = useQueryClient();
   const { me } = useStaff();
-  const { key, draft, setDraft, finish, discard } = usePersistedDraft<SavingsDraft>(`savings:${me.user_id ?? ''}:${branchId}`, { date: businessToday(), ...EMPTY });
+  const { key, draft, setDraft, finish, discard, name } = usePersistedDraft<SavingsDraft>(`savings:${me.user_id ?? ''}:${branchId}`, { date: businessToday(), ...EMPTY });
   // A draft restored with an amount shows its problem at once; a fresh form waits for blur (rule 10).
   const [touched, setTouched] = useState(() => draft.amount.trim() !== '');
   const [reasonOpen, setReasonOpen] = useState(false);
-  const suggestionKey = ['retail', 'savings-suggestion', branchId, draft.date];
-  const suggestion = useQuery({ queryKey: suggestionKey, queryFn: () => retail.savingsSuggestion({ branchId, date: draft.date }) });
+  // ADR-120: today for everyone but the owner, who alone may open an earlier day.
+  const entry = useEntryDate(branchId, draft.date, draft.dateReason);
+  // Issue #799: a seller without the till goes through the sales staff routes while the owner's switch is on.
+  const salesStaff = savesAsSalesStaff(me);
+  // The sales staff route has its own cache entry, so a till answer (or a 403) cached under one is never served for the other.
+  // Issue #812: offline, or when the network drops, the savings are kept on the phone with the suggestion's token. Offline the
+  // entry is dated today, so today's figures and token are used whatever day the draft held (review of #839).
+  const entries = useEntrySave();
+  const day = entries.offlineMode ? businessToday() : entry.day;
+  const suggestionKey = ['retail', 'savings-suggestion', branchId, day, ...(salesStaff ? [SALES_STAFF_KEY] : [])];
+  const suggestion = useQuery({ queryKey: suggestionKey, queryFn: () => retail.savingsSuggestion({ branchId, date: day, salesStaff }) });
   const s = suggestion.data;
   const profitView = seesAmounts(s);
   // ADR-115: the server says whether this caller may change the amount (the owner's setting before the day is saved, or the
   // overwrite permission); an older server without the flag leaves it to the permission.
   const canOverwrite = s?.may_change_amount ?? holds(me, SAVINGS_OVERWRITE);
   const reason = reasonText(draft.reason, draft.other ?? '');
-  const plan = s ? planSavings({ branchId, date: draft.date, suggestion: s, amount: draft.amount, reason, canOverwrite, today: businessToday() }) : null;
+  const plan = s ? planSavings({ branchId, date: day, sent: entry.sent, suggestion: s, amount: draft.amount, reason, canOverwrite, today: businessToday() }) : null;
 
-  // toast-exempt: success screen, the Saved panel replaces the form
+  // success-screen: the Saved panel replaces the form
   const save = useMutation({
     mutationFn: () => {
       if (!plan) throw new Error('The suggestion has not loaded');
-      return retail.createSavings(plan.request, key);
+      return entries.save(
+        {
+          kind: 'savings', path: salesStaff ? '/api/v1/retail/savings/sales-staff' : undefined, body: plan.request, key, branchId,
+          amountMinor: plan.request.amount_minor, fix: { to: '/staff/retail/savings', draftName: name, draft },
+        },
+        () => retail.createSavings(plan.request, key, { salesStaff }),
+      );
     },
+    meta: { success: (saved: Savings) => (saved?.amount_minor != null ? `Savings of ${money(saved.amount_minor)} saved` : 'Savings for the day saved') },
     onSuccess: (saved) => {
+      if (isKept(saved)) {
+        discard();
+        return;
+      }
       finish();
       showInRecords(queryClient, saved);
-      queryClient.setQueryData(suggestionKey, (old: typeof s) => (old ? { ...old, existing_id: saved.id } : old));
+      // The day is saved: its suggestion goes and only the saved amount stays (issue #799), before the refetch says the same.
+      queryClient.setQueryData(suggestionKey, (old: typeof s) =>
+        (old ? { ...old, existing_id: saved.id, existing_amount_minor: saved.amount_minor, suggested_minor: undefined, may_change_amount: false } : old));
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       onSaved?.(saved);
     },
@@ -84,29 +114,41 @@ export function SavingsForm({ branchId, onSaved }: { branchId: string; onSaved?:
       // and, when the figures changed, start a fresh key and ask the person to look again before saving.
       if (afterSavingsConflict(queryClient, suggestionKey, error) === 'look_again') {
         discard();
-        setDraft({ date: draft.date, ...EMPTY });
+        setDraft({ date: draft.date, dateReason: draft.dateReason, ...EMPTY });
       }
     },
   });
 
-  const blocked = !s || !plan || plan.problem !== null || s.existing_id != null || save.isPending;
+  const blocked = !s || !plan || plan.problem !== null || s.existing_id != null || entry.reasonMissing || save.isPending;
   const update = (patch: Partial<SavingsDraft>) => setDraft((d) => ({ ...d, ...patch }));
   // Validation shows on blur (docs/ui-rules.md rule 10) or when Save is pressed; the cap never waits for the server.
   const showProblem = touched && plan?.problem != null && draft.amount.trim() !== '' && !(plan.overwrite && !canOverwrite);
 
+  if (entries.kept) return <KeptOnPhone item={entries.kept} onNew={entries.another} />;
   return (
     <form onSubmit={(e) => { e.preventDefault(); setTouched(true); if (!blocked) save.mutate(); }}>
-      <DateField id="savings-date" label="Date" value={draft.date} onChange={(date) => { update({ date, ...EMPTY }); setTouched(false); }} />
+      {entries.offlineMode && <OfflineFormNote what="savings record" />}
+      {entries.offlineMode && !s && <Note>The day's figures are not saved on this phone. Open Savings once while online to save them.</Note>}
+      {/* Issue #799: sales staff open days of this month only; the server refuses an earlier one too. */}
+      {!entries.offlineMode && <DateField id="savings-date" label="Date" entry={entry} value={entry.day} reason={draft.dateReason} min={salesStaff ? `${businessToday().slice(0, 8)}01` : undefined} onChange={(date) => { update({ date, ...EMPTY }); setTouched(false); }} onReason={(dateReason) => update({ dateReason })} />}
       {suggestion.isError && <Problem error={suggestion.error} />}
       {suggestion.isPending && <p className="loading">Loading</p>}
       {s && (
         <>
           <p>
-            Sold on {showDate(s.business_date ?? draft.date)}: <strong>{money(s.total_sold_minor ?? 0)}</strong>
+            Sold on {showDate(s.business_date ?? entry.day)}: <strong>{money(s.total_sold_minor ?? 0)}</strong>
           </p>
-          {s.existing_id != null && <Note>Savings are already recorded for this shop on this day. If that record is wrong, void it in the records below, then save again.</Note>}
-          {nowAboveWords(s) && <Note>{nowAboveWords(s)}</Note>}
-          {profitView ? (
+          {/* Issue #799 (the owner's request): a saved day shows only what was saved, never its suggestion. */}
+          {s.existing_id != null ? (
+            <>
+              <Note>
+                Savings are already recorded for this shop on this day. If that record is wrong,{' '}
+                {salesStaff ? 'ask an administrator to void it.' : 'void it in the records below, then save again.'}
+              </Note>
+              {s.existing_amount_minor !== undefined && <KeyFigure label="Saved" value={money(s.existing_amount_minor)} />}
+              {nowAboveWords(s) && <Note>{nowAboveWords(s)}</Note>}
+            </>
+          ) : profitView ? (
             <>
               {s.daily_profit_minor === undefined ? null : s.available_minor !== undefined ? (
                 <dl className="rt-figures" aria-label="The day's figures">
@@ -169,9 +211,10 @@ export function SavingsForm({ branchId, onSaved }: { branchId: string; onSaved?:
 export function SavingsRecords({ onVoided }: { onVoided?: (message: string) => void }) {
   const scope = useReadScope();
   const window = useWindow();
+  const { from, to } = window;
   const rows = useQuery({
-    queryKey: ['retail', 'savings', scope, window.from, window.to],
-    queryFn: () => retail.listSavings({ branchIds: scope, ...window.query, includeVoided: true }),
+    queryKey: ['retail', 'savings', scope, from, to],
+    queryFn: () => retail.listSavings({ branchIds: scope, from, to, includeVoided: true }),
   });
   return (
     <section aria-label="Savings records" data-tour="savings-records">
@@ -184,6 +227,9 @@ export function SavingsRecords({ onVoided }: { onVoided?: (message: string) => v
           rows={rows.data}
           empty="No savings recorded in this period."
           what="savings record"
+          list="savings"
+          figures={{ amount: (r) => r.amount_minor }}
+          totalWord="Saved"
           voidWith={(row, reason, key) => retail.voidSavings(row.id ?? '', reason, key)}
           onVoided={() => onVoided?.('Savings record voided.')}
           renderRow={(row) => (
@@ -201,10 +247,68 @@ export function SavingsRecords({ onVoided }: { onVoided?: (message: string) => v
   );
 }
 
+// JUSTIFICATION-A3: issue #827 asks for the old app's grouped view with a total at four levels; no screen shows it yet.
+/** One line of the grouped view: what it is and the amount saved, the amount at the end of the line. */
+function Total({ label, minor }: { label: ReactNode; minor: number | undefined }) {
+  return <span className="rt-savings-total"><span>{label}</span> <strong>{money(minor ?? 0)}</strong></span>;
+}
+
+/**
+ * Issue #827, as the owner's old app did: a seller's savings of every month, by shop, year, month and the person who saved,
+ * with the amount saved at each level. Amounts saved only, never the profit or a suggestion. The newest year is open.
+ */
+export function SavingsByShop() {
+  const scope = useReadScope();
+  const shopName = useBranchName();
+  const groups = useQuery({ queryKey: ['retail', 'savings-groups', scope, SALES_STAFF_KEY], queryFn: () => retail.savingsGroups({ branchIds: scope }) });
+  const g = groups.data;
+  return (
+    <section aria-label="Savings records" data-tour="savings-records">
+      <h2>Savings records</h2>
+      {groups.isError && <Problem error={groups.error} />}
+      {groups.isPending && <p className="loading">Loading</p>}
+      {g && (g.shops?.length ?? 0) === 0 && <p className="empty-state">No savings recorded yet.</p>}
+      {g && (g.shops?.length ?? 0) > 0 && (
+        <>
+          <p><Total label="Saved in all shops" minor={g.total_minor} /></p>
+          {g.shops?.map((shop) => (
+            <section key={shop.branch_id} aria-label={shopName(shop.branch_id)}>
+              <h3><Total label={shopName(shop.branch_id)} minor={shop.total_minor} /></h3>
+              {shop.years?.map((year, i) => (
+                <details key={year.year} className="rt-groupby" open={i === 0}>
+                  <summary><Total label={year.year} minor={year.total_minor} /></summary>
+                  {year.months?.map((month) => (
+                    <div key={month.month} className="rt-savings-month">
+                      <h4><Total label={monthLabel(`${year.year}-${String(month.month).padStart(2, '0')}`)} minor={month.total_minor} /></h4>
+                      <ul className="rt-savings-people">
+                        {month.people?.map((person) => (
+                          <li key={person.user_id ?? 'none'} className="rt-card">
+                            <Total label={person.name ?? 'Not recorded'} minor={person.total_minor} />
+                            <ul className="rt-savings-days">
+                              {person.records?.map((r) => (
+                                <li key={r.id}><Total label={showDate(r.business_date)} minor={r.amount_minor} /></li>
+                              ))}
+                            </ul>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </details>
+              ))}
+            </section>
+          ))}
+        </>
+      )}
+    </section>
+  );
+}
+
 export function SavingsScreen() {
   const { me } = useStaff();
   const { branchId, branchName } = useSingleBranch();
   const [saved, setSaved] = useSavedFor<Savings>(branchId);
+  const salesStaff = savesAsSalesStaff(me);
   const [round, setRound] = useState(0);
   const { show, toast } = useToast();
   return (
@@ -212,7 +316,7 @@ export function SavingsScreen() {
       <p><ScreenLink screen="cashSummary" to="/staff/retail/cash-summary">Cash summary</ScreenLink></p>
       <div data-tour="savings-form">
       {branchId === null ? (
-        <BranchRequired permissions={[SAVINGS_RECORD]} />
+        <BranchRequired permissions={[salesStaff ? SALE_CREATE : SAVINGS_RECORD]} />
       ) : saved ? (
         <Saved title="Savings recorded" again="Record another day" onAgain={() => { setSaved(null); setRound((n) => n + 1); }}>
           <p>
@@ -227,7 +331,7 @@ export function SavingsScreen() {
       )}
       </div>
       {toast}
-      {holds(me, CASHBOOK_READ) && <SavingsRecords onVoided={(text) => show(text, 'success')} />}
+      {salesStaff ? <SavingsByShop /> : holds(me, CASHBOOK_READ) && <SavingsRecords onVoided={(text) => show(text, 'success')} />}
     </Gate>
   );
 }

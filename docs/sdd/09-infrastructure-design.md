@@ -260,6 +260,14 @@ migration) with status only, no details.
   `BMS_DOCUMENTS_ORPHAN_SWEEP_MAX_SHARE` (default `0.5`) are passed by both compose files;
   `BMS_DOCUMENTS_ORPHAN_SWEEP_ENABLED` (default `true`), `_MAX_PER_TENANT` (1000), `_MAX_PER_RUN` (10000) and `_PAUSE`
   (`1s`) are read by the API but not passed by them (chapter 12 section 12.5).
+- Customer data onboarding uploads (issue #128, spec section 3.1), optional: `BMS_IMPORT_KEY` (32 bytes in base64, the
+  platform import key of chapter 8 section 8.7; both compose files pass it; unset, uploads answer 503 and the rest runs). Read
+  by the API with defaults and not passed by the compose files: `BMS_IMPORTS_MAX_FILE_SIZE` (25MB), `BMS_IMPORTS_MAX_ROWS`
+  (100000), `BMS_IMPORTS_MAX_COLUMNS` (200), raised only after the big file test passes at the new size;
+  `BMS_IMPORTS_WORK_DIR` (empty: the temp folder; holds encrypted copies for the length of one call, mode 600; an upload is
+  refused with `UPLOAD_DISK_LOW` when its free space is under twice the file); `BMS_IMPORTS_ORPHAN_AGE` (24h) and
+  `BMS_IMPORTS_CLEANUP_ENABLED` (true) for the daily cleanup (section 9.9). The quarantined files go to the documents bucket
+  under `tenants/<tenant_id>/quarantine/imports/<run_id>/<batch_id>.bin` (chapter 12 section 12.5).
 - Web Push (ADR-050), optional on every host: `BMS_PUSH_VAPID_PUBLIC_KEY`, `BMS_PUSH_VAPID_PRIVATE_KEY`, `BMS_PUSH_SUBJECT` and
   `BMS_PUSH_EXTRA_ENDPOINT_HOSTS`; both compose files pass them; unset means push is off (`docs/runbooks/push-notifications.md`).
 - Outbox senders (ADR-024, spec section 11), optional on every host except that email is required in production:
@@ -289,8 +297,16 @@ migration) with status only, no details.
   and `off` elsewhere), `BMS_SMS_ALLOWLIST`, `BMS_SMS_PLATFORM_DAILY_CAP` (default 2000), `BMS_SMS_AT_BASE_URL`,
   `BMS_SMS_AT_USERNAME` and `BMS_SMS_AT_API_KEY`. The API refuses to start, in every mode, when outside production the URL is
   not the Africa's Talking sandbox host or the account is not `sandbox`, when the mode is `live` outside production, and in
-  production when the mode is `sink` or the provider is the fake. Outbound traffic is HTTPS to the provider; nothing is
-  opened inbound until the delivery report slice (#215).
+  production when the mode is `sink` or the provider is the fake. Outbound traffic is HTTPS to the provider. Inbound, the
+  delivery reports (#215) arrive on the callback host at `/api/v1/channels/sms/africastalking/delivery-reports/<token>`,
+  which the Caddyfile already forwards there (`/api/v1/channels/*`); `BMS_SMS_CALLBACK_TOKEN` (at least 32 random
+  characters, a host secret) turns the endpoint on, and unset it answers 404. The application's own limit per address
+  and overall (`bms.sms.callback-ip-per-minute`, 3000, and `bms.sms.callback-global-per-minute`, 6000; a wrong token has a
+  bucket a tenth of those) holds without the edge rule. A report must reach the application with its Content-Length:
+  a body without one (chunked) is refused with 411 and counted `no_length` (issue #808). Caddy's `reverse_proxy`
+  forwards the length the provider sends; any proxy put in front later must keep it (request buffering on, or
+  `request_buffers` in Caddy, and HTTP/1.1 to the application), or real reports become 411s. The `no_length` counter
+  in `docs/runbooks/sms-incident.md` is where that shows.
 - Client extras (issue #210, design): Pesapal `BMS_PESAPAL_PROVIDER`, `BMS_PESAPAL_BASE_URL`, `BMS_PESAPAL_CALLBACK_BASE_URL` (a lender's own account is entered by the lender and
   stored encrypted, so there is no per-lender variable; the consumer key, secret, IPN id, token and tenant id variables of #213 are gone, #233), `BMS_DATA_KEY_PREVIOUS` (retired data keys during a rotation), `BMS_PESAPAL_PLATFORM_CONSUMER_KEY`, `BMS_PESAPAL_PLATFORM_CONSUMER_SECRET`,
   `BMS_PESAPAL_PLATFORM_IPN_ID`, `BMS_PESAPAL_PLATFORM_IPN_TOKEN` (an IPN registration belongs to one credential pair); SMS `BMS_SMS_PROVIDER`, `BMS_SMS_MODE` (`off` default, `sink` on staging),
@@ -337,6 +353,12 @@ with no beat for a minute (`bms.reports.heartbeat-stale`; the same limit on the 
 and a clean stop interrupts the workers and gives them 15 seconds to close their runs (the api containers set `stop_grace_period: 30s`),
 `lending.advisor.daily-brief` (per tenant with the assistant on, idempotent by date), and a higher batch for the SMS
 channel of the outbox sender.
+
+`core.imports.quarantine-cleanup` (issue #128, daily at 04:25 Kampala time, per active business): removes the staged rows and
+quarantined files of cancelled import runs, the file of a failed or cancelled batch whose delete failed at the time, and a
+quarantined file no batch names once storage wrote it more than `BMS_IMPORTS_ORPHAN_AGE` (24 hours) ago, then this instance's
+encrypted work files of the same age. Audited per removal (`core.import_batch.quarantine_deleted`, actor `system`); logs carry
+counts only. A run simply left open is not removed here: that is the retention of #139.
 
 Platform jobs (no tenant bound): `core.notifications.outbox-sender` every 30 seconds (at most 50
 rows a run), `core.notifications.outbox-purge` nightly at 03:15 (sent rows after 30 days) and

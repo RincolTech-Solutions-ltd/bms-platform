@@ -16,6 +16,8 @@ import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.PushNotice;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue.ProductSnapshot;
+import com.rincoltech.bms.retail.stock.EntryDates;
+import com.rincoltech.bms.retail.stock.OfflineEntry;
 import com.rincoltech.bms.retail.stock.Quantities;
 import com.rincoltech.bms.retail.stock.RetailBooks;
 import com.rincoltech.bms.retail.stock.RetailBooks.Leg;
@@ -97,6 +99,7 @@ class TransferService implements ModuleSettingsChangeGuard {
     private final AuditLog audit;
     private final ObjectProvider<TransferOutGuard> guards;
     private final ApplicationEventPublisher events;
+    private final EntryDates entryDates;
 
     TransferService(
             TransferRepository repo,
@@ -111,8 +114,10 @@ class TransferService implements ModuleSettingsChangeGuard {
             BusinessClock clock,
             AuditLog audit,
             ObjectProvider<TransferOutGuard> guards,
-            ApplicationEventPublisher events) {
+            ApplicationEventPublisher events,
+            EntryDates entryDates) {
         this.events = events;
+        this.entryDates = entryDates;
         this.repo = repo;
         this.catalogue = catalogue;
         this.stock = stock;
@@ -129,7 +134,10 @@ class TransferService implements ModuleSettingsChangeGuard {
 
     @Transactional
     Outcome<Transfer> create(String idempotencyKey, TransferRequest r) {
-        return idempotency.once(idempotencyKey, "POST", PATH, r, Transfer.class, () -> record(r));
+        // The key covers the request without its offline block (ADR-067 decision 13): an online request whose answer
+        // was
+        // lost is sent again from the phone with when it was made, and is still the same move.
+        return idempotency.once(idempotencyKey, "POST", PATH, r.forKey(), Transfer.class, () -> record(r));
     }
 
     private Transfer record(TransferRequest r) {
@@ -139,7 +147,16 @@ class TransferService implements ModuleSettingsChangeGuard {
         // A branch that keeps no goods may still be the source, so stock stranded there can leave (ADR-041).
         UUID from = branchContext.resolve(PERMISSION, r.fromBranchId(), "from_branch_id");
         LocalDate today = clock.today(tenant.profile().timezone());
-        LocalDate on = r.transferDate() == null ? today : r.transferDate();
+        // An entry kept on the phone offline is dated the day it was made (ADR-067 decision 13).
+        LocalDate requested = OfflineEntry.day(
+                r.offline(),
+                r.transferDate(),
+                clock.now(),
+                tenant.profile().timezone(),
+                // An old entry is the owner's where ADR-120 asks it: the source, and the destination when the move
+                // completes now (a dispatch is received later, on its own day).
+                dispatchOnly ? List.of(from) : List.of(from, r.toBranchId()));
+        LocalDate on = requested == null ? today : requested;
         List<FieldProblem> problems = new ArrayList<>();
         Branches.Branch to = null;
         if (r.toBranchId().equals(from)) {
@@ -208,6 +225,14 @@ class TransferService implements ModuleSettingsChangeGuard {
         if (!problems.isEmpty()) {
             throw ApiException.validation(problems);
         }
+        // ADR-120: an earlier date needs the owner's permission and a reason at each branch the move dates that day:
+        // the source, and the destination when the move completes now (a dispatch is received later, on its own day).
+        // A move kept offline was dated by the phone, not chosen (ADR-067 decision 13): past 7 days OfflineEntry asks
+        // for the owner.
+        EntryDates.Backdate backdate = r.offline() != null
+                ? null
+                : entryDates.check(
+                        on, "transfer_date", r.dateReason(), dispatchOnly ? List.of(from) : List.of(from, to.id()));
         Map<UUID, java.math.BigDecimal> quantities = new java.util.LinkedHashMap<>();
         lines.forEach(l -> quantities.put(l.productId(), l.qty()));
         guards.orderedStream().forEach(g -> g.check(from, quantities));
@@ -291,6 +316,8 @@ class TransferService implements ModuleSettingsChangeGuard {
             after.put("status", "in_transit");
         }
         audit.record(AuditLog.Entry.created("retail.transfer.created", TRANSFER, id, from, after));
+        entryDates.audit(backdate, TRANSFER, id, from);
+        entryDates.auditOffline(r.offline(), on, TRANSFER, id, from);
         if (dispatchOnly) {
             // The people who can receive at the destination hear on their devices (ADR-050): stock is on its way to
             // them.

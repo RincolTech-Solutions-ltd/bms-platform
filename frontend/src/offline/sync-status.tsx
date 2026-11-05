@@ -3,7 +3,8 @@ import { useRef, useState } from 'react';
 import { api, problemOf } from '../api/client';
 import { BusyButton } from '../app/ui/BusyButton';
 import { money } from '../areas/staff/retail/ui';
-import { discarded, failedCount, waiting, waitingWords, type OutboxItem } from './outbox';
+import { EntryState, makerName } from './entry-state';
+import { discarded, failedCount, heldWords, sentEntries, waiting, waitingWords, type OutboxItem } from './outbox';
 import { useOffline, useOnline, useOutbox } from './offline-context';
 
 // The status in the staff bar (issue #458, ADR-067 decision 10): a dot, green online, grey offline, amber while sending,
@@ -52,7 +53,7 @@ export function SyncStatus() {
   const outbox = useOutbox();
   const sheet = useRef<HTMLDialogElement>(null);
   if (!offline) return null;
-  const list = waiting(outbox.items);
+  const list = waiting(outbox.items, outbox.formHeld);
   const failed = failedCount(outbox.items);
   const state = dotState(online, outbox.syncing);
   const words = statusWords(state, list.length, failed);
@@ -106,8 +107,9 @@ export function OthersWaitingNote() {
 function SyncSheet({ online, onClose }: { online: boolean; onClose: () => void }) {
   const offline = useOffline();
   const outbox = useOutbox();
-  const list = waiting(outbox.items);
+  const list = waiting(outbox.items, outbox.formHeld);
   const gone = discarded(outbox.items);
+  const sent = sentEntries(outbox.items);
   if (!offline) return null;
   return (
     <div className="stack">
@@ -115,7 +117,8 @@ function SyncSheet({ online, onClose }: { online: boolean; onClose: () => void }
       <p className="muted">
         {online
           ? 'Sales made on this phone are sent to the server one at a time, oldest first.'
-          : 'Sales you make now are kept on this phone. They are sent when the phone is back online.'}
+          : 'Sales you make now are kept on this phone. They are sent when the phone is back online.'}{' '}
+        So are expenses, savings, banking, withdrawals, deliveries, stock moves, usage and damage. Changing a saved entry needs the internet.
       </p>
       {offline.othersWaiting > 0 && <p className="muted">{othersWords(offline.othersWaiting)}</p>}
       {outbox.needsSignIn && (
@@ -137,10 +140,17 @@ function SyncSheet({ online, onClose }: { online: boolean; onClose: () => void }
           {gone.map((item) => (
             <li key={item.id} className="sync-row sync-row-failed">
               <div>
-                <strong>{item.provisionalNo}</strong> {when(item.occurredAt)}, {item.branchName}, {METHOD_WORDS[item.method] ?? item.method} {money(item.totalMinor)}
+                <strong>{item.provisionalNo}</strong> {when(item.occurredAt)}, {item.branchName}, {METHOD_WORDS[item.method ?? ''] ?? item.method} {money(item.totalMinor)}
               </div>
               <p className="sync-reason">Discarded by a manager. It is not recorded and is not sent again.</p>
             </li>
+          ))}
+        </ul>
+      )}
+      {sent.length > 0 && (
+        <ul className="sync-list" aria-label="Sent in the last day">
+          {sent.map((item) => (
+            <SyncRow key={item.id} item={item} onAgain={() => undefined} />
           ))}
         </ul>
       )}
@@ -158,11 +168,22 @@ function SyncSheet({ online, onClose }: { online: boolean; onClose: () => void }
 }
 
 function SyncRow({ item, onAgain }: { item: OutboxItem; onAgain: () => void }) {
+  const offline = useOffline();
   const failed = item.state === 'failed';
+  if (item.entry) {
+    return (
+      <li className={failed ? 'sync-row sync-row-failed' : 'sync-row'}>
+        <div>
+          <strong>{item.entry.words}</strong> {when(item.occurredAt)}, {item.branchName}{item.totalMinor > 0 ? `, ${money(item.totalMinor)}` : ''}
+        </div>
+        <EntryState item={item} />
+      </li>
+    );
+  }
   return (
     <li className={failed ? 'sync-row sync-row-failed' : 'sync-row'}>
       <div>
-        <strong>{item.provisionalNo}</strong> {when(item.occurredAt)}, {item.branchName}, {METHOD_WORDS[item.method] ?? item.method} {money(item.totalMinor)}
+        <strong>{item.provisionalNo}</strong> {when(item.occurredAt)}, {item.branchName}, {METHOD_WORDS[item.method ?? ''] ?? item.method} {money(item.totalMinor)}
       </div>
       {failed ? (
         <>
@@ -174,6 +195,9 @@ function SyncRow({ item, onAgain }: { item: OutboxItem; onAgain: () => void }) {
             Send again
           </button>
         </>
+      ) : item.state === 'held' ? (
+        // Kept as it is for the person who made it, never typed again (issue #852).
+        <p className="muted">{heldWords(makerName(offline, item))}</p>
       ) : (
         <p className="muted">{item.state === 'sending' ? 'Sending' : item.attempts > 0 ? `Waiting to try again: ${item.error?.message ?? ''}` : 'Waiting its turn'}</p>
       )}
@@ -252,6 +276,14 @@ function ManagerQueue() {
       setSelfReason('');
       void queryClient.invalidateQueries({ queryKey: ['retail', 'offline-failures'] });
     },
+    meta: {
+      // Every row of this list is a sale another phone could not record (the offline failures route holds only sales).
+      success: (_: unknown, sent: { id: string; action: 'retry' | 'discard' }) => {
+        const f = (failures.data ?? []).find((r) => r.id === sent?.id);
+        const sale = f?.total_minor !== undefined ? `Sale of ${money(f.total_minor)}${f.made_by_name ? ` by ${f.made_by_name}` : ''}` : 'Sale';
+        return `${sale} ${sent?.action === 'retry' ? 'sent again' : 'discarded, never recorded'}`;
+      },
+    },
   });
   const resolve = useMutation({
     mutationFn: async (id: string) => {
@@ -259,6 +291,7 @@ function ManagerQueue() {
       if (error) throw new Error(problemOf(error).detail ?? 'Could not resolve the clash');
     },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['retail', 'sale-clashes'] }),
+    meta: { success: 'Sale clash resolved' },
   });
   const rows = failures.data ?? [];
   const open = clashes.data ?? [];

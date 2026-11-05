@@ -11,7 +11,7 @@ import { GroupControls, GroupedBodies, GroupedCards, sameUnitQty, useCategoryGro
 import { lineTotalMinor, milliOf } from './maths';
 import { packsAndPiecesParts, type PackSize } from './units-state';
 import { EmptyState, SkeletonList } from '../../../components/states';
-import { BranchRequired, CategoryLabel, Gate, NoStockHere, Problem, money, useBranchView, useIsPhone, useProfitAccess } from './ui';
+import { BranchRequired, CategoryLabel, Gate, ItemPageLink, NoStockHere, Problem, money, useBranchView, useIsPhone, useProfitAccess } from './ui';
 import { CorrectItem, mayCorrect } from './stock-correct';
 import { useStaff } from '../context';
 import { needsOf } from './permissions';
@@ -24,7 +24,7 @@ import { ScreenLink, useAddress } from './screen-link';
 import { Hint } from '../../../app/ui/Hint';
 import { HelpTip } from '../../../app/ui/HelpTip';
 import { WORDS } from '../../../app/glossary';
-import { ElsewhereNote, allBranchesKey, noneHere, useStockElsewhere, type Elsewhere } from './stock-elsewhere';
+import { ElsewhereNote, allBranchesKey, noneHere, shopsOf, useStockElsewhere, type Elsewhere } from './stock-elsewhere';
 import { UnfinishedCounts } from './unfinished-counts';
 
 // Stock per branch (FR-RET-03): balances with a negative flag and a search box. The cost column
@@ -73,7 +73,7 @@ export function StockTable({ rows, showCost, searching = false, filterKey = '', 
   elsewhere?: ReadonlyMap<string, Elsewhere>;
 } & Narrowing) {
   const away = (r: StockRow) => {
-    const at = noneHere(r.qty) ? elsewhere?.get(r.product_id ?? '') : undefined;
+    const at = noneHere(r.qty) && !shopsOf(r) ? elsewhere?.get(r.product_id ?? '') : undefined;
     return at && <ElsewhereNote at={at} id={r.product_id ?? ''} />;
   };
   // On a phone the category sits under the item's name, so the table keeps room for the quantity and price.
@@ -93,11 +93,12 @@ export function StockTable({ rows, showCost, searching = false, filterKey = '', 
       <li key={r.product_id} className="rt-card stock-card">
         <strong>{r.description}</strong>
         {showCategory && r.category && <CategoryLabel category={r.category} />}
-        <p className="stock-card-qty">In stock: <span className={r.standard_pack ? 'num qty-packs' : 'num'}><InPacks qty={r.qty ?? '0'} unit={r.unit} pack={r.standard_pack} /></span></p>
-        {r.negative && <p className="rt-flag">Negative</p>}
+        {shopsOf(r) ? <ShopQuantities row={r} /> : <p className="stock-card-qty">In stock: <span className={r.standard_pack ? 'num qty-packs' : 'num'}><InPacks qty={r.qty ?? '0'} unit={r.unit} pack={r.standard_pack} /></span></p>}
+        {r.negative && !shopsOf(r) && <p className="rt-flag">Negative</p>}
         {away(r)}
         {keptWords(r.qty, r.reserved_qty) && <p className="hint">{keptWords(r.qty, r.reserved_qty)}</p>}
         {(r.sell_minor !== undefined || (showCost && r.cost_minor !== undefined)) && <p className="hint"><PriceLine cost={showCost ? r.cost_minor : undefined} sell={r.sell_minor} /></p>}
+        <ItemPageLink productId={r.product_id} name={r.description} />
         {correctable && correct(r)}
         {correctable && corrected === r.product_id && <CorrectItem row={r} branchId={correctable.branchId} onClose={() => setCorrected(null)} />}
       </li>
@@ -116,12 +117,13 @@ export function StockTable({ rows, showCost, searching = false, filterKey = '', 
       <tr>
         <td>
           {r.description}{showCategory && r.category && <><br /><CategoryLabel category={r.category} /></>}
+          <div><ItemPageLink productId={r.product_id} name={r.description} /></div>
           {correctable && <div>{correct(r)}</div>}
         </td>
         {!phone && !grouping && <td>{r.category}</td>}
         <td className={r.standard_pack ? 'num qty-packs' : 'num'}>
-          <InPacks qty={r.qty ?? '0'} unit={r.unit} pack={r.standard_pack} />
-          {r.negative && <div className="rt-flag">Negative</div>}
+          {shopsOf(r) ? <ShopQuantities row={r} /> : <InPacks qty={r.qty ?? '0'} unit={r.unit} pack={r.standard_pack} />}
+          {r.negative && !shopsOf(r) && <div className="rt-flag">Negative</div>}
           {away(r)}
           {keptWords(r.qty, r.reserved_qty) && <div className="hint">{keptWords(r.qty, r.reserved_qty)}</div>}
         </td>
@@ -162,6 +164,24 @@ function InPacks({ qty, unit, pack }: { qty: string; unit?: string; pack?: PackS
   return total ? <><span className="qty-in-packs">{inPacks}</span> <span className="qty-total">({total})</span></> : <>{inPacks}</>;
 }
 
+/**
+ * Issue #807 (ADR-119): the item's quantity in every shop of the business, this shop first as "In stock here", a shop with
+ * none at 0 and one below zero said in words as well as by its minus sign. Quantities only; nothing moves the person.
+ */
+function ShopQuantities({ row }: { row: StockRow }) {
+  return (
+    <ul className="shop-qtys" data-testid={`shops-${row.product_id}`} aria-label={`${row.description} in each shop`}>
+      {(row.shops ?? []).map((s) => (
+        <li key={s.branch_id} className={s.here ? 'shop-qty-here' : undefined}>
+          {s.here ? 'In stock here' : s.name}:{' '}
+          <span className={row.standard_pack ? 'num qty-packs' : 'num'}><InPacks qty={s.qty ?? '0'} unit={row.unit} pack={row.standard_pack} /></span>
+          {s.negative && <span className="rt-flag"> Below zero</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** One quantity with its unit, in the item's standard pack and pieces when it has one (issue #650), and the negative flag in words. */
 function Qty({ qty, unit, negative, pack }: { qty: string; unit?: string; negative?: boolean; pack?: PackSize }) {
   return (
@@ -185,7 +205,7 @@ export function AllBranchesTable({ data, showCost: mayCost, searching = false, f
   if (data.items.length === 0) return <EmptyState title="No items found.">Try another name or code, or buy stock to add items.</EmptyState>;
   const row = (r: AllBranchesStock['items'][number]) => (
     <tr key={r.product_id}>
-      <td>{r.description}{!grouping && <><br /><CategoryLabel category={r.category} /></>}</td>
+      <td>{r.description}{!grouping && <><br /><CategoryLabel category={r.category} /></>}<div><ItemPageLink productId={r.product_id} name={r.description} /></div></td>
       <td className={r.standard_pack ? 'num qty-packs' : 'num'}><strong><Qty qty={r.total_qty ?? '0'} unit={r.unit} negative={r.negative} pack={r.standard_pack} /></strong></td>
       {(r.balances ?? []).map((c) => (
         <td key={c.branch_id} className={r.standard_pack ? 'num qty-packs' : 'num'}><Qty qty={c.qty ?? '0'} unit={r.standard_pack ? r.unit : undefined} negative={c.negative} pack={r.standard_pack} /></td>
@@ -229,6 +249,7 @@ export function AllBranchesList({ data, showCost, searching = false, filterKey =
               <span>
                 <strong>{r.description}</strong>
                 {!grouping && <><br /><CategoryLabel category={r.category} /></>}
+                <br /><ItemPageLink productId={r.product_id} name={r.description} />
               </span>
               <span className="num"><strong>Total <Qty qty={r.total_qty ?? '0'} unit={r.unit} negative={r.negative} pack={r.standard_pack} /></strong></span>
             </div>
@@ -265,7 +286,7 @@ const LEVELS: { value: StockLevel | ''; label: string }[] = [
 ];
 
 /**
- * Tabs for the stock lists: everything, out of stock (zero or less) or low stock (at or below the item's minimum, else 5 or fewer,
+ * Tabs for the stock lists: everything, out of stock (zero or less) or low stock (at or below the item's minimum, else 10 or fewer,
  * out included); out and low keep only items the shop has stocked (issue #490).
  */
 export function StockLevelFilter({ level, onChange }: { level: StockLevel | ''; onChange: (level: StockLevel | '') => void }) {
@@ -273,7 +294,7 @@ export function StockLevelFilter({ level, onChange }: { level: StockLevel | ''; 
     <>
       <Segmented label="Show" options={LEVELS} value={level} onChange={onChange} />
       {level === 'out' && <p className="hint">Items you have stocked with none left, or less than none.</p>}
-      {level === 'low' && <Hint>Items you have stocked that are at or below their minimum, or 5 or fewer without one, including those out of stock.</Hint>}
+      {level === 'low' && <Hint>Items you have stocked that are at or below their minimum, or 10 or fewer without one, including those out of stock.</Hint>}
     </>
   );
 }

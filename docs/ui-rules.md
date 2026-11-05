@@ -47,7 +47,22 @@ back to what opened it.
     first missing field. The kit's `Field` does all of this, and the lending forms (`form-fields.tsx`) follow it.
 11. Amounts open the numeric keypad (`inputmode="numeric"`), quantities use steppers, and a choice of 2 to 5 options is a
     segmented control.
-12. Touch targets are at least 48px.
+12. Touch targets are at least 48 by 48px. On a phone two targets stand at least 8px apart (`--tap-gap`) and the screen's main
+    action is full width in the stuck `ActionBar`; these rules hold in the app's phone layout, under 720px, which holds the
+    phone of issue #825 (up to 600px). On a laptop (from 1024px) a button is as wide as its label, never wider than
+    `--button-max` (320px), the main action at least `--button-min-wide` (160px) and at the right of its form, a secondary
+    action right under it (Clear this purchase) under it at the right, any other block button at its start, still 48px tall
+    for a touch laptop (issue #825). The gap rules hold under 720px and the width rules from 1024px; at every width a button
+    is at least 48px wide, the shop chart ranges and a search's Clear are 48px, and the buttons of a bar or sheet keep the
+    order below (the primary last), so between 720 and 1023px those change while the sizes of the laptop do not. The ActionBar and a sheet's buttons stand
+    together at the right in the order of the page, never reversed, so what is seen matches the Tab order, and the primary
+    comes last in the markup, so it stands at the far right on a laptop and nearest the thumb on a phone. The staff top bar keeps 8px between its targets at every
+    width; below 412px it takes two lines in the order of the page (the menu and the names, then the icon buttons at the
+    right), so the business and branch names keep the minimum of #605. A bar the page scrolls under (the top bar, the bottom
+    tabs, a stuck ActionBar) keeps its targets 8px inside every edge that faces the page.
+    `layout/buttons.layout.test.ts` measures the daily screens at 412 by 900 and 1366 by 800, and the design guard lists every
+    class named as a tap target (`.btn-*`, `.chip`, `.pill`, `*-btn`, `*-button`, `*-chip`, `*-pill`, `*-clear`, `*-close`,
+    `*-toggle`).
 
 ## Motion
 
@@ -75,7 +90,7 @@ back to what opened it.
 ## Feedback
 
 14. A page load shows a skeleton, and nothing at all for under 1 second.
-15. Toasts are dark and neutral, at the bottom, with an icon, for 6 seconds (12 with an Undo), with at most one action. An error is never
+15. Toasts are dark and neutral, at the bottom, with an icon, for 4 seconds (8 with an Undo; the owner's ask in issue #824), with at most one action. An error is never
     a blocking dialog. Sign-in and the invitation page say an error in an error toast as well as in their error line (issue
     #122); the line stays on the page and is the one read out, so that toast is silent and carries no button. The toast shows
     only while the line does, so the next attempt and the step after it never keep an old error, and a second failure
@@ -85,9 +100,15 @@ back to what opened it.
     Every successful save, sale, add, edit, delete, move, purchase and payment in the staff area says so in a success toast
     of a few plain words, because most people read very little (issue #682): the screen's own `show(text, 'success')`, or
     the words in the mutation's `meta: { success }` (or `sayDone` for a write by hand) that the app's one `DoneToast` says,
-    with Undo where `meta.undo` can take it back. Success is never said twice: a screen that already shows a success note
-    or screen keeps that and is exempt. The success toast guard in `busy-guard.test.ts` fails a staff write that says
-    nothing, unless `// toast-exempt: <reason>` sits above it.
+    with Undo where `meta.undo` can take it back. Success is never said twice in a toast and a success note: a screen that
+    already shows a success note keeps that and is exempt. A success screen that replaces the form is not exempt (issue
+    #824): it still says it in a toast, and its write carries `// success-screen: <what replaces the form>`. A save that
+    waits for approval raises no success toast. The success toast guard in `busy-guard.test.ts` fails a write that says
+    nothing, unless `// toast-exempt: <kind>: <reason>` sits above it, the kind one of `saves nothing`, `waits for
+    approval`, `said elsewhere` or `success note`, and never takes a success screen as that reason.
+    The words say what happened and to what, from what the screen already has, money through the money formatter
+    (issue #836): 'Category Transport added', 'Expense of UGX 20,000 saved', 'Sale deleted, stock put back'. The same guard
+    refuses a toast of one word, or only Saved, Done, Success or OK.
     A press shows at once: every button, tile, link card and row sinks to `--press-scale` and dims to `--press-opacity`,
     by transform and opacity only, in `--motion-fast` (100 to 160ms); under reduced motion it only dims. A busy button
     is the `BusyButton` (rule 6 of the design system) and a disabled one is flat grey, never only faded.

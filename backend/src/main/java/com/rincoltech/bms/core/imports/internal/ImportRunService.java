@@ -70,8 +70,12 @@ class ImportRunService implements ImportRuns {
                             WHERE locktype = 'advisory' AND granted AND pid = pg_backend_pid() AND objsubid = 1
                               AND ((classid::bigint << 32) | objid::bigint) = hashtextextended(?, 0))""";
 
-    /** Seconds the probe of the claim may take before the claim counts as lost. */
-    private static final int CLAIM_PROBE_TIMEOUT_SECONDS = 10;
+    /**
+     * Milliseconds the probe of the claim may wait on the database before the claim counts as lost (issue #792). It is
+     * the claim connection's network timeout, not a query timeout: pgjdbc cancels a query on a new socket and never
+     * unblocks the read on a black-holed one, while a socket read that times out ends the connection.
+     */
+    private static final int CLAIM_PROBE_TIMEOUT_MILLIS = 10_000;
 
     private static final Logger log = LoggerFactory.getLogger(ImportRunService.class);
 
@@ -142,6 +146,15 @@ class ImportRunService implements ImportRuns {
             if (!RunStates.allowed(run.status(), status)) {
                 throw invalidTransition("The import is " + RunStates.words(run.status()) + ", so it cannot be "
                         + RunStates.words(status) + " now.");
+            }
+            // Ready means every file is read (spec section 3.11): a file not yet parsed, or refused, is parsed again or
+            // cancelled first (#128).
+            if (RunStates.READY.equals(status)
+                    && jdbc.sql("""
+                                    SELECT EXISTS (SELECT 1 FROM import_batches WHERE run_id = ? AND status IN ('uploaded', 'failed'))
+                                    """).param(runId).query(Boolean.class).single()) {
+                throw invalidTransition(
+                        "A file of this import is not read yet or was refused; read it again or cancel it.");
             }
             setStatus(runId, status);
             audit(runId, "core.import_run.status_changed", Map.of("status", run.status()), Map.of("status", status));
@@ -406,15 +419,7 @@ class ImportRunService implements ImportRuns {
          * claim is lost: {@code claim_connection_lost} when the probe fails, {@code claim_not_held} when it answers no.
          */
         String lostReason() {
-            try (PreparedStatement probe = connection.prepareStatement(CLAIM_HELD)) {
-                probe.setQueryTimeout(CLAIM_PROBE_TIMEOUT_SECONDS);
-                probe.setString(1, key);
-                try (ResultSet rs = probe.executeQuery()) {
-                    return rs.next() && rs.getBoolean(1) ? null : "claim_not_held";
-                }
-            } catch (SQLException e) {
-                return "claim_connection_lost";
-            }
+            return probeClaim(connection, key, CLAIM_PROBE_TIMEOUT_MILLIS);
         }
 
         @Override
@@ -439,9 +444,44 @@ class ImportRunService implements ImportRuns {
         }
     }
 
+    // JUSTIFICATION-A3: the probe body moved out of LoopClaim, static so issue #792's stalled read test can reach it.
+    /**
+     * The probe of {@link LoopClaim#lostReason()}: every read on the connection is bounded by {@code timeoutMillis}
+     * through its network timeout, and the previous network timeout is put back afterwards, on every path. A timeout
+     * that cannot be put back means the connection is closed or broken (a read that times out ends it), so the claim
+     * counts as {@code claim_connection_lost} whatever the probe read.
+     */
+    static String probeClaim(Connection connection, String key, int timeoutMillis) {
+        int previous;
+        try {
+            previous = connection.getNetworkTimeout();
+            connection.setNetworkTimeout(Runnable::run, timeoutMillis);
+        } catch (SQLException e) {
+            return "claim_connection_lost";
+        }
+        String reason;
+        boolean restored = false;
+        try (PreparedStatement probe = connection.prepareStatement(CLAIM_HELD)) {
+            probe.setString(1, key);
+            try (ResultSet rs = probe.executeQuery()) {
+                reason = rs.next() && rs.getBoolean(1) ? null : "claim_not_held";
+            }
+        } catch (SQLException e) {
+            reason = "claim_connection_lost";
+        } finally {
+            try {
+                connection.setNetworkTimeout(Runnable::run, previous);
+                restored = true;
+            } catch (SQLException e) {
+                // Closed or broken: the session and its loop key may be gone; the close of the claim discards it.
+            }
+        }
+        return restored ? reason : "claim_connection_lost";
+    }
+
     private CommitOutcome writeBatches(UUID runId, BatchWriter writer, LoopClaim claim) {
         List<PendingBatch> pending = tx.execute(s -> jdbc.sql("""
-                        SELECT id, seq FROM import_batches WHERE run_id = ? AND status = 'pending' ORDER BY seq
+                        SELECT id, seq FROM import_batches WHERE run_id = ? AND status IN ('pending', 'parsed') ORDER BY seq
                         """)
                 .param(runId)
                 .query((rs, n) -> new PendingBatch(rs.getObject("id", UUID.class), rs.getInt("seq")))
@@ -485,7 +525,8 @@ class ImportRunService implements ImportRuns {
         }
         tx.executeWithoutResult(s -> {
             Run run = find(runId, true);
-            long left = jdbc.sql("SELECT count(*) FROM import_batches WHERE run_id = ? AND status = 'pending'")
+            long left = jdbc.sql(
+                            "SELECT count(*) FROM import_batches WHERE run_id = ? AND status IN ('pending', 'parsed')")
                     .param(runId)
                     .query(Long.class)
                     .single();

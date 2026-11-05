@@ -58,7 +58,7 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   (issue #152, ADR-031) `V32`, and lending insights (issue #153, ADR-030) `V33`. Flyway runs with
   `outOfOrder` off, so a new migration takes a number above the highest one on any open branch
   (`V34` is the retail cash book, issue #147; `V35` is claimed by lending, issue #176; `V36` is claimed by lending payment methods, issue #160; `V37` is retail branch roles, issue #191; `V38` is the retail two-step transfer, issue #193; `V39` is units of measure, issue #194; `V40` is search, issue #241; `V41` is price lists, issue #195; `V42` is the loan reopen pledge guard, issue #176; `V43` is payment methods, issue #160; `V44` is customer accounts, issue #196; `V45` is returns, issue #201; `V46` is optional documents, issue #197; `V47` is optional purchasing, issue #198; `V48` is landed cost and supplier credit notes, issue #199; `V49` is report runs, issue #214; `V50` is the SMS channel core, issue #212; `V51` is the `core.ai` call log, issue #220; `V52` is the tenant SMS settings, issue #218; `V53` is the member event SMS cancel, issue #221; `V54` is the payment gateway core, issue #213; `V55` is the stored daily AI brief and the advisor permissions, issue #226; `V56` is the lenders' own payment accounts and `V57` their permission, issue #233; `V58` is the step-up failure counter; `V59` is the loan repayment by gateway and the unallocated receipts, issue #216; `V60` is the savings deposit by gateway, issue #219; `V62` is the staff forgot-password migration, issue #320; `V65` is the store branch flag, issue #366; `V67` is the two-step default, issue #348; `V69` is the items with sizes and colours, issue #384, the next number after `V68` (the push subscriptions); `V70` is customer orders with delivery, issue #385; `V71` is the item photos, issue #384 slice 2; `V72` is find your sign-in page, issue #383; `V73` is the retail Storekeeper and Purchasing roles, issue #399; `V74` is sellers who see only their own figures, issue #399 slice 2; `V75` is the operator screens, issue #407, directly after it; `V76` is the low-stock minimums and the daily notices, issue #412, directly after `V75`; `V77` is changing an order's items, issue #393, directly after `V76`; `V79` is the Owner of a business, issue #442, directly after `V78`; `V80` is in-app feedback, issue #447, directly after `V79`; `V81` is the lending arrears run and penalty charges, issue #264, then `V82` the penalty waivers, issue #265, `V83` the collection actions, issue #266, and `V84` the arrears notices' record, issue #227, in that merge order; then `V85` shop logos, issue #461, pull request #465, `V86` offline sales, pull request #463, and `V87` barcodes, pull request #470; then `V88` referrals, pull request #467, `V89` existing loans, pull request #475, and `V90` the self-serve plan, pull request #474 (issue #472, ADR-073), and `V91` Download my data as a workbook, pull request #478 (issue #334); `V80` to `V91` are all merged. `V92` is subscription billing automation, pull request #482 (issue #480, ADR-075), merged; `V93` is the shop's EAN-13 barcodes (#528, issue #524, ADR-070 decision 12), merged; `V94` is the average cost (#529, issue #523, ADR-079), merged; `V95` is the savings cap and the optional savings reason (issue #538, pull request #540, ADR-080), merged; `V96` is item codes made from the category (issue #493, ADR-081), the next number after `V95`, merged; `V97` is buying on credit and paying suppliers without the purchasing capability (issue #557, ADR-084), the next number after `V96`; `V98` is one staff phone per business (issues #323 and #324, ADR-085), the next number after `V97`, merged; `V99` stays unused, since it is the placeholder `placeholder-migration-guard` refuses; `V100` is the index for the shop Home takings, `(tenant_id, paid_on)` on `retail_sale_payments` (issue #488, ADR-076), directly after `V98`, merged; `V101` is the Controls page's two partial indexes on sale lines (issue #357, ADR-087), directly after `V100`, merged; `V102` is the billing contact, closing the business and its removal (issue #571, ADR-090), directly after `V101`, merged; `V103` is the kind of business (issue #424, ADR-092: the retail profile renamed without changing a switch, and `business_type` on the operator's overview), directly after `V102`, merged; `V104` is the entry warnings' three product indexes on sale, purchase and transfer lines (issue #353, ADR-093), directly after `V103`, merged; `V105` is the billing review follow-ups (issue #502, ADR-075): `platform_mark_subscription_overdue` refused under a tenant binding and for a business that asked to close, directly after `V104`; `V106` is the sign-in review follow-ups (issues #369 and #377, ADR-046): `platform_sessions.revoked_reason` gains `two_step_required`, so the refresh of an operator with no second factor ends the session instead of failing, directly after `V105`, merged; `V107` is the fee and interest waivers (issue #265, pull request #597, FR-ARR-04 second half: `lending_item_waivers` and the permission `lending.charges.waive_fee_interest`), directly after `V106`; How do I...? (issue #598) needs no migration; `V108` is Ask BMS (issue #20, ADR-096: the tables `help_ask_questions`, `help_ask_tickets`, `help_ask_spend` and `help_ask_answers`, and the functions `help_ask_platform_spend` and `help_erase_personal_data`), directly after `V107`; `V109` is the default units for retail businesses (issue #618, ADR-098), directly after `V108`; `V110` is selling packs with their own prices (issue #624, ADR-099: `purpose` and `sell_minor` on `retail_product_units`), directly after `V109`, merged (PR #627); `V111` is the usual pack size and purpose of a unit (issue #625, PR #628, ADR-100, Set up your shop: `pack_size`, `pack_of_unit_id` and `pack_purpose` on `retail_units`, the purpose taking the values of `retail_product_units.purpose`), directly after `V110`; `V112` is the setup helper's draft log (issue #626, ADR-102: `help_setup_drafts`), directly after `V111`; `V113` is the discarded stock count (issue #656: `discarded` in the status of `retail_stocktakes`, with `discarded_by` and `discarded_at`), directly after `V112`; `V114` is claimed by `import_runs` (issue #127); `V115` folds the branch role `store` into
-`branches.sells_goods` (issue #371, ADR-104), after `V114`; `V116` is the transfer receipt checks (#239); `V117` is retail posting and reading cash and bank through the payment methods mapping (issue #236, ADR-105: `platform_set_tenant_modules` without the V43 remap check), directly after `V116`; `V118` is the pack ladder (#699, ADR-107), merged; `V119` is the short links (#708, pull request #713, ADR-108), merged; `V120` is one unit for many spellings and the display style of names (issue #698, ADR-109, a Java migration in `backend/src/main/java/db/migration`), after `V119`; `V121` is the standard units (issue #709, ADR-110, a Java migration), merged; `V122` is the onboarding applicant link kept after Activate (issue #746, pull request #747), directly after `V121`, merged; `V123` is the unallocated receipts queue and the governed reversal of gateway payments (issue #224, pull request #315), directly after `V122`, and `V124` the nightly payment reconciliation and statement upload (issue #224, pull request #318), directly after `V123`, both merged; `V125` is the retail AI brief (issue #422, pull request #735), directly after `V124`, merged; `V126` the AI assistant add-on (issue #423, pull request #743) and `V127` the import runs (issue #127, pull request #736), then `V128` the receipt links (issue #760, pull request #762), in that order after `V125`; the merger renumbers at merge time if the order changes). A migration takes the highest number on main plus one at merge time; a number above one that is still unmerged is allowed only as one of the ordered claims listed here; a placeholder `V99__` is refused by `placeholder-migration-guard` and by the first job of `deploy.yml`. The retail analytics pass (issue #149) is reports only on existing data: no migration; its
+`branches.sells_goods` (issue #371, ADR-104), after `V114`; `V116` is the transfer receipt checks (#239); `V117` is retail posting and reading cash and bank through the payment methods mapping (issue #236, ADR-105: `platform_set_tenant_modules` without the V43 remap check), directly after `V116`; `V118` is the pack ladder (#699, ADR-107), merged; `V119` is the short links (#708, pull request #713, ADR-108), merged; `V120` is one unit for many spellings and the display style of names (issue #698, ADR-109, a Java migration in `backend/src/main/java/db/migration`), after `V119`; `V121` is the standard units (issue #709, ADR-110, a Java migration), merged; `V122` is the onboarding applicant link kept after Activate (issue #746, pull request #747), directly after `V121`, merged; `V123` is the unallocated receipts queue and the governed reversal of gateway payments (issue #224, pull request #315), directly after `V122`, and `V124` the nightly payment reconciliation and statement upload (issue #224, pull request #318), directly after `V123`, both merged; `V125` is the retail AI brief (issue #422, pull request #735), directly after `V124`, merged; `V126` the AI assistant add-on (issue #423, pull request #743) and `V127` the import runs (issue #127, pull request #736), then `V128` the receipt links (issue #760, pull request #762), in that order after `V125`; `V129` is the quarantined upload of customer data onboarding (issue #128), directly after `V128`; `V130` is the SMS delivery reports (issue #215, pull request #806), directly after `V129`; `V131` is the owner's permission to date an entry earlier than today, `retail.entry.backdate` (issue #811, pull request #831, ADR-120), directly after `V130`; `V132` is where each sale and usage or damage entry is made and each shop's location (issue #826, pull request #834, ADR-122), directly after `V131`; `V133` is the undo of a usage or damage entry (issue #818, pull request #843, ADR-123), directly after `V132`; `V134` is a supplier's details (issue #820, pull request #848, ADR-125), directly after `V133`; `V135` is the staff email spaces (issue #823, pull request #855), directly after `V134`, merged; `V136` is the index that reads an Idempotency-Key across the people of a business, so a replay answers only the person who stored it (issue #852, pull request #853, ADR-026 decision 5), directly after `V135`; `V137` is the SMS delivery report follow-ups, the purge's answer and the counter's tenant guard (issue #808, pull request #861, ADR-036 decision 7), directly after `V136`; the merger renumbers at merge time if the order changes). A migration takes the highest number on main plus one at merge time; a number above one that is still unmerged is allowed only as one of the ordered claims listed here; a placeholder `V99__` is refused by `placeholder-migration-guard` and by the first job of `deploy.yml`. The retail analytics pass (issue #149) is reports only on existing data: no migration; its
   queries are in `scripts/db-bench/queries` (k01 to k15).
 - **Built (trade 1 of 10, issue #191, ADR-033):** migration `V37` (`retail_branch_roles`, the permission
   `retail.branch_role.manage`, a backfill of role `both`); the tenant settings group `retail.capabilities`
@@ -374,6 +374,18 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   mutations run with `networkMode: 'always'` (`main.tsx`), so no change is ever held to be sent later (NFR-OFF-04).
   `OfflineBanner` is the one offline notice ("Figures are from today at 14:05"); Home's Shop card says Sell works offline. Tests:
   `read-cache.test.ts`, `offline-reading.dom.test.tsx`, `offline-context.dom.test.tsx`, `top-bar.dom.test.tsx`, `home-cards.dom.test.tsx`.
+- **Built (the item page, issue #813, FR-RET-85, ADR-121):** no migration, no permission. `GET /retail/stock/items/{product_id}`
+  (the item and its stock in each open branch the caller may read, a closed one only while it holds the item, the average buying
+  price per shop with `retail.profit.read`) and `GET /retail/stock/items/{product_id}/movements` (`branch_id`, `from`, `to`,
+  `limit`, `cursor`; newest first), both `retail.stock.read` (`ItemPageService`, `ItemPageController`). The movements are the
+  stock movements read (`StockRepository.movements` with `withBalance`): `balance_after` is a window sum per branch over the
+  item's whole history, taken before the days and the cursor narrow the rows, so a page is one query; `profit_minor` on a sale
+  (the line's total less its cost) only with `retail.profit.read`. A branch outside the caller's scope and another business's
+  item are 404. Screen `/staff/retail/items/$productId` (`item-page.tsx`, tour `page-item`): each shop's stock, then every
+  movement in plain words with In stock after, a shop choice and the PeriodPicker, Show older movements; opened by Open the item
+  (`ItemPageLink` in `ui.tsx`) on My stock, Items and a sale's lines; kept offline (`item-stock`, `item-movements` on the
+  ADR-116 allowlist). Tests: `RetailItemPageIT`, `item-page.dom.test.tsx`, `layout/item-page.layout.test.ts`,
+  `read-cache.test.ts`, `tours-retail-reports.test.tsx`.
 - **Built (light and dark theme selector, issue #429):** PWA only, no migration, no API change, nothing stored on the server. A System, Light, Dark selector at the top right of the shell's header (every area), kept per device in `localStorage` (`bms.theme`), following the system setting by default, set before first paint by the blocking `frontend/public/theme-init.js` (the CSP is `script-src 'self'`), applied afterwards by `frontend/src/app/theme-mode.ts`; one `:root[data-theme='dark']` token set in `theme.css`, stylesheets draw with colour roles only (`design-guard.test.ts`), the tenant brand pair is untouched and its link and focus colours are derived again for dark, the `theme-color` meta follows the choice (the manifest stays light); the three welcome tours gain a "Light or dark" step (`admin-welcome` v16, `retail-sales` v9, `staff-welcome` v4). Token pairs in `docs/ui/design-system.md`; tests `theme-mode.dom.test.tsx`, `tokens.test.ts`.
 - **Built (theme button and Appearance, issue #452):** PWA only, no migration, no API change. The header `<select>` of #429 becomes an icon button (sun, moon, or a phone for the device choice, `aria-label` "Theme: <choice>") opening an accessible three item menu (`ThemeMenu` in `frontend/src/app/shell.tsx`); the Notifications and app page gains an Appearance radio group on the same `useThemeChoice`. The label of `system` is "Same as my phone" everywhere; `theme-mode.ts` is unchanged. Tour `page-notifications` v3. Tests `theme-mode.dom.test.tsx`, `notifications.dom.test.tsx`, `shell.test.tsx`.
 - **Built (busy buttons, issue #456):** PWA only, no API change. `BusyButton` (`frontend/src/app/ui/BusyButton.tsx`, `.busy-button` and `.busy-spinner` in `ui/buttons.css`) is the one button for every write (POST, PUT, PATCH, DELETE): while its request runs it keeps its label (no `isPending ?` label swap), shows a small spinner in its end padding without changing width, is `aria-busy` and `aria-disabled` (keeps focus, its press guard drops presses), says Working once through the `BusyAnnouncer` in the app shell (no live region per button; the opened phone menu drawer, being `aria-modal`, mounts a second one inside itself), sends once on a double click and drops an Enter re-submit; under reduced motion the spinner is a pulsing dot. Every write button in the staff, member, onboarding, sign-in and operator screens uses it. **Rule for a new screen:** a button that writes is a `BusyButton` with the mutation's `isPending` (or the screen's submitting state) as `busy`; read-only buttons stay plain; a mutation that needs no busy button of its own carries `// busy-exempt: <reason>` in the `//` comment lines directly above its `const ... = useMutation(` line (no reason, no exemption), and a plain button that only waits (Cancel) carries `/* busy-exempt: <reason> */` in its tag. `src/app/ui/busy-guard.test.ts` fails a mutation (`useMutation<T>(`, destructured, or from a local hook that returns one) that an onClick, onSubmit or component callback sends while its pending flag reaches no `busy={...}` in that file and neither that comment nor an `ALLOWED` entry with a reason exempts it, and a plain `<button>` disabled by a pending state without the tag comment; fixture tests prove the failures and the exemption. It is a text heuristic: it checks that the flag reaches some `busy=` in the same file, not which button. Docs: `docs/ui/design-system.md` (Busy button, rule 6). Tests: `BusyButton.dom.test.tsx`, `busy-guard.test.ts` and the busy cases in the screens' dom tests.
@@ -874,6 +886,83 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   answer; the Sell line's price field is Selling price, and the sale lines export sheet's price column too. Tests:
   `shop-here.dom.test.tsx`, `stock-cards.dom.test.tsx`, `layout/my-stock.layout.test.ts`, `design-guard.test.ts`,
   `glossary.test.ts`, `maths.test.ts`, `DataExportIT`.
+- **Built (every shop's stock on My stock, issue #807, ADR-119, FR-RET-84):** no migration and no permission. Each row of
+  `GET /retail/stock` carries `shops` (`{branch_id, name, qty, negative, here}` per active shop that keeps goods, the listed one
+  first), from one read of the stock balances per page, for everyone who may read stock at the listed shop; absent while the
+  retail setting `other_shops_stock` (on by default, Retail settings, "Show other shops' stock to everyone") is off or
+  fewer than two shops would be listed. My stock lists the shops on each card and in the In stock cell, "In stock here" first; the Switch to
+  button of #728 is gone. Tests: `RetailAllShopsStockIT`, `RetailAllShopsStockReadsIT`, `all-shops-stock.dom.test.tsx`, `where-is-my-stock.dom.test.tsx`,
+  `layout/my-stock.layout.test.ts`.
+- **Built (where each sale and usage entry is made, issue #826, ADR-122, FR-RET-87):** migration `V132`
+  (`retail_entry_locations`, `retail_shop_locations`) and the permission `retail.entry_location.read` (the administrator's).
+  `POST /retail/sales` (online and from the outbox) and `POST /retail/usage` take an optional `location` (422 out of range,
+  never refused without it, left out of every key and fingerprint) recorded through the `retail.stock` port `EntryLocations`.
+  `GET /retail/entry-locations` gives the owner the distance from the shop in words, never the coordinates; the shop's own
+  location is set in Business set-up ("Shop locations", `core.settings.manage`, `GET`, `PUT` and `DELETE
+  /retail/shop-locations`). The Sell and Usage and damage forms ask once (`entry-location.tsx`, `useWhereNow`, answer kept
+  on the phone); the sale shows "Where" and Past usage and damage each entry's distance to the owner only. No coordinate is
+  logged or audited; removal of a closed business deletes them (`EntryLocationErasure`). Staff note: help article
+  `where-a-sale-is-made`. Tests: `RetailEntryLocationIT`, `EntryDistanceTest`, `entry-location.dom.test.tsx`,
+  `layout/entry-location.layout.test.ts`.
+- **Built (undo a wrong usage or damage entry, issue #818, ADR-123, FR-RET-88):** migration `V133` (`retail_usage_undos`,
+  append-only, one row per entry at most); no new permission. `POST /retail/usage/{report_id}/undo` (`retail.sale.void` at the
+  entry's branch, as a sale void; `UsageUndoService`) takes a required reason, puts every movement back with a `return` of
+  source type `retail.usage_undo` at the same unit cost and reverses the shrinkage entry, both on the day of the undo; 409
+  `usage_undone` the second time, 422 `usage_imported` for imported history, audit `retail.usage.undone`. Movements carry
+  `undone`; Past usage and damage shows Undone in words with an icon and an Undo this entry button with a reason
+  (`usage-undo.tsx`), and its grouped totals, the daily profit's usage and the stock health's usage leave undone entries
+  out; Controls gains `usage_undos`; Undo this entry shows once per entry, the form names the entry's lines from the
+  movement's `entry_lines` and the toast the answer's `items_back`, both counted on the server, never from the list. Tests:
+  `RetailUsageUndoIT` (also two undos at once and another business's entry), `usage-undo.dom.test.tsx`,
+  `controls-state.test.ts`, `layout/usage-undo.layout.test.ts`.
+- **Built (damage and use as a share of stock, issue #822, ADR-127, FR-RET-92):** no migration and no permission.
+  `GET /retail/reports/stock-health/damage-share` (`retail.profit.read`; `StockHealthService.damageShare`,
+  `StockHealthRepository.flow`) gives per shop and item the damaged and used quantities of the period (this month by default),
+  each as a whole percent of the stock that passed through: the stock at the start of the first day plus what came in
+  (deliveries, stock moved in, a starting stock first set, never a voided or reversing movement), undone entries left out, no
+  share on a zero base, the highest first, with a shop total. Only the shops where the caller holds the permission; any other
+  branch or another business's is 404 `unknown_branch`. Stock health shows it in the Damage and use section
+  (`damage-share.tsx`) with its own period picker on This month and the base in one line, only to a profit reader; the read is
+  kept offline (`damage-share`); tour `page-stock-health` v4. Tests: `RetailDamageShareIT`, `damage-share.dom.test.tsx`,
+  `layout/damage-share.layout.test.ts`. Issue #854: a void dated after the period leaves it as it was (`r.business_date <=
+  :to`, ADR-127 Consequences); the section shows only where the person holds `retail.profit.read` at the shop chosen (any
+  shop when all are chosen), so a manager of one shop looking at another sees no section; quantities are grouped in thousands.
+- **Built (a receipt photo on a sale, a delivery, an expense and a usage entry, issue #819, ADR-124, FR-RET-89):** no
+  migration and no permission. The catalogue's public port `ReceiptPhotos` (`ReceiptPhotoService`) stores the photo through the
+  item photo's checks and limits as an `upload` document whose subject is the record (`retail.sale_receipt_photo`,
+  `retail.delivery_receipt_photo`, `retail.usage_receipt_photo`, and the existing `retail.expense_receipt`); each module adds
+  and serves its record's photo (`POST`/`GET .../receipt-photo` on sales, purchases, usage and expenses, and
+  `POST /retail/expenses/receipt-photos` for the expense form's `receipt_document_id`) and registers a `ReceiptPhotos.Rule`, the
+  record's own read check, which the catalogue makes the subject type's `DocumentAccess`. `retail.cashbook` now depends on
+  `retail.catalogue`. Sales, restocks and usage movements answer `has_receipt_photo`, and an expense answers the photo as its
+  `receipt_document_id`, asked of core.documents through `Documents.newestOf` (no retail module reads `documents` for it).
+  A voided or undone record takes no photo (409 `record_voided`); a sale's comes from its seller or whoever may cancel sales
+  there; an expense's photo belongs to one expense and its sender (409 `receipt_taken`). A photo no expense names within 24
+  hours loses its file to the nightly `core.documents.unclaimed-sweep` (`UnclaimedSweep`, the claim hooks of
+  `DocumentAccess`). The four forms have Add receipt photo (`receipt-photo.tsx`), sent after the save is said, bounded to 30
+  seconds and never offline, and cleared by every save; the sale page, Past purchases, the expense rows and Past usage and
+  damage show it small, opening full size, or offer to add one. Tests: `RetailReceiptPhotosIT`, `UnclaimedSweepIT`,
+  `receipt-photo.dom.test.tsx`, `layout/receipt-photo.layout.test.ts`.
+- **Built (a supplier's details and deliveries, issue #820, ADR-125, FR-RET-90):** migration `V134` (eight nullable columns
+  on `retail_suppliers`: `email`, `address`, `country`, `website`, `payment_terms`, `bank_account`, `supplier_type`, `notes`,
+  and the index `retail_purchases_supplier`); no new permission. A supplier carries `details` and `last_delivery_on` (the
+  newest restock not voided, in the scope of the restock list, never typed); `created_at` is the date added. `GET
+  /retail/suppliers` takes `q` (name, type or phone through `kernel.Search`), and `GET /retail/suppliers/{supplier_id}`,
+  `/deliveries` (restocks newest day first, keyset paged, no amount, 404 for another business) and `/types` are new
+  (`SuppliersService`, `SuppliersRepository`). The bank account number is in a response only for `retail.catalogue.manage`,
+  who alone may save one; the audit names the changed details, never their values; `SupplierDetailsErasure` clears them when
+  a closed business is removed. The Suppliers screen (`suppliers.tsx`) is searchable, its form takes every detail with the
+  types used before as suggestions, and each supplier has a page (`/staff/retail/catalogue/suppliers/$supplierId`) with
+  Call, Text, WhatsApp, Email and Website and its deliveries, each opening the purchase on its own page
+  (`/staff/retail/restocks/$purchaseId`); tours `page-suppliers` v3, `page-supplier` v1, `page-purchase` v1. Tests:
+  `RetailSupplierDetailsIT`, `MigrationOrderIT`, `suppliers.dom.test.tsx`, `layout/suppliers.layout.test.ts`.
+- **Built (what a delivery should sell for, issue #821, ADR-126, FR-RET-91):** no migration and no permission. Every restock
+  response carries `sell_worth_minor` (each line's base quantity times the line's own selling price, else the item's current
+  one) and `expected_profit_minor` (that less `total_minor`) only for a caller with `retail.profit.read` at every branch they
+  see it stock (`PurchasingService.shown`, after the idempotency store so a replay never leaks them). Buy stock draws Total
+  cost, Should sell for and Expected profit (or loss) in the total's box, live (`restockWorth`, `DeliveryWorth`), and each
+  Past purchases row the three the server sent; anyone else sees Total cost as before. Past purchases is a kept read
+  (ADR-116). Tests: `RetailDeliveryWorthIT`, `delivery-worth.dom.test.tsx`, `layout/delivery-worth.layout.test.ts`.
 - **Built (Past usage and damage, issue #145, AppSheet "Damaged or used stock not sold"):** no migration and no permission.
   `GET /retail/stock/movements` takes a repeatable `kind` filter (422 for an unknown or blank kind) and each row carries the
   item's `code`, `description` and `unit`, and for a profit reader `line_cost_minor`, the value the screen shows as is. The page `/staff/retail/usage-history` (`usage-history.tsx`, `retail.stock.read`), linked
@@ -883,6 +972,16 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   filter by; an empty list offers Record usage or damage (or Show the last year without the usage permission). The known kinds
   are `JdbcStockLedger.KINDS`, pinned to the table's check by `RetailPaymentsAndUsageIT`. Tests: `RetailPaymentsAndUsageIT`,
   `usage-history.dom.test.tsx`, `tours-retail-reports.test.tsx`, `layout/usage-history.layout.test.ts`.
+- **Built (totals in the record lists, issue #816, as the owner's old app did):** no migration and no permission. The cash book
+  record lists (expenses, banking, savings, withdrawals, advances; `RecordsByShop` in `cash-ui.tsx`) are drawn in the group tree
+  of the sales, stock and restocks lists (`ListChain`), with a total at every level: shop, year and month, and for expenses the
+  category and the day. Those lists are not paged, so `TreeKind.local` sums the groups from the rows already held
+  (`cashGroups` in `cash-state.ts`) instead of a request; the newest records open on arrival, voided ones are counted apart,
+  and a row without an amount leaves its group without a total. Past usage and damage gains Flat list or Grouped (shop, month,
+  category, item) from the new `GET /retail/usage/summary` (`retail.stock.read`, `UsageSummaryService`), which sums the same
+  movements the paged list shows; `cost_minor` only with `retail.profit.read` in every branch covered, counts and the
+  quantity at item level for everyone. Tests: `RetailUsageSummaryIT`, `cash-totals.dom.test.tsx`, `usage-grouped.dom.test.tsx`,
+  `layout/cash-totals.layout.test.ts`, `layout/usage-history.layout.test.ts`.
 
 ## Reading order
 
@@ -1344,12 +1443,17 @@ Accepted (this list is the ADR index):
 - ADR-111 Sizes, colours and types in Add an item, picked from ready lists shipped with the app: the same one form asks
   about sizes, `POST /retail/product-families` takes `packs` made on every size in its transaction, and `GET
   /retail/product-families/options` offers the sizes and colours a shop used before (#697, D81, D98; no migration)
-- ADR-115 Salespeople may see and change the savings amount when the owner allows it (Proposed, #768): the setting
+- ADR-115 Salespeople may see and change the savings amount when the owner allows it (Accepted, #768, D124): the setting
   `salespeople_see_savings_amount` in the settings document, off by default, set by the Owner only (403 `owner_only`); when
   on, a caller without `retail.profit.read` sees the suggestion and may change it before the day is saved, and sees the amount
-  of records made while it is on if they hold `retail.savings.record`; the cap, the profit and the expenses stay hidden, and
+  of records made while it is on if they hold `retail.savings.record` (every month's since #827); the cap, the profit and the expenses stay hidden, and
   the profit can still be worked out from the suggestion; replacing a saved amount needs `retail.savings.overwrite` for
-  everyone; the audit flags `salespeople_setting` (no migration)
+  everyone; the audit flags `salespeople_setting` (no migration). Amended by #799: while it is on, a seller
+  (`retail.sale.create` at the branch) without the till records the branch's savings through
+  `/retail/savings/sales-staff` (403 while off), and every month's records (#827; this month's before it) show their amounts
+  to whoever may record savings or sell at the branch, whenever they were made, with `/retail/savings/sales-staff/groups` by
+  shop, year, month and person with totals for the Savings screen; sellers open and save days of this month only; `/me` carries the switch so the
+  Savings screen shows for sellers only then; once a day is saved its suggestion is sent to no one, the Owner included
 - ADR-116 The figures last loaded are kept on the phone for reading offline: an allowlist of retail reads (Home and Retail
   summaries, sales of the last 30 days, stock, customers and what they owe, past usage, the reports already made) in the
   `bms-offline` store per business and person, never lending or sign-in, capped, cleared at sign-out; one offline banner
@@ -1364,6 +1468,27 @@ Accepted (this list is the ADR index):
   "Messages not sent" page; a hard bounce, a complaint or `email.suppressed` stores a keyed hash of the address
   (`EmailSuppressions`, never the address), both senders then refuse it with `recipient_suppressed`, and
   `POST /api/v1/platform/outbox/unsuppress` clears it (#333; no migration, no new column)
+- ADR-119 My stock shows every shop's quantity to everyone who may see stock (#807, asked for by the owner): each row of
+  `GET /retail/stock` carries `shops`, the quantity in every active shop that keeps goods, the listed shop always first and
+  marked `here`, the balances read for the page in one query; quantities only, whatever the caller's scope at the other shops; the owner's switch `other_shops_stock`
+  in the retail settings group, on unless switched off; the Switch to button of #728 is gone (no migration)
+- ADR-122 Where each sale and usage entry is made (#826, asked for by the owner, as the old app did): an optional phone
+  location and accuracy on every sale (online and offline) and usage or damage entry, never refused without one; an optional
+  location per shop set by the owner; the owner and administrators (`retail.entry_location.read`) read the distance from the shop in
+  words, never the coordinates; the phone asks once; never logged, audited or hashed; migration `V132`
+- ADR-124 A receipt photo on a sale, a delivery, an expense and a usage entry (#819, asked for by the owner, as the old app
+  did): one optional photo per entry through the item photo's checks and storage, a document whose subject is the entry, seen
+  by whoever sees the entry; saved after the entry, never queued offline (no migration)
+- ADR-123 A wrong usage or damage entry is undone like a voided sale (#818, asked for by the owner): a required reason, the
+  stock back at the same unit cost and the shrinkage reversed on the day of the undo, the entry kept and marked undone once
+  (`retail_usage_undos`, migration `V133`), the permission of a sale void, audited and on Controls
+- ADR-125 A supplier keeps its useful details and shows its deliveries (#820, asked for by the owner, as the old app did):
+  eight optional text details, the date added and a last delivery date derived from the restocks not voided in the reader's
+  scope, never typed; the deliveries are its restocks, newest first, paged; search by name, type or phone; who may read and
+  edit is unchanged, the bank account number is shown to and saved by those who may edit suppliers only; migration `V134`
+- ADR-121 One page per item with each shop's stock and every movement of it (Proposed, #813): the movements are the ledger
+  read with a running balance per shop from a window sum, one query per page; quantities to every stock reader, buying
+  figures and profit only with `retail.profit.read`; a branch outside the scope is 404; kept offline (no migration)
 
 Pending (cite only as "pending ADR-NNN"):
 

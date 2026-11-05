@@ -42,7 +42,8 @@ import org.springframework.transaction.annotation.Transactional;
  * 4 and 10). The expected amount is always computed here from the day's cash takings; a client may
  * display it but never supplies it. Banking is never refused for exceeding the cash on hand: it is
  * flagged. Everything net of savings and cash purchases is profit-derived and shown only with
- * {@code retail.profit.read}.
+ * {@code retail.profit.read}, except that with the owner's savings switch on the day's savings and the cash expected
+ * less them reach whoever may bank (issue #814, ADR-115 decision 11).
  */
 @Service
 class BankingService {
@@ -94,6 +95,12 @@ class BankingService {
         LocalDate on = support.businessDate(date, "date");
         Day d = figures.day(branch, on);
         boolean profit = mayProfit(branch);
+        // Issue #814, ADR-115 decision 11: with the owner's savings switch on, whoever may bank sees the day's savings
+        // and the cash expected less them; the cash purchases and the net of them stay with retail.profit.read. The
+        // savings voided that day are folded into the after-savings figure only: a voided record is not on the
+        // seller's Savings view, so its amount is not sent on its own (issue #847).
+        boolean savingsLine = !profit && support.salespeopleSavings().on();
+        boolean savings = profit || savingsLine;
         return new BankingExpected(
                 branch,
                 on,
@@ -103,13 +110,14 @@ class BankingService {
                 d.advanceVoids(),
                 d.repaymentVoids(),
                 profit ? d.cashPurchases() : null,
-                profit ? d.savings() : null,
+                savings ? d.savings() : null,
                 profit ? d.savingsVoids() : null,
                 d.expenses(),
                 d.advancesOut(),
                 d.repaymentsIn(),
                 d.cashExpected(),
                 profit ? d.expectedToBank() : null,
+                savingsLine ? d.cashExpected() - d.savings() + d.savingsVoids() : null,
                 repo.bankedSoFar(branch, on));
     }
 
@@ -117,17 +125,26 @@ class BankingService {
 
     @Transactional
     Outcome<Banking> createBanking(String key, BankingRequest r) {
-        return idempotency.once(key, "POST", BANKING_PATH, r, Banking.class, () -> recordBanking(r));
+        // The key covers the request without its offline block (ADR-067 decision 13).
+        return idempotency.once(key, "POST", BANKING_PATH, r.forKey(), Banking.class, () -> recordBanking(r));
     }
 
     private Banking recordBanking(BankingRequest r) {
         UUID branch = branchContext.resolve(CashbookSupport.BANKING_RECORD, r.branchId());
         branchContext.requireSells(branch, "branch_id");
-        LocalDate date = support.businessDate(r.businessDate(), "business_date");
-        Instant bankedAt = r.bankedAt() == null ? support.now() : r.bankedAt();
+        CashbookSupport.Dated dated =
+                support.entryDate(r.businessDate(), "business_date", r.dateReason(), branch, r.offline());
+        LocalDate date = dated.date();
+        Instant bankedAt = support.entryTime(r.bankedAt(), r.offline(), branch);
         if (bankedAt.atZone(tenant.profile().timezone()).toLocalDate().isAfter(support.today())) {
             throw ApiException.validation(
                     List.of(new FieldProblem("banked_at", "future_date", "A date cannot be in the future.")));
+        }
+        // ADR-120: the time of the banking is the app's too; an earlier day is the owner's, with the same reason.
+        // An entry kept offline was timed by the phone, judged in entryTime (ADR-067 decision 13), not chosen by the
+        // person.
+        if (r.offline() == null) {
+            dated = support.withTime(dated, bankedAt, "banked_at", r.dateReason(), branch);
         }
         long amount = r.amountMinor();
         boolean profit = mayProfit(branch);
@@ -157,6 +174,7 @@ class BankingService {
         after.put("business_date", date.toString());
         after.put("amount_minor", amount);
         audit.record(AuditLog.Entry.created("retail.banking.created", "retail.banking", id, branch, after));
+        support.auditBackdate(dated, "retail.banking", id, branch);
         Day d = figures.day(branch, date);
         BankingRow row = repo.banking(id, false).orElseThrow();
         return view(row, profit, d.bankedNet() - d.expectedToBank(), flag(d), warnings);
@@ -273,17 +291,25 @@ class BankingService {
 
     @Transactional
     Outcome<Withdrawal> createWithdrawal(String key, WithdrawalRequest r) {
-        return idempotency.once(key, "POST", WITHDRAWAL_PATH, r, Withdrawal.class, () -> recordWithdrawal(r));
+        // The key covers the request without its offline block (ADR-067 decision 13).
+        return idempotency.once(key, "POST", WITHDRAWAL_PATH, r.forKey(), Withdrawal.class, () -> recordWithdrawal(r));
     }
 
     private Withdrawal recordWithdrawal(WithdrawalRequest r) {
         UUID branch = withdrawalBranch(r.branchId());
         branchContext.requireSells(branch, "branch_id");
-        LocalDate date = support.businessDate(r.businessDate(), "business_date");
-        Instant at = r.withdrawnAt() == null ? support.now() : r.withdrawnAt();
+        CashbookSupport.Dated dated =
+                support.entryDate(r.businessDate(), "business_date", r.dateReason(), branch, r.offline());
+        LocalDate date = dated.date();
+        Instant at = support.entryTime(r.withdrawnAt(), r.offline(), branch);
         if (at.atZone(tenant.profile().timezone()).toLocalDate().isAfter(support.today())) {
             throw ApiException.validation(
                     List.of(new FieldProblem("withdrawn_at", "future_date", "A date cannot be in the future.")));
+        }
+        // An entry kept offline was timed by the phone, judged in entryTime (ADR-067 decision 13), not chosen by the
+        // person.
+        if (r.offline() == null) {
+            dated = support.withTime(dated, at, "withdrawn_at", r.dateReason(), branch);
         }
         long amount = r.amountMinor();
         List<String> warnings = new ArrayList<>();
@@ -303,6 +329,7 @@ class BankingService {
                 id,
                 branch,
                 Map.of("business_date", date.toString(), "amount_minor", amount)));
+        support.auditBackdate(dated, "retail.withdrawal", id, branch);
         return view(repo.withdrawal(id, false).orElseThrow(), warnings);
     }
 

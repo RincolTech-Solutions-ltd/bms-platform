@@ -149,6 +149,28 @@
   box-shadow: var(--shadow-sm);
 }
 
+/* Issue #813: the item page. Each shop's stock and each movement as a card in tabular figures; long names wrap inside it. */
+.item-shops,
+.item-moves {
+  list-style: none;
+  padding: 0;
+}
+
+.item-shop,
+.item-move {
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.item-shop p,
+.item-move p {
+  margin: var(--space-1) 0;
+}
+
+.item-after {
+  font-weight: 600;
+}
+
 /* Issue #680: one shop's stock on a phone, a card per item with the quantity large and the prices small under it. */
 .stock-cards {
   list-style: none;
@@ -179,6 +201,21 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* A card's Open the item link and its Correct button (#813) stand 8px apart, side by side or one under the other (#825). */
+.stock-card > .item-page-link {
+  margin: 0 var(--tap-gap) var(--tap-gap) 0;
+}
+
+/* Open the item and the Items ways to add sizes and colours are links drawn as buttons: a 48px target wherever they stand, even
+   should .btn change (#825). */
+.item-page-link,
+[data-tour='product-add-sizes'],
+[data-tour='product-join-sizes'] {
+  display: inline-flex;
+  min-width: var(--tap);
+  min-height: var(--tap);
+}
+
 /* Issue #728: "0 here. 456 at Test Store" and its switch, under the quantity; in a table cell it reads from the left. */
 .stock-elsewhere {
   display: flex;
@@ -193,6 +230,25 @@
 
 .stock-elsewhere p {
   margin: 0;
+}
+
+/* Issue #807: every shop's quantity of an item, this shop first and larger; in a table cell it reads from the left. */
+.shop-qtys {
+  list-style: none;
+  margin: var(--space-1) 0;
+  padding: 0;
+  text-align: start;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.shop-qtys .num {
+  text-align: start;
+}
+
+.shop-qty-here {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
 }
 
 /* Issue #690: finding an item on a phone. The search and the category chips stay under the 56px top bar while the list scrolls,
@@ -380,9 +436,32 @@
   font-size: var(--text-lg);
 }
 
-.rt-primary ~ button:not(.rt-primary) {
+/* A secondary action under the main one, also the one button right after an ActionBar holding it (Buy stock's Clear this
+   purchase, #825). */
+.rt-primary ~ button:not(.rt-primary),
+.action-bar:has(> .rt-primary) + button:not(.rt-primary) {
   width: 100%;
   margin-top: var(--space-3);
+}
+
+/* The phone layout (#825): a line holding a button right under the main action stands clear of it. */
+@media (max-width: 719px) {
+  .rt-primary + p:has(> :is(button, .btn)) {
+    margin-top: var(--space-3);
+  }
+}
+
+/* A laptop (issue #825, buttons.css): the main action and the buttons under it take the width of their label, at the right. */
+@media (min-width: 1024px) {
+  .rt-primary,
+  .rt-primary ~ button:not(.rt-primary),
+  .action-bar:has(> .rt-primary) + button:not(.rt-primary) {
+    display: flex;
+    width: fit-content;
+    min-width: min(100%, var(--button-min-wide));
+    max-width: min(100%, var(--button-max));
+    margin-inline-start: auto;
+  }
 }
 
 .rt section > h2:first-child {
@@ -840,6 +919,36 @@ th[scope='rowgroup'] .cat-head {
   font-weight: var(--weight-semibold);
 }
 
+/* Issue #827: a seller's savings by shop, year, month and person; each line is what it is, then the amount saved at its end. */
+.rt-savings-total {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.rt-groupby > summary .rt-savings-total {
+  width: calc(100% - 1.5em);
+}
+
+.rt-savings-month {
+  padding: 0 var(--space-3) var(--space-2);
+}
+
+.rt-savings-people,
+.rt-savings-days {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rt-savings-days li {
+  padding: var(--space-1) 0 0 var(--space-3);
+  color: var(--color-text-muted);
+}
+
 .rt-groupby button {
   min-height: var(--tap);
 }
@@ -928,7 +1037,7 @@ th[scope='rowgroup'] .cat-head {
 }
 
 .rc-chip {
-  min-height: 40px;
+  min-height: var(--tap);
   padding: var(--space-1) var(--space-3);
   border: 1px solid var(--color-border-strong);
   border-radius: 999px;
@@ -1275,6 +1384,22 @@ th[scope='rowgroup'] .cat-head {
 .rt-figures dd {
   margin: 0;
   font-variant-numeric: tabular-nums;
+}
+
+/* Buy stock's total for the owner (issue #821): the cost, what it should sell for and the expected profit in the total's box. */
+.rt-total-figures {
+  display: block;
+  font-size: var(--text-base);
+  font-weight: var(--weight-regular);
+}
+
+.rt-total-figures .rt-figures {
+  margin: 0;
+}
+
+/* An amount in a list of figures never breaks in the middle of its digits (issue #821, on a phone 412 wide). */
+.rt-figures dd .num {
+  white-space: nowrap;
 }
 
 /* An entry warning (issue #353): a tinted note next to the field it is about, its words in the text colour for reading, the
@@ -1683,4 +1808,12 @@ td.num.qty-packs {
   .next-step > .btn {
     flex: 1;
   }
+}
+
+/* Call, Text and WhatsApp next to a phone number (issue #817): 48px targets --tap-gap apart, each as wide as its word on every screen. */
+.contact-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--tap-gap);
 }

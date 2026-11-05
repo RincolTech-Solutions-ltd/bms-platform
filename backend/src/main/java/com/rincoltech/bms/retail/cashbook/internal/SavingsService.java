@@ -11,14 +11,21 @@ import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Cursor;
 import com.rincoltech.bms.kernel.Principal;
+import com.rincoltech.bms.retail.cashbook.internal.CashbookApi.SavedDay;
 import com.rincoltech.bms.retail.cashbook.internal.CashbookApi.Savings;
+import com.rincoltech.bms.retail.cashbook.internal.CashbookApi.SavingsGroups;
+import com.rincoltech.bms.retail.cashbook.internal.CashbookApi.SavingsMonth;
 import com.rincoltech.bms.retail.cashbook.internal.CashbookApi.SavingsPage;
+import com.rincoltech.bms.retail.cashbook.internal.CashbookApi.SavingsPerson;
 import com.rincoltech.bms.retail.cashbook.internal.CashbookApi.SavingsRequest;
+import com.rincoltech.bms.retail.cashbook.internal.CashbookApi.SavingsShop;
 import com.rincoltech.bms.retail.cashbook.internal.CashbookApi.SavingsSuggestion;
+import com.rincoltech.bms.retail.cashbook.internal.CashbookApi.SavingsYear;
 import com.rincoltech.bms.retail.cashbook.internal.CashbookApi.VoidRequest;
 import com.rincoltech.bms.retail.cashbook.internal.CashbookRepository.SavingsRow;
 import com.rincoltech.bms.retail.cashbook.internal.CashbookSupport.SalespeopleSavings;
 import com.rincoltech.bms.retail.reports.DailyProfits;
+import com.rincoltech.bms.retail.stock.EntryDates;
 import com.rincoltech.bms.retail.stock.RetailBooks;
 import com.rincoltech.bms.retail.stock.RetailBranchContext;
 import java.math.BigDecimal;
@@ -26,11 +33,15 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.function.ToLongFunction;
+import java.util.stream.Collectors;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -110,22 +121,58 @@ class SavingsService {
         return new Day(profit, expenses, available, Math.min(available, suggested(available)));
     }
 
+    /**
+     * Who is asking (issue #799, ADR-115): {@code TILL} through the till's routes ({@code retail.savings.record} and the
+     * till), {@code SALES_STAFF} through the sales staff routes ({@code retail.sale.create}), which answer only while the
+     * owner's setting is on and resolve the branch by the right to sell there. Everything after the branch is the same.
+     */
+    enum Caller {
+        TILL,
+        SALES_STAFF
+    }
+
+    private UUID resolveBranch(Caller caller, SalespeopleSavings setting, UUID requested) {
+        if (caller == Caller.SALES_STAFF) {
+            setting.requireOnForSalesStaff();
+            return branchContext.resolve(CashbookSupport.SALE_CREATE, requested);
+        }
+        return branchContext.resolve(CashbookSupport.SAVINGS_RECORD, requested);
+    }
+
+    /**
+     * The business date of a request; sales staff (issue #799) are held to this business month, the scope the owner gave them,
+     * so no earlier day's suggestion (half its profit) reaches them and nothing they save falls outside the records they see.
+     */
+    private LocalDate businessDate(Caller caller, LocalDate requested, String field) {
+        LocalDate date = support.businessDate(requested, field);
+        if (caller == Caller.SALES_STAFF && date.isBefore(monthStart())) {
+            throw ApiException.validation(List.of(new FieldProblem(
+                    field, "outside_this_month", "Savings can be opened and saved for days of this month only.")));
+        }
+        return date;
+    }
+
     @Transactional(readOnly = true)
     SavingsSuggestion suggestion(UUID branchId, LocalDate date) {
-        UUID branch = branchContext.resolve(CashbookSupport.SAVINGS_RECORD, branchId);
-        LocalDate on = support.businessDate(date, "date");
-        Day d = day(branch, on);
-        boolean gate = mayProfit(branch);
+        return suggestion(Caller.TILL, branchId, date);
+    }
+
+    @Transactional(readOnly = true)
+    SavingsSuggestion suggestion(Caller caller, UUID branchId, LocalDate date) {
         // ADR-115: with the owner's setting on, the suggestion shows without profit read; the profit, the expenses and
         // the
-        // cap never do, and the day's saved amount only when it was saved while the setting was on.
+        // cap never do, and the day's saved amount only as amountShown allows.
         SalespeopleSavings setting = support.salespeopleSavings();
+        UUID branch = resolveBranch(caller, setting, branchId);
+        LocalDate on = businessDate(caller, date, "date");
+        Day d = day(branch, on);
+        boolean gate = mayProfit(branch);
         boolean sees = gate || setting.on();
         UUID existing = repo.activeSavings(branch, on).orElse(null);
         Long existingAmount = existing == null
                 ? null
                 : repo.savings(existing, false)
-                        .filter(x -> gate || setting.shows(x.createdAt()))
+                        .filter(x -> amountShown(x, setting))
                         .map(SavingsRow::amountMinor)
                         .orElse(null);
         return new SavingsSuggestion(
@@ -133,13 +180,16 @@ class SavingsService {
                 on,
                 figures.day(branch, on).totalSold(),
                 support.suggestionToken(branch, on, d.suggested()),
-                sees ? d.suggested() : null,
+                // Issue #799 (the owner's request): once the day is saved, its suggestion is no longer sent to anyone;
+                // the
+                // screen shows only what was saved.
+                sees && existing == null ? d.suggested() : null,
                 gate ? d.profit() : null,
                 gate ? d.expenses() : null,
                 gate ? d.available() : null,
                 existing,
                 existingAmount,
-                sees && mayChangeAmount(branch, on, setting));
+                sees && existing == null && mayChangeAmount(branch, on, setting));
     }
 
     /**
@@ -154,16 +204,44 @@ class SavingsService {
 
     @Transactional
     Outcome<Savings> create(String key, SavingsRequest r) {
-        return idempotency.once(key, "POST", PATH, r, Savings.class, () -> record(r));
+        return create(Caller.TILL, key, r);
     }
 
-    private Savings record(SavingsRequest r) {
-        UUID branch = branchContext.resolve(CashbookSupport.SAVINGS_RECORD, r.branchId());
-        branchContext.requireSells(branch, "branch_id");
-        LocalDate date = support.businessDate(r.businessDate(), "business_date");
-        boolean profit = mayProfit(branch);
+    @Transactional
+    Outcome<Savings> create(Caller caller, String key, SavingsRequest r) {
+        String path = caller == Caller.SALES_STAFF ? SALES_STAFF_PATH : PATH;
         // ADR-115: the owner let salespeople see and change the amount; they still never see the profit or expenses.
+        // Read
+        // once, and for sales staff checked before the replay, so a key replayed after the switch was turned off is
+        // refused.
         SalespeopleSavings setting = support.salespeopleSavings();
+        if (caller == Caller.SALES_STAFF) {
+            setting.requireOnForSalesStaff();
+        }
+        // The key covers the request without its offline block (ADR-067 decision 13).
+        return idempotency.once(key, "POST", path, r.forKey(), Savings.class, () -> record(caller, setting, r));
+    }
+
+    /** The sales staff routes (issue #799). */
+    static final String SALES_STAFF_PATH = PATH + "/sales-staff";
+
+    private Savings record(Caller caller, SalespeopleSavings setting, SavingsRequest r) {
+        UUID branch = resolveBranch(caller, setting, r.branchId());
+        branchContext.requireSells(branch, "branch_id");
+        // Savings kept on the phone offline are dated by the phone (ADR-067 decision 13): the day they were made,
+        // judged as
+        // an offline sale is, never a closed day but for the owner, and within the 7 days a day of last month too
+        // (review
+        // of #839: made on the 31st, sent on the 1st). Otherwise the sales staff save days of this month only.
+        LocalDate date = r.offline() != null
+                ? support.offlineDay(r.offline(), r.businessDate(), "business_date", branch)
+                : businessDate(caller, r.businessDate(), "business_date");
+        // ADR-120: an earlier day is the owner's, with a reason, on the till's route and on the sales staff's alike;
+        // not
+        // for savings kept offline, which the phone dated.
+        EntryDates.Backdate backdate =
+                r.offline() != null ? null : support.entryDates().check(date, "business_date", r.dateReason(), branch);
+        boolean profit = mayProfit(branch);
         boolean salesperson = !profit && setting.on();
         if (r.suggestionToken() == null || r.suggestionToken().isBlank()) {
             throw ApiException.rule(
@@ -188,7 +266,8 @@ class SavingsService {
         if (!support.tokenMatches(branch, date, suggested, r.suggestionToken())) {
             Map<String, Object> extra = new LinkedHashMap<>();
             extra.put("suggestion_token", support.suggestionToken(branch, date, suggested));
-            if (profit || salesperson) {
+            // Issue #799: never for a day already saved; the 409 savings_exists that follows a fresh read says why.
+            if ((profit || salesperson) && repo.activeSavings(branch, date).isEmpty()) {
                 extra.put("suggested_minor", suggested);
             }
             throw new ApiException(
@@ -260,6 +339,8 @@ class SavingsService {
             after.put("salespeople_setting", true);
         }
         audit.record(AuditLog.Entry.created("retail.savings.created", "retail.savings", id, branch, after));
+        support.entryDates().audit(backdate, "retail.savings", id, branch);
+        support.entryDates().auditOffline(r.offline(), date, "retail.savings", id, branch);
         return view(repo.savings(id, false).orElseThrow(), setting);
     }
 
@@ -312,7 +393,26 @@ class SavingsService {
     @Transactional(readOnly = true)
     SavingsPage list(
             List<UUID> branchIds, LocalDate from, LocalDate to, boolean includeVoided, Integer limit, String cursor) {
-        List<UUID> filter = CurrentPrincipal.require().branchFilter(CashbookSupport.READ, branchIds);
+        return list(Caller.TILL, branchIds, from, to, includeVoided, limit, cursor);
+    }
+
+    /**
+     * The savings records. Through the sales staff routes (issue #799) only while the owner's setting is on, only at the
+     * branches where the caller may sell; every month's since issue #827, as the owner's old app did.
+     */
+    @Transactional(readOnly = true)
+    SavingsPage list(
+            Caller caller,
+            List<UUID> branchIds,
+            LocalDate from,
+            LocalDate to,
+            boolean includeVoided,
+            Integer limit,
+            String cursor) {
+        SalespeopleSavings setting = support.salespeopleSavings();
+        List<UUID> filter = caller == Caller.SALES_STAFF
+                ? salesStaffBranches(setting, branchIds)
+                : CurrentPrincipal.require().branchFilter(CashbookSupport.READ, branchIds);
         int size = support.limit(limit);
         Cursor.Key after = Cursor.decodeKey(cursor).orElse(null);
         List<SavingsRow> rows = repo.savingsPage(
@@ -329,27 +429,130 @@ class SavingsService {
                 ? Cursor.encode(
                         items.getLast().createdAt() + "|" + items.getLast().id())
                 : null;
-        SalespeopleSavings setting = support.salespeopleSavings();
         return new SavingsPage(items.stream().map(x -> view(x, setting)).toList(), next);
     }
 
     /**
-     * A savings row as the caller may see it: the suggestion needs profit read; the amount and the overwrite flag need profit
-     * read, or, under the owner's setting (ADR-115), {@code retail.savings.record} for the row's branch and a record made while
-     * the setting was on. Older records and a reader of the cash book only keep the amount hidden.
+     * The branches a sales staff read covers (issue #799): only while the owner's setting is on, and only where the caller
+     * may sell; a named branch outside that scope is 404 unknown_branch, as on the suggestion and the save (FR-RET-18).
      */
+    private List<UUID> salesStaffBranches(SalespeopleSavings setting, List<UUID> branchIds) {
+        setting.requireOnForSalesStaff();
+        if (branchIds != null) {
+            branchIds.forEach(b -> branchContext.resolve(CashbookSupport.SALE_CREATE, b));
+        }
+        return CurrentPrincipal.require().branchFilter(CashbookSupport.SALE_CREATE, branchIds);
+    }
+
+    // JUSTIFICATION-A3: issue #827's grouped view with a total at four levels is new behaviour; no existing code groups
+    // savings.
+    /**
+     * Issue #827, as the owner's old app did: every active savings record of the branches where the caller may sell, grouped
+     * by shop, year, month and the person who saved, with the sum of the amount saved at each level. Amounts saved only.
+     */
+    @Transactional(readOnly = true)
+    SavingsGroups groups(List<UUID> branchIds, LocalDate from, LocalDate to) {
+        List<UUID> filter = salesStaffBranches(support.salespeopleSavings(), branchIds);
+        // Rows come newest day first, so years and months keep that order.
+        List<SavingsShop> shops = group(repo.activeSavings(filter, from, to), SavingsRow::branchId).entrySet().stream()
+                .map(s -> {
+                    List<SavingsYear> years = group(
+                                    s.getValue(), r -> r.businessDate().getYear())
+                            .entrySet()
+                            .stream()
+                            .map(y -> {
+                                List<SavingsMonth> months =
+                                        group(
+                                                        y.getValue(),
+                                                        r -> r.businessDate().getMonthValue())
+                                                .entrySet()
+                                                .stream()
+                                                .map(m -> {
+                                                    List<SavingsPerson> people =
+                                                            group(m.getValue(), SavingsService::personKey)
+                                                                    .values()
+                                                                    .stream()
+                                                                    .map(SavingsService::person)
+                                                                    .sorted(Comparator.comparing(
+                                                                            SavingsPerson::name,
+                                                                            Comparator.nullsLast(
+                                                                                    Comparator.naturalOrder())))
+                                                                    .toList();
+                                                    return new SavingsMonth(
+                                                            m.getKey(), sum(people, SavingsPerson::totalMinor), people);
+                                                })
+                                                .toList();
+                                return new SavingsYear(y.getKey(), sum(months, SavingsMonth::totalMinor), months);
+                            })
+                            .toList();
+                    return new SavingsShop(s.getKey(), sum(years, SavingsYear::totalMinor), years);
+                })
+                .toList();
+        return new SavingsGroups(sum(shops, SavingsShop::totalMinor), shops);
+    }
+
+    private static <K> Map<K, List<SavingsRow>> group(List<SavingsRow> rows, Function<SavingsRow, K> key) {
+        return rows.stream().collect(Collectors.groupingBy(key, LinkedHashMap::new, Collectors.toList()));
+    }
+
+    private static <T> long sum(List<T> items, ToLongFunction<T> total) {
+        return items.stream().mapToLong(total).sum();
+    }
+
+    /** A record brought in from an earlier system may have no person: those group together. */
+    private static UUID personKey(SavingsRow r) {
+        return r.by() == null ? new UUID(0, 0) : r.by();
+    }
+
+    /** The name is the user's current one (joined from {@code users}), so every row of the group carries the same. */
+    private static SavingsPerson person(List<SavingsRow> rows) {
+        SavingsRow first = rows.getFirst();
+        return new SavingsPerson(
+                first.by(),
+                first.byName(),
+                sum(rows, SavingsRow::amountMinor),
+                rows.stream()
+                        .map(r -> new SavedDay(r.id(), r.businessDate(), r.amountMinor()))
+                        .toList());
+    }
+
+    /** The first day of the business month: the month whose records sales staff see with their amounts (issue #799). */
+    private LocalDate monthStart() {
+        return support.today().withDayOfMonth(1);
+    }
+
+    /**
+     * Whether the caller sees a record's amount and overwrite flag (ADR-115). Profit read sees every amount. Without it, only
+     * while the owner's setting is on, and then every record of any month, whenever it was made, to a caller who may record
+     * savings or sell at its branch (issue #827, as the owner's old app did; it replaces the this-month rule of #799 and the
+     * made-while-on rule of #768). A reader of the cash book alone keeps the amount hidden.
+     */
+    static boolean amountShown(SavingsRow r, SalespeopleSavings setting) {
+        if (mayProfit(r.branchId())) {
+            return true;
+        }
+        if (!setting.on()) {
+            return false;
+        }
+        Principal principal = CurrentPrincipal.require();
+        return principal.may(CashbookSupport.SAVINGS_RECORD, r.branchId())
+                || principal.may(CashbookSupport.SALE_CREATE, r.branchId());
+    }
+
+    /** A savings row as the caller may see it: the suggestion needs profit read; the amount follows {@link #amountShown}. */
     static Savings view(SavingsRow r, SalespeopleSavings setting) {
         boolean profit = mayProfit(r.branchId());
-        boolean amount = profit
-                || (setting.shows(r.createdAt())
-                        && CurrentPrincipal.require().may(CashbookSupport.SAVINGS_RECORD, r.branchId()));
+        boolean amount = amountShown(r, setting);
         return new Savings(
                 r.id(),
                 r.branchId(),
                 r.businessDate(),
                 r.currency(),
                 amount ? r.amountMinor() : null,
-                profit ? r.suggestedMinor() : null,
+                // Issue #799: an active record is a saved day, whose suggestion is sent to no one, the Owner included;
+                // a
+                // voided record no longer saves its day and keeps it for profit read.
+                profit && r.voided().voided() ? r.suggestedMinor() : null,
                 amount ? r.overwritten() : null,
                 r.totalSoldMinor(),
                 r.by(),

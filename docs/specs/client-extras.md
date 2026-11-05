@@ -492,8 +492,11 @@ The twin of 3.14; only what differs is listed.
   receipts exactly as in 3.14. A payment dated on or before the last end of day written (or before the account opened) is booked dated today (note "dated today"); a closed period is retried
   dated today. Only the allow-listed business refusals become receipts; any other error is retried.
 - **Reversal.** Staff cannot reverse a gateway deposit (`gateway_reversal_pending`) until #224, and the screen hides Reverse.
-- **Not built here.** The same as 3.14 (a payment in another currency; the system user, the reversal request and the allocation and refund of a receipt, FR-PAY-04, are built since in #224 part 1, section 3.16). The savings
-  transaction list does not yet show the provider's payment code (it is on the collect screen and the intent).
+- **Not built here.** The same as 3.14 (a payment in another currency; the system user, the reversal request and the allocation and refund of a receipt, FR-PAY-04, are built since in #224 part 1, section 3.16).
+- **The payment code in the transaction list** (issue #314, ADR-035 decision 68). `GET .../transactions` returns `payment_code`, the provider's
+  confirmation code, on each deposit a gateway payment booked (at once or allocated from the queue), read through `payment_intents.booked_subject_txn_id`
+  in one query per page; null on every other row. The account page shows it as "Payment code" under the deposit, as the collect screen does, so staff
+  can match the member's text message. It is read with the list's own `lending.savings.read` in the account's branch (else 404); the payer's number is never returned.
 
 ### 3.16 As built in slice #224, part 1 (the unallocated receipts queue, governed reversal, review windows)
 
@@ -913,6 +916,33 @@ text above:
   2026 (23:59 in Kampala) and move it to 21:01 UTC where the Kampala date must change under them.
 - **Not in this slice.** Reminders and arrears notices (#227), the payment link (#231), a correction message for a reversal (decided
   against), delivery reports (#215).
+
+### 4.18 As built in slice #215 (delivery reports and the SMS use report)
+
+Section 4.7 and `core.sms_usage` are built (migration `V130`; ADR-036 fifth amendment carries the decisions; item 12 of the self
+review in section 11, a forged delivery report, holds as answered there). Where the build sharpens the text above:
+
+- **The token and the limit.** `BMS_SMS_CALLBACK_TOKEN` (at least 32 characters; shorter or unset keeps the route answering 404),
+  compared in constant time. A wrong token is 404 and counted `bad_token` inside a bucket of its own, so guesses never use up the
+  provider's budget and past their bucket cost no database write. The application limits each address and all addresses together
+  (3000 and 6000 a minute by default); the edge rule and the source allow-list stay operator tasks (chapter 9).
+- **Read, never kept.** Only the message id, the status and the failure reason are read; the recipient's number the provider sends
+  is never read, kept or logged. `Success` is delivered, `Failed` and `Rejected` undelivered, `Sent`, `Submitted` and `Buffered` an
+  interim report that moves nothing.
+- **Forward only, once.** The definer function `sms_delivery_report_apply` (platform only) finds the one row with the provider's id
+  and moves it from `sent` to `delivered` or `undelivered` under the row lock; a replay, a late interim report and a final report
+  that contradicts the first change nothing, and a row that was never sent is never moved (a report cannot settle an `unknown`
+  outcome, which has no provider id). Unknown ids are answered 200 and ignored.
+- **Counted.** Every outcome is counted per Kampala day in `sms_report_counters` (platform table, no id, no number, no tenant), kept
+  as long as the delivery rows.
+- **Known gap, accepted.** A report that arrives before the sender has recorded the message id finds no row; it is counted
+  `unknown_id` and the row stays `sent`.
+- **The report.** `core.sms_usage` (chapter 14 section 14.6), under `core.reports.financial`: messages handed to the provider,
+  delivered, not delivered, segments and the recorded cost per month (in the business's own time zone) and event, and per month. Off by default: offered only
+  to a business whose own SMS switch is on or that has a message in its log, so a business that stops SMS still sees what it used.
+  It prices nothing; the price a business sees before switching SMS on is the operator's data (owner's decision, issue #215).
+- **Not in this slice.** The operator's view of the counters (read with SQL as the owner role, runbook `sms-incident.md`), the per
+  message history screen of FR-NTF-05, a signed report if the sandbox shows the provider signs them.
 
 ## 5. AI monitoring (ADR-037)
 

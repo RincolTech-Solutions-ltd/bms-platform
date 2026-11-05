@@ -1,5 +1,5 @@
 import { useQuery, type QueryClient } from '@tanstack/react-query';
-import { Link } from '@tanstack/react-router';
+import { Link, useRouter } from '@tanstack/react-router';
 import { useState, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { TOAST_MS, useToast as useToastOf } from './toast';
 import { Highlight } from '../../../app/ui/SearchBox';
@@ -10,14 +10,18 @@ import { RETAIL_CURRENCY, RetailError, retail, type BranchRole, type Product } f
 import { ALL_BRANCHES, branchLabel } from '../../../auth/branch';
 import { formatMinor } from '../../../components/money';
 import { useStockedBranches } from '../branch-picker';
-import { useStaff } from '../context';
+import { useOptionalStaff, useStaff } from '../context';
 import { ItemPhoto, shownPhoto } from './item-photo';
 import { parseCount, qtyString, showQty } from './maths';
 import { ladderLevels, packsAndPieces, packsAndPiecesMilli, packsAndPiecesProblem, unitWords, type PackSize } from './units-state';
 import { plural } from '../../../app/glossary';
 import { BRANCH_ROLES, branchesWhere, canSeeProfit, canUse, capabilityOn, sellingBranches, type RetailScreen } from './permissions';
 import { keptWords } from './orders-state';
+import { stockWarning } from './sale-state';
+import { icons } from '../../../components/icons';
 import { NoAccess } from '../../../app/ui/EmptyState';
+import { searchSaved } from '../../../offline/catalogue';
+import { useOffline, useOnline } from '../../../offline/offline-context';
 
 // Shared pieces of the retail screens. Phone first: one column, 44px tap targets, labels on every
 // input, a visible focus ring, and state shown in words as well as colour.
@@ -209,6 +213,27 @@ export function NoStockHere({ branchId }: { branchId: string }) {
   );
 }
 
+/**
+ * Opens the item page (issue #813): what each shop holds of the item and every movement of it. Shown only to whoever may read
+ * stock; a full size tap target.
+ */
+export function ItemPageLink({ productId, name }: { productId?: string; name?: string }) {
+  // Nothing outside the staff layout, and a plain link outside a router (a screen test), as NoAccess does.
+  const me = useOptionalStaff()?.me;
+  const router = useRouter({ warn: false });
+  if (!productId || !me || !canUse(me, 'stock')) return null;
+  const label = name ? `Open ${name}: stock in each shop and every movement` : undefined;
+  return router ? (
+    <Link className="btn btn-ghost item-page-link" to="/staff/retail/items/$productId" params={{ productId }} aria-label={label}>
+      Open the item
+    </Link>
+  ) : (
+    <a className="btn btn-ghost item-page-link" href={`/staff/retail/items/${encodeURIComponent(productId)}`} aria-label={label}>
+      Open the item
+    </a>
+  );
+}
+
 /** The product's category as a small grey label under its name; nothing when the product has none. */
 export function CategoryLabel({ category }: { category?: string }) {
   return category ? <span className="hint">{category}</span> : null;
@@ -254,14 +279,29 @@ export function useProfitAccess(): boolean {
   return canSeeProfit(useStaff().me);
 }
 
+/** Issue #815: Out of stock or Only N left as a tinted badge with an icon and the words, never colour alone; nothing otherwise. */
+export function StockWarning({ product }: { product: Product }) {
+  const words = stockWarning(product);
+  if (words === null) return null;
+  const out = words === 'Out of stock';
+  return (
+    <span className={`badge stock-warning ${out ? 'badge-danger' : 'badge-warning'}`} data-testid="stock-warning">
+      <span aria-hidden="true">{out ? icons.error : icons.warning}</span>
+      {words}
+    </span>
+  );
+}
+
 /**
  * Search the catalogue and add an item, each with what `branchId` holds (negative flagged). The
  * sale screen shows the price too; the stock move screen shows the source branch's stock. The matches
  * show only while something is typed and close once one is picked (ItemCombobox, issue #534): there is
  * no browsable list here, the Stock page has the whole list.
  */
-export function ProductPicker({ id, branchId, onAdd, showPrice = false, showStock = true, addLabel = 'Add', label = 'Find an item by name, code or category', notFound }: {
+export function ProductPicker({ id, branchId, onAdd, showPrice = false, showStock = true, warnStock = false, addLabel = 'Add', label = 'Find an item by name, code or category', notFound }: {
   id: string;
+  /** Issue #815, the sale screen: Out of stock or Only N left on each match. */
+  warnStock?: boolean;
   /**
    * Drawn under the box once a search has found nothing, with what was typed (Sell's Add it here, issue #615). `hold` keeps it
    * drawn while a form it opened is open, so a later search that finds something never wipes what was typed (review of #616).
@@ -285,6 +325,10 @@ export function ProductPicker({ id, branchId, onAdd, showPrice = false, showStoc
   });
   const nothing = notFound && search.term !== '' && !search.pending && products.data !== undefined && products.data.length === 0;
   const [held, setHeld] = useState(false);
+  // Issue #812: offline, the items saved on this phone are searched instead, so a form kept on the phone can still be filled.
+  const offline = useOffline();
+  const online = useOnline();
+  const saved = offline && !online && search.term !== '' ? searchSaved(offline.catalogue, branchId, search.term) : undefined;
   return (
     <>
     <ItemCombobox
@@ -292,9 +336,11 @@ export function ProductPicker({ id, branchId, onAdd, showPrice = false, showStoc
       label={label}
       search={search}
       // Only the answer to the term in the box: an earlier term's matches are never shown, so never picked.
-      results={search.term === '' ? undefined : products.data}
+      results={search.term === '' ? undefined : saved ?? products.data}
       // Waiting only for a term with no answer yet: a background refresh of a cached answer keeps its options in view.
-      fetching={products.isPending}
+      fetching={saved ? false : products.isPending}
+      // Offline, an empty search says why (review of #839): the items are only on the phones of people who sell.
+      emptyText={saved ? (term) => (offline?.catalogue ? `No item saved on this phone matches "${term}".` : 'Items are not saved on this phone. Search for items when you are back online.') : undefined}
       error={products.isError ? <Problem error={products.error} /> : undefined}
       optionKey={(p) => p.id ?? p.code ?? ''}
       // The time the answer was read from the server (a cached answer keeps its own), for a sale that may be kept on the phone (#769).
@@ -318,6 +364,7 @@ export function ProductPicker({ id, branchId, onAdd, showPrice = false, showStoc
                   </>
                 )}
               </span>
+              {warnStock && <StockWarning product={p} />}
             </span>
             <span className="cb-verb" aria-hidden="true">{addLabel}</span>
           </>

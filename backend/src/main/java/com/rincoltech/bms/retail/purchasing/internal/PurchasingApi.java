@@ -2,6 +2,7 @@ package com.rincoltech.bms.retail.purchasing.internal;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
+import com.rincoltech.bms.retail.stock.OfflineEntry;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Digits;
@@ -24,16 +25,66 @@ final class PurchasingApi {
 
     private PurchasingApi() {}
 
-    @Schema(name = "RetailSupplierRequest")
+    @Schema(name = "RetailSupplierRequest", description = "Every field but the name is optional (issue #820)")
     record SupplierRequest(
             @NotBlank @Size(max = 200) String name,
-            @Size(max = 100) String contact) {}
+            @Size(max = 100) String contact,
+            @Valid SupplierDetails details) {
 
-    @Schema(name = "RetailSupplierUpdate", description = "Omitted fields are unchanged; an empty contact clears it")
+        // JUSTIFICATION-A3: the existing callers and tests send a name and a contact only.
+        SupplierRequest(String name, String contact) {
+            this(name, contact, null);
+        }
+    }
+
+    /**
+     * The optional details of a supplier (issue #820, ADR-125, FR-RET-90), as the owner's old app kept them. In a request an
+     * omitted field is unchanged and an empty one clears it; the email and the website are checked by the service.
+     */
+    @Schema(name = "RetailSupplierDetails")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record SupplierDetails(
+            @Size(max = 254) String email,
+            @Size(max = 300) String address,
+            @Size(max = 100) String country,
+
+            @Size(max = 300) @Schema(description = "A web address, with or without https://")
+            String website,
+
+            @Size(max = 100) @Schema(description = "As typed, for example 30 days")
+            String paymentTerms,
+
+            @Size(max = 60)
+            @Schema(description = "Shown only to those who may edit suppliers (retail.catalogue.manage)")
+            String bankAccount,
+
+            @Size(max = 60) @Schema(description = "A short free label, for example Wholesaler")
+            String supplierType,
+
+            @Size(max = 1000) String notes) {
+
+        static final SupplierDetails NONE = new SupplierDetails(null, null, null, null, null, null, null, null);
+
+        /** These details with the bank account left out, for a reader who may not edit suppliers. */
+        SupplierDetails withoutBankAccount() {
+            return new SupplierDetails(email, address, country, website, paymentTerms, null, supplierType, notes);
+        }
+    }
+
+    @Schema(
+            name = "RetailSupplierUpdate",
+            description = "Omitted fields are unchanged; an empty contact or detail clears it")
     record UpdateSupplierRequest(
             @Size(min = 1, max = 200) String name,
             @Size(max = 100) String contact,
-            Boolean active) {}
+            Boolean active,
+            @Valid SupplierDetails details) {
+
+        // JUSTIFICATION-A3: the existing callers and tests send these three only.
+        UpdateSupplierRequest(String name, String contact, Boolean active) {
+            this(name, contact, active, null);
+        }
+    }
 
     @Schema(name = "RetailSupplier")
     record Supplier(
@@ -41,10 +92,26 @@ final class PurchasingApi {
             String name,
             String contact,
             boolean active,
+
+            @Schema(description = "The date added, set by the server")
             Instant createdAt,
 
             @Schema(description = "Send as If-Match when updating")
-            int version) {}
+            int version,
+
+            // Issue #820: the optional details; the bank account only for those who may edit suppliers.
+            SupplierDetails details,
+
+            @Schema(
+                    description =
+                            "Issue #820: the day of the newest restock from this supplier that is not voided, among"
+                                    + " those the caller may list; never typed")
+            LocalDate lastDeliveryOn) {
+
+        Supplier withDetails(SupplierDetails shown) {
+            return new Supplier(id, name, contact, active, createdAt, version, shown, lastDeliveryOn);
+        }
+    }
 
     @Schema(name = "RetailSupplierList")
     record SupplierList(List<Supplier> items) {}
@@ -100,7 +167,9 @@ final class PurchasingApi {
             @Schema(description = "Required for a credit purchase")
             UUID supplierId,
 
-            @NotNull @Schema(description = "Not in the future")
+            @Schema(
+                    description = "Defaults to today; not in the future, and before today only from a holder of"
+                            + " retail.entry.backdate at every branch of the lines, with date_reason (ADR-120)")
             LocalDate purchasedOn,
 
             @NotNull
@@ -111,7 +180,30 @@ final class PurchasingApi {
             String paymentMethod,
 
             @Size(max = 300) String note,
-            @NotEmpty @Size(max = 500) List<@Valid @NotNull PurchaseLineRequest> lines) {}
+            @NotEmpty @Size(max = 500) List<@Valid @NotNull PurchaseLineRequest> lines,
+
+            @Size(max = 300) @Schema(description = "Why the purchase has a date before today; needed then (ADR-120)")
+            String dateReason,
+
+            @Valid OfflineEntry offline) {
+
+        /** An earlier day the owner chose, with its reason, is judged as sent online (ADR-067 decision 13). */
+        PurchaseRequest {
+            offline = OfflineEntry.unlessChosen(offline, dateReason);
+        }
+
+        /** What the Idempotency-Key covers: the request without its offline block (ADR-067 decision 13). */
+        PurchaseRequest forKey() {
+            return new PurchaseRequest(supplierId, purchasedOn, paymentMethod, note, lines, dateReason, null);
+        }
+
+        /** The same purchase dated {@code on}: an entry kept offline takes the day it was made (ADR-067 decision 13). */
+        PurchaseRequest dated(LocalDate on) {
+            return java.util.Objects.equals(on, purchasedOn)
+                    ? this
+                    : new PurchaseRequest(supplierId, on, paymentMethod, note, lines, dateReason, offline);
+        }
+    }
 
     @Schema(name = "RetailPurchaseLineBranch")
     record LineBranch(
@@ -228,7 +320,31 @@ final class PurchasingApi {
 
             @JsonInclude(JsonInclude.Include.NON_NULL)
             @Schema(description = "True when the caller's branch scope hid other branches this restock added stock to")
-            Boolean partial) {
+            Boolean partial,
+
+            @Schema(description = "Issue #819, ADR-124: a photo of the paper receipt is on the delivery")
+            boolean hasReceiptPhoto,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Issue #821 (ADR-126): what the goods should sell for, each line's quantity in base units"
+                                    + " times the selling price the line set, else the item's current selling price. Present only"
+                                    + " to a holder of retail.profit.read")
+            Long sellWorthMinor,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description = "Issue #821 (ADR-126): sell_worth_minor less total_minor. Present only to a holder of"
+                            + " retail.profit.read")
+            Long expectedProfitMinor,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description = "Issue #821 (ADR-126): true, for a holder of retail.profit.read, when an item"
+                            + " on a line has no selling price yet, or the line sets none and its item was deleted or"
+                            + " is unknown (issue #852); sell_worth_minor and expected_profit_minor are then absent")
+            Boolean hasUnpricedItems) {
 
         // JUSTIFICATION-A3: a restock gained the void fields of issue #351; the short constructor keeps the three
         // existing callers as they are.
@@ -262,7 +378,68 @@ final class PurchasingApi {
                     null,
                     null,
                     null,
+                    null,
+                    false,
+                    null,
+                    null,
                     null);
+        }
+
+        // JUSTIFICATION-A3: the lead's decision on #846 reads the photo through a port; the restock is marked after.
+        /** Issue #819: the same restock, marked as having a receipt photo or not. */
+        Purchase withReceiptPhoto(boolean has) {
+            return new Purchase(
+                    id,
+                    purchaseNo,
+                    supplierId,
+                    purchasedOn,
+                    paymentMethod,
+                    currency,
+                    totalMinor,
+                    note,
+                    lines,
+                    createdAt,
+                    createdBy,
+                    status,
+                    voidedAt,
+                    voidedBy,
+                    voidedOn,
+                    voidReason,
+                    partial,
+                    has,
+                    sellWorthMinor,
+                    expectedProfitMinor,
+                    hasUnpricedItems);
+        }
+
+        // JUSTIFICATION-A3: a record copy names every component; the worth is two new ones (issue #821).
+        /**
+         * This restock with what its goods should sell for and the expected profit (issue #821, ADR-126); a null worth says an
+         * item on a line has no selling price yet, and leaves both out.
+         */
+        Purchase withWorth(Long sellWorth) {
+            return new Purchase(
+                    id,
+                    purchaseNo,
+                    supplierId,
+                    purchasedOn,
+                    paymentMethod,
+                    currency,
+                    totalMinor,
+                    note,
+                    lines,
+                    createdAt,
+                    createdBy,
+                    status,
+                    voidedAt,
+                    voidedBy,
+                    voidedOn,
+                    voidReason,
+                    partial,
+                    hasReceiptPhoto,
+                    sellWorth,
+                    sellWorth == null ? null : Math.subtractExact(sellWorth, totalMinor),
+                    sellWorth == null ? Boolean.TRUE : null);
         }
 
         Purchase withLinesAndTotal(List<PurchaseLine> newLines, long newTotal, boolean hidden) {
@@ -283,7 +460,11 @@ final class PurchasingApi {
                     voidedBy,
                     voidedOn,
                     voidReason,
-                    hidden ? Boolean.TRUE : null);
+                    hidden ? Boolean.TRUE : null,
+                    hasReceiptPhoto,
+                    sellWorthMinor,
+                    expectedProfitMinor,
+                    hasUnpricedItems);
         }
     }
 
