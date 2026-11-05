@@ -119,7 +119,7 @@ export function ValuationTable({ valuation, nameOf }: { valuation: Valuation; na
           {(valuation.rows ?? []).map((r) => (
             <tr key={`${r.branch_id}-${r.product_id}`}>
               <td>
-                <ToStock item={r.product_id}>{r.description}</ToStock><br /><CategoryLabel category={r.category} />
+                <ToStock item={r.product_id} branch={r.branch_id}>{r.description}</ToStock><br /><CategoryLabel category={r.category} />
                 {nameOf && <><br /><span className="hint">{nameOf(r.branch_id)}</span></>}
                 {phone && <><br /><span className="hint">{showQty(r.qty ?? '0')} in stock{withCost && r.value_at_cost_minor !== undefined ? `, cost ${money(r.value_at_cost_minor)}` : ''}</span></>}
               </td>

@@ -337,13 +337,24 @@ function StockRows({ sel, filter, all, branchId }: { sel: ListSelection; filter:
  */
 function useBranchFromAddress(branch: string | undefined, item: string | undefined, go: ReturnType<typeof useAddress>['go']): string | null {
   const { me, branch: current, chooseBranch } = useStaff();
-  const known = branch !== undefined && (me.branches ?? []).some((b) => b.id === branch);
+  // A branch this session cannot switch to (not one of its branches, or no switcher where the page is drawn) is said, never dropped in silence.
+  const known = branch !== undefined && chooseBranch !== undefined && (me.branches ?? []).some((b) => b.id === branch);
   useEffect(() => {
     if (branch === undefined || !known) return;
     if (branch !== current) chooseBranch?.(branch);
     go('/staff/retail/stock', item ? { item } : {}, true);
   }, [branch, known, current, chooseBranch, go, item]);
   return branch !== undefined && !known ? branch : null;
+}
+
+/** Issue #336: the note over Stock opened for one item from a link, with the way back to every item (a 48px button on a neutral note). */
+export function OneItemNote({ name, onEvery }: { name?: string; onEvery: () => void }) {
+  return (
+    <div role="status" className="alert alert-info" data-testid="one-item">
+      <p>{name ? `Showing one item: ${name}.` : 'Showing one item.'}</p>
+      <button type="button" className="btn-sm" onClick={onEvery}>Show every item</button>
+    </div>
+  );
 }
 
 const textOf = (v: unknown) => (typeof v === 'string' && v !== '' ? v : undefined);
@@ -385,6 +396,12 @@ export function StockPage() {
   const categoryId = oneItem ? '' : chipCategory;
   const chipReady = chipLoaded && (!oneItem || fromAddress.product.data !== undefined);
   const everyItem = () => address.go('/staff/retail/stock', {});
+  // Typing a search leaves the one item from the link, so the box always does what it says (review of #797).
+  const typed = search.term !== '';
+  const { go } = address;
+  useEffect(() => {
+    if (typed && oneItem) go('/staff/retail/stock', {}, true);
+  }, [typed, oneItem, go]);
   const one = useQuery({
     queryKey: ['retail', 'stock', branchId, query, categoryId, negativeOnly, level, showInactive],
     queryFn: ({ signal }) => retail.listStock({ branchId: branchId ?? '', query, categoryId, negativeOnly, level: level || undefined, includeInactive: showInactive, signal }),
@@ -423,10 +440,7 @@ export function StockPage() {
         <CategoryChips categories={categories.data ?? []} value={categoryId} onChange={setCategoryId} />
       </FindBar>
       {oneItem && (
-        <div role="status" className="alert alert-info" data-testid="one-item">
-          <p>{fromAddress.product.data ? `Showing one item: ${fromAddress.product.data.description}.` : 'Showing one item.'}</p>
-          <button type="button" className="btn-sm" onClick={everyItem}>Show every item</button>
-        </div>
+        <OneItemNote name={fromAddress.product.data?.description} onEvery={everyItem} />
       )}
       <Problem error={fromAddress.product.error} />
       {unknownBranch !== null && <p className="hint" data-testid="branch-not-yours">That branch is not one you work at, so this is the stock of the branch you are using.</p>}

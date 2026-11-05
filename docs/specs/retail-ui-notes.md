@@ -1263,10 +1263,12 @@ therefore as far as the existing routes go: Stock, and Past restocks and Stock m
 
 **Stable addresses for one record (issue #336, task #794).** The three gaps named above are closed without a new route: a
 route that opens one record reads it from the address. `/staff/retail/sales?sale=<id>` (and `/staff/retail/credit-sales?sale=<id>`)
-opens that sale whatever branch is in use, Back to the list clears it, and a change of branch closes it as before;
+opens that sale whatever branch is in use, Back to the list clears it, and a change of branch made after it opened closes it
+as before (the branch settling while the page loads does not);
 `/staff/retail/stock?item=<id>` shows that one item (found by its code, inactive included, the category chip ignored) with
-Show every item; `/staff/retail/stock?branch=<id>` switches to that branch once when the person works there, then drops it from
-the address, and says so otherwise. `SaleLink` (`retail/screen-link.tsx`) now makes the sale number on a credit note, a return,
+Show every item, and typing a search leaves it; `/staff/retail/stock?branch=<id>` switches to that branch once when the person
+works there, then drops it from the address, and says so otherwise; both together open that item at that branch, which is what a
+row of one branch links to (Stock value, Stock health, slow movers, damage and use). `SaleLink` (`retail/screen-link.tsx`) now makes the sale number on a credit note, a return,
 an overdue row of Credit control, a delivered order and a converted quotation open the sale; `ToStock` takes `item` or
 `branch`, so the item and branch names on Sales analysis, Margins, Daily profit, Stock value, Stock health (its damage and use
 section too), slow movers, Business evaluation and a saved stock move open that item or branch. Tested in `retail/record-links.dom.test.tsx` and
@@ -1283,7 +1285,8 @@ group header, or paged, and a record keeps its long sections closed. Rule 3 is "
 shop owner would not use has a help tip), one primary action per view, and an empty list that names the next step.
 
 **Result.** Rule 1: 133 of 139 pass, 6 break. Rule 3: 101 of 139 passed before this change and 38 broke; this change fixes
-27 of them (the empty states, and three screens with a second brand button), so 128 pass and 11 are left. Every route not
+27 of them (the empty states, and three screens with a second brand button), so 128 pass and 11 are left. `/staff` is in both tables below: its empty state is fixed, but its KYC heading still breaks
+rule 3, so it counts among the 11 left. Every route not
 named below passes both rules: the sales, stock, restock, controls and cash record lists are grouped; members, loans,
 collateral, documents, opt-outs, the purchasing lists, buyers and suppliers are paged; the reports are bounded by a date
 range or a top count.

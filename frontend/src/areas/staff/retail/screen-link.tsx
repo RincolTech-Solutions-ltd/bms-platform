@@ -23,8 +23,8 @@ export function ScreenLink({ screen, to, search, children, label, tour, action =
 }
 
 /**
- * A sale number that opens that sale (issue #336): All sales for a person who may read it, else Credit sales for a credit sale,
- * else the number as plain text. The address `?sale=<id>` is stable, so it can be shared too.
+ * A sale number that opens that sale (issue #336): All sales for a person who may read it, else Credit sales with `credit` (a
+ * credit sale, or a row that may be one, such as a credit note: Credit sales opens any sale by its id), else the number as plain text. The address `?sale=<id>` is stable, so it can be shared too.
  */
 export function SaleLink({ saleId, credit = false, children }: { saleId: string | undefined; credit?: boolean; children: ReactNode }) {
   const staff = useOptionalStaff();

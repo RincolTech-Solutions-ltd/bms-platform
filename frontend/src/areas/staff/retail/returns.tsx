@@ -23,7 +23,7 @@ export function ReturnRow({ row, branchName }: { row: SaleReturn; branchName?: s
         {showDate(row.returned_on)}, <strong>{money(row.total_minor ?? 0)}</strong>
       </p>
       <p className="hint">
-        Sale <SaleLink saleId={row.sale_id}>{row.sale_no}</SaleLink>{row.customer_name ? `, ${row.customer_name}` : ''}{branchName ? `, ${branchName}` : ''}. {settledWords(row)}.
+        Sale <SaleLink saleId={row.sale_id} credit>{row.sale_no}</SaleLink>{row.customer_name ? `, ${row.customer_name}` : ''}{branchName ? `, ${branchName}` : ''}. {settledWords(row)}.
       </p>
       <p>
         <Link className="btn-sm" to="/staff/retail/returns/$returnId" params={{ returnId: row.id ?? '' }} aria-label={`Open credit note ${row.credit_note_no}`}>Open</Link>

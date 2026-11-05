@@ -2,7 +2,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { ReactElement } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../../api/client';
 import { retail } from '../../../api/retail';
@@ -10,7 +10,8 @@ import { createMockRetail, mockMe } from '../../../api/retail-mock';
 import { router as appRouter } from '../../../app/router';
 import { StaffContext } from '../context';
 import { CreditNoteView } from './credit-note';
-import { AllSales } from './sales';
+import { ToStock } from './analytics-ui';
+import { AllSales, CreditSales } from './sales';
 import { SaleLink } from './screen-link';
 import { StockPage } from './stock';
 
@@ -72,7 +73,62 @@ describe('a sale number opens that sale (#336)', () => {
   });
 });
 
+// JUSTIFICATION-A3: new test cases the review of #797 asked for; no existing test covers these paths.
+describe('a sale from the address on load (review of #797)', () => {
+  it('stays open when the session\'s branch settles after the first render', async () => {
+    const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: [`/staff/retail/sales?sale=${SALE_2}`] }) });
+    // The staff layout starts with no branch and sets it once the profile and the stored choice are read.
+    function Settling() {
+      const [branch, setBranch] = useState<string | null>(null);
+      useEffect(() => { const t = setTimeout(() => setBranch(BRANCH_A), 50); return () => clearTimeout(t); }, []);
+      return <StaffContext.Provider value={{ me: mockMe('admin'), branch }}><AllSales /></StaffContext.Provider>;
+    }
+    render(
+      <RouterContextProvider router={router}>
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><Settling /></QueryClientProvider>
+      </RouterContextProvider>,
+    );
+    expect(await screen.findByRole('heading', { name: /Sale S-900002/ })).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 200));
+    expect(screen.getByRole('heading', { name: /Sale S-900002/ })).toBeTruthy();
+    expect(router.state.location.search).toEqual({ sale: SALE_2 });
+  });
+
+  it('opens on Credit sales from the address too', async () => {
+    show(<CreditSales />, `/staff/retail/credit-sales?sale=${SALE_2}`);
+    expect(await screen.findByRole('heading', { name: /Sale S-900002/ })).toBeTruthy();
+  });
+});
+
 describe('an item or a branch opens its stock (#336)', () => {
+  it('opens the item at the branch of the row it came from, keeping the item once the branch is switched', async () => {
+    const chooseBranch = vi.fn();
+    const router = show(<StockPage />, `/staff/retail/stock?item=${ITEM_3}&branch=${BRANCH_B}`, { chooseBranch });
+    await waitFor(() => expect(chooseBranch).toHaveBeenCalledWith(BRANCH_B));
+    await waitFor(() => expect(router.state.location.search).toEqual({ item: ITEM_3 }));
+    expect(await screen.findByTestId('one-item')).toBeTruthy();
+  });
+
+  it('leaves the one item when the person types a search', async () => {
+    const router = show(<StockPage />, `/staff/retail/stock?item=${ITEM_3}`);
+    await screen.findByTestId('one-item');
+    fireEvent.change(screen.getByLabelText('Search by name, code, barcode or category'), { target: { value: 'cable' } });
+    await waitFor(() => expect(router.state.location.search).toEqual({}));
+    await waitFor(() => expect(screen.queryByTestId('one-item')).toBeNull());
+  });
+
+  it('is plain text on a report for a session that may not read stock', () => {
+    const me = { ...mockMe('admin'), permissions: ['retail.sale.read'] } as Me;
+    show(<ToStock item={ITEM_3} branch={BRANCH_B}>LED bulb 9W screw</ToStock>, '/staff', { me });
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.getByText('LED bulb 9W screw')).toBeTruthy();
+  });
+
+  it('links an item of one branch to that item at that branch', () => {
+    show(<ToStock item={ITEM_3} branch={BRANCH_B}>LED bulb 9W screw</ToStock>, '/staff');
+    expect(screen.getByRole('link', { name: 'LED bulb 9W screw' }).getAttribute('href')).toBe(`/staff/retail/stock?item=${ITEM_3}&branch=${BRANCH_B}`);
+  });
+
   it('shows only the item from the address, with a way back to every item', async () => {
     show(<StockPage />, `/staff/retail/stock?item=${ITEM_3}`);
     const note = await screen.findByTestId('one-item');

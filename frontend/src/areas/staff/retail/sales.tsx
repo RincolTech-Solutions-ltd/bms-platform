@@ -281,15 +281,19 @@ function useOpenSale(key: string, to: SalesPath): [string | null, (id: string | 
   const address = useAddress();
   // Outside a router (a test drawing the list alone) the open sale is the screen's own state, as before.
   const [local, setLocal] = useState<{ key: string; id: string } | null>(null);
-  const openedAt = useRef(key);
   const fromAddress = typeof address.search.sale === 'string' && address.search.sale !== '' ? address.search.sale : null;
-  const id = address.routed ? openUnder(fromAddress ? { key: openedAt.current, id: fromAddress } : null, key) : openUnder(local, key);
+  // The branch choice the sale in the address was opened under. It is taken again when the address names another sale, and while
+  // the branch is not known yet (key '': the session's branch settles after the first render), so a shared link is never closed
+  // by the page loading; only a change of branch after that closes it (review of #797).
+  const openedAt = useRef({ sale: fromAddress, key });
+  if (openedAt.current.sale !== fromAddress || openedAt.current.key === '') openedAt.current = { sale: fromAddress, key };
+  const id = address.routed ? openUnder(fromAddress ? { key: openedAt.current.key, id: fromAddress } : null, key) : openUnder(local, key);
   const { routed, go } = address;
   useEffect(() => {
     if (routed && fromAddress && id === null) go(to, {}, true);
   }, [routed, fromAddress, id, go, to]);
   return [id, (next) => {
-    openedAt.current = key;
+    openedAt.current = { sale: next, key };
     if (routed) go(to, next ? { sale: next } : {});
     else setLocal(next === null ? null : { key, id: next });
   }];

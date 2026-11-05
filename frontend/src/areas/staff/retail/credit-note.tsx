@@ -26,7 +26,7 @@ export function CreditNoteView({ note, nameOf, buyerOpens }: { note: SaleReturn;
   const facts: [string, ReactNode][] = [
     ['Date', showDate(note.returned_on)],
     ['Branch', nameOf(note.branch_id)],
-    ['Sale', <SaleLink key="sale" saleId={note.sale_id}>{note.sale_no ?? ''}</SaleLink>],
+    ['Sale', <SaleLink key="sale" saleId={note.sale_id} credit>{note.sale_no ?? ''}</SaleLink>],
     ...(note.customer_name
       ? [['Buyer', buyerOpens && note.customer_id ? <Link key="buyer" to="/staff/retail/accounts/$customerId" params={{ customerId: note.customer_id }}>{note.customer_name}</Link> : note.customer_name] as [string, ReactNode]]
       : []),

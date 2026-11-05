@@ -69,6 +69,7 @@ describe('links on the retail report pages', () => {
     };
     show(<DamageShareView data={data} nameOf={() => 'Test Branch A'} />);
     expect(screen.getByRole('link', { name: 'Test Branch A' }).getAttribute('href')).toBe(`/staff/retail/stock?branch=${BRANCH}`);
-    expect(screen.getByRole('link', { name: 'Test Item 01' }).getAttribute('href')).toBe('/staff/retail/stock?item=p1');
+    // An item under one shop opens that item at that shop (review of #797).
+    expect(screen.getByRole('link', { name: 'Test Item 01' }).getAttribute('href')).toBe(`/staff/retail/stock?item=p1&branch=${BRANCH}`);
   });
 });

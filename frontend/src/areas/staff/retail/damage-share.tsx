@@ -39,10 +39,10 @@ export function shareWords(label: string, pct: number | undefined, qty: string |
   return `${label} ${percent}, ${showQty(qty ?? '0')} of ${showQty(base ?? '0')}${u}`;
 }
 
-function ItemRow({ item }: { item: DamageShareItem }) {
+function ItemRow({ item, branchId }: { item: DamageShareItem; branchId?: string }) {
   return (
     <li className="rt-card" data-testid="damage-share-item">
-      <strong><ToStock item={item.product_id}>{item.description}</ToStock></strong>
+      <strong><ToStock item={item.product_id} branch={branchId}>{item.description}</ToStock></strong>
       <span className="hint">{item.code}</span>
       <div className="rt-row"><span className="num">{shareWords('Damaged', item.damaged_pct, item.damaged_qty, item.base_qty, item.unit)}</span></div>
       <div className="rt-row"><span className="num">{shareWords('Used', item.used_pct, item.used_qty, item.base_qty, item.unit)}</span></div>
@@ -66,7 +66,7 @@ export function DamageShareView({ data, nameOf }: { data: DamageShare; nameOf: N
             <p className="hint">Nothing damaged or used here.</p>
           ) : (
             <ul className="an-cards">
-              {(shop.items ?? []).map((item) => <ItemRow key={item.product_id} item={item} />)}
+              {(shop.items ?? []).map((item) => <ItemRow key={item.product_id} item={item} branchId={shop.branch_id} />)}
             </ul>
           )}
         </li>
