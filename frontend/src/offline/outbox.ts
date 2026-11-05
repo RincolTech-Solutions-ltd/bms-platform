@@ -77,6 +77,12 @@ export interface OutboxItem {
   sentAt?: number;
   /** When the phone learnt that a manager discarded it (epoch ms). */
   discardedAt?: number;
+  /**
+   * In flight from the form (issue #844): the form wrote the item at save and its own request waits for an answer until
+   * about this time (epoch ms). Until then the sync engine never sends it and it is not counted as waiting; a form that got
+   * no answer clears it at once, and an app killed during the wait leaves it to pass, so the next start sends the item.
+   */
+  formUntil?: number;
 }
 
 /** 5 s, 15 s, 1 min, 5 min, then every 15 min (ADR-067 decision 4). */
@@ -113,12 +119,25 @@ export function inOrder(items: OutboxItem[]): OutboxItem[] {
  */
 export function nextToSend(items: OutboxItem[], now: number): OutboxItem | undefined {
   const head = inOrder(items).find((i) => i.state === 'queued' || i.state === 'sending');
-  return head && head.nextAttemptAt <= now ? head : undefined;
+  return head && dueAt(head) <= now ? head : undefined;
 }
 
-/** What waits to sync: queued, failed and held items (a failed one waits for a manager or another try, a held one for its maker). */
-export function waiting(items: OutboxItem[]): OutboxItem[] {
-  return inOrder(items).filter((i) => i.state !== 'sent' && i.state !== 'discarded');
+/** When an item may go: its backoff, and never while its form's own request is in flight (issue #844). */
+export function dueAt(item: OutboxItem): number {
+  return Math.max(item.nextAttemptAt, item.formUntil ?? 0);
+}
+
+/** The form's own request for it is still in flight (issue #844): not sent, reported or counted as waiting. */
+export function inFlightFromForm(item: OutboxItem, now: number): boolean {
+  return (item.formUntil ?? 0) > now;
+}
+
+/**
+ * What waits to sync: queued, failed and held items (a failed one waits for a manager or another try, a held one for its
+ * maker). An item its form is still waiting on is not (issue #844), so a normal online save never shows "1 waiting".
+ */
+export function waiting(items: OutboxItem[], now: number = Date.now()): OutboxItem[] {
+  return inOrder(items).filter((i) => i.state !== 'sent' && i.state !== 'discarded' && !inFlightFromForm(i, now));
 }
 
 /** The items a manager discarded, shown as such until they go after a day. */

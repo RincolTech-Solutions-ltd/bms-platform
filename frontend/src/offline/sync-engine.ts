@@ -1,5 +1,8 @@
-import { applyOutcome, classify, classifyEntry, expired, inOrder, markDiscarded, nextToSend, requeue, type OutboxItem, type SendOutcome } from './outbox';
+import { applyOutcome, classify, classifyEntry, dueAt, expired, inOrder, markDiscarded, nextToSend, requeue, type OutboxItem, type SendOutcome } from './outbox';
 import type { OfflineStore } from './store';
+
+/** How long past the form's own wait an item stays the form's (issue #844): the time the form takes to settle it. */
+export const FORM_SLACK_MS = 5_000;
 
 // Sends the outbox (issue #458, ADR-067 decisions 4, 5 and 8): one sale at a time, oldest first, never two requests in
 // flight; a failure of the network or the server backs off and keeps the order; an expired session is refreshed once and
@@ -148,17 +151,39 @@ export class SyncEngine {
    * Puts a sale in the outbox; it is written to the device before this resolves. It is added, never written over: a sale
    * already queued under its client sale id (a second tap, another tab) stays as it is.
    */
-  async queue(item: OutboxItem): Promise<void> {
+  async queue(item: OutboxItem): Promise<boolean> {
     if (item.scope !== this.deps.scope) throw new Error('an outbox item belongs to its own person');
     try {
       await this.deps.store.addItem(item);
     } catch (e) {
       if (!(e instanceof DOMException && e.name === 'ConstraintError')) throw e;
       await this.load();
-      return;
+      return false;
     }
     this.items = [...this.items.filter((i) => i.id !== item.id), item];
     this.emit();
+    return true;
+  }
+
+  /**
+   * Issue #844: the form keeps its item on the phone at save, before its own request goes, marked in flight from the form
+   * for `waitMs` and a little more. True when it was added (false: one under its id was there already, and stays).
+   */
+  hold(item: OutboxItem, waitMs: number): Promise<boolean> {
+    return this.queue({ ...item, formUntil: this.deps.now() + waitMs + FORM_SLACK_MS });
+  }
+
+  /** The server answered the form (a 2xx, or a refusal the form shows): its item is taken off the phone. */
+  formAnswered(id: string): Promise<void> {
+    // Only a form whose hold added the item calls this, within its wait, so the item is the form's: never sent from here.
+    return this.drop(id);
+  }
+
+  /** The form got no answer: its item is left to this engine, as one kept on the phone, under the same key. */
+  async formUnanswered(id: string): Promise<void> {
+    // Read from the device when a read of another tab's writes replaced the list in memory meanwhile.
+    const item = this.items.find((i) => i.id === id) ?? (await this.deps.store.outbox(this.deps.scope)).find((i) => i.id === id);
+    if (item?.formUntil !== undefined) await this.save({ ...item, formUntil: undefined });
   }
 
   /** A new access token arrived (a sign-in or a refresh): sending may go on, at once, and a held item may be its maker's to send. */
@@ -359,7 +384,7 @@ export class SyncEngine {
     if (this.needsSignIn || this.elsewhere) return;
     const head = inOrder(this.items).find((i) => i.state === 'queued' || i.state === 'sending');
     if (!head) return;
-    const wait = Math.max(head.nextAttemptAt - this.deps.now(), 0);
+    const wait = Math.max(dueAt(head) - this.deps.now(), 0);
     this.cancelTimer = this.deps.later(() => void this.sync(), wait);
   }
 

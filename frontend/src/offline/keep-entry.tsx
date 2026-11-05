@@ -33,24 +33,36 @@ export function useEntrySave(): EntrySave {
     async <T,>(spec: Omit<EntrySpec, 'branchName'>, send: () => Promise<T>): Promise<T | Kept> => {
       // When the save began: an entry kept on the phone is dated by it, even one whose online answer was lost (#839 review).
       const madeAt = new Date();
-      const keep = async (lost: boolean): Promise<Kept> => {
-        if (!offline) throw new Error('This phone cannot keep entries.');
-        const item = offlineEntry({
-          ...spec, branchName: branchName(spec.branchId), scope: offline.scope, now: madeAt, onlineAsOf: lastOnline(offline.catalogue?.pricesAsOf), lost,
-        });
-        await offline.engine.queue(item);
+      if (!offline) return send();
+      const item = offlineEntry({
+        ...spec, branchName: branchName(spec.branchId), scope: offline.scope, now: madeAt, onlineAsOf: lastOnline(offline.catalogue?.pricesAsOf), lost: offline.connectivity.online(),
+      });
+      const kept = async (): Promise<Kept> => {
         if (offline.connectivity.online()) void offline.engine.sync();
         setKept(item);
         return { kept: item };
       };
-      if (offline && !offline.connectivity.online()) return keep(false);
+      if (!offline.connectivity.online()) {
+        await offline.engine.queue(item);
+        return kept();
+      }
+      // Issue #844: the entry is on the phone before its request goes, in flight from this form, so a phone that dies during
+      // the wait still has it and sends it on its next start. A phone that cannot write it now still sends it online.
+      const held = await offline.engine.hold(item, ENTRY_ANSWER_MS).catch(() => false);
       try {
         // A save never waits longer than ENTRY_ANSWER_MS (the 8 seconds a sale waits, issue #812): with no answer by then the
-        // entry is kept on the phone under the same key, with when it was made, and the late answer and the outbox's send are
+        // entry is left on the phone under the same key, with when it was made, and the late answer and the outbox's send are
         // one record (the key covers the request without its offline block).
-        return await (offline ? answerWithin(send(), ENTRY_ANSWER_MS) : send());
+        const answer = await answerWithin(send(), ENTRY_ANSWER_MS);
+        if (held) await offline.engine.formAnswered(item.id).catch(() => undefined);
+        return answer;
       } catch (e) {
-        if (offline && (droppedConnection(e) || e instanceof NoAnswer)) return keep(true);
+        if (droppedConnection(e) || e instanceof NoAnswer) {
+          await (held ? offline.engine.formUnanswered(item.id) : offline.engine.queue(item));
+          return kept();
+        }
+        // A refusal the form shows as today: nothing of it stays on the phone.
+        if (held) await offline.engine.formAnswered(item.id).catch(() => undefined);
         throw e;
       }
     },
