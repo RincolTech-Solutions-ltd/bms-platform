@@ -3059,8 +3059,9 @@ class MigrationOrderIT {
                     .containsExactlyInAnyOrder(spaced, inside);
 
             // Issue #857: the check after every migrate names each reason on its own, with the fix and no email.
+            UUID operator = UUID.randomUUID();
             owner.sql("INSERT INTO platform_users (id, email, full_name) VALUES (?, ?, 'Test Operator V135')")
-                    .params(UUID.randomUUID(), "op v135@example.test")
+                    .params(operator, "op v135@example.test")
                     .update();
             // The counts are across every business, so only this case's business and operator are asserted, by reason.
             List<String> warnings = leftOverWarnings(postgres);
@@ -3084,6 +3085,27 @@ class MigrationOrderIT {
                     .singleElement()
                     .asString()
                     .contains("staff-email-left-over.md");
+
+            // The runbook's operator fix, as written there, works on this schema and clears the WARNING.
+            // JUSTIFICATION-A3: the #860 review asks the runbook's operator statements to be run in a test.
+            owner.sql("""
+                            UPDATE platform_users
+                               SET email = lower(regexp_replace(email,
+                                       '[\\s\\x00a0\\x0085\\x1680\\x180e\\x2000-\\x200b\\x2028\\x2029\\x202f\\x205f\\x2060\\x3000\\xfeff]', '', 'g')),
+                                   updated_at = now()
+                             WHERE id = ?
+                            """).param(operator).update();
+            owner.sql("""
+                            INSERT INTO platform_audit_log (id, action, data)
+                            VALUES (gen_random_uuid(), 'platform.user.email_cleaned',
+                                    jsonb_build_object('platform_user_id', ?::text, 'reason', 'whitespace removed (issue #857)'))
+                            """).param(operator).update();
+            assertThat(owner.sql("SELECT email FROM platform_users WHERE id = ?")
+                            .param(operator)
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("opv135@example.test");
+            assertThat(leftOverWarnings(postgres)).noneMatch(w -> w.startsWith("operator email:"));
         }
     }
 

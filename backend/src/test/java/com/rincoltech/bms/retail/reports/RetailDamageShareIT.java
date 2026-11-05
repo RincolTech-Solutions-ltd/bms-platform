@@ -344,6 +344,8 @@ class RetailDamageShareIT extends IntegrationTest {
 
     @Test
     void aPackDeliveryAndAUsageLineCountInTheItemsSmallestUnit() {
+        // Pack sizes are switched on for this test's own business: setUp makes a new one for every test, and units can
+        // never be switched off again (BusinessTypes.NEVER_SWITCHED_OFF), so no other test sees it.
         String etag = api.get("/settings/capabilities", "core.settings.manage")
                 .getHeaders()
                 .getETag();
@@ -385,6 +387,30 @@ class RetailDamageShareIT extends IntegrationTest {
                         .query(String.class)
                         .single())
                 .isEqualTo("6.000|6.000");
+        // A usage line in cartons cannot be recorded at all: the API refuses an unknown field, so a carton line is
+        // never counted as 1. If usage lines ever take a pack unit, this refusal fails and the test must then assert
+        // that 1 carton counts as 24. JUSTIFICATION-A3: the #860 review asks this refusal to be asserted here.
+        Map<String, Object> inCartons = Map.of(
+                "branch_id",
+                t.headOffice(),
+                "kind",
+                "damaged",
+                "reason",
+                "Test damaged",
+                "lines",
+                List.of(Map.of("product_id", p, "qty", "1", "unit_id", carton)));
+        ResponseEntity<JsonNode> refused =
+                api.postKeyed("/usage", inCartons, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(refused.getStatusCode().is4xxClientError())
+                .as("%s", refused.getBody())
+                .isTrue();
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM retail_usage_lines WHERE tenant_id = ? AND product_id = ?")
+                        .params(t.tenantId(), p)
+                        .query(Long.class)
+                        .single())
+                .as("only the 6 pieces were recorded")
+                .isEqualTo(1);
 
         JsonNode packed = item(shop(report(todayOnly(), ADMIN, Map.of()), t.headOffice()), "DSH-6");
         // Two cartons of 24 are 48 pieces; 6 pieces of 48 is 12.5 %, a whole 13 half up.

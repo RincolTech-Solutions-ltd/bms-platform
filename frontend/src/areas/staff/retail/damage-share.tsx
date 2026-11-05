@@ -83,7 +83,7 @@ export function DamageShareView({ data, nameOf }: { data: DamageShare; nameOf: N
 export function DamageShareSection({ nameOf }: { nameOf: NameOf }) {
   const { me } = useStaff();
   const { all, branchId } = useBranchView();
-  const owner = all ? canSeeProfit(me) : branchId !== null && holdsAt(me, PROFIT, branchId);
+  const owner = all ? canSeeProfit(me) : Boolean(branchId) && holdsAt(me, PROFIT, branchId);
   const [days, setDays] = useState(() => presetRange('month', businessToday()));
   const report = useQuery({
     queryKey: ['retail', 'damage-share', all ? 'all' : branchId, days.from, days.to],
