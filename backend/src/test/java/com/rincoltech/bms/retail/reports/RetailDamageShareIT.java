@@ -252,15 +252,12 @@ class RetailDamageShareIT extends IntegrationTest {
                         """)
                 .params(t.tenantId(), on, branch, product, kind, qty)
                 .update();
-        TestDatabase.owner()
-                .sql("""
+        TestDatabase.owner().sql("""
                         INSERT INTO retail_stock_balances (tenant_id, branch_id, product_id, qty, avg_cost_minor)
                         SELECT ?, ?, p.id, CAST(? AS numeric), p.cost_minor FROM retail_products p WHERE p.id = ?
                         ON CONFLICT (tenant_id, branch_id, product_id)
                         DO UPDATE SET qty = retail_stock_balances.qty + EXCLUDED.qty
-                        """)
-                .params(t.tenantId(), branch, qty, product)
-                .update();
+                        """).params(t.tenantId(), branch, qty, product).update();
     }
 
     JsonNode item(JsonNode shop, String code) {
