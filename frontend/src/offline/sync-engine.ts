@@ -1,4 +1,4 @@
-import { FORM_SLACK_MS, applyOutcome, classify, classifyEntry, dueAt, expired, inOrder, markDiscarded, nextToSend, requeue, type OutboxItem, type SendOutcome } from './outbox';
+import { FORM_SLACK_MS, applyOutcome, formMayHold, classify, classifyEntry, dueAt, expired, inOrder, markDiscarded, nextToSend, requeue, type OutboxItem, type SendOutcome } from './outbox';
 import type { OfflineStore } from './store';
 
 export { FORM_SLACK_MS };
@@ -135,6 +135,13 @@ export class SyncEngine {
     const all = await this.deps.store.outbox(this.deps.scope);
     for (const old of all.filter((i) => expired(i, now))) await this.deps.store.deleteItem(old.id);
     this.items = all.filter((i) => !expired(i, now));
+    // Issue #844: a form's hold that has passed, or is further ahead than any form holds (the clock moved back), is stale
+    // and goes. One still within its time stays: another tab's form may be waiting on it.
+    for (const stale of this.items.filter((i) => i.formUntil !== undefined && !this.formHeld.has(i.id) && !formMayHold(i, now))) {
+      const cleared = { ...stale, formUntil: undefined };
+      await this.deps.store.putItem(cleared);
+      this.items = this.items.map((i) => (i.id === stale.id ? cleared : i));
+    }
     this.emit();
   }
 
@@ -295,6 +302,13 @@ export class SyncEngine {
         // An item a form of this tab still waits on never goes from here, however late the form's answer is (issue #844).
         const item = nextToSend(this.items.filter((i) => !this.formHeld.has(i.id)), this.deps.now());
         if (!item) break;
+        // Read again just before it goes: a form (of this tab or another) may hold it or have taken it off meanwhile.
+        const fresh = (await this.deps.store.outbox(this.deps.scope)).find((i) => i.id === item.id);
+        if (!fresh || this.formHeld.has(item.id) || formMayHold(fresh, this.deps.now()) || (fresh.state !== 'queued' && fresh.state !== 'sending')) {
+          this.items = [...this.items.filter((i) => i.id !== item.id), ...(fresh ? [fresh] : [])];
+          this.emit();
+          continue;
+        }
         this.syncing = true;
         this.emit();
         const outcome = await this.attempt(item);

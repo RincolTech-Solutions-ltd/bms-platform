@@ -15,7 +15,8 @@ export function SignOutWarning({ ask, onSignOut }: { ask: number; onSignOut: () 
   const online = useOnline();
   const outbox = useOutbox();
   const dialog = useRef<HTMLDialogElement>(null);
-  const count = waiting(outbox.items, outbox.formHeld).length;
+  // Every item on the phone, one a form still waits on too, as `waitingNow` counts it (issue #844).
+  const count = waiting(outbox.items).length;
 
   useEffect(() => {
     const d = dialog.current;

@@ -281,10 +281,14 @@ left, the branch, the period, the person's roles.
     shared-phone replay rule of #853, issue #852, is kept as it is: a replay answers only the person who stored the key, and
     the outbox never offers Fix with a new key for its own entry). "In flight from the form" is two things. In memory, the
     sync engine of the tab whose form saved it lists the item as held by a form: that engine never sends it, however late
-    the form's answer comes (a tab frozen in the background), and it is not counted as waiting, so the dot and the sign-out
-    warning never say "1 waiting" during a normal online save. On the item, `formUntil` (the form's own wait of 8 seconds
+    the form's answer comes (a tab frozen in the background), and it is not counted as waiting, so the dot never says
+    "1 waiting" during a normal online save. Sign-out still asks first while any item is on the phone, one a form is
+    waiting on too (the lead on the review of #859): signing out ends that wait, and the item is then the outbox's; sign-out
+    never deletes the outbox. Every engine reads an item again just before it sends it and leaves it when a form holds it
+    or has taken it off meanwhile. On the item, `formUntil` (the form's own wait of 8 seconds
     and 5 seconds more) keeps another tab's engine from sending it before then; a `formUntil` further ahead than 13 seconds
-    (the phone's clock moved back) is not believed. While it holds, the sale is not in the summary of other people's sales
+    (the phone's clock moved back) is not believed, and a read of the outbox clears it, as it clears one that has passed;
+    one still within its time stays, since another tab's form may be waiting on it. While it holds, the sale is not in the summary of other people's sales
     sent for the managers (decision 9) either, since its request may still be on its way. An app killed during the wait holds nothing in memory any more: on the
     next start the item counts as waiting at once, so sign-out asks first (decision 9), and it is sent once, under its key,
     when `formUntil` has passed. Since no engine sends an item a form holds, none is refused and reported for a manager

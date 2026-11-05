@@ -422,8 +422,9 @@ export function requestPersistence(): void {
 
 /** The number of sales waiting on this device for the signed-in person (queued and failed). */
 export function waitingNow(offline: Offline | null): number {
-  const now = offline?.engine.snapshot();
-  return now ? waiting(now.items, now.formHeld).length : 0;
+  // Sign-out asks first while any item is on the phone, one a form is still waiting on too (the lead on the review of #859):
+  // signing out ends that form's wait, and the item is then the outbox's.
+  return offline ? waiting(offline.engine.snapshot().items).length : 0;
 }
 
 /**

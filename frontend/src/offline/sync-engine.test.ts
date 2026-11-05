@@ -487,12 +487,28 @@ describe('an item kept at save, in flight from its form (issue #844)', () => {
     expect(tab.engine.snapshot().items.map((i) => i.state)).toEqual(['sent']);
   });
 
-  it('does not believe a hold further ahead than any form holds, as after the clock was moved back', async () => {
+  it('does not believe a hold further ahead than any form holds, as after the clock was moved back, and clears it on load', async () => {
     const { engine, store, sent } = setup(async (i) => ok(i));
     await store.addItem(item('a', 1, { formUntil: 1_000_000 + 3 * 60 * 60 * 1000 }));
+    await store.addItem(item('b', 2, { formUntil: 1_000_000 - 1 }));
+    await store.addItem(item('c', 3, { formUntil: 1_000_000 + 5_000 }));
     await engine.load();
+    // A passed or impossible hold is stale and goes; one within its time stays, as another tab's form may wait on it.
+    expect((await store.outbox(SCOPE)).map((i) => [i.id, i.formUntil])).toEqual([['a', undefined], ['b', undefined], ['c', 1_005_000]]);
     await engine.sync();
-    expect(sent).toEqual(['a:key-a']);
+    expect(sent).toEqual(['a:key-a', 'b:key-b']);
+  });
+
+  it('reads an item again just before it goes, and leaves it when a form holds it or took it off meanwhile', async () => {
+    const { engine, store, sent } = setup(async (i) => ok(i));
+    await engine.queue(item('b', 1));
+    await engine.queue(item('a', 2));
+    // Another tab's form took b off, and holds a, since this engine read the outbox.
+    await store.deleteItem('b');
+    await store.putItem(item('a', 2, { formUntil: 1_000_000 + 8_000 }));
+    await engine.sync();
+    expect(sent).toEqual([]);
+    expect(engine.snapshot().items.map((i) => [i.id, i.formUntil])).toEqual([['a', 1_008_000]]);
   });
 
   it('is taken off the phone when the form gets its answer, a 2xx or a refusal', async () => {

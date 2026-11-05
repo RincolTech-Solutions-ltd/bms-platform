@@ -548,7 +548,8 @@ describe('Record a sale offline', () => {
     expect(send).not.toHaveBeenCalled();
     expect(onPhone[0]?.formUntil).toBeGreaterThan(Date.now());
     expect(waiting(offline.engine.snapshot().items, offline.engine.snapshot().formHeld)).toEqual([]);
-    expect(waitingNow(offline)).toBe(0);
+    // Sign-out still asks first: the sale is on the phone (the lead on the review of #859).
+    expect(waitingNow(offline)).toBe(1);
     expect(screen.queryByText(/\d+ waiting/)).toBeNull();
     expect(screen.queryByRole('button', { name: /waiting to sync/ })).toBeNull();
     expect(othersOnPhone(await offline.store.allOutbox(), 'test.example', 'test.example|someone-else')).toEqual([]);
