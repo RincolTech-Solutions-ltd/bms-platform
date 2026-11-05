@@ -86,18 +86,15 @@ class RetailDamageShareIT extends IntegrationTest {
         return RetailTestSupport.id(r);
     }
 
+    /** The body of a usage or damage entry with one line, as every entry here sends it. */
+    static Map<String, Object> usageBody(UUID branch, String kind, Map<String, Object> line) {
+        return Map.of("branch_id", branch, "kind", kind, "reason", "Test " + kind, "lines", List.of(line));
+    }
+
     UUID usage(UUID branch, String kind, UUID product, String qty) {
         ResponseEntity<JsonNode> r = api.postKeyed(
                 "/usage",
-                Map.of(
-                        "branch_id",
-                        branch,
-                        "kind",
-                        kind,
-                        "reason",
-                        "Test " + kind,
-                        "lines",
-                        List.of(Map.of("product_id", product, "qty", qty))),
+                usageBody(branch, kind, Map.of("product_id", product, "qty", qty)),
                 ADMIN,
                 "*",
                 UUID.randomUUID().toString());
@@ -387,36 +384,42 @@ class RetailDamageShareIT extends IntegrationTest {
                         .query(String.class)
                         .single())
                 .isEqualTo("6.000|6.000");
-        // A usage line in cartons cannot be recorded at all: the API refuses an unknown field, so a carton line is
-        // never counted as 1. If usage lines ever take a pack unit, this refusal fails and the test must then assert
-        // that 1 carton counts as 24. JUSTIFICATION-A3: the #860 review asks this refusal to be asserted here.
-        Map<String, Object> inCartons = Map.of(
-                "branch_id",
-                t.headOffice(),
-                "kind",
-                "damaged",
-                "reason",
-                "Test damaged",
-                "lines",
-                List.of(Map.of("product_id", p, "qty", "1", "unit_id", carton)));
-        ResponseEntity<JsonNode> refused =
-                api.postKeyed("/usage", inCartons, ADMIN, "*", UUID.randomUUID().toString());
-        assertThat(refused.getStatusCode().is4xxClientError())
-                .as("%s", refused.getBody())
-                .isTrue();
+        // A line carrying the carton as unit_id is refused for that field alone: the API refuses an unknown field
+        // (400 malformed_request), so a carton line is never counted as 24, nor stored at all. The same body without
+        // unit_id is accepted and counts as the 1 piece typed. If usage lines ever take a pack unit, the refusal fails
+        // and this test must be changed on purpose (#860, the lead's sign-off).
+        // JUSTIFICATION-A3: the #860 review asks this refusal to be proven against the same body accepted.
+        Map<String, Object> withUnit = new LinkedHashMap<>(Map.of("product_id", p, "qty", "1"));
+        withUnit.put("unit_id", carton);
+        ResponseEntity<JsonNode> refused = api.postKeyed(
+                "/usage",
+                usageBody(t.headOffice(), "damaged", withUnit),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(refused.getStatusCode()).as("%s", refused.getBody()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(refused.getBody().get("code").asString()).isEqualTo("malformed_request");
+        String lines = "SELECT count(*) FROM retail_usage_lines WHERE tenant_id = ? AND product_id = ?";
         assertThat(TestDatabase.owner()
-                        .sql("SELECT count(*) FROM retail_usage_lines WHERE tenant_id = ? AND product_id = ?")
+                        .sql(lines)
                         .params(t.tenantId(), p)
                         .query(Long.class)
                         .single())
-                .as("only the 6 pieces were recorded")
+                .as("nothing recorded from the refused line")
                 .isEqualTo(1);
+        usage(t.headOffice(), "damaged", p, "1");
+        assertThat(TestDatabase.owner()
+                        .sql(lines)
+                        .params(t.tenantId(), p)
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(2);
 
         JsonNode packed = item(shop(report(todayOnly(), ADMIN, Map.of()), t.headOffice()), "DSH-6");
-        // Two cartons of 24 are 48 pieces; 6 pieces of 48 is 12.5 %, a whole 13 half up.
+        // Two cartons of 24 are 48 pieces; 6 + 1 pieces of 48 is 14.6 %, a whole 15 half up; never 6 + 24.
         assertThat(packed.get("received_qty").asString()).isEqualTo("48.000");
-        assertThat(packed.get("damaged_qty").asString()).isEqualTo("6.000");
-        assertThat(packed.get("damaged_pct").asInt()).isEqualTo(13);
+        assertThat(packed.get("damaged_qty").asString()).isEqualTo("7.000");
+        assertThat(packed.get("damaged_pct").asInt()).isEqualTo(15);
     }
 
     /** Issue #854 item 1: a void dated after the period does not change it; one inside the period does. */
