@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, configure, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useEffect, useState, type ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../../api/client';
@@ -20,6 +20,9 @@ import { StockPage } from './stock';
 // the fabricated retail mock; every name and figure is made up.
 
 vi.setConfig({ testTimeout: 20000 });
+// A navigation loads the destination's lazy route module first, which under the whole suite's load can take longer than the
+// default second, so the waits here allow ten (a full run once timed out at Back to the list).
+configure({ asyncUtilTimeout: 10000 });
 
 const BRANCH_A = '00000000-0000-4000-8000-0000000000a1';
 const BRANCH_B = '00000000-0000-4000-8000-0000000000a2';
