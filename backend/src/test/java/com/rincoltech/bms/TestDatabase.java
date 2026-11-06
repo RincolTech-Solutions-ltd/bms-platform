@@ -107,10 +107,10 @@ public final class TestDatabase {
 
     // JUSTIFICATION-A3: issue #132's "the dry run writes nothing" needs every table's count, shared by two tests.
     /**
-     * The row count of every table the owner can read: of this business for a table with a tenant, and in all for one
-     * without (the platform's own; the test profile runs no scheduler, so nothing else writes them meanwhile); and the last
-     * value of every sequence, which a rolled-back insert still advances (review of #869). Issue #132: a dry run leaves
-     * every count and every sequence as it was.
+     * The row count of every table, each of which the owner must read: of this business for a table with a tenant, and in
+     * all for one without (the platform's own; the test profile runs no scheduler, so nothing else writes them meanwhile);
+     * and the last value of every sequence, which a rolled-back insert still advances (review of #869). Issue #132: a dry
+     * run leaves every count and every sequence as it was.
      */
     public static Map<String, Long> rowCounts(UUID tenantId) {
         JdbcClient owner = owner();
@@ -118,9 +118,19 @@ public final class TestDatabase {
                         SELECT table_name FROM information_schema.columns
                          WHERE table_schema = 'public' AND column_name = 'tenant_id'
                         """).query(String.class).list());
+        // A table or sequence the owner cannot read would compare as nothing, so the check would hold without testing
+        // anything (review of d8d1e5b on #869): there must be none.
+        List<String> unreadable = owner.sql("""
+                        SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                         WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'S')
+                           AND NOT has_table_privilege(c.oid, 'SELECT')
+                        """).query(String.class).list();
+        if (!unreadable.isEmpty()) {
+            throw new IllegalStateException("the owner cannot read " + unreadable);
+        }
         List<String> tables = owner.sql("""
                         SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-                         WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND has_table_privilege(c.oid, 'SELECT')
+                         WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
                          ORDER BY 1
                         """).query(String.class).list();
         Map<String, Long> counts = new TreeMap<>();
@@ -135,7 +145,8 @@ public final class TestDatabase {
                                     .single()
                             : owner.sql(sql).query(Long.class).single());
         }
-        owner.sql("SELECT schemaname || '.' || sequencename, coalesce(last_value, 0) FROM pg_sequences")
+        // NULL is a sequence never used (readable, as checked above); -1 tells it from one used up to 0.
+        owner.sql("SELECT schemaname || '.' || sequencename, coalesce(last_value, -1) FROM pg_sequences")
                 .query((rs, n) -> counts.put("sequence " + rs.getString(1), rs.getLong(2)))
                 .list();
         return counts;
