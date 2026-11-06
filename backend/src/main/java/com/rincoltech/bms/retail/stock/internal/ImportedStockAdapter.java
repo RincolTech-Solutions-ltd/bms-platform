@@ -53,7 +53,7 @@ class ImportedStockAdapter implements ImportedStock {
 
     @Override
     public void add(Opening at, UUID productId, BigDecimal qty, UUID importId) {
-        quickAdd.addOpening(at.branchId(), productId, qty, at.day());
+        quickAdd.addOpening(at.branchId(), productId, qty, at.day(), importId);
     }
 
     @Override

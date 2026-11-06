@@ -7,6 +7,8 @@ import { setupHelper, type SetupHelperApi } from '../../../api/setup-helper';
 import { ItemDraftList, ListReader, useSetupHelper } from '../setup-helper/setup-helper';
 import { fromItemDraft, itemsCsv, type ItemEdit } from '../setup-helper/setup-helper-state';
 import { Gate, Note, Problem, useProfitAccess, useToast } from './ui';
+import { useStaff } from '../context';
+import { holds } from './permissions';
 import { Hint } from '../../../app/ui/Hint';
 import { AddManyForm } from './add-many';
 
@@ -85,6 +87,7 @@ function FileImport({ helperApi, shop }: { helperApi: SetupHelperApi; shop?: str
   const queryClient = useQueryClient();
   const profit = useProfitAccess();
   const helper = useSetupHelper(helperApi);
+  const { me } = useStaff();
   const [draft, setDraft] = useState<ItemEdit[] | null>(null);
   const { show, toast } = useToast();
   const [text, setText] = useState('');
@@ -143,7 +146,8 @@ function FileImport({ helperApi, shop }: { helperApi: SetupHelperApi; shop?: str
           {profit ? '' : ' Leave the buying price out.'} Check the file first: nothing is saved until you add the items.
         </Note>
       </div>
-      {helper.enabled && (
+      {/* Review of #871: the helper's reading stays an administrator's (ADR-102), so an owner without it never sees the box. */}
+      {helper.enabled && holds(me, 'core.settings.manage') && (
         <ListReader
           photos={helper.photos}
           tour="import-helper"

@@ -178,6 +178,7 @@ class ProductImportService {
         ImportedStock.Opening at = anyQty ? stock.check(request.branchId(), occurredAt, onlineAsOf) : null;
         List<StockPending> stockPending = new ArrayList<>();
         int stockRows = 0;
+        int stockSkipped = 0;
 
         Set<String> existing = repo.productCodes();
         // Issue #345: the optional barcode columns, several codes per cell separated by spaces or |.
@@ -232,6 +233,8 @@ class ProductImportService {
             java.math.BigDecimal qty = qtyText.isEmpty() ? null : quantity(qtyText);
             boolean stockOnly = withStockOnly
                     && YES.contains(cell(cells, columns, "stock_only").strip().toLowerCase(Locale.ROOT));
+            // Review of #871: a skipped row would drop its quantity, so an apply with such a row adds nothing (below).
+            int lost = qty != null && qty.signum() > 0 ? 1 : 0;
             if (code == null && !auto) {
                 problem = "The code holds a special character.";
             } else if (code != null && code.length() > 40) {
@@ -312,12 +315,14 @@ class ProductImportService {
                 code = "";
             } else if (existing.contains(key)) {
                 skipped++;
+                stockSkipped += lost;
                 report.add(new ImportRow(
                         line, code, description.strip(), "skipped", "An item with this code exists already."));
                 continue;
             }
             if (!auto && !seen.add(key)) {
                 skipped++;
+                stockSkipped += lost;
                 report.add(new ImportRow(
                         line,
                         code,
@@ -338,6 +343,7 @@ class ProductImportService {
             if (sameName != null) {
                 seen.remove(key);
                 skipped++;
+                stockSkipped += lost;
                 report.add(new ImportRow(
                         line,
                         code,
@@ -356,6 +362,7 @@ class ProductImportService {
             if (sameLine != null) {
                 seen.remove(key);
                 skipped++;
+                stockSkipped += lost;
                 report.add(new ImportRow(
                         line,
                         code,
@@ -452,9 +459,23 @@ class ProductImportService {
                         errors + (errors == 1 ? " row has" : " rows have")
                                 + " a problem. Nothing was added. Run the check to see which rows, fix them and try again.");
             }
+            // Review of #871: a row with a quantity is never skipped on an apply, or its stock would be lost unseen (a
+            // name added on another phone after the check, or a list sent from the outbox). Nothing is added; the check
+            // then shows the row with Add to its stock.
+            if (stockSkipped > 0) {
+                throw ApiException.rule(
+                        "import_stock_skipped",
+                        stockSkipped
+                                + (stockSkipped == 1
+                                        ? " row with a quantity names an item"
+                                        : " rows with a quantity name items")
+                                + " already in your list, so its stock would not be added. Nothing was added. Check the list"
+                                + " again and choose Add to its stock.");
+            }
             Map<Integer, UUID> madeIds = new HashMap<>();
             try {
                 Map<Integer, String> made = apply(
+                        stockRows,
                         madeIds,
                         pending,
                         categories,
@@ -514,6 +535,7 @@ class ProductImportService {
 
     /** Adds the rows; returns the code made for each row that had none, by its place in the report. */
     private Map<Integer, String> apply(
+            int stockOnlyRows,
             Map<Integer, UUID> madeIds,
             List<Pending> pending,
             Map<String, UUID> categories,
@@ -675,11 +697,13 @@ class ProductImportService {
         summary.put("make_codes", makeCodes);
         summary.put("categories_created", newCategories.size());
         summary.put("units_created", newUnits.size());
+        // Issue #870: the new items that came with stock, and the rows that added stock to an item already in the list.
         summary.put(
                 "with_stock",
                 pending.stream()
                         .filter(p -> p.qty() != null && p.qty().signum() > 0)
                         .count());
+        summary.put("stock_added", stockOnlyRows);
         audit.record(AuditLog.Entry.created("retail.product.imported", PRODUCT, null, null, summary));
         return made;
     }

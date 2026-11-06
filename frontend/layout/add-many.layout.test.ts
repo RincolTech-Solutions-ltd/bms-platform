@@ -58,6 +58,11 @@ describe.each([360, 390, 412])('Add many items at %ipx wide', (width) => {
       expect((sell?.y ?? 0) > (name?.y ?? 0), 'the selling price sits below the name').toBe(true);
       const another = await page.getByRole('button', { name: 'Add another row' }).boundingBox();
       expect(another?.height ?? 0).toBeGreaterThanOrEqual(47.5);
+      // Review of #871: the Paste a list and From a file summaries are 48px targets too.
+      for (const summary of await page.locator('summary').all()) {
+        const box = await summary.boundingBox();
+        expect(box?.height ?? 0, `${await summary.textContent()} is a 48px target`).toBeGreaterThanOrEqual(47.5);
+      }
     }
     await page.close();
   });

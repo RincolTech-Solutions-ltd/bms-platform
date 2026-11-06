@@ -139,4 +139,5 @@ opening stock path.
 the owner saves again.
 
 **Watch for:** a list kept offline is checked only when it arrives; a name added meanwhile makes it a refused entry to fix on the
-phone. A file from before #870 that relied on a comma decimal being stripped is now refused on that row.
+phone: on an apply a row with a quantity is never skipped (422 `import_stock_skipped`, nothing added), so no stock is dropped
+unseen (review of #871). A file from before #870 that relied on a comma decimal being stripped is now refused on that row.

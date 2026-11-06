@@ -206,17 +206,23 @@ class QuickAddService {
      * add adds it, one opening movement under the balance row's lock, dated {@code day} (today, or the day a list kept on the
      * phone was made). The branch was checked by {@link ImportedStockAdapter#check} before any item was made.
      */
-    void addOpening(UUID branch, UUID productId, BigDecimal qty, LocalDate day) {
+    void addOpening(UUID branch, UUID productId, BigDecimal qty, LocalDate day, UUID importId) {
         ProductSnapshot product = catalogue
                 .find(productId)
                 .orElseThrow(() -> ApiException.validation(
                         List.of(new FieldProblem("product_id", "unknown_product", "No such item."))));
         ledger.lock(branch, product.id());
-        addStock(UUID.randomUUID(), branch, product, qty, day, IMPORT_NOTE);
+        // Review of #871: every movement and entry of one import carries its id, so its stock is traced to it.
+        addStock(importId, branch, product, qty, day, IMPORT_NOTE, SOURCE + ":" + importId + ":" + UUID.randomUUID());
     }
 
     /** One opening movement at the branch's average and its entry against opening balance equity, as the import's opening stock. */
     private UUID addStock(UUID id, UUID branch, ProductSnapshot product, BigDecimal qty, LocalDate today, String from) {
+        return addStock(id, branch, product, qty, today, from, SOURCE + ":" + id);
+    }
+
+    private UUID addStock(
+            UUID id, UUID branch, ProductSnapshot product, BigDecimal qty, LocalDate today, String from, String key) {
         long cost = ledger.averageCost(branch, product.id());
         UUID movementId = ledger.record(
                         today,
@@ -230,7 +236,7 @@ class QuickAddService {
                 "Opening stock from " + from,
                 SOURCE,
                 id,
-                SOURCE + ":" + id,
+                key,
                 List.of(Leg.debit("inventory", value), Leg.credit("opening_balance_equity", value))));
         audited(id, branch, product, qty, cost, null, null, null);
         return movementId;

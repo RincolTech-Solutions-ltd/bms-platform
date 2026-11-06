@@ -40,6 +40,13 @@ const { testOffline } = await import('../../../offline/test-kit');
 const owner = mockMe('admin');
 const branch = owner.branches?.[0]?.id ?? '';
 
+/** An owner who may not add stock anywhere: the rows have no How many, so the import may skip a row. */
+function withoutCount(): Me {
+  const scopes = { ...(owner.permission_scopes ?? {}) };
+  delete scopes['retail.stocktake.commit'];
+  return { ...owner, permissions: (owner.permissions ?? []).filter((p) => p !== 'retail.stocktake.commit'), permission_scopes: scopes };
+}
+
 function withoutProfit(): Me {
   return { ...owner, permissions: (owner.permissions ?? []).filter((p) => p !== 'retail.profit.read') };
 }
@@ -255,6 +262,43 @@ describe('Add many items', () => {
     fireEvent.click(saveButton());
     await waitFor(() => expect(applies()).toHaveLength(2));
     expect(applies()[1]?.[3]?.key).not.toBe(applies()[0]?.[3]?.key);
+  });
+
+  // JUSTIFICATION-A3: the review of #871 asks the two ways an apply can leave a row unadded; one test each.
+  it('keeps a row the apply did not add on the screen, never counting it done (review of #871)', async () => {
+    let applied = false;
+    importProducts.mockImplementation(async (csv: string, dry: boolean) => {
+      // Between the check and the apply another phone adds Test Soap: the apply skips it and adds Test Brush.
+      if (!dry) {
+        applied = true;
+        existing = { 'Test Soap': 'GNR-0042' };
+      }
+      return answer(csv, dry);
+    });
+    open(withoutCount());
+    type('am-name-1', 'Test Soap');
+    type('am-sell-1', '2500');
+    type('am-name-2', 'Test Brush');
+    type('am-sell-2', '800');
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(applied).toBe(true));
+    expect((await screen.findByTestId('am-result')).textContent).toBe('1 item added, 1 needs a look.');
+    expect(input('am-name-1').value).toBe('Test Soap');
+  });
+
+  it('says why when the apply refuses a row with a quantity, and keeps every row (review of #871)', async () => {
+    importProducts.mockImplementation(async (csv: string, dry: boolean) => {
+      if (!dry) throw new RetailError('1 row with a quantity names an item already in your list, so its stock would not be added. Nothing was added.', 422, 'import_stock_skipped');
+      return answer(csv, dry);
+    });
+    open();
+    type('am-name-1', 'Test Soap');
+    type('am-qty-1', '24');
+    type('am-sell-1', '2500');
+    fireEvent.click(saveButton());
+    expect(await screen.findByText(/so its stock would not be added\. Nothing was added\./)).toBeTruthy();
+    expect(input('am-name-1').value).toBe('Test Soap');
+    expect(input('am-qty-1').value).toBe('24');
   });
 
   it('moves to the next cell on Enter, and adds a row after the last one', async () => {

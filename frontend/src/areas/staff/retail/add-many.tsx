@@ -171,7 +171,10 @@ export function AddManyForm() {
     },
     onSuccess: (answer, plan) => {
       const kept = isKept(answer);
-      const sent = new Set(plan.keys);
+      // Review of #871: a row the apply did not add stays on the screen, never counted done; the next check marks it.
+      const notAdded = new Set(kept ? [] : (answer.rows ?? [])
+        .filter((row) => row.outcome !== 'added' && row.outcome !== 'stock').map((row) => plan.keys[rowOf(row.line)]));
+      const sent = new Set(plan.keys.filter((k) => !notAdded.has(k)));
       const left = draft.rows.filter((r) => !sent.has(r.key) && !isBlank(r));
       const needLook = left.length;
       // The group is remembered as on Quick add, once an item is added with it at that shop.

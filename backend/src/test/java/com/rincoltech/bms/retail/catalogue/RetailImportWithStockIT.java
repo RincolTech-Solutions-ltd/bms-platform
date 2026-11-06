@@ -181,6 +181,46 @@ class RetailImportWithStockIT extends IntegrationTest {
         assertThat(products()).isEqualTo(1);
     }
 
+    // JUSTIFICATION-A3: the review of #871 asks a test of the name race and of the import's trace, one each.
+    @Test
+    void aRowWithAQuantityIsNeverSkippedOnApplySoNoStockIsLostUnseen() {
+        // Review of #871: the check passes Test Soap with 24; another phone then adds Test Soap; the apply (or a list
+        // from the outbox) must not skip it with 200 and drop the 24: nothing is added and the words say why.
+        String list =
+                HEADER + "\nTest Soap,Test Cleaning,Piece,24,2000,2500\nTest Brush,Test Cleaning,Piece,3,500,800\n";
+        assertThat(check(list, hq).getBody().get("added").asInt()).isEqualTo(2);
+        apply(HEADER + "\nTest Soap,Test Cleaning,Piece,5,2000,2500\n", hq);
+        UUID soap = productNamed("Test Soap");
+
+        ResponseEntity<JsonNode> r = apply(list, hq);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(r.getBody().get("code").asString()).isEqualTo("import_stock_skipped");
+        assertThat(r.getBody().toString()).contains("Add to its stock");
+        assertThat(products()).isEqualTo(1);
+        assertThat(stockAt(hq, soap)).isEqualByComparingTo("5");
+        // A file without quantities still skips a name already held, as before #870.
+        String noQty = "description,category,unit,sell_price\nTest Soap,Test Cleaning,Piece,2500\n";
+        ResponseEntity<JsonNode> plain = api.post("/products/import?dry_run=false", body(noQty, hq), ADMIN);
+        assertThat(plain.getStatusCode()).as("%s", plain.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(plain.getBody().get("skipped").asInt()).isEqualTo(1);
+    }
+
+    @Test
+    void anImportsStockIsTracedToItByItsMovementsAndEntries() {
+        // Review of #871: every opening movement and journal entry of one apply carries the same source id.
+        apply(HEADER + "\nTest Trace Cup,Test Home,Piece,4,100,200\nTest Trace Plate,Test Home,Piece,6,150,300\n", hq);
+        assertThat(scalar(
+                        "SELECT count(DISTINCT source_id) FROM retail_stock_movements WHERE tenant_id = ?"
+                                + " AND note = 'Import items'",
+                        t.tenantId()))
+                .isEqualTo(1);
+        assertThat(scalar(
+                        "SELECT count(DISTINCT source_id) FROM journal_entries WHERE tenant_id = ?"
+                                + " AND source_type = 'retail.quick_add'",
+                        t.tenantId()))
+                .isEqualTo(1);
+    }
+
     @Test
     void aCommaUsedAsADecimalPointIsRefusedAndThousandsCommasAreRead() {
         ResponseEntity<JsonNode> r = check(
