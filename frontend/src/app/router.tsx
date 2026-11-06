@@ -170,7 +170,7 @@ const retailEvaluationRoute = retailScreen('/evaluation', 'Business evaluation')
 const retailControlsRoute = retailScreen('/controls', 'Controls').lazy(() => import('../areas/staff/retail/controls').then((m) => m.Route));
 const retailCatalogueRoute = retailScreen('/catalogue', 'Catalogue').lazy(() => import('../areas/staff/retail/catalogue').then((m) => m.Route));
 // Issue #798: `category` opens the items of one category, so a category name elsewhere links to them.
-const retailProductsRoute = retailScreen('/catalogue/products', 'Items', textParams('category')).lazy(() => import('../areas/staff/retail/catalogue-products').then((m) => m.ProductsRoute));
+const retailProductsRoute = retailScreen('/catalogue/products', 'Items', textParams('category', 'unit')).lazy(() => import('../areas/staff/retail/catalogue-products').then((m) => m.ProductsRoute));
 // Items with sizes and colours (issue #384): under Items, so the trail reads Catalogue, Items, then the item.
 const retailSizesNewRoute = retailScreen('/catalogue/products/sizes/new', 'Add an item with sizes and colours').lazy(() => import('../areas/staff/retail/catalogue-variants').then((m) => m.NewFamilyRoute));
 const retailSizesJoinRoute = retailScreen('/catalogue/products/sizes/join', 'Put items together as sizes').lazy(() => import('../areas/staff/retail/catalogue-variants').then((m) => m.JoinRoute));
