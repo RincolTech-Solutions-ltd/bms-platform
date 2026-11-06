@@ -520,7 +520,13 @@ class ImportPreviewIT extends IntegrationTest {
         assertThat(dry.current()).isTrue();
         assertThat(dry.previewMatches()).isTrue();
         assertThat(dry.by()).isEqualTo(operator);
-        assertThat(dry.writer()).isEqualTo(writer.identity());
+        // The writers are the run's template loaders, one line per batch, never the script a test hands them.
+        String template = FixtureShopTemplate.class.getName();
+        assertThat(dry.writer().lines())
+                .containsExactly(
+                        "1 fixture_shop_v1 " + template + " items " + template + "$$Lambda",
+                        "2 fixture_shop_v1 " + template + " customers " + template + "$$Lambda",
+                        "3 fixture_shop_v1 " + template + " sales " + template + "$$Lambda");
         CommitReport report = dry.report();
         assertThat(report.mode()).isEqualTo(CommitReport.DRY_RUN);
         assertThat(report.failure()).isNull();

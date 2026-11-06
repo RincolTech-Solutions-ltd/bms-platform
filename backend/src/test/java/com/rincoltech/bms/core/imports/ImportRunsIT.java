@@ -88,13 +88,14 @@ class ImportRunsIT extends IntegrationTest {
         return runId;
     }
 
-    /** Binds the run's batches to a mapping of the test-only template, as an upload with a mapping would. */
+    /**
+     * Binds the run's batches to a mapping of the test-only template, as an upload with a mapping would. Called inside
+     * the business's context.
+     */
     void scripted(UUID runId) {
-        UUID mapping = as(
-                t,
-                () -> mappings.latest("scripted")
-                        .orElseGet(() -> mappings.save("scripted", ScriptedTemplate.mapping(), operator, null))
-                        .id());
+        UUID mapping = mappings.latest("scripted")
+                .orElseGet(() -> mappings.save("scripted", ScriptedTemplate.mapping(), operator, null))
+                .id();
         TestDatabase.owner()
                 .sql("""
                         UPDATE import_batches SET mapping_id = ?, mapping_source = 'rows', template_key = ?,
