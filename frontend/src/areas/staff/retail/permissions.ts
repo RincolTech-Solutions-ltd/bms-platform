@@ -19,7 +19,7 @@ export const ENTRY_LOCATION = 'retail.entry_location.read';
 
 export type RetailScreen =
   | 'sale' | 'creditSales' | 'salesHistory' | 'orders' | 'ordersReport' | 'restock' | 'usage' | 'stock' | 'stocktake' | 'transfer' | 'transfers' | 'valuation' | 'profit' | 'salesAnalysis' | 'margins' | 'stockHealth' | 'creditControl' | 'evaluation' | 'controls'
-  | 'catalogue' | 'quickAdd' | 'products' | 'categories' | 'units' | 'suppliers' | 'buyers' | 'importer' | 'labels' | 'shopSetup'
+  | 'catalogue' | 'quickAdd' | 'addMany' | 'products' | 'categories' | 'units' | 'suppliers' | 'buyers' | 'importer' | 'labels' | 'shopSetup'
   // The trade screens of ADR-033: offered only while their capability is on (SCREEN_CAPABILITY below).
   | 'stockByLocation' | 'inTransit' | 'priceLists' | 'customerGroups' | 'customerAccounts' | 'customerAgeing' | 'documents' | 'quotations' | 'returns'
   // Optional purchasing (ADR-033, issue #198): orders and goods received, then supplier invoices, payments and what is owed. Payments
@@ -171,6 +171,8 @@ const NEEDS: Record<RetailScreen, string[]> = {
   // Quick add (issue #632): making the item is a catalogue change; adding its stock also needs retail.stocktake.commit at the
   // branch, without which the form adds the item with no stock and says who to ask.
   quickAdd: ['retail.catalogue.manage', 'retail.stock.read'],
+  // Add many items (issue #870): Quick add's permissions, a list at a time.
+  addMany: ['retail.catalogue.manage', 'retail.stock.read'],
   products: ['retail.catalogue.manage', 'retail.stock.read'],
   categories: ['retail.catalogue.manage', 'retail.stock.read'],
   units: ['retail.catalogue.manage', 'retail.stock.read'],
@@ -407,6 +409,7 @@ export const WHOLESALE_SCREENS: readonly RetailScreen[] = [
 /** The screens under Catalogue, in the order the Catalogue home lists them. */
 export const CATALOGUE_LINKS: { screen: RetailScreen; path: string; label: string; hint: string }[] = [
   { screen: 'quickAdd', path: '/staff/retail/quick-add', label: 'Quick add', hint: 'An item, its prices and how many you have, in one tap' },
+  { screen: 'addMany', path: '/staff/retail/add-many', label: 'Add many items', hint: 'Type or paste a list of items, then save them all at once' },
   { screen: 'products', path: '/staff/retail/catalogue/products', label: 'Items', hint: 'Add or change an item, change its price' },
   { screen: 'categories', path: '/staff/retail/catalogue/categories', label: 'Categories', hint: 'Group your items and add new ones inside a category' },
   { screen: 'units', path: '/staff/retail/catalogue/units', label: 'Units', hint: 'Piece, roll, kilogram and so on' },

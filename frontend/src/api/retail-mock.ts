@@ -2,7 +2,7 @@ import type {
   ApprovalWaiting,
   Barcode,
   AllBranchesRow, Category, EntryConfirmation, EntryNorms, NameHints, CapabilitiesRead, Family, Pack, Customer, InFlightReport, LocationRow, PriceChange, DailyProfit, DailyProfitRow, Product, Purchase, RetailApi, Sale, SaleLine, SimilarProduct, StockMovement, Stocktake, StockByLocation, StockRow,
-  Supplier, SupplierDelivery, SupplierDetails, Transfer, Unit, Usage, UsualPackRequest, Valuation, ValuationRow,
+  QuickAdd, Supplier, SupplierDelivery, SupplierDetails, Transfer, Unit, Usage, UsualPackRequest, Valuation, ValuationRow,
 } from './retail';
 import type { SalesQuery } from './retail';
 import { NO_SUPPLIER, RetailError, businessToday, daysBefore } from './retail';
@@ -1547,6 +1547,22 @@ export function createMockRetail(): RetailApi {
     // Issue #728, as the server: the drafts of a branch, newest first.
     unfinishedStocktakes: (branchId) => delay([...stocktakes.values()].filter((s) => s.branch_id === branchId && s.status === 'draft').reverse()
       .map((s) => ({ id: s.id, branch_id: s.branch_id, created_at: s.created_at, lines: s.lines?.length ?? 0 }))),
+
+    // Add many items (issue #870): each row through the mock's Quick add under the list's key, the refusal of a row naming it
+    // as the server does. The dev mock does not undo the rows before a refused one; the server saves nothing of such a list.
+    quickAddList: async (body, key) => {
+      const rows: QuickAdd[] = [];
+      for (const [i, row] of body.rows.entries()) {
+        try {
+          rows.push(await mock.quickAdd({ ...row, ...(row.qty !== undefined ? { branch_id: body.branch_id } : {}) }, `${key}:${i}`));
+        } catch (e) {
+          if (!(e instanceof RetailError)) throw e;
+          throw new RetailError(e.message, e.status, e.code, { ...(e.problem ?? { code: e.code, detail: e.message }), row_index: i });
+        }
+      }
+      const made = rows.filter((r) => r.item_made).length;
+      return { id: `list-${key}`, branch_id: body.branch_id, items_made: made, stock_added: rows.length - made, rows };
+    },
 
     // Quick add (issue #632, ADR-101): the item as createProduct makes it, General and Piece made when missing, then the quantity
     // added to the branch's stock as opening stock, as the server does.

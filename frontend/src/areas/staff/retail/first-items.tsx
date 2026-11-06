@@ -42,6 +42,8 @@ export function FirstItemsCard() {
         <div className="stack" data-testid="first-items-actions">
           {/* Quick add first (issue #632): one form for the item, its prices and how many there are. */}
           <ScreenLink screen="quickAdd" to="/staff/retail/quick-add" action>Quick add an item</ScreenLink>
+          {/* Issue #870: many items at once, typed or pasted as a list. */}
+          <ScreenLink screen="addMany" to="/staff/retail/add-many">Add many items as a list</ScreenLink>
           {/* Then Set up your shop beside it, then the Items page and the import (owner's order, review round 4 of #632). */}
           <ScreenLink screen="shopSetup" to="/staff/retail/catalogue/set-up">Set up your shop</ScreenLink>
           <ScreenLink screen="products" to="/staff/retail/catalogue/products">Add your first items</ScreenLink>

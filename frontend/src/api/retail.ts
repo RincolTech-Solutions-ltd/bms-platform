@@ -217,6 +217,10 @@ export type OpenStocktake = S['RetailOpenStocktake'];
 /** Quick add (issue #632): an item, its prices and how many there are at a branch, in one request. */
 export type QuickAddRequest = S['RetailQuickAddRequest'];
 export type QuickAdd = S['RetailQuickAdd'];
+/** Add many items (issue #870): a list of Quick adds at one branch, saved in one request under one key. */
+export type QuickAddListRequest = S['RetailQuickAddListRequest'];
+export type QuickAddListRow = S['RetailQuickAddListRow'];
+export type QuickAddList = S['RetailQuickAddList'];
 export type StocktakeLine = S['RetailStocktakeLine'];
 export type Valuation = S['RetailValuation'];
 export type ValuationRow = S['RetailValuationRow'];
@@ -687,6 +691,8 @@ export interface RetailApi {
   unfinishedStocktakes(branchId: string): Promise<OpenStocktake[]>;
   /** Quick add (issue #632): makes the item and adds its stock at the branch as opening stock in one transaction; takes the Idempotency-Key of its form. */
   quickAdd(body: QuickAddRequest, idempotencyKey: string): Promise<QuickAdd>;
+  /** Add many items (issue #870): every row one Quick add at the list's branch, one transaction, one key for the list. */
+  quickAddList(body: QuickAddListRequest, idempotencyKey: string): Promise<QuickAddList>;
   /** Every product with its balance in each branch the caller may read (#144). */
   listStockAllBranches(q: { query?: string; categoryId?: string; negativeOnly?: boolean; level?: StockLevel; includeClosed?: boolean; includeInactive?: boolean; signal?: AbortSignal }): Promise<AllBranchesStock>;
   /** One branch, or every branch in the caller's scope when `branchId` is absent (#144). */
@@ -1585,6 +1591,9 @@ const realRetail: RetailApi = {
 
   async quickAdd(body, key) {
     return unwrap(await api.POST('/api/v1/retail/quick-add', { params: { header: { 'Idempotency-Key': key } }, body }));
+  },
+  async quickAddList(body, key) {
+    return unwrap(await api.POST('/api/v1/retail/quick-add/list', { params: { header: { 'Idempotency-Key': key } }, body }));
   },
 
   async valuation({ branchId, asOf }) {

@@ -154,6 +154,8 @@ const retailStockRoute = retailScreen('/stock', 'Stock', textParams('item', 'bra
 const retailItemPageRoute = retailScreen('/items/$productId', 'Item').lazy(() => import('../areas/staff/retail/item-page').then((m) => m.Route));
 // Quick add (issue #632): `name` is what Sell's search typed before it found nothing, so the form starts with it.
 const retailQuickAddRoute = retailScreen('/quick-add', 'Quick add', textParams('name')).lazy(() => import('../areas/staff/retail/quick-add').then((m) => m.Route));
+// Add many items (issue #870): rows and a paste box, saved as one list.
+const retailAddManyRoute = retailScreen('/add-many', 'Add many items').lazy(() => import('../areas/staff/retail/add-many').then((m) => m.Route));
 // Count it now (issue #700): `item` is the item just added, put on the sheet ready to type, and `from` the screen it came from.
 const retailStocktakeRoute = retailScreen('/stocktake', WORDS.countStock, textParams('item', 'from', 'finish')).lazy(() => import('../areas/staff/retail/stocktake').then((m) => m.Route));
 const retailTransferRoute = retailScreen('/transfer', 'Move stock').lazy(() => import('../areas/staff/retail/transfer').then((m) => m.Route));
@@ -451,6 +453,7 @@ export const router = createRouter({
         retailItemPageRoute,
         retailStocktakeRoute,
         retailQuickAddRoute,
+        retailAddManyRoute,
         retailTransferRoute,
         retailTransfersRoute,
         retailStockByLocationRoute,

@@ -19,8 +19,8 @@ export interface OutboxLine {
   totalMinor: number;
 }
 
-/** The other daily forms kept on the phone while offline (issue #812, ADR-067 decision 13). */
-export type EntryKind = 'expense' | 'savings' | 'banking' | 'withdrawal' | 'purchase' | 'transfer' | 'usage';
+/** The other daily forms kept on the phone while offline (issue #812, ADR-067 decision 13); a list of items (issue #870). */
+export type EntryKind = 'expense' | 'savings' | 'banking' | 'withdrawal' | 'purchase' | 'transfer' | 'usage' | 'items';
 
 /** An entry that is not a sale: the route it goes to, the body as the form built it, and how to show and fix it. */
 export interface OutboxEntry {

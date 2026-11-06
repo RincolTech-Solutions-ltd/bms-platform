@@ -29,7 +29,7 @@ export function AddPanel({ label, open, onOpen, onClose, children }: { label: st
 }
 
 export const TILE_ICONS: Partial<Record<RetailScreen, keyof typeof icons>> = {
-  products: 'stock', categories: 'categories', units: 'units', suppliers: 'restock', buyers: 'customerAccounts', importer: 'importer', labels: 'labels', shopSetup: 'shop',
+  products: 'stock', categories: 'categories', units: 'units', suppliers: 'restock', buyers: 'customerAccounts', importer: 'importer', labels: 'labels', shopSetup: 'shop', addMany: 'addMany',
 };
 
 export function CatalogueLinks() {

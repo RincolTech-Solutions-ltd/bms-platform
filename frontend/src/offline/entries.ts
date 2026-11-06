@@ -12,6 +12,8 @@ export const ENTRY_PATHS: Record<EntryKind, string> = {
   purchase: '/api/v1/retail/purchases',
   transfer: '/api/v1/retail/transfers',
   usage: '/api/v1/retail/usage',
+  // Add many items (issue #870): the whole list is one entry under one key.
+  items: '/api/v1/retail/quick-add/list',
 };
 
 /** The name of each kind, as the list and the toasts say it. */
@@ -23,6 +25,7 @@ export const ENTRY_NAMES: Record<EntryKind, string> = {
   purchase: 'Delivery',
   transfer: 'Stock move',
   usage: 'Usage or damage',
+  items: 'List of items',
 };
 
 /**

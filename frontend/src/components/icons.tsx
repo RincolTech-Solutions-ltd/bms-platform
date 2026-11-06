@@ -231,6 +231,13 @@ export const icons = {
       <path d="M19 3v4M17 5h4" />
     </Svg>
   ),
+  // A list of lines with a plus: Add many items, a whole list at once (issue #870).
+  addMany: (
+    <Svg>
+      <path d="M4 6h10M4 11h10M4 16h6" />
+      <path d="M17 13v8M13 17h8" />
+    </Svg>
+  ),
   // A gem: what the stock is worth.
   valuation: (
     <Svg>
