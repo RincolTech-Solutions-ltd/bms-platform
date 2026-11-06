@@ -1380,7 +1380,7 @@ only, no new table, index or grant (`bms_app` already has `SELECT, INSERT, UPDAT
   stamp of the run now equals its stamp; `ready` needs one that counts, did not fail and matched the preview. It holds no
   personal value: any text of it that names a personal value of the run's staged rows is stored as hidden.
 - **`import_batches`** gains `report jsonb` (an object: the batch's part of the run's report, written in the batch's commit
-  transaction with its counts, so a real run's report, resumed or not, is its committed batches' parts in `seq` order).
+  transaction with its counts, so a real run's report, resumed or not, is its committed batches' parts in the order they committed, the template's dependency order since #133).
 
 Added by `V143__import_commit.sql` (issue #133, FR-IMP-07, ADR-027 decisions 4 and 7, chapter 13 sections 13.10 and 13.14.1),
 expand only:
