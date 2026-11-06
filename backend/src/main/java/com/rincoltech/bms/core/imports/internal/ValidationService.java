@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -139,7 +140,8 @@ class ValidationService implements ImportValidation {
 
     /**
      * Everything pass 1 learns of a run: the run, its batches and their stamps, the template and the engine with its index,
-     * the batches in commit order with their inputs, the review, and the first row of each identity (for a link).
+     * the batches in commit order with their inputs, the review, the first row of each identity (for a link) and the cells
+     * each identity has in the run (to tell a changed row).
      */
     private record Prepared(
             RunRow run,
@@ -149,7 +151,8 @@ class ValidationService implements ImportValidation {
             List<BatchRow> ordered,
             List<BatchInput> inputs,
             ReviewState review,
-            Map<String, UUID> rowsByKey) {}
+            Map<String, UUID> rowsByKey,
+            Map<String, Set<String>> shasByKey) {}
 
     private static final String BATCHES = """
             SELECT id, seq, status, source_filename, mapping_id, mapping_source, template_key, template_version,
@@ -278,7 +281,7 @@ class ValidationService implements ImportValidation {
         }
         ReviewState review = read(here, () -> ReviewState.load(jdbc, runId));
         if (batches.isEmpty()) {
-            return new Prepared(run, seen, null, null, List.of(), List.of(), review, Map.of());
+            return new Prepared(run, seen, null, null, List.of(), List.of(), review, Map.of(), Map.of());
         }
         ImportTemplate template = templates.require(
                 batches.getFirst().templateKey(), batches.getFirst().templateVersion());
@@ -296,10 +299,12 @@ class ValidationService implements ImportValidation {
         }
         // Pass 1: what the run holds, with the edits in force.
         Map<String, UUID> rowsByKey = new HashMap<>();
+        Map<String, Set<String>> shasByKey = new HashMap<>();
         for (BatchInput input : inputs) {
             readRows(input.batchId(), here, staged -> {
                 String key = engine.rowKey(input, staged.row());
                 rowsByKey.putIfAbsent(key, staged.row().rowId());
+                shasByKey.computeIfAbsent(key, k -> new HashSet<>()).add(staged.sha());
                 engine.index(input, reviewed(staged, review.row(key, staged.sha())));
             });
         }
@@ -309,7 +314,7 @@ class ValidationService implements ImportValidation {
                     .forEach((set, keys) -> engine.addExisting(set, template.existingKeys(set, keys)));
             return null;
         });
-        return new Prepared(run, seen, template, engine, ordered, inputs, review, rowsByKey);
+        return new Prepared(run, seen, template, engine, ordered, inputs, review, rowsByKey, shasByKey);
     }
 
     /** The row with the review's edits read in place of their fields' cells. */
@@ -430,7 +435,9 @@ class ValidationService implements ImportValidation {
         List<Object[]> issues = new ArrayList<>();
         Consumer<Staged> each = staged -> {
             SourceRow row = staged.row();
-            ReviewState.Row decided = p.review().row(engine.rowKey(input, row), staged.sha());
+            String rowKey = engine.rowKey(input, row);
+            ReviewState.Row decided = p.review()
+                    .row(rowKey, staged.sha(), p.shasByKey().getOrDefault(rowKey, Set.of(staged.sha())));
             RowResult result = engine.validate(input, reviewed(staged, decided));
             rows[0]++;
             updates.add(new Object[] {

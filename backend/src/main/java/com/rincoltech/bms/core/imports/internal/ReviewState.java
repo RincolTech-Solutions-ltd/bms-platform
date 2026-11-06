@@ -105,8 +105,18 @@ final class ReviewState {
                 .single();
     }
 
-    /** What the review decided for the row of this identity with these cells. */
+    /** What the review decided for the row of this identity with these cells, without asking whether it changed. */
     Row row(String rowKey, String sha) {
+        return row(rowKey, sha, null);
+    }
+
+    /**
+     * The same, and whether the row changed since it was reviewed: a deciding resolution of its identity was made on cells
+     * that no row of the run with that identity has now ({@code present}: the SHA-256 of each such row's cells), and none on
+     * its own. So two rows of one reference with different cells (a duplicate the queue resolves on one of them) never mark
+     * each other changed; only cells that are gone from the run do.
+     */
+    Row row(String rowKey, String sha, Set<String> present) {
         List<Made> all = byRow.get(rowKey);
         if (all == null) {
             return Row.NONE;
@@ -123,7 +133,7 @@ final class ReviewState {
             boolean here = m.sha().equals(sha);
             if (DECIDING.contains(m.kind())) {
                 reviewedHere |= here;
-                reviewedElsewhere |= !here;
+                reviewedElsewhere |= !here && present != null && !present.contains(m.sha());
             }
             if (!here) {
                 continue;

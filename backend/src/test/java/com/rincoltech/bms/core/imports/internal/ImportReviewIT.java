@@ -510,6 +510,9 @@ class ImportReviewIT extends IntegrationTest {
         Batch items = run.batches().get(ITEMS);
         resolve(issue(items, 4, "CODE_DUPLICATE"), "override", null, "The twin is the same fabricated kettle");
         resolve(issue(items, 5, "REQUIRED_MISSING"), "exclude_row", null, "The fabricated source has no name here");
+        // Lines 9 and 10 share one reference with different cells: resolving line 10 never marks line 9 changed.
+        resolve(issue(items, 10, "CODE_DUPLICATE"), "override", null, "The copy is the same fabricated tray");
+        assertThat(onLine(items, 9)).isEmpty();
         // The customer sends the file again with line 4 changed and line 5 as it was.
         String original = new String(golden(ITEMS), StandardCharsets.UTF_8);
         String changed = original.replace("FAB -001,Fabricated Kettle Twin,pcs,45000", "FAB -001,Fabricated Kettle Twin,pcs,46000");
@@ -534,8 +537,11 @@ class ImportReviewIT extends IntegrationTest {
         assertThat(count("SELECT count(*) FROM import_rows WHERE batch_id = ? AND source_row_no = 5 AND excluded_by IS NOT"
                         + " NULL", again.id()))
                 .isEqualTo(1);
-        // Rows without a resolution are as before.
+        // The duplicate pair: line 10 keeps its override, line 9 is not taken for a changed row.
         assertThat(onLine(again, 10)).extracting(Issue::code).containsExactly("DUPLICATE_SOURCE_REF", "CODE_DUPLICATE");
+        assertThat(issue(again, 10, "CODE_DUPLICATE").status()).isEqualTo("resolved");
+        assertThat(issue(again, 10, "DUPLICATE_SOURCE_REF").status()).isEqualTo("open");
+        assertThat(onLine(again, 9)).isEmpty();
 
         // Reviewed again as it now is: the question goes away and stays away; the warning is the operator's to decide.
         resolve(changedRow, "accept_suggestion", null, null);
