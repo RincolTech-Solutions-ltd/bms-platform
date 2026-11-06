@@ -3561,6 +3561,7 @@ class MigrationOrderIT {
 
             assertThat(owner.sql("SELECT status = 'in_review' AND dry_run_report IS NULL AND dry_run_at IS NULL"
                                     + " AND dry_run_by IS NULL AND dry_run_stamp IS NULL AND dry_run_preview_matches IS NULL"
+                                    + " AND dry_run_writer IS NULL"
                                     + " FROM import_runs WHERE id = ?")
                             .param(run)
                             .query(Boolean.class)
@@ -3577,7 +3578,8 @@ class MigrationOrderIT {
                             .update())
                     .hasMessageContaining("import_runs_dry_run_whole");
             assertThat(owner.sql("UPDATE import_runs SET dry_run_report = '{}', dry_run_at = now(), dry_run_by = ?,"
-                                    + " dry_run_stamp = ?, dry_run_preview_matches = true WHERE id = ?")
+                                    + " dry_run_stamp = ?, dry_run_preview_matches = true,"
+                                    + " dry_run_writer = 'fabricated writer' WHERE id = ?")
                             .params(UUID.randomUUID(), "0".repeat(32), run)
                             .update())
                     .isEqualTo(1);

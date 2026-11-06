@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.tuple;
 
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
+import com.rincoltech.bms.core.documents.internal.StoredObjects;
 import com.rincoltech.bms.core.imports.CommitReport;
 import com.rincoltech.bms.core.imports.ImportRuns;
 import com.rincoltech.bms.core.imports.ImportRuns.DryRun;
@@ -13,6 +14,8 @@ import com.rincoltech.bms.kernel.TenantContext;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -21,7 +24,9 @@ import java.util.function.Supplier;
 import org.assertj.core.groups.Tuple;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationContext;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -41,6 +46,9 @@ class RetailDryRunIT extends IntegrationTest {
 
     @Autowired
     ImportRuns runs;
+
+    @Autowired
+    ApplicationContext context;
 
     TestDatabase.Fixture t;
     TestDatabase.Fixture other;
@@ -75,12 +83,17 @@ class RetailDryRunIT extends IntegrationTest {
     void theDryRunWritesNothingAndItsReportEqualsARealImportRetailRun() {
         UUID run = inReview(t);
         Map<String, Long> before = TestDatabase.rowCounts(t.tenantId());
+        List<String> files = StoredObjects.keys(context, "tenants/" + t.tenantId() + "/");
 
         DryRun dry = dryRun(run);
 
         assertThat(TestDatabase.rowCounts(t.tenantId()))
-                .as("every table, the audit log included")
+                .as("every table and sequence, the audit log included")
                 .isEqualTo(before);
+        assertThat(StoredObjects.keys(context, "tenants/" + t.tenantId() + "/")).isEqualTo(files);
+        // Every opening journal as the ledger held it inside the dry run: balanced, the credit read from its lines.
+        assertThat(dry.report().journals())
+                .allSatisfy(j -> assertThat(j.creditMinor()).isEqualTo(j.debitMinor()));
         CommitReport report = dry.report();
         assertThat(report.failure()).as(report.render()).isNull();
         assertThat(report.checksum()).contains("match=yes");
@@ -106,13 +119,38 @@ class RetailDryRunIT extends IntegrationTest {
         // The real path for now: import-retail itself, on the same export.
         ImportReport real = importer.run(t.slug(), RetailImportIT.SAMPLE, false);
         assertThat(real.failed()).as(real.render()).isFalse();
-        CommitReport committed = real.toCommitReport();
+        CommitReport committed = importer.toCommitReport(t.slug(), real);
         assertThat(committed.mode()).isEqualTo(CommitReport.COMMIT);
         assertThat(report.sameAs(committed))
                 .as("dry run:%n%s%nreal run:%n%s", report.render(), committed.render())
                 .isTrue();
         assertThat(committed.render().replace("committed, one transaction per batch", "x"))
                 .isEqualTo(report.render().replace("dry run, every write rolled back", "x"));
+    }
+
+    // JUSTIFICATION-A3: the review of #869 asks that a changed export is not the export rehearsed; a test case.
+    @Test
+    void theExportsContentIsPartOfTheWritersIdentity(@TempDir Path copy) throws IOException {
+        for (String name : RetailImporter.FILES) {
+            Path file = RetailImportIT.SAMPLE.resolve(name);
+            if (Files.isRegularFile(file)) {
+                Files.copy(file, copy.resolve(name));
+            }
+        }
+        String sample = importer.exportWriter(RetailImportIT.SAMPLE, null).identity();
+        assertThat(importer.exportWriter(copy, null).identity())
+                .as("the same files")
+                .isEqualTo(sample);
+        UUID run = inReview(t);
+        assertThat(dryRun(run).writer()).isEqualTo(sample);
+
+        // A file changed after the dry run: the writer is not the one rehearsed.
+        Path balances = copy.resolve("balances.jsonl");
+        Files.writeString(balances, Files.readString(balances) + "\n");
+        assertThat(importer.exportWriter(copy, null).identity()).isNotEqualTo(sample);
+        String laterStart = importer.exportWriter(RetailImportIT.SAMPLE, LocalDate.of(2026, 10, 1))
+                .identity();
+        assertThat(laterStart).as("another first live day").isNotEqualTo(sample);
     }
 
     @Test

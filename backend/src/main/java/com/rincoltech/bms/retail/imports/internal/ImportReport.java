@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 /**
  * What one run did, printed as plain text at the end of the command: counts per file, anomalies,
@@ -120,28 +121,35 @@ public final class ImportReport {
     // JUSTIFICATION-A3: issue #132 tells the framework's report what this one holds, one shape for every run.
     /**
      * Tells a report of the import framework (issue #132) what this one holds: a line per file, the anomalies with their file
-     * and line, the opening journals (inventory per branch, and the cash book's per branch, each with its debit and credit
-     * totals), the negative balances and the notes as notes, and the checksum. A failure is not told: the framework records
-     * the batch that failed itself.
+     * and line, the opening journals (inventory per branch, and the cash book's per branch, each with the debit and credit
+     * totals {@code ledger} reads for its entry), the negative balances and the notes as notes, and the checksum. A failure
+     * is not told: the framework records the batch that failed itself.
      */
-    public void into(CommitReport.Sink sink) {
+    public void into(CommitReport.Sink sink, Function<String, long[]> ledger) {
         files.forEach((name, c) -> sink.counts(name, c.read, c.written, c.existing, c.skipped));
         sourced.forEach(a -> sink.anomaly(a.file(), a.line(), a.message()));
-        openings.forEach(
-                o -> sink.journal(o.branch(), "inventory", o.debitMinor(), o.debitMinor(), o.status(), o.entryNo()));
+        // The debit and credit the ledger holds for each entry, read back from its lines, never the amount meant
+        // (review of #869): an entry posted unbalanced or in part shows as it is.
+        openings.forEach(o -> {
+            long[] posted = o.entryNo() == null ? new long[2] : ledger.apply(o.entryNo());
+            sink.journal(o.branch(), "inventory", posted[0], posted[1], o.status(), o.entryNo());
+        });
         cashOpenings.forEach(o -> {
-            long sum = o.cashMinor() + o.bankMinor() + o.savingsMinor() + o.advancesMinor();
-            sink.journal(o.branch(), "cash_book", sum, sum, o.status(), o.entryNo());
+            long[] posted = o.entryNo() == null ? new long[2] : ledger.apply(o.entryNo());
+            sink.journal(o.branch(), "cash_book", posted[0], posted[1], o.status(), o.entryNo());
         });
         negatives.forEach(n -> sink.note("negative source balance, excluded from the opening journal: " + n));
         notes.forEach(sink::note);
         sink.checksum(checksum);
     }
 
-    /** This report in the framework's shape, for a run of the command itself. */
-    public CommitReport toCommitReport() {
+    /**
+     * This report in the framework's shape, for a run of the command itself; {@code ledger} gives an entry's debit and
+     * credit totals by its number.
+     */
+    public CommitReport toCommitReport(Function<String, long[]> ledger) {
         CommitReport.Builder builder = new CommitReport.Builder(null);
-        into(builder);
+        into(builder, ledger);
         if (failure != null) {
             builder.fail(failure);
         }

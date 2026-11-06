@@ -27,7 +27,9 @@ public interface ImportRuns {
      * {@code in_review} to {@code ready}, {@code committed} to {@code signed_off} to {@code purged}, and {@code cancelled}
      * from any state before {@code committing}. {@code committing} and {@code committed} are reached only through
      * {@link #commit}. {@code ready} needs a stored dry run that still counts, did not fail and matched the preview
-     * (issue #132): 409 {@code dry_run_required}, {@code dry_run_failed} or {@code preview_differs} otherwise.
+     * (issue #132): 409 {@code dry_run_required}, {@code dry_run_failed} or {@code preview_differs} otherwise; the commit
+     * checks the same again and, with the resume, refuses a writer other than the one the dry run rehearsed (409
+     * {@code dry_run_writer_differs}).
      */
     Run transition(UUID runId, String status);
 
@@ -59,12 +61,14 @@ public interface ImportRuns {
     /**
      * The dry run of a run {@code in_review} (issue #132, ADR-027 decision 5): the commit's own batch code, with the same
      * writer, inside one outer transaction that is rolled back, so nothing is written (no business, ledger or audit row);
-     * then its report is stored on the run with the stamp of the run's inputs and whether the preview's opening journals
-     * equal the dry run's. It is not stopped by the kill switch or the halt, which guard writes. A writer that throws stops
-     * the dry run at that batch, and the stored report says which batch failed and the kind of failure. Refused with 409
-     * {@code run_not_open} for a run in another state, 409 {@code batch_not_parsed} while a file of the run is stored and not
-     * read or was refused, and 409 {@code run_changed} when a batch, issue or resolution of the run changed while it ran
-     * (nothing is stored). Takes its own transactions; none may be open around it.
+     * then its report is stored on the run with the stamp of the run's inputs, the writer's identity and whether the
+     * preview's balances equal the dry run's. It holds the business's commit loop while it runs, as a commit does, so a
+     * commit or resume of the business meanwhile is refused at once with {@code IMPORT_IN_PROGRESS} rather than waiting on
+     * its locks, and the other way round. It is not stopped by the kill switch or the halt, which guard writes. A writer
+     * that throws stops the dry run at that batch, and the stored report says which batch failed and the kind of failure.
+     * Refused with 409 {@code run_not_open} for a run in another state, 409 {@code batch_not_parsed} while a file of the run
+     * is stored and not read or was refused, and 409 {@code run_changed} when a batch, issue or resolution of the run
+     * changed while it ran (nothing is stored). Takes its own transactions; none may be open around it.
      */
     DryRun dryRun(UUID runId, BatchWriter writer, UUID by);
 
@@ -78,10 +82,11 @@ public interface ImportRuns {
     CommitReport commitReport(UUID runId);
 
     /**
-     * A stored dry run: its report, when and by whom it ran, whether the preview's opening journals equalled its own, and
-     * whether it still counts (the run's inputs are those it ran on).
+     * A stored dry run: its report, when and by whom it ran, whether the preview's balances equalled its own, the identity of
+     * the writer it rehearsed ({@link BatchWriter#identity()}), and whether it still counts (the run's inputs, the
+     * application's version and the business's committed imports are those it ran on).
      */
-    record DryRun(CommitReport report, Instant at, UUID by, boolean previewMatches, boolean current) {}
+    record DryRun(CommitReport report, Instant at, UUID by, boolean previewMatches, String writer, boolean current) {}
 
     /** The platform kill switch {@code imports.commit_enabled}. */
     boolean commitEnabled();

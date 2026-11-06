@@ -4,10 +4,15 @@ import com.rincoltech.bms.core.imports.BatchWriter;
 import com.rincoltech.bms.core.imports.ImportForecast;
 import com.rincoltech.bms.core.imports.ImportTemplate;
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import org.springframework.stereotype.Component;
 
 /**
@@ -113,15 +118,31 @@ class FixtureShopTemplate implements ImportTemplate {
         return "items".equals(entitySet) && keys.contains(EXISTING_ITEM) ? Set.of(EXISTING_ITEM) : Set.of();
     }
 
-    /** The one branch the fixture's opening journals are posted to: the test business's head office. */
-    static final String BRANCH = "HQ";
+    /** The test business's head office: stock takes and loans. */
+    static final String HEAD_OFFICE = "HQ";
 
-    // JUSTIFICATION-A3: issue #132 adds the forecast to the template contract; the fixture predicts by its own rules.
+    /** The test business's second branch: sales without a named buyer. */
+    static final String SECOND_BRANCH = "BR2";
+
+    /** The day the fixture's loans are aged at: the day after the golden run's cutover in Kampala. */
+    static final LocalDate AS_AT = LocalDate.of(2026, 10, 1);
+
+    static final ZoneId ZONE = ZoneId.of("Africa/Kampala");
+
+    // JUSTIFICATION-A3: issue #132 and its review add the forecast to the template contract; the fixture's rules.
     /**
-     * The fixture's predicted balances (issue #132), by rules made up for the test: a stock take ({@code adjustment}) puts
-     * its quantity on hand at the value it is paid at, and a sale to a named buyer is owed (a receivable). Each makes one
-     * opening journal of the head office, {@code inventory} and {@code trade_debtors}, debit and credit alike. The
-     * integration test's writer posts by the same rules, so the preview must equal the ledger after the commit.
+     * The fixture's predicted balances (issue #132), by rules made up for the test, one rule per kind of balance:
+     *
+     * <ul>
+     *   <li>a stock take ({@code adjustment}) puts its quantity on hand at the head office at the value it is paid at:
+     *       stock, and the {@code inventory} opening journal of the head office;
+     *   <li>a sale to a named buyer is a loan of the head office of its amount, aged in days from its day to
+     *       {@link #AS_AT} ({@link #bucket}): loan principal, an arrears bucket and the {@code loans_receivable} journal;
+     *   <li>a sale without a named buyer is owed to the second branch: a receivable and its {@code trade_debtors} journal.
+     * </ul>
+     *
+     * The integration test's writer posts by the same rules, and the test reads the books after the commit, so the preview
+     * must equal what was posted, per branch.
      */
     @Override
     public ImportForecast forecast() {
@@ -129,7 +150,8 @@ class FixtureShopTemplate implements ImportTemplate {
             BigDecimal qty = BigDecimal.ZERO;
             long value;
             long owed;
-            boolean stock;
+            long lent;
+            final Map<String, long[]> buckets = new TreeMap<>();
 
             @Override
             public void row(String entitySet, Map<String, Object> values) {
@@ -138,10 +160,14 @@ class FixtureShopTemplate implements ImportTemplate {
                 }
                 long amount = (Long) values.get("amount");
                 if ("adjustment".equals(values.get("kind"))) {
-                    stock = true;
                     qty = qty.add((BigDecimal) values.get("qty"));
                     value = Math.addExact(value, amount);
                 } else if (values.get("customer") != null) {
+                    lent = Math.addExact(lent, amount);
+                    long[] b = buckets.computeIfAbsent(bucket((Instant) values.get("sold_at")), k -> new long[2]);
+                    b[0]++;
+                    b[1] = Math.addExact(b[1], amount);
+                } else {
                     owed = Math.addExact(owed, amount);
                 }
             }
@@ -149,20 +175,41 @@ class FixtureShopTemplate implements ImportTemplate {
             @Override
             public Balances balances() {
                 List<Journal> journals = new ArrayList<>();
-                if (value != 0) {
-                    journals.add(new Journal(BRANCH, "inventory", value, value));
+                List<Stock> stock = new ArrayList<>();
+                List<Amount> receivables = new ArrayList<>();
+                List<Amount> loans = new ArrayList<>();
+                List<ArrearsBucket> arrears = new ArrayList<>();
+                if (value != 0 || qty.signum() != 0) {
+                    stock.add(new Stock(HEAD_OFFICE, qty, value));
+                    journals.add(new Journal(HEAD_OFFICE, "inventory", value, value));
+                }
+                if (lent != 0) {
+                    loans.add(new Amount(HEAD_OFFICE, lent));
+                    buckets.forEach((bucket, b) ->
+                            arrears.add(new ArrearsBucket(HEAD_OFFICE, bucket, Math.toIntExact(b[0]), b[1])));
+                    journals.add(new Journal(HEAD_OFFICE, "loans_receivable", lent, lent));
                 }
                 if (owed != 0) {
-                    journals.add(new Journal(BRANCH, "trade_debtors", owed, owed));
+                    receivables.add(new Amount(SECOND_BRANCH, owed));
+                    journals.add(new Journal(SECOND_BRANCH, "trade_debtors", owed, owed));
                 }
-                return new Balances(
-                        stock ? List.of(new Stock(BRANCH, qty, value)) : List.of(),
-                        owed == 0 ? List.of() : List.of(new Amount(BRANCH, owed)),
-                        List.of(),
-                        List.of(),
-                        journals);
+                return new Balances(stock, receivables, loans, arrears, journals);
             }
         };
+    }
+
+    /** The days-past-due bucket of a loan made at that moment, aged to {@link #AS_AT} in Kampala. */
+    static String bucket(Instant madeAt) {
+        return bucket(madeAt.atZone(ZONE).toLocalDate());
+    }
+
+    /** The days-past-due bucket of a loan made on that day, aged to {@link #AS_AT}. */
+    static String bucket(LocalDate madeOn) {
+        long days = ChronoUnit.DAYS.between(madeOn, AS_AT);
+        if (days <= 0) {
+            return "current";
+        }
+        return days <= 30 ? "1-30" : days <= 60 ? "31-60" : days <= 90 ? "61-90" : "over-90";
     }
 
     @Override

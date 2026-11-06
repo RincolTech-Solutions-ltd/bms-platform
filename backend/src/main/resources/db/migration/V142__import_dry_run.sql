@@ -7,10 +7,11 @@
 --
 -- `import_runs` gains the stored dry run: the report (`dry_run_report`, the same shape a real run stores: per batch read,
 -- written, existing and skipped, the anomalies with file and line, the opening journals with their debit and credit totals,
--- the notes and the balances checksum), when and by whom it ran, the stamp of the run's inputs it ran on (`dry_run_stamp`,
--- an MD5 over every batch's status, file, mapping version, parse and row count, every issue's status and version, every
--- resolution, the cutover moment and the policy decisions), and whether the preview's opening journals equalled the dry
--- run's (`dry_run_preview_matches`). A run becomes `ready` only with a stored dry run whose stamp is the run's stamp now, that
+-- the balances written, the notes and the balances checksum), when and by whom it ran, the stamp of the run's inputs it ran
+-- on (`dry_run_stamp`, an MD5 over the application's version, every batch's status, file, mapping version, parse and row
+-- count, every issue's status and version, every resolution, every staged row's review columns and typed values, the
+-- cutover moment, the policy decisions and the last batch any run of the business committed), whether the preview's
+-- balances equalled the dry run's (`dry_run_preview_matches`) and the writer it rehearsed (`dry_run_writer`). A run becomes `ready` only with a stored dry run whose stamp is the run's stamp now, that
 -- did not fail and whose preview matched: a batch, mapping version or resolution changed after it makes the stamp differ,
 -- and the stored report no longer counts. The dry run writes nothing else: its commit runs inside one outer transaction
 -- that is rolled back, so no business table, no ledger table and no audit row changes (the test counts every table).
@@ -19,8 +20,9 @@
 -- journals, notes and checksum), written in the batch's own commit transaction, so the report of a real run, resumed or not,
 -- is its committed batches' parts in order.
 --
--- Personal data: none. The writer's anomaly messages are checked against the personal values of the row they name before
--- they are kept, and one that holds such a value is stored as hidden; counts, codes and amounts are not personal.
+-- Personal data: none. Every text a writer gives the report (source names, anomalies, journal fields, notes, the checksum)
+-- is checked against the personal values of every staged row of the run before it is kept, and one that holds such a value
+-- is stored as hidden; counts, codes and amounts are not personal.
 --
 -- Locks, said plainly: ADD COLUMN without a default is a catalogue change under ACCESS EXCLUSIVE on each table for
 -- milliseconds, behind the lock_timeout below; no row is rewritten.
@@ -34,11 +36,14 @@ ALTER TABLE import_runs
     ADD COLUMN dry_run_by              uuid,
     ADD COLUMN dry_run_stamp           char(32)     CHECK (dry_run_stamp ~ '^[0-9a-f]{32}$'),
     ADD COLUMN dry_run_preview_matches boolean,
+    -- What the writer the dry run rehearsed is (BatchWriter.identity): a commit or resume with another one is refused.
+    ADD COLUMN dry_run_writer          varchar(300),
     ADD CONSTRAINT import_runs_dry_run_whole
         CHECK ((dry_run_report IS NULL) = (dry_run_at IS NULL)
                AND (dry_run_report IS NULL) = (dry_run_by IS NULL)
                AND (dry_run_report IS NULL) = (dry_run_stamp IS NULL)
-               AND (dry_run_report IS NULL) = (dry_run_preview_matches IS NULL));
+               AND (dry_run_report IS NULL) = (dry_run_preview_matches IS NULL)
+               AND (dry_run_report IS NULL) = (dry_run_writer IS NULL));
 
 ALTER TABLE import_batches
     ADD COLUMN report jsonb CHECK (report IS NULL OR jsonb_typeof(report) = 'object');

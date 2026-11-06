@@ -108,8 +108,9 @@ public final class TestDatabase {
     // JUSTIFICATION-A3: issue #132's "the dry run writes nothing" needs every table's count, shared by two tests.
     /**
      * The row count of every table the owner can read: of this business for a table with a tenant, and in all for one
-     * without (the platform's own; the test profile runs no scheduler, so nothing else writes them meanwhile). Issue #132:
-     * a dry run leaves every count as it was.
+     * without (the platform's own; the test profile runs no scheduler, so nothing else writes them meanwhile); and the last
+     * value of every sequence, which a rolled-back insert still advances (review of #869). Issue #132: a dry run leaves
+     * every count and every sequence as it was.
      */
     public static Map<String, Long> rowCounts(UUID tenantId) {
         JdbcClient owner = owner();
@@ -134,6 +135,9 @@ public final class TestDatabase {
                                     .single()
                             : owner.sql(sql).query(Long.class).single());
         }
+        owner.sql("SELECT schemaname || '.' || sequencename, coalesce(last_value, 0) FROM pg_sequences")
+                .query((rs, n) -> counts.put("sequence " + rs.getString(1), rs.getLong(2)))
+                .list();
         return counts;
     }
 

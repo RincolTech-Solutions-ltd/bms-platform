@@ -29,6 +29,24 @@ public interface BatchWriter {
      */
     Map<String, Object> write(UUID runId, UUID batchId, int seq, Checkpoint checkpoint);
 
+    /**
+     * What this writer is, stored with a dry run and compared at the commit and the resume (issue #132): a run commits only
+     * with the writer its dry run rehearsed ({@code dry_run_writer_differs} otherwise). The default is the writer's class,
+     * without the per-process suffix of a lambda's class, so it is the same after a restart. A writer whose behaviour
+     * depends on more than its code names that too: the retail export's writer adds the SHA-256 of the export's files, and
+     * a template's loader (#133) its template and version. Every lambda of one class is one writer by default, whatever
+     * its site, since the JDK numbers lambda classes per process.
+     */
+    default String identity() {
+        String name = getClass().getName();
+        int lambda = name.indexOf("$$Lambda");
+        if (lambda >= 0) {
+            return name.substring(0, lambda + "$$Lambda".length());
+        }
+        int hidden = name.indexOf('/');
+        return hidden < 0 ? name : name.substring(0, hidden);
+    }
+
     /** The guard the writer calls after each row, and the report it tells what it did (issue #132). */
     interface Checkpoint extends CommitReport.Sink {
 

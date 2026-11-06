@@ -2,6 +2,7 @@ package com.rincoltech.bms.retail.imports.internal;
 
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.imports.BatchWriter;
+import com.rincoltech.bms.core.imports.CommitReport;
 import com.rincoltech.bms.core.jobs.TenantJobs;
 import com.rincoltech.bms.core.tenancy.BranchProvisioning;
 import com.rincoltech.bms.core.tenancy.Branches;
@@ -25,8 +26,11 @@ import com.rincoltech.bms.retail.stock.RetailHistory;
 import com.rincoltech.bms.retail.stock.StockLedger;
 import com.rincoltech.bms.retail.stock.StockLedger.HistoricalMovement;
 import com.rincoltech.bms.retail.stock.StockLedger.Position;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -290,16 +294,73 @@ public class RetailImporter {
      * checkpoint's kill switch is not read between rows: the command never read it either.
      */
     public BatchWriter exportWriter(Path dir, LocalDate firstLiveDate) {
-        return (runId, batchId, seq, checkpoint) -> {
-            ImportReport report = new ImportReport("", dir.toString(), false);
-            importAll(readExport(dir), report, firstLiveDate);
-            if (report.failed()) {
-                // The cause is in the command's own report; it may quote a row, so it is not the exception's message.
-                throw new IllegalStateException("the retail export stopped at a file");
+        // JUSTIFICATION-A3: the review of #869 asks for the export's content in the writer's identity and the ledger's
+        // own totals in the report; both are the writer's, so they sit with it.
+        return new BatchWriter() {
+            @Override
+            public Map<String, Object> write(UUID runId, UUID batchId, int seq, Checkpoint checkpoint) {
+                ImportReport report = new ImportReport("", dir.toString(), false);
+                importAll(readExport(dir), report, firstLiveDate);
+                if (report.failed()) {
+                    // The cause is in the command's own report; it may quote a row, so it is not the message.
+                    throw new IllegalStateException("the retail export stopped at a file");
+                }
+                report.into(checkpoint, RetailImporter.this::ledgerTotals);
+                return Map.of();
             }
-            report.into(checkpoint);
-            return Map.of();
+
+            /**
+             * The export's own content is part of what this writer is (review of #869): the SHA-256 of every file it
+             * reads, so a dry run of one export never stands for a commit of files changed since, and the first live day.
+             */
+            @Override
+            public String identity() {
+                return "retail.import-retail export sha256:" + exportSha256(dir) + " first-live:" + firstLiveDate;
+            }
         };
+    }
+
+    /**
+     * The command's report in the framework's shape, with each opening journal's debit and credit as the tenant's ledger
+     * holds them for its entry: the real run the framework's dry run is compared with (issue #132).
+     */
+    public CommitReport toCommitReport(String tenantSlug, ImportReport report) {
+        return tenants.callAsTenant(
+                tenantSlug, "retail", () -> transactions.execute(s -> report.toCommitReport(this::ledgerTotals)));
+    }
+
+    /** An entry's debit and credit totals by its number, from its lines, in the caller's transaction. */
+    private long[] ledgerTotals(String entryNo) {
+        return jdbc.sql("""
+                        SELECT coalesce(sum(l.debit), 0), coalesce(sum(l.credit), 0)
+                          FROM journal_entries e JOIN journal_lines l ON l.entry_id = e.id
+                         WHERE e.entry_no = ?
+                        """)
+                .param(entryNo)
+                .query((rs, n) -> new long[] {rs.getLong(1), rs.getLong(2)})
+                .single();
+    }
+
+    /** The SHA-256 over the names and bytes of every file of the export the command reads, in a fixed order. */
+    static String exportSha256(Path dir) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            List<String> names = new ArrayList<>(FILES);
+            names.addAll(CASH_FILES);
+            for (String name : names) {
+                Path file = dir.resolve(name);
+                digest.update((name + "\n").getBytes(StandardCharsets.UTF_8));
+                if (Files.isRegularFile(file)) {
+                    digest.update(Files.readAllBytes(file));
+                }
+                digest.update((byte) 0);
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        } catch (IOException e) {
+            throw new UncheckedIOException("the export could not be read", e);
+        }
     }
 
     /** Every file of the export directory, read once; an absent file is an empty one. */

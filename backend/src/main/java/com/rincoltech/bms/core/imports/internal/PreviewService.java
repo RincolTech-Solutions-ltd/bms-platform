@@ -38,9 +38,9 @@ import tools.jackson.databind.json.JsonMapper;
  * held back by an open blocking issue, else written. The rows to write are given to the template's forecast in commit
  * order, 1,000 at a time, with their typed values.
  *
- * <p>It also answers, for the dry run's report, which personal values a staged row holds ({@link #privacy}): the cells of
- * the columns its mapping feeds into a personal field, and those fields' typed values, so an anomaly that names one is kept
- * as hidden.
+ * <p>It also answers, for the commit's report, which personal values the run's staged rows hold ({@link #privacy}): the
+ * cells of the columns a mapping feeds into a personal field, and those fields' typed values, so any text of the report
+ * that names one, on any line or in any batch, is kept as hidden.
  */
 @Service
 class PreviewService implements ImportPreview {
@@ -269,26 +269,94 @@ class PreviewService implements ImportPreview {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // The personal values of a staged row, for the report.
+    // The personal values of a run's staged rows, for the report (review of #869).
     // ---------------------------------------------------------------------------------------------
 
-    /** The personal values of the rows of one batch, read line by line inside the caller's transaction. */
-    interface RowPrivacy {
+    /**
+     * The personal values of every staged row of a run that is read with a mapping, every batch and every line: the cells
+     * its mapping feeds into a personal field and those fields' typed values, of four characters or more (the validation's
+     * rule), and their digits, of seven or more. {@link #holds} tells whether a text names one anywhere in it, so a message
+     * on one line that quotes the buyer of another, or a note of one batch that quotes a row of another, is caught too.
+     */
+    static final class RunPrivacy {
 
-        /** The personal values the row on this line holds, of four characters or more; empty for none. */
-        List<String> values(int line);
+        /** Values up to this length are found by substring lookups; a longer one by a plain search, there are few. */
+        private static final int INDEXED = 64;
+
+        private static final int SHORTEST_DIGITS = 7;
+
+        private final Set<String> values = new HashSet<>();
+        private final List<String> longValues = new ArrayList<>();
+        private final Set<String> digits = new HashSet<>();
+        private int shortest = Integer.MAX_VALUE;
+        private int longest;
+        private int longestDigits;
+
+        void add(String value) {
+            String s = value.strip();
+            if (s.length() < SHORTEST_PERSONAL) {
+                return;
+            }
+            if (s.length() > INDEXED) {
+                longValues.add(s);
+            } else if (values.add(s)) {
+                shortest = Math.min(shortest, s.length());
+                longest = Math.max(longest, s.length());
+            }
+            String d = national(s);
+            if (d.length() >= SHORTEST_DIGITS && digits.add(d)) {
+                longestDigits = Math.max(longestDigits, d.length());
+            }
+        }
+
+        /** Whether the text holds a personal value, as written or by its digits ({@code 700000101} in a phone). */
+        boolean holds(String text) {
+            if (text == null || text.isEmpty()) {
+                return false;
+            }
+            for (int i = 0; i < text.length() && !values.isEmpty(); i++) {
+                for (int len = shortest; len <= longest && i + len <= text.length(); len++) {
+                    if (values.contains(text.substring(i, i + len))) {
+                        return true;
+                    }
+                }
+            }
+            for (String v : longValues) {
+                if (text.contains(v)) {
+                    return true;
+                }
+            }
+            String d = text.replaceAll("\\D", "");
+            for (int i = 0; i < d.length() && !digits.isEmpty(); i++) {
+                for (int len = SHORTEST_DIGITS; len <= longestDigits && i + len <= d.length(); len++) {
+                    if (digits.contains(d.substring(i, i + len))) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        /** The digits of a value without a leading 256 or 0, so one phone written three ways compares equal. */
+        private static String national(String v) {
+            String d = v.replaceAll("\\D", "");
+            if (d.startsWith("256") && d.length() == 12) {
+                return d.substring(3);
+            }
+            return d.startsWith("0") && d.length() == 10 ? d.substring(1) : d;
+        }
     }
 
-    /** A batch read without a mapping, or a line without a row: nothing to look for. */
-    private static final RowPrivacy NONE = line -> List.of();
-
-    /** How to find a batch's personal values: the columns its mapping feeds into personal fields, and those fields. */
-    RowPrivacy privacy(UUID batchId) {
-        BatchRow b = jdbc.sql("""
+    /** The personal values of every staged row of the run, read 1,000 rows at a time inside the caller's transaction. */
+    RunPrivacy privacy(UUID runId) {
+        RunPrivacy privacy = new RunPrivacy();
+        List<BatchRow> batches = jdbc.sql("""
                         SELECT id, seq, source_filename, mapping_id, mapping_source, template_key, template_version
-                          FROM import_batches WHERE id = ?
+                          FROM import_batches
+                         WHERE run_id = ? AND status IN ('parsed', 'committed') AND mapping_id IS NOT NULL
+                         ORDER BY seq
                         """)
-                .param(batchId)
+                .param(runId)
                 .query((rs, n) -> new BatchRow(
                         rs.getObject("id", UUID.class),
                         rs.getInt("seq"),
@@ -297,66 +365,72 @@ class PreviewService implements ImportPreview {
                         rs.getString("mapping_source"),
                         rs.getString("template_key"),
                         (Integer) rs.getObject("template_version")))
-                .optional()
-                .orElse(null);
-        if (b == null || b.mappingId() == null || b.templateKey() == null) {
-            return NONE;
-        }
-        ImportTemplate template =
-                templates.find(b.templateKey(), b.templateVersion()).orElse(null);
-        Map<String, Object> source =
-                MappingValidator.sources(mappings.get(b.mappingId()).document()).get(b.source());
-        EntitySet set = template == null || source == null
-                ? null
-                : template.entitySets().stream()
-                        .filter(e -> e.key().equals(source.get("entity_set")))
-                        .findFirst()
-                        .orElse(null);
-        if (set == null) {
-            return NONE;
-        }
-        Set<String> fields =
-                set.fields().stream().filter(Field::isPersonal).map(Field::name).collect(Collectors.toSet());
-        Set<String> columns = new HashSet<>();
-        if (source.get("columns") instanceof Map<?, ?> mapped) {
-            mapped.forEach((column, target) -> {
-                if (target instanceof Map<?, ?> t && t.get("field") instanceof String field && fields.contains(field)) {
-                    columns.add(Parsing.key(column.toString()));
+                .list();
+        for (BatchRow b : batches) {
+            ImportTemplate template = b.templateKey() == null
+                    ? null
+                    : templates.find(b.templateKey(), b.templateVersion()).orElse(null);
+            Map<String, Object> source = MappingValidator.sources(
+                            mappings.get(b.mappingId()).document())
+                    .get(b.source());
+            EntitySet set = template == null || source == null
+                    ? null
+                    : template.entitySets().stream()
+                            .filter(e -> e.key().equals(source.get("entity_set")))
+                            .findFirst()
+                            .orElse(null);
+            if (set == null) {
+                continue;
+            }
+            Set<String> fields = set.fields().stream()
+                    .filter(Field::isPersonal)
+                    .map(Field::name)
+                    .collect(Collectors.toSet());
+            if (fields.isEmpty()) {
+                continue;
+            }
+            Set<String> columns = new HashSet<>();
+            if (source.get("columns") instanceof Map<?, ?> mapped) {
+                mapped.forEach((column, target) -> {
+                    if (target instanceof Map<?, ?> t
+                            && t.get("field") instanceof String field
+                            && fields.contains(field)) {
+                        columns.add(Parsing.key(column.toString()));
+                    }
+                });
+            }
+            int after = 0;
+            while (true) {
+                List<Object[]> chunk = jdbc.sql("SELECT source_row_no, raw::text, normalised::text FROM import_rows"
+                                + " WHERE batch_id = ? AND source_row_no > ? ORDER BY source_row_no LIMIT " + CHUNK)
+                        .params(b.id(), after)
+                        .query((rs, n) -> new Object[] {rs.getInt(1), rs.getString(2), rs.getString(3)})
+                        .list();
+                for (Object[] row : chunk) {
+                    after = (Integer) row[0];
+                    personal(privacy, (String) row[1], (String) row[2], columns, fields);
                 }
-            });
+                if (chunk.size() < CHUNK) {
+                    break;
+                }
+            }
         }
-        if (fields.isEmpty()) {
-            return NONE;
-        }
-        return line -> jdbc.sql(
-                        "SELECT raw::text, normalised::text FROM import_rows WHERE batch_id = ? AND source_row_no = ?")
-                .params(batchId, line)
-                .query((rs, n) -> personal(rs.getString(1), rs.getString(2), columns, fields))
-                .optional()
-                .orElse(List.of());
+        return privacy;
     }
 
-    private static List<String> personal(String raw, String normalised, Set<String> columns, Set<String> fields) {
-        List<String> out = new ArrayList<>();
+    private static void personal(
+            RunPrivacy privacy, String raw, String normalised, Set<String> columns, Set<String> fields) {
         for (Map.Entry<String, RawCell> cell : ValidationService.cells(raw).entrySet()) {
             if (columns.contains(Parsing.key(cell.getKey())) && cell.getValue().value() != null) {
-                add(out, cell.getValue().value().toString());
+                privacy.add(cell.getValue().value().toString());
             }
         }
         if (normalised != null) {
             JSON.readValue(normalised, OBJECT).forEach((field, v) -> {
                 if (fields.contains(field) && v != null) {
-                    add(out, v.toString());
+                    privacy.add(v.toString());
                 }
             });
-        }
-        return out;
-    }
-
-    private static void add(List<String> out, String v) {
-        String s = v.strip();
-        if (s.length() >= SHORTEST_PERSONAL) {
-            out.add(s);
         }
     }
 }

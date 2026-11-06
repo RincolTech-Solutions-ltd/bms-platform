@@ -3,10 +3,10 @@ package com.rincoltech.bms.core.imports.internal;
 import static com.rincoltech.bms.core.imports.internal.ImportValidationIT.assertCode;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.entry;
-import static org.assertj.core.api.Assertions.tuple;
 
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
+import com.rincoltech.bms.core.documents.internal.StoredObjects;
 import com.rincoltech.bms.core.imports.BatchWriter;
 import com.rincoltech.bms.core.imports.CommitReport;
 import com.rincoltech.bms.core.imports.ImportForecast;
@@ -31,22 +31,35 @@ import com.rincoltech.bms.core.ledger.LedgerPosting.EntryRequest;
 import com.rincoltech.bms.core.ledger.LedgerPosting.Line;
 import com.rincoltech.bms.kernel.Money;
 import com.rincoltech.bms.kernel.TenantContext;
+import com.rincoltech.bms.retail.RetailTestSupport;
+import com.rincoltech.bms.retail.stock.StockLedger;
+import com.rincoltech.bms.retail.stock.StockLedger.HistoricalMovement;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.file.Files;
+import java.sql.Date;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.context.ApplicationContext;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -56,18 +69,24 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * The preview and the dry run of issue #132 (spec section 3.6, FR-IMP-06, ADR-027 decision 5) on real PostgreSQL as
- * bms_app: the preview counts every batch's rows by outcome and predicts the balances; the dry run is the commit's code
- * inside one outer transaction that is rolled back, so every table keeps its row count, the audit log included; its report
- * equals the real run's on the same input; the preview's predicted balances equal the ledger after the commit; the report
- * holds no personal value; a stored dry run stops counting once a resolution, a mapping version or a batch of the run
- * changes; a run is ready only with a dry run that counts; and another business reaches none of it. Fabricated data only:
- * the golden files of {@code fixtures/imports/golden/} and the fixture mapping, with made-up rules for the commit.
+ * bms_app, with the review of #869: the preview counts every batch's rows by outcome and predicts every kind of balance per
+ * branch; the dry run is the commit's code inside one outer transaction that is rolled back, so every table keeps its row
+ * count, every sequence its value and storage its files, the audit log included; its report equals the real run's on the
+ * same input; the preview's predicted balances (stock quantity and value, receivables, loan principal, arrears buckets and
+ * each journal, per branch) equal the books after the commit; no text of the report names a personal value of the run; a
+ * stored dry run stops counting once a resolution, a mapping version, a batch or another run's commit changes; a run commits
+ * only with the writer its dry run rehearsed; a dry run and a commit of the business never wait on each other; and another
+ * business reaches none of it. Fabricated data only: the golden files of {@code fixtures/imports/golden/}, the fixture
+ * mapping and the fixture template's made-up rules.
  */
 class ImportPreviewIT extends IntegrationTest {
 
     static final LocalDate DAY = LocalDate.of(2026, 6, 30);
     static final String SHA = "b".repeat(64);
     static final FixtureShopTemplate TEMPLATE = new FixtureShopTemplate();
+
+    /** A writer with nothing to write: for a run whose batches hold no rows. */
+    static final BatchWriter NOTHING = (r, b, s, c) -> Map.of();
 
     private static final TypeReference<Map<String, Object>> OBJECT = new TypeReference<>() {};
     private static final JsonMapper JSON = JsonMapper.builder()
@@ -96,20 +115,33 @@ class ImportPreviewIT extends IntegrationTest {
     LedgerPosting ledger;
 
     @Autowired
+    StockLedger stock;
+
+    @Autowired
     JdbcClient jdbc;
 
     @Autowired
     PlatformTransactionManager transactionManager;
 
+    @Autowired
+    TestRestTemplate http;
+
+    @Autowired
+    ApplicationContext context;
+
     TestDatabase.Fixture t;
     TestDatabase.Fixture other;
     final UUID operator = UUID.randomUUID();
 
+    /** The retail item the fixture's stock takes are put on hand as. */
+    UUID item;
+
     @BeforeEach
     void setUp() {
-        // A retail business, so its chart has inventory, trade debtors and opening balance equity.
-        t = TestDatabase.tenant("preview", false, true);
-        other = TestDatabase.tenant("preview-b", false, true);
+        // Lending and retail, so the chart has inventory, trade debtors, loans receivable and opening balance equity.
+        t = TestDatabase.tenant("preview", true, true);
+        other = TestDatabase.tenant("preview-b", true, true);
+        item = new RetailTestSupport(http, t).product("FAB-900", 700, 900);
     }
 
     <T> T as(TestDatabase.Fixture f, Supplier<T> work) {
@@ -146,16 +178,43 @@ class ImportPreviewIT extends IntegrationTest {
         return new Run(runId, batches);
     }
 
+    /** A run of the business in review with one batch that holds no row. */
+    UUID emptyRun(TestDatabase.Fixture f) {
+        return as(f, () -> {
+            UUID run = runs.open(operator).id();
+            runs.addBatch(run, 1);
+            runs.transition(run, "uploaded");
+            runs.transition(run, "in_review");
+            return run;
+        });
+    }
+
+    /** The rows of a batch the commit would write, with their lines and typed values. */
+    List<Map.Entry<Integer, Map<String, Object>>> rowsToWrite(UUID batchId, EntitySet set) {
+        String sql = "SELECT r.source_row_no, r.normalised::text FROM import_rows r WHERE r.batch_id = ? AND "
+                + PreviewService.WRITE + " ORDER BY r.source_row_no";
+        return jdbc.sql(sql)
+                .param(batchId)
+                .query((rs, n) ->
+                        Map.entry(rs.getInt(1), PreviewService.typed(set, JSON.readValue(rs.getString(2), OBJECT))))
+                .list();
+    }
+
+    // JUSTIFICATION-A3: the review of #869 asks for every kind of balance written and read back, per branch.
     /**
-     * The commit's writer for the fixture's run, by the fixture's made-up rules (the forecast's): every row to write is
-     * counted; each new buyer is reported twice, by its number and by its name, a personal value the report must hide; and
-     * the sales' stock takes and amounts owed are posted as two opening journals of the head office. {@code extra} is added
-     * to the stock's value, to make the dry run differ from the preview.
+     * The commit's writer for the fixture's run, by the fixture template's made-up rules (those of its forecast): every
+     * row to write is counted; each new buyer is reported twice, by its number and by its name (a personal value the report
+     * must hide); a stock take puts its quantity on hand at the head office as a stock movement of the fabricated item; and
+     * the sales post three opening journals, each reported with the totals its lines hold: the head office's
+     * {@code inventory}, its {@code loans_receivable} dated the loan's day, and the second branch's {@code trade_debtors}.
+     * {@code extra} is added to the stock's value, to make the dry run differ from the preview.
      */
     BatchWriter writer(TestDatabase.Fixture f, long extra) {
         UUID inventory = f.account("inventory");
         UUID debtors = f.account("trade_debtors");
+        UUID loans = f.account("loans_receivable");
         UUID equity = f.account("opening_balance_equity");
+        UUID product = item;
         return (runId, batchId, seq, checkpoint) -> {
             String source = jdbc.sql("SELECT mapping_source FROM import_batches WHERE id = ?")
                     .param(batchId)
@@ -170,26 +229,46 @@ class ImportPreviewIT extends IntegrationTest {
                     .filter(e -> e.key().equals(set))
                     .findFirst()
                     .orElseThrow();
-            List<Object[]> rows = jdbc.sql("SELECT r.source_row_no, r.normalised::text FROM import_rows r"
-                            + " WHERE r.batch_id = ? AND " + PreviewService.WRITE + " ORDER BY r.source_row_no")
-                    .param(batchId)
-                    .query((rs, n) -> new Object[] {rs.getInt(1), rs.getString(2)})
-                    .list();
+            List<Map.Entry<Integer, Map<String, Object>>> rows = rowsToWrite(batchId, entities);
             BigDecimal qty = BigDecimal.ZERO;
             long value = 0;
             long owed = 0;
-            for (Object[] row : rows) {
-                int line = (Integer) row[0];
-                Map<String, Object> values = PreviewService.typed(entities, JSON.readValue((String) row[1], OBJECT));
+            long lent = 0;
+            LocalDate lentOn = null;
+            Map<String, long[]> buckets = new TreeMap<>();
+            for (Map.Entry<Integer, Map<String, Object>> row : rows) {
+                Map<String, Object> values = row.getValue();
                 if ("customers".equals(set)) {
-                    checkpoint.anomaly(line, "buyer " + values.get("ref_no") + " is new");
-                    checkpoint.anomaly(line, "buyer " + values.get("name") + " is new");
+                    checkpoint.anomaly(row.getKey(), "buyer " + values.get("ref_no") + " is new");
+                    checkpoint.anomaly(row.getKey(), "buyer " + values.get("name") + " is new");
                 } else if ("sales".equals(set)) {
                     long amount = (Long) values.get("amount");
+                    Instant at = (Instant) values.get("sold_at");
                     if ("adjustment".equals(values.get("kind"))) {
-                        qty = qty.add((BigDecimal) values.get("qty"));
+                        BigDecimal counted = (BigDecimal) values.get("qty");
+                        stock.recordHistorical(
+                                DAY,
+                                List.of(new HistoricalMovement(
+                                        f.headOffice(),
+                                        product,
+                                        "legacy_balance",
+                                        counted,
+                                        700,
+                                        at,
+                                        "test_import",
+                                        null,
+                                        null,
+                                        "Fabricated stock take")));
+                        qty = qty.add(counted);
                         value += amount;
                     } else if (values.get("customer") != null) {
+                        lent += amount;
+                        LocalDate on = at.atZone(FixtureShopTemplate.ZONE).toLocalDate();
+                        lentOn = lentOn == null || on.isBefore(lentOn) ? on : lentOn;
+                        long[] b = buckets.computeIfAbsent(FixtureShopTemplate.bucket(at), k -> new long[2]);
+                        b[0]++;
+                        b[1] += amount;
+                    } else {
                         owed += amount;
                     }
                 }
@@ -197,10 +276,21 @@ class ImportPreviewIT extends IntegrationTest {
             }
             if ("sales".equals(set)) {
                 value += extra;
-                String stockNo = post(f, inventory, equity, value);
-                String owedNo = post(f, debtors, equity, owed);
-                checkpoint.journal(FixtureShopTemplate.BRANCH, "inventory", value, value, "posted", stockNo);
-                checkpoint.journal(FixtureShopTemplate.BRANCH, "trade_debtors", owed, owed, "posted", owedNo);
+                String hq = FixtureShopTemplate.HEAD_OFFICE;
+                String br2 = FixtureShopTemplate.SECOND_BRANCH;
+                if (value != 0) {
+                    report(checkpoint, hq, "inventory", post(f.headOffice(), DAY, inventory, equity, value));
+                    checkpoint.stock(hq, qty, value);
+                }
+                if (lent != 0) {
+                    report(checkpoint, hq, "loans_receivable", post(f.headOffice(), lentOn, loans, equity, lent));
+                    checkpoint.loanPrincipal(hq, lent);
+                    buckets.forEach((bucket, b) -> checkpoint.arrears(hq, bucket, Math.toIntExact(b[0]), b[1]));
+                }
+                if (owed != 0) {
+                    report(checkpoint, br2, "trade_debtors", post(f.secondBranch(), DAY, debtors, equity, owed));
+                    checkpoint.receivable(br2, owed);
+                }
                 checkpoint.note(
                         "stock takes on hand: " + qty.stripTrailingZeros().toPlainString());
                 checkpoint.checksum("balances checksum: rows=1 total_qty="
@@ -210,11 +300,11 @@ class ImportPreviewIT extends IntegrationTest {
         };
     }
 
-    /** Posts one opening journal of the head office: debit the account, credit opening balance equity. */
-    String post(TestDatabase.Fixture f, UUID debit, UUID equity, long amount) {
+    /** Posts one opening journal: debit the account, credit opening balance equity; answers its entry number. */
+    String post(UUID branch, LocalDate day, UUID debit, UUID equity, long amount) {
         return ledger.post(new EntryRequest(
-                        f.headOffice(),
-                        DAY,
+                        branch,
+                        day,
                         "IMP-OPEN",
                         "Opening balance from the fabricated import",
                         "retail",
@@ -227,16 +317,34 @@ class ImportPreviewIT extends IntegrationTest {
                 .entryNo();
     }
 
-    static Map<String, Long> everyTable(UUID tenantId) {
-        return TestDatabase.rowCounts(tenantId);
+    /** Reports a posted journal with the debit and credit totals its lines hold, read back from the ledger. */
+    void report(BatchWriter.Checkpoint checkpoint, String branch, String kind, String entryNo) {
+        long[] totals = jdbc.sql("""
+                        SELECT coalesce(sum(l.debit), 0), coalesce(sum(l.credit), 0)
+                          FROM journal_entries e JOIN journal_lines l ON l.entry_id = e.id WHERE e.entry_no = ?
+                        """)
+                .param(entryNo)
+                .query((rs, n) -> new long[] {rs.getLong(1), rs.getLong(2)})
+                .single();
+        checkpoint.journal(branch, kind, totals[0], totals[1], "posted", entryNo);
     }
 
-    /** Debits less credits on one account of the business, from the ledger. */
-    long balance(TestDatabase.Fixture f, String systemKey) {
+    /** Every trace a run can leave: every table's rows, every sequence, and the business's files in storage. */
+    Map<String, Object> traces(TestDatabase.Fixture f) {
+        Map<String, Object> out = new TreeMap<>(TestDatabase.rowCounts(f.tenantId()));
+        out.put("storage", StoredObjects.keys(context, "tenants/" + f.tenantId() + "/"));
+        return out;
+    }
+
+    /** Debits less credits on one account at one branch of the business, from the ledger. */
+    long balance(TestDatabase.Fixture f, String systemKey, UUID branch) {
         return TestDatabase.owner()
-                .sql(
-                        "SELECT coalesce(sum(debit - credit), 0) FROM journal_lines WHERE tenant_id = ? AND account_id = ?")
-                .params(f.tenantId(), f.account(systemKey))
+                .sql("""
+                        SELECT coalesce(sum(l.debit - l.credit), 0)
+                          FROM journal_lines l JOIN journal_entries e ON e.id = l.entry_id
+                         WHERE l.tenant_id = ? AND l.account_id = ? AND e.branch_id = ?
+                        """)
+                .params(f.tenantId(), f.account(systemKey), branch)
                 .query(Long.class)
                 .single();
     }
@@ -251,9 +359,23 @@ class ImportPreviewIT extends IntegrationTest {
     }
 
     /** Whether the run's stored dry run still counts. */
-    boolean current(Run run) {
-        return as(t, () -> runs.dryRunReport(run.runId())).orElseThrow().current();
+    boolean current(UUID runId) {
+        return as(t, () -> runs.dryRunReport(runId)).orElseThrow().current();
     }
+
+    /** The predicted balances of the golden files by the fixture's rules, worked out by hand. */
+    static final ImportForecast.Balances GOLDEN = new ImportForecast.Balances(
+            // The stock take of till line 4: 1.5 at a fabricated 1000.
+            List.of(new ImportForecast.Stock("HQ", new BigDecimal("1.5"), 1_000)),
+            // The sale of till line 3, without a buyer: 45000 owed to the second branch.
+            List.of(new ImportForecast.Amount("BR2", 45_000)),
+            // The sale of till line 2 to buyer B-001: a loan of 90000 made on 15 September, 16 days before 1 October.
+            List.of(new ImportForecast.Amount("HQ", 90_000)),
+            List.of(new ImportForecast.ArrearsBucket("HQ", "1-30", 1, 90_000)),
+            List.of(
+                    new ImportForecast.Journal("HQ", "inventory", 1_000, 1_000),
+                    new ImportForecast.Journal("HQ", "loans_receivable", 90_000, 90_000),
+                    new ImportForecast.Journal("BR2", "trade_debtors", 45_000, 45_000)));
 
     // ---------------------------------------------------------------------------------------------
     // The preview.
@@ -262,11 +384,11 @@ class ImportPreviewIT extends IntegrationTest {
     @Test
     void thePreviewCountsRowsByOutcomeAndRecordsByTypeAndPredictsTheBalances() throws IOException {
         Run run = validated(t);
-        Map<String, Long> before = everyTable(t.tenantId());
+        Map<String, Object> before = traces(t);
 
         Preview p = as(t, () -> previews.preview(run.runId()));
 
-        assertThat(everyTable(t.tenantId())).as("a preview writes nothing").isEqualTo(before);
+        assertThat(traces(t)).as("a preview writes nothing").isEqualTo(before);
         assertThat(p.templateKey()).isEqualTo(FixtureShopTemplate.KEY);
         // Worked out from the golden files and fixtures/imports/golden/expected-issues.txt: a row with an open blocking
         // issue is held back, a warning is not, the blank line is blank.
@@ -275,17 +397,14 @@ class ImportPreviewIT extends IntegrationTest {
         assertThat(outcome(p, "fab-buyers.csv")).containsExactly(6, 3, 0, 0, 3);
         assertThat(outcome(p, "fab-till-roll.csv")).containsExactly(10, 3, 0, 1, 6);
         assertThat(p.batches()).extracting(BatchOutcome::entitySet).containsExactly("items", "customers", "sales");
-        // The stock take of line 4 (1.5 at a fabricated 1000) and the sale to a named buyer on line 2 (90000).
         ImportForecast.Balances b = p.balances();
         assertThat(b.stock()).hasSize(1);
-        assertThat(b.stock().getFirst().branch()).isEqualTo("HQ");
         assertThat(b.stock().getFirst().qty()).isEqualByComparingTo("1.5");
-        assertThat(b.stock().getFirst().valueMinor()).isEqualTo(1_000);
-        assertThat(b.receivables()).containsExactly(new ImportForecast.Amount("HQ", 90_000));
-        assertThat(b.journals())
-                .containsExactly(
-                        new ImportForecast.Journal("HQ", "inventory", 1_000, 1_000),
-                        new ImportForecast.Journal("HQ", "trade_debtors", 90_000, 90_000));
+        assertThat(ImportRunService.sameBalances(b, GOLDEN)).as("%s", b).isTrue();
+        assertThat(b.receivables()).isEqualTo(GOLDEN.receivables());
+        assertThat(b.loanPrincipal()).isEqualTo(GOLDEN.loanPrincipal());
+        assertThat(b.arrears()).isEqualTo(GOLDEN.arrears());
+        assertThat(b.journals()).isEqualTo(GOLDEN.journals());
 
         // A row the review leaves out moves from write to excluded, and its records with it.
         Batch items = run.batches().get("fab-item-list.csv");
@@ -304,24 +423,75 @@ class ImportPreviewIT extends IntegrationTest {
         assertThat(after.recordsByType()).containsEntry("items", 3);
     }
 
+    @Test
+    void theBalancesCompareSummedPerBranchAndKindAndAnyDifferenceCounts() {
+        ImportForecast.Balances shuffled = new ImportForecast.Balances(
+                List.of(
+                        new ImportForecast.Stock("HQ", new BigDecimal("1.000"), 400),
+                        new ImportForecast.Stock("HQ", new BigDecimal("0.5"), 600)),
+                GOLDEN.receivables(),
+                GOLDEN.loanPrincipal(),
+                GOLDEN.arrears(),
+                List.of(
+                        GOLDEN.journals().get(2),
+                        GOLDEN.journals().get(0),
+                        GOLDEN.journals().get(1)));
+        assertThat(ImportRunService.sameBalances(GOLDEN, shuffled)).isTrue();
+        ImportForecast.Balances otherQty = new ImportForecast.Balances(
+                List.of(new ImportForecast.Stock("HQ", new BigDecimal("2"), 1_000)),
+                GOLDEN.receivables(),
+                GOLDEN.loanPrincipal(),
+                GOLDEN.arrears(),
+                GOLDEN.journals());
+        ImportForecast.Balances otherBucket = new ImportForecast.Balances(
+                GOLDEN.stock(),
+                GOLDEN.receivables(),
+                GOLDEN.loanPrincipal(),
+                List.of(new ImportForecast.ArrearsBucket("HQ", "31-60", 1, 90_000)),
+                GOLDEN.journals());
+        ImportForecast.Balances otherBranch = new ImportForecast.Balances(
+                GOLDEN.stock(),
+                List.of(new ImportForecast.Amount("HQ", 45_000)),
+                GOLDEN.loanPrincipal(),
+                GOLDEN.arrears(),
+                GOLDEN.journals());
+        ImportForecast.Balances unbalanced = new ImportForecast.Balances(
+                GOLDEN.stock(),
+                GOLDEN.receivables(),
+                GOLDEN.loanPrincipal(),
+                GOLDEN.arrears(),
+                List.of(
+                        new ImportForecast.Journal("HQ", "inventory", 1_000, 999),
+                        GOLDEN.journals().get(1),
+                        GOLDEN.journals().get(2)));
+        for (ImportForecast.Balances differs : List.of(otherQty, otherBucket, otherBranch, unbalanced)) {
+            assertThat(ImportRunService.sameBalances(GOLDEN, differs))
+                    .as("%s", differs)
+                    .isFalse();
+        }
+    }
+
     // ---------------------------------------------------------------------------------------------
     // The dry run.
     // ---------------------------------------------------------------------------------------------
 
+    // JUSTIFICATION-A3: the review of #869 asks for sequences, files and every balance read back from the books.
     @Test
-    void theDryRunWritesNothingAndItsReportEqualsTheRealRunAndThePreviewEqualsTheBooksAfterTheCommit()
-            throws IOException {
+    void theDryRunLeavesNoTraceItsReportEqualsTheRealRunAndThePreviewEqualsTheBooksAfterTheCommit() throws IOException {
         Run run = validated(t);
         Preview preview = as(t, () -> previews.preview(run.runId()));
-        Map<String, Long> before = everyTable(t.tenantId());
+        BatchWriter writer = writer(t, 0);
+        Map<String, Object> before = traces(t);
 
-        DryRun dry = as(t, () -> runs.dryRun(run.runId(), writer(t, 0), operator));
+        DryRun dry = as(t, () -> runs.dryRun(run.runId(), writer, operator));
 
-        // Every table keeps its row count, the audit log and the ledger included; only the run row's columns change.
-        assertThat(everyTable(t.tenantId())).isEqualTo(before);
+        // Every table's rows, every sequence and the business's files are as they were, the audit log and the ledger
+        // included; only the run row's columns change.
+        assertThat(traces(t)).isEqualTo(before);
         assertThat(dry.current()).isTrue();
         assertThat(dry.previewMatches()).isTrue();
         assertThat(dry.by()).isEqualTo(operator);
+        assertThat(dry.writer()).isEqualTo(writer.identity());
         CommitReport report = dry.report();
         assertThat(report.mode()).isEqualTo(CommitReport.DRY_RUN);
         assertThat(report.failure()).isNull();
@@ -330,10 +500,9 @@ class ImportPreviewIT extends IntegrationTest {
                         new CommitReport.Source("fab-item-list.csv", 9, 4, 0, 0),
                         new CommitReport.Source("fab-buyers.csv", 6, 3, 0, 0),
                         new CommitReport.Source("fab-till-roll.csv", 10, 3, 0, 0));
-        assertThat(report.journals())
-                .extracting(
-                        CommitReport.Journal::kind, CommitReport.Journal::debitMinor, CommitReport.Journal::creditMinor)
-                .containsExactly(tuple("inventory", 1_000L, 1_000L), tuple("trade_debtors", 90_000L, 90_000L));
+        assertThat(ImportRunService.sameBalances(report.balances(), GOLDEN))
+                .as("%s", report.balances())
+                .isTrue();
         assertThat(report.checksum()).contains("match=yes");
         assertThat(report.render()).contains("dry run, every write rolled back").contains("fab-till-roll.csv");
         assertThat(as(t, () -> runs.dryRunReport(run.runId())).orElseThrow().report())
@@ -342,7 +511,7 @@ class ImportPreviewIT extends IntegrationTest {
         // The real run on the same input, with the same writer.
         as(t, () -> runs.transition(run.runId(), "ready"));
         as(t, () -> runs.recordPreImportDump(run.runId(), "pre-import-fabricated.dump", Instant.now(), SHA));
-        assertThat(as(t, () -> runs.commit(run.runId(), writer(t, 0)))).isEqualTo(CommitOutcome.COMMITTED);
+        assertThat(as(t, () -> runs.commit(run.runId(), writer))).isEqualTo(CommitOutcome.COMMITTED);
         CommitReport real = as(t, () -> runs.commitReport(run.runId()));
 
         assertThat(real.mode()).isEqualTo(CommitReport.COMMIT);
@@ -350,32 +519,106 @@ class ImportPreviewIT extends IntegrationTest {
         assertThat(real.render().replace("committed, one transaction per batch", "x"))
                 .isEqualTo(report.render().replace("dry run, every write rolled back", "x"));
 
-        // FR-IMP-06: the preview's predicted balances are the books after the commit.
+        // FR-IMP-06: the preview's predicted balances are the books after the commit, per branch, read from the ledger
+        // and the stock ledger, not from the report.
         ImportForecast.Balances predicted = preview.balances();
-        assertThat(balance(t, "inventory"))
-                .isEqualTo(predicted.stock().getFirst().valueMinor());
-        assertThat(balance(t, "trade_debtors"))
-                .isEqualTo(predicted.receivables().getFirst().amountMinor());
-        assertThat(balance(t, "opening_balance_equity"))
-                .isEqualTo(-predicted.journals().stream()
-                        .mapToLong(ImportForecast.Journal::creditMinor)
-                        .sum());
-        long debits = TestDatabase.owner()
-                .sql("SELECT coalesce(sum(debit), 0) FROM journal_lines WHERE tenant_id = ?")
-                .param(t.tenantId())
-                .query(Long.class)
-                .single();
-        assertThat(debits)
-                .isEqualTo(predicted.journals().stream()
-                        .mapToLong(ImportForecast.Journal::debitMinor)
-                        .sum());
+        BigDecimal onHand = as(t, () -> new TransactionTemplate(transactionManager).execute(s -> onHand()));
+        ImportForecast.Balances books = new ImportForecast.Balances(
+                List.of(new ImportForecast.Stock("HQ", onHand, balance(t, "inventory", t.headOffice()))),
+                List.of(new ImportForecast.Amount("BR2", balance(t, "trade_debtors", t.secondBranch()))),
+                List.of(new ImportForecast.Amount("HQ", balance(t, "loans_receivable", t.headOffice()))),
+                arrearsFromTheBooks(),
+                journalsFromTheBooks(real));
+        assertThat(ImportRunService.sameBalances(predicted, books))
+                .as("books %s", books)
+                .isTrue();
+        assertThat(balance(t, "inventory", t.secondBranch())).isZero();
+        assertThat(balance(t, "trade_debtors", t.headOffice())).isZero();
+        assertThat(balance(t, "loans_receivable", t.secondBranch())).isZero();
+    }
+
+    /** The fabricated item on hand at the head office, from the stock ledger, inside the caller's transaction. */
+    BigDecimal onHand() {
+        return stock.positions().stream()
+                .filter(p ->
+                        p.branchId().equals(t.headOffice()) && p.productId().equals(item))
+                .map(StockLedger.Position::balance)
+                .findFirst()
+                .orElse(BigDecimal.ZERO);
+    }
+
+    /** The loans receivable the head office's journals hold, aged by each entry's day to the fixture's day. */
+    List<ImportForecast.ArrearsBucket> arrearsFromTheBooks() {
+        Map<String, long[]> buckets = new TreeMap<>();
+        TestDatabase.owner()
+                .sql("""
+                        SELECT e.entry_date, sum(l.debit - l.credit) AS principal
+                          FROM journal_lines l JOIN journal_entries e ON e.id = l.entry_id
+                         WHERE l.tenant_id = ? AND l.account_id = ? AND e.branch_id = ?
+                         GROUP BY e.id, e.entry_date
+                        """)
+                .params(t.tenantId(), t.account("loans_receivable"), t.headOffice())
+                .query((rs, n) -> {
+                    LocalDate day = rs.getObject("entry_date", Date.class).toLocalDate();
+                    long[] b = buckets.computeIfAbsent(FixtureShopTemplate.bucket(day), k -> new long[2]);
+                    b[0]++;
+                    b[1] += rs.getLong("principal");
+                    return null;
+                })
+                .list();
+        List<ImportForecast.ArrearsBucket> out = new ArrayList<>();
+        buckets.forEach((bucket, b) -> out.add(new ImportForecast.ArrearsBucket("HQ", bucket, (int) b[0], b[1])));
+        return out;
+    }
+
+    /** Each journal the report names, as its lines in the ledger hold it: branch, kind, debit and credit totals. */
+    List<ImportForecast.Journal> journalsFromTheBooks(CommitReport report) {
+        List<ImportForecast.Journal> out = new ArrayList<>();
+        for (CommitReport.Journal j : report.journals()) {
+            Map<String, Object> row = TestDatabase.owner()
+                    .sql("""
+                            SELECT b.code, sum(l.debit) AS debit, sum(l.credit) AS credit
+                              FROM journal_entries e JOIN journal_lines l ON l.entry_id = e.id
+                              JOIN branches b ON b.id = e.branch_id
+                             WHERE e.tenant_id = ? AND e.entry_no = ? GROUP BY b.code
+                            """)
+                    .params(t.tenantId(), j.entryNo())
+                    .query()
+                    .singleRow();
+            long debit = ((Number) row.get("debit")).longValue();
+            long credit = ((Number) row.get("credit")).longValue();
+            assertThat(debit).as("%s is balanced in the ledger", j.entryNo()).isEqualTo(credit);
+            assertThat(List.of(debit, credit))
+                    .as("%s as reported", j.entryNo())
+                    .containsExactly(j.debitMinor(), j.creditMinor());
+            out.add(new ImportForecast.Journal((String) row.get("code"), j.kind(), debit, credit));
+        }
+        return out;
     }
 
     @Test
-    void theReportHoldsNoPersonalValue() throws IOException {
+    void noTextOfTheReportNamesAPersonalValueOfTheRun() throws IOException {
         Run run = validated(t);
+        BatchWriter good = writer(t, 0);
+        // A careless loader: names in a note, an anomaly on another file and on no line, a buyer of another line and of
+        // another batch, a phone in the checksum and a name as a source.
+        BatchWriter careless = (runId, batchId, seq, checkpoint) -> {
+            Map<String, Object> counts = good.write(runId, batchId, seq, checkpoint);
+            if (seq == 2) {
+                checkpoint.note("duplicate of Fabricated Buyer Alpha");
+                checkpoint.anomaly("fab-other.csv", 0, "buyer Fabricated Buyer Gamma is a twin");
+                checkpoint.anomaly(3, "line 3 is like the buyer of line 4, Fabricated Buyer Beta");
+                checkpoint.counts("Fabricated Buyer Delta.csv", 1, 1, 0, 0);
+                checkpoint.note("buyers checked: 6");
+            }
+            if (seq == 3) {
+                checkpoint.anomaly(2, "sold to Fabricated Buyer Epsilon");
+                checkpoint.checksum("balances checksum for +256700000102 match=yes");
+            }
+            return counts;
+        };
 
-        DryRun dry = as(t, () -> runs.dryRun(run.runId(), writer(t, 0), operator));
+        DryRun dry = as(t, () -> runs.dryRun(run.runId(), careless, operator));
 
         String text = dry.report().render();
         String stored = TestDatabase.owner()
@@ -387,22 +630,29 @@ class ImportPreviewIT extends IntegrationTest {
             assertThat(text).as("the report names %s", personal).doesNotContain(personal);
             assertThat(stored).as("the stored report names %s", personal).doesNotContain(personal);
         }
-        // A buyer's number is not personal and is kept; a buyer's name is, and its message is hidden, on every line.
-        assertThat(dry.report().anomalies())
+        CommitReport report = dry.report();
+        // A buyer's number is not personal and is kept; a buyer's name is, and so is every careless text.
+        assertThat(report.anomalies())
                 .contains(
                         new CommitReport.Anomaly("fab-buyers.csv", 3, "buyer B-001 is new"),
                         new CommitReport.Anomaly("fab-buyers.csv", 3, CommitReport.HIDDEN),
                         new CommitReport.Anomaly("fab-buyers.csv", 4, CommitReport.HIDDEN),
-                        new CommitReport.Anomaly("fab-buyers.csv", 7, CommitReport.HIDDEN));
+                        new CommitReport.Anomaly("fab-buyers.csv", 7, CommitReport.HIDDEN),
+                        new CommitReport.Anomaly("fab-other.csv", 0, CommitReport.HIDDEN),
+                        new CommitReport.Anomaly("fab-till-roll.csv", 2, CommitReport.HIDDEN));
+        assertThat(report.notes()).contains(CommitReport.HIDDEN, "buyers checked: 6");
+        assertThat(report.sources()).extracting(CommitReport.Source::name).contains(CommitReport.HIDDEN);
+        assertThat(report.checksum()).isEqualTo(CommitReport.HIDDEN);
         assertThat(text).contains("fab-buyers.csv:3: buyer B-001 is new");
     }
 
+    // JUSTIFICATION-A3: the review of #869 asks for the invalidations a dry run must see, one case each.
     @Test
-    void aStoredDryRunStopsCountingOnceAResolutionAMappingOrABatchOfTheRunChanges() throws IOException {
+    void aStoredDryRunStopsCountingOnceAResolutionAMappingABatchOrAnotherRunsCommitChanges() throws IOException {
         Run run = validated(t);
         BatchWriter writer = writer(t, 0);
         as(t, () -> runs.dryRun(run.runId(), writer, operator));
-        assertThat(current(run)).isTrue();
+        assertThat(current(run.runId())).isTrue();
 
         // A resolution: an override of the warning on line 4 of the item list.
         Batch items = run.batches().get("fab-item-list.csv");
@@ -415,10 +665,10 @@ class ImportPreviewIT extends IntegrationTest {
                 t,
                 () -> review.resolve(
                         twin.id(), new Resolution("override", twin.version(), null, null, null, note), operator));
-        assertThat(current(run)).isFalse();
+        assertThat(current(run.runId())).isFalse();
         assertCode(() -> as(t, () -> runs.transition(run.runId(), "ready")), "dry_run_required");
         as(t, () -> runs.dryRun(run.runId(), writer, operator));
-        assertThat(current(run)).isTrue();
+        assertThat(current(run.runId())).isTrue();
 
         // A mapping version: a value map from the review moves the run's batches to version 2.
         Batch till = run.batches().get("fab-till-roll.csv");
@@ -428,13 +678,23 @@ class ImportPreviewIT extends IntegrationTest {
                 .orElseThrow();
         Resolution map = new Resolution("map_value", returned.version(), "adjustment", null, null, null);
         as(t, () -> review.resolve(returned.id(), map, operator));
-        assertThat(current(run)).isFalse();
+        assertThat(current(run.runId())).isFalse();
         as(t, () -> runs.dryRun(run.runId(), writer, operator));
-        assertThat(current(run)).isTrue();
+        assertThat(current(run.runId())).isTrue();
+
+        // Another run's commit into the business: the business's records are not those the dry run saw.
+        UUID second = emptyRun(t);
+        as(t, () -> runs.dryRun(second, NOTHING, operator));
+        as(t, () -> runs.transition(second, "ready"));
+        as(t, () -> runs.recordPreImportDump(second, "pre-import-fabricated.dump", Instant.now(), SHA));
+        assertThat(as(t, () -> runs.commit(second, NOTHING))).isEqualTo(CommitOutcome.COMMITTED);
+        assertThat(current(run.runId())).isFalse();
+        as(t, () -> runs.dryRun(run.runId(), writer, operator));
+        assertThat(current(run.runId())).isTrue();
 
         // A batch: the buyer book cancelled.
         as(t, () -> uploads.cancelBatch(run.batches().get("fab-buyers.csv").id()));
-        assertThat(current(run)).isFalse();
+        assertThat(current(run.runId())).isFalse();
         assertCode(() -> as(t, () -> runs.transition(run.runId(), "ready")), "dry_run_required");
 
         // A dry run of the run as it is now counts again, and the run may be made ready.
@@ -443,7 +703,78 @@ class ImportPreviewIT extends IntegrationTest {
     }
 
     @Test
-    void aFailedDryRunIsStoredWritesNothingAndTheRunIsNotReady() throws IOException {
+    void aRunCommitsOnlyWithTheWriterItsDryRunRehearsed() throws IOException {
+        Run run = validated(t);
+        BatchWriter writer = writer(t, 0);
+        // The same code under another name: what the commit is given is not what was rehearsed.
+        BatchWriter rehearsed = new BatchWriter() {
+            @Override
+            public Map<String, Object> write(UUID runId, UUID batchId, int seq, Checkpoint checkpoint) {
+                return writer.write(runId, batchId, seq, checkpoint);
+            }
+
+            @Override
+            public String identity() {
+                return "fabricated rehearsal writer";
+            }
+        };
+        DryRun dry = as(t, () -> runs.dryRun(run.runId(), rehearsed, operator));
+        assertThat(dry.writer()).isEqualTo("fabricated rehearsal writer");
+        as(t, () -> runs.transition(run.runId(), "ready"));
+        as(t, () -> runs.recordPreImportDump(run.runId(), "pre-import-fabricated.dump", Instant.now(), SHA));
+        Map<String, Object> before = traces(t);
+
+        assertCode(() -> as(t, () -> runs.commit(run.runId(), writer)), "dry_run_writer_differs");
+
+        assertThat(as(t, () -> runs.get(run.runId())).status()).isEqualTo("ready");
+        assertThat(traces(t)).isEqualTo(before);
+        assertThat(as(t, () -> runs.commit(run.runId(), rehearsed))).isEqualTo(CommitOutcome.COMMITTED);
+        // The default identity is the writer's class without the JDK's per-process lambda suffix.
+        assertThat(writer.identity()).isEqualTo(ImportPreviewIT.class.getName() + "$$Lambda");
+    }
+
+    @Test
+    void aDryRunAndACommitOfTheBusinessNeverWaitOnEachOther() throws Exception {
+        UUID ready = emptyRun(t);
+        as(t, () -> runs.dryRun(ready, NOTHING, operator));
+        as(t, () -> runs.transition(ready, "ready"));
+        as(t, () -> runs.recordPreImportDump(ready, "pre-import-fabricated.dump", Instant.now(), SHA));
+        UUID reviewed = emptyRun(t);
+        CountDownLatch inside = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        BatchWriter held = (runId, batchId, seq, checkpoint) -> {
+            inside.countDown();
+            try {
+                release.await(20, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return Map.of();
+        };
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            Future<DryRun> dry = pool.submit(() -> as(t, () -> runs.dryRun(reviewed, held, operator)));
+            assertThat(inside.await(20, TimeUnit.SECONDS)).isTrue();
+            long started = System.nanoTime();
+            try {
+                // Refused at once, not after a lock wait: the dry run holds the business's commit loop.
+                assertCode(() -> as(t, () -> runs.commit(ready, NOTHING)), "IMPORT_IN_PROGRESS");
+                assertCode(() -> as(t, () -> runs.dryRun(ready, NOTHING, operator)), "IMPORT_IN_PROGRESS");
+            } finally {
+                release.countDown();
+            }
+            assertThat(TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - started))
+                    .isLessThan(10);
+            assertThat(dry.get(60, TimeUnit.SECONDS).current()).isTrue();
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(as(t, () -> runs.get(ready)).status()).isEqualTo("ready");
+        assertThat(as(t, () -> runs.commit(ready, NOTHING))).isEqualTo(CommitOutcome.COMMITTED);
+    }
+
+    @Test
+    void aFailedDryRunIsStoredLeavesNoTraceAndTheRunIsNotReady() throws IOException {
         Run run = validated(t);
         BatchWriter good = writer(t, 0);
         BatchWriter failing = (runId, batchId, seq, checkpoint) -> {
@@ -452,11 +783,11 @@ class ImportPreviewIT extends IntegrationTest {
             }
             return good.write(runId, batchId, seq, checkpoint);
         };
-        Map<String, Long> before = everyTable(t.tenantId());
+        Map<String, Object> before = traces(t);
 
         DryRun dry = as(t, () -> runs.dryRun(run.runId(), failing, operator));
 
-        assertThat(everyTable(t.tenantId())).isEqualTo(before);
+        assertThat(traces(t)).isEqualTo(before);
         assertThat(dry.report().failure()).isEqualTo("batch 3 failed (IllegalStateException)");
         assertThat(dry.report().render()).contains("FAILED: batch 3").doesNotContain("Fabricated Buyer Alpha");
         assertThat(dry.report().sources()).hasSize(2);
@@ -476,20 +807,21 @@ class ImportPreviewIT extends IntegrationTest {
     @Test
     void aDryRunIsRefusedOutsideReviewAndWhileAFileIsNotRead() {
         UUID draft = as(t, () -> runs.open(operator).id());
-        assertCode(() -> as(t, () -> runs.dryRun(draft, writer(t, 0), operator)), "run_not_open");
+        assertCode(() -> as(t, () -> runs.dryRun(draft, NOTHING, operator)), "run_not_open");
         UUID failed = as(t, () -> runs.open(operator).id());
+        byte[] unread = TestFiles.csv("Name\nFAB\n");
         as(
                 t,
                 () -> uploads.upload(
                         failed,
                         new Upload(
                                 "fab-unread.csv",
-                                new ByteArrayInputStream(TestFiles.csv("Name\nFAB\n")),
-                                TestFiles.csv("Name\nFAB\n").length,
+                                new ByteArrayInputStream(unread),
+                                unread.length,
                                 operator,
                                 new ImportUploads.ParseOptions(null, Set.of("code"), Set.of()))));
         as(t, () -> runs.transition(failed, "in_review"));
-        assertCode(() -> as(t, () -> runs.dryRun(failed, writer(t, 0), operator)), "batch_not_parsed");
+        assertCode(() -> as(t, () -> runs.dryRun(failed, NOTHING, operator)), "batch_not_parsed");
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -497,31 +829,46 @@ class ImportPreviewIT extends IntegrationTest {
     // ---------------------------------------------------------------------------------------------
 
     @Test
-    void anotherBusinessCanNeitherPreviewNorDryRunNorReadTheStoredReport() throws IOException {
+    void anotherBusinessCanNeitherPreviewNorDryRunNorReadTheStoredReports() throws IOException {
         Run run = validated(t);
-        as(t, () -> runs.dryRun(run.runId(), writer(t, 0), operator));
+        BatchWriter writer = writer(t, 0);
+        as(t, () -> runs.dryRun(run.runId(), writer, operator));
+        as(t, () -> runs.transition(run.runId(), "ready"));
+        as(t, () -> runs.recordPreImportDump(run.runId(), "pre-import-fabricated.dump", Instant.now(), SHA));
+        as(t, () -> runs.commit(run.runId(), writer));
 
         as(other, () -> {
             assertCode(() -> previews.preview(run.runId()), "not_found");
-            assertCode(() -> runs.dryRun(run.runId(), writer(other, 0), operator), "not_found");
+            assertCode(() -> runs.dryRun(run.runId(), NOTHING, operator), "not_found");
             assertCode(() -> runs.dryRunReport(run.runId()), "not_found");
             assertCode(() -> runs.commitReport(run.runId()), "not_found");
             return null;
         });
-        // bms_app bound to the other business reads no stored report at all: import_runs is under forced RLS.
-        long seen = as(
+        // bms_app bound to the other business reads neither stored report: import_runs and import_batches are under
+        // forced RLS.
+        List<Long> seen = as(
                 other,
                 () -> new TransactionTemplate(transactionManager)
-                        .execute(s -> jdbc.sql("SELECT count(*) FROM import_runs WHERE dry_run_report IS NOT NULL")
-                                .query(Long.class)
-                                .single()));
-        assertThat(seen).isZero();
+                        .execute(s -> List.of(
+                                jdbc.sql("SELECT count(*) FROM import_runs WHERE dry_run_report IS NOT NULL")
+                                        .query(Long.class)
+                                        .single(),
+                                jdbc.sql("SELECT count(*) FROM import_batches WHERE report IS NOT NULL")
+                                        .query(Long.class)
+                                        .single())));
+        assertThat(seen).containsExactly(0L, 0L);
         assertThat(TestDatabase.owner()
-                        .sql(
-                                "SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE relname = 'import_runs'")
+                        .sql("SELECT count(*) FROM import_batches WHERE run_id = ? AND report IS NOT NULL")
+                        .param(run.runId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(3);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT bool_and(relrowsecurity AND relforcerowsecurity) FROM pg_class"
+                                + " WHERE relname IN ('import_runs', 'import_batches')")
                         .query(Boolean.class)
                         .single())
                 .isTrue();
-        assertThat(current(run)).isTrue();
+        assertThat(as(t, () -> runs.commitReport(run.runId())).journals()).hasSize(3);
     }
 }
