@@ -90,7 +90,11 @@ class ValidationService implements ImportValidation {
         this.runs = runs;
     }
 
-    /** One batch of the run as the service reads it. */
+    /**
+     * One batch of the run as the service reads it. {@link #stamp} is what a new parse, a new mapping version, a cancel or a
+     * commit changes: the validation refuses to write a batch, or to finish, when it no longer matches pass 1 (review of
+     * #867). JUSTIFICATION-A3: the stamp and its re-check are the reviewer's must-fix 1.
+     */
     private record BatchRow(
             UUID id,
             int seq,
@@ -99,7 +103,57 @@ class ValidationService implements ImportValidation {
             UUID mappingId,
             String source,
             String templateKey,
-            Integer templateVersion) {}
+            Integer templateVersion,
+            Instant parsedAt,
+            Integer rowCount) {
+
+        String stamp() {
+            return status + "|" + mappingId + "|" + parsedAt + "|" + rowCount;
+        }
+    }
+
+    private static final String BATCHES = """
+            SELECT id, seq, status, source_filename, mapping_id, mapping_source, template_key, template_version,
+                   parsed_at, row_count
+              FROM import_batches
+             WHERE run_id = ? AND status IN ('uploaded', 'parsed', 'committed')
+             ORDER BY seq
+            """;
+
+    /** Every batch of the run that is read, being read or committed, in its order. */
+    private List<BatchRow> batches(UUID runId) {
+        return jdbc.sql(BATCHES)
+                .param(runId)
+                .query((rs, n) -> {
+                    Timestamp parsed = rs.getTimestamp("parsed_at");
+                    return new BatchRow(
+                            rs.getObject("id", UUID.class),
+                            rs.getInt("seq"),
+                            rs.getString("status"),
+                            rs.getString("source_filename"),
+                            rs.getObject("mapping_id", UUID.class),
+                            rs.getString("mapping_source"),
+                            rs.getString("template_key"),
+                            (Integer) rs.getObject("template_version"),
+                            parsed == null ? null : parsed.toInstant(),
+                            (Integer) rs.getObject("row_count"));
+                })
+                .list();
+    }
+
+    private static Map<UUID, String> stamps(List<BatchRow> batches) {
+        Map<UUID, String> out = new LinkedHashMap<>();
+        batches.forEach(b -> out.put(b.id(), b.stamp()));
+        return out;
+    }
+
+    private static ApiException changed() {
+        return new ApiException(
+                HttpStatus.CONFLICT,
+                "batch_changed",
+                "Import changed",
+                "A file of this import was added, read again or cancelled while it was checked; check it again.");
+    }
 
     @Override
     public RunReport validate(UUID runId) {
@@ -116,23 +170,17 @@ class ValidationService implements ImportValidation {
                 .optional()
                 .orElseThrow(ApiException::notFound));
         requireOpen(run.status());
-        List<BatchRow> batches = readOnly.execute(s -> jdbc.sql("""
-                        SELECT id, seq, status, source_filename, mapping_id, mapping_source, template_key, template_version
-                          FROM import_batches
-                         WHERE run_id = ? AND status IN ('parsed', 'committed')
-                         ORDER BY seq
-                        """)
-                .param(runId)
-                .query((rs, n) -> new BatchRow(
-                        rs.getObject("id", UUID.class),
-                        rs.getInt("seq"),
-                        rs.getString("status"),
-                        rs.getString("source_filename"),
-                        rs.getObject("mapping_id", UUID.class),
-                        rs.getString("mapping_source"),
-                        rs.getString("template_key"),
-                        (Integer) rs.getObject("template_version")))
-                .list());
+        List<BatchRow> all = readOnly.execute(s -> batches(runId));
+        Map<UUID, String> seen = stamps(all);
+        // A file stored and not yet read would be left out while the run moves on (review of #867).
+        if (all.stream().anyMatch(b -> "uploaded".equals(b.status()))) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "batch_not_parsed",
+                    "File not read yet",
+                    "A file of this import is not read yet; wait for it, or cancel it, before checking the rows.");
+        }
+        List<BatchRow> batches = all;
         if (batches.stream().anyMatch(b -> b.mappingId() == null && "parsed".equals(b.status()))) {
             throw new ApiException(
                     HttpStatus.UNPROCESSABLE_CONTENT,
@@ -155,6 +203,7 @@ class ValidationService implements ImportValidation {
                     "The files of this import were read with mappings of different templates; a run keeps one.");
         }
         if (batches.isEmpty()) {
+            finish(runId, seen, null, List.of());
             return new RunReport(runId, null, 0, List.of());
         }
         ImportTemplate template = templates.require(
@@ -186,19 +235,38 @@ class ValidationService implements ImportValidation {
                 reports.add(write(runId, b, inputs.get(i), engine));
             }
         }
-        if (RunStates.UPLOADED.equals(run.status())) {
-            runs.transition(runId, RunStates.IN_REVIEW);
-        }
+        finish(runId, seen, template.id(), reports);
+        return new RunReport(runId, template.key(), template.version(), reports);
+    }
+
+    /**
+     * The end of a validation, in one transaction that holds the run {@code FOR UPDATE}, as an upload does: every batch
+     * must still be as pass 1 saw it (none added, read again, cancelled or committed meanwhile), or 409
+     * {@code batch_changed}; then an {@code uploaded} run moves to {@code in_review} (the run's own transition joins this
+     * transaction, so a second validation that finishes later finds it in review), and the validation is audited.
+     */
+    private void finish(UUID runId, Map<UUID, String> seen, String templateId, List<BatchReport> reports) {
         Map<String, Integer> byCode = new TreeMap<>();
         reports.forEach(r -> r.byCode().forEach((code, n) -> byCode.merge(code, n, Integer::sum)));
-        Map<String, Object> after = new LinkedHashMap<>();
-        after.put("template", template.id());
-        after.put("batches", reports.size());
-        after.put("issues_by_code", byCode);
-        tx.executeWithoutResult(s ->
-                audit.record(AuditLog.Entry.created("core.import_run.validated", "import_run", runId, null, after)));
+        tx.executeWithoutResult(s -> {
+            String status = jdbc.sql("SELECT status FROM import_runs WHERE id = ? FOR UPDATE")
+                    .param(runId)
+                    .query(String.class)
+                    .single();
+            requireOpen(status);
+            if (!stamps(batches(runId)).equals(seen)) {
+                throw changed();
+            }
+            if (RunStates.UPLOADED.equals(status)) {
+                runs.transition(runId, RunStates.IN_REVIEW);
+            }
+            Map<String, Object> after = new LinkedHashMap<>();
+            after.put("template", templateId == null ? "none" : templateId);
+            after.put("batches", reports.size());
+            after.put("issues_by_code", byCode);
+            audit.record(AuditLog.Entry.created("core.import_run.validated", "import_run", runId, null, after));
+        });
         log.info("import run {} validated: {} batches, issues by code {}", runId, reports.size(), byCode);
-        return new RunReport(runId, template.key(), template.version(), reports);
     }
 
     /** The batches in commit order: the template's entity sets, then the batch's own order. */
@@ -231,16 +299,18 @@ class ValidationService implements ImportValidation {
                     .query(String.class)
                     .single();
             requireOpen(runStatus);
-            String status = jdbc.sql("SELECT status FROM import_batches WHERE id = ? FOR UPDATE")
+            // The batch as pass 1 read it: same status, mapping version, parse and row count (review of #867).
+            jdbc.sql("SELECT id FROM import_batches WHERE id = ? FOR UPDATE")
                     .param(b.id())
-                    .query(String.class)
-                    .single();
-            if (!"parsed".equals(status)) {
-                throw new ApiException(
-                        HttpStatus.CONFLICT,
-                        "invalid_status_transition",
-                        "Invalid status transition",
-                        "A file of this import changed while it was checked; check it again.");
+                    .query(UUID.class)
+                    .optional()
+                    .orElseThrow(ValidationService::changed);
+            BatchRow now = batches(runId).stream()
+                    .filter(r -> r.id().equals(b.id()))
+                    .findFirst()
+                    .orElseThrow(ValidationService::changed);
+            if (!now.stamp().equals(b.stamp())) {
+                throw changed();
             }
             jdbc.sql("DELETE FROM import_issues WHERE batch_id = ?")
                     .param(b.id())

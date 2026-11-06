@@ -1325,15 +1325,16 @@ Added by `V140__import_validation.sql` (issue #130, chapter 13 sections 13.4, 13
   (a column grant), so `raw` is still never changed; the trigger `import_rows_validation_kept` refuses a change to them once
   the row's batch is `committed`. `normalised` may hold personal data, like `raw`, and is purged with it by #139.
 - **`import_issues`** (RLS forced, `SELECT, INSERT, DELETE`): the issues of the latest validation of a batch. `id`, `tenant_id`,
-  `created_at`, `batch_id` (FK `(tenant_id, batch_id)`), `row_id` (FK `import_rows`, `ON DELETE CASCADE`, so a new parse takes
-  its rows' issues with it), `source_row_no`, `ordinal` (the engine's order within the batch, `UNIQUE (batch_id, ordinal)`),
+  `created_at`, `batch_id` (FK `(tenant_id, batch_id)`), `row_id` (FK `(tenant_id, batch_id, row_id)` to the new
+  `UNIQUE (tenant_id, batch_id, id)` of `import_rows`, `ON DELETE CASCADE`, so an issue's row is of its business and batch
+  and a new parse, a cancel or the purge takes its rows' issues with it), `source_row_no`, `ordinal` (the engine's order within the batch, `UNIQUE (batch_id, ordinal)`),
   `code` (a code of the template's catalogue), `severity` [`info`, `warning`, `blocking`], `field` (or NULL for the row),
   `message varchar(500)` (built from the code's template with field, file and line, never a personal value),
   `original_value jsonb` (the cell text the issue concerns, which may be personal: the review screen shows it to a holder of
   `core.imports.view_raw` only), `status` [`open`, `resolved`] (`info` is created `resolved`, a CHECK). Plain indexes
   `import_issues_by_row (row_id)` and `import_issues_by_code (tenant_id, batch_id, code)`. A new validation of a batch deletes
   its issues and writes them again; the trigger `import_issues_batch_kept` refuses an insert or delete for a `committed`
-  batch. Both triggers keep V102's bypass for a migration and for the removal and purge of a closed business.
+  batch, except a delete cascaded from the row's own removal. Both triggers keep V102's bypass for a migration and for the removal and purge of a closed business.
 
 ## 6.6 General ledger (RLS)
 

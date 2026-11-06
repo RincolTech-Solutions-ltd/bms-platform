@@ -72,6 +72,12 @@ final class RowValidator {
     /** The longest {@code source_ref} kept as written; a longer column value is kept by its hash. */
     static final int MAX_REF_TEXT = 200;
 
+    /** The longest file name a message shows. */
+    static final int MAX_FILE_NAME = 100;
+
+    /** Commas, or spaces, only as separators of groups of three digits: {@code 12,500}, {@code 1 234 567.5}. */
+    private static final Pattern GROUPED = Pattern.compile("^[+-]?\\d{1,3}(,\\d{3})+(\\.\\d+)?$");
+
     private static final Pattern NUMBER = Pattern.compile("^[+-]?\\d+(\\.\\d+)?$");
     private static final Pattern SPACES = Pattern.compile("[\\s\\u00A0\\u2007\\u202F]");
     private static final Pattern ISO_DATE = Pattern.compile("^(\\d{4})-(\\d{1,2})-(\\d{1,2})$");
@@ -216,8 +222,26 @@ final class RowValidator {
             }
         }
         Map<String, Object> values = Collections.unmodifiableMap(new LinkedHashMap<>(t.values));
+        // A rule's parameters are checked against the row's personal values, original and normalised (review of #867).
+        // JUSTIFICATION-A3: the reviewer's item 6; the keys were already whitelisted, the values were not.
+        Set<String> personal = new HashSet<>();
+        for (Field f : p.set.fields()) {
+            if (f.isPersonal()) {
+                if (t.texts.get(f.name()) != null) {
+                    personal.add(t.texts.get(f.name()).strip());
+                }
+                if (t.values.get(f.name()) instanceof String s) {
+                    personal.add(s);
+                }
+            }
+        }
         for (RowCheck check : template.rowChecks(p.set.key())) {
             for (RowFinding finding : check.check(values)) {
+                for (String v : finding.params().values()) {
+                    if (v != null && personal.stream().anyMatch(s -> !s.isEmpty() && v.contains(s))) {
+                        throw new IllegalStateException("a row check put a personal value into " + finding.code());
+                    }
+                }
                 t.add(finding.code(), finding.field(), finding.params(), null);
             }
         }
@@ -258,7 +282,7 @@ final class RowValidator {
         if (f.field() != null) {
             values.put("field", f.field());
         }
-        values.put("file", file);
+        values.put("file", shortName(file));
         values.put("line", String.valueOf(line));
         String message = c.message();
         for (String placeholder : TemplateRegistry.placeholders(c.message())) {
@@ -271,7 +295,24 @@ final class RowValidator {
     }
 
     private static String other(Location first, Location here) {
-        return first.file().equals(here.file()) ? String.valueOf(first.line()) : first.line() + " of " + first.file();
+        return first.file().equals(here.file())
+                ? String.valueOf(first.line())
+                : first.line() + " of " + shortName(first.file());
+    }
+
+    /**
+     * A file name as a message shows it: at most {@value #MAX_FILE_NAME} characters, the middle elided, so a message with
+     * two file names stays well inside {@code import_issues.message} (500) whatever names the customer gave (review of
+     * #867).
+     */
+    static String shortName(String file) {
+        int length = file.codePointCount(0, file.length());
+        if (length <= MAX_FILE_NAME) {
+            return file;
+        }
+        int head = file.offsetByCodePoints(0, 50);
+        int tail = file.offsetByCodePoints(0, length - (MAX_FILE_NAME - 53));
+        return file.substring(0, head) + "..." + file.substring(tail);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -390,6 +431,7 @@ final class RowValidator {
             t.add("TYPE_INVALID", f.name(), Map.of("type", f.type().spec()), original);
             return null;
         }
+        separators(f, mapped, original, t);
         if (d.stripTrailingZeros().scale() > 0) {
             t.add("MONEY_FRACTION", f.name(), Map.of(), original);
             return null;
@@ -411,6 +453,7 @@ final class RowValidator {
             t.add("TYPE_INVALID", f.name(), Map.of("type", f.type().spec()), original);
             return null;
         }
+        separators(f, mapped, original, t);
         BigDecimal q = d.stripTrailingZeros();
         if (q.scale() > 3) {
             t.add("QTY_PRECISION", f.name(), Map.of(), original);
@@ -420,6 +463,13 @@ final class RowValidator {
             q = q.setScale(0);
         }
         return inRange(f, q, original, t) ? q : null;
+    }
+
+    /** Group separators removed from a number are a change like any normaliser's: an {@code info} with the original. */
+    private static void separators(Field f, String mapped, String original, Typed t) {
+        if (grouped(mapped)) {
+            t.add("VALUE_NORMALISED", f.name(), Map.of("normaliser", "thousands_separator"), original);
+        }
     }
 
     private static boolean inRange(Field f, BigDecimal d, String original, Typed t) {
@@ -555,10 +605,24 @@ final class RowValidator {
         });
     }
 
-    /** A number written with optional thousands commas and spaces; null when it is not one. */
+    /**
+     * A number, with commas or spaces only between groups of three digits ({@code 12,500}, {@code 12 500}); null when it is
+     * not one. {@code 12,50} and {@code 1,5} are refused, never read as 1250 or 15 (review of #867).
+     */
     static BigDecimal decimal(String s) {
-        String plain = SPACES.matcher(s).replaceAll("").replace(",", "");
-        return NUMBER.matcher(plain).matches() ? new BigDecimal(plain) : null;
+        String grouped = SPACES.matcher(s.strip()).replaceAll(",");
+        if (grouped.indexOf(',') >= 0) {
+            if (!GROUPED.matcher(grouped).matches()) {
+                return null;
+            }
+            grouped = grouped.replace(",", "");
+        }
+        return NUMBER.matcher(grouped).matches() ? new BigDecimal(grouped) : null;
+    }
+
+    /** Whether a number was written with group separators, which reading it removes (an {@code info} with the original). */
+    static boolean grouped(String s) {
+        return SPACES.matcher(s.strip()).find() || s.indexOf(',') >= 0;
     }
 
     /**

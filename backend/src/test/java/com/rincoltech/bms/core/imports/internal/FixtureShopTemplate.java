@@ -24,6 +24,9 @@ class FixtureShopTemplate implements ImportTemplate {
 
     static final BigDecimal MAX_PRICE = new BigDecimal("10000000");
 
+    /** What a test does between the validation's two passes, where the engine asks for the business's keys; or null. */
+    static volatile Runnable BETWEEN_PASSES;
+
     @Override
     public String key() {
         return KEY;
@@ -101,6 +104,10 @@ class FixtureShopTemplate implements ImportTemplate {
     /** The business already holds the item {@code FAB-900} (in compare form), as a vertical's own table would answer. */
     @Override
     public Set<String> existingKeys(String entitySet, Set<String> keys) {
+        Runnable between = BETWEEN_PASSES;
+        if (between != null) {
+            between.run();
+        }
         return "items".equals(entitySet) && keys.contains(EXISTING_ITEM) ? Set.of(EXISTING_ITEM) : Set.of();
     }
 

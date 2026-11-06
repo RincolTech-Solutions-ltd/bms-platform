@@ -34,14 +34,17 @@ ALTER TABLE import_rows
     ADD COLUMN normalised jsonb        CHECK (normalised IS NULL OR jsonb_typeof(normalised) = 'object'),
     ADD COLUMN source_ref varchar(300);
 GRANT UPDATE (normalised, source_ref) ON import_rows TO bms_app;
+-- The target of the issues' foreign key, so an issue's row is of its business and of its batch.
+ALTER TABLE import_rows ADD CONSTRAINT import_rows_tenant_batch_id UNIQUE (tenant_id, batch_id, id);
 
 CREATE TABLE import_issues (
     id             uuid         NOT NULL PRIMARY KEY,
     tenant_id      uuid         NOT NULL REFERENCES tenants (id),
     created_at     timestamptz  NOT NULL DEFAULT now(),
     batch_id       uuid         NOT NULL,
-    -- The row the issue is on; its issues go with it when a new parse replaces the batch's rows.
-    row_id         uuid         NOT NULL REFERENCES import_rows (id) ON DELETE CASCADE,
+    -- The row the issue is on, of the same business and batch (the foreign key below); its issues go with it when a new
+    -- parse, a cancel or the purge removes the batch's rows.
+    row_id         uuid         NOT NULL,
     source_row_no  integer      NOT NULL CHECK (source_row_no > 0),
     -- The order the engine found it in within the batch: line, then the template's field order, then the row's own checks.
     ordinal        integer      NOT NULL CHECK (ordinal > 0),
@@ -55,14 +58,17 @@ CREATE TABLE import_issues (
     UNIQUE (tenant_id, id),
     UNIQUE (batch_id, ordinal),
     CHECK (severity <> 'info' OR status = 'resolved'),
-    FOREIGN KEY (tenant_id, batch_id) REFERENCES import_batches (tenant_id, id)
+    FOREIGN KEY (tenant_id, batch_id) REFERENCES import_batches (tenant_id, id),
+    FOREIGN KEY (tenant_id, batch_id, row_id) REFERENCES import_rows (tenant_id, batch_id, id) ON DELETE CASCADE
 );
 CREATE INDEX import_issues_by_row ON import_issues (row_id);
 CREATE INDEX import_issues_by_code ON import_issues (tenant_id, batch_id, code);
 SELECT bms_apply_tenant_rls('import_issues');
 SELECT bms_grant_app('import_issues', 'SELECT, INSERT, DELETE');
 
--- No issue of a committed batch is written or removed.
+-- No issue of a committed batch is written or removed by a validation. A delete cascaded from its row (pg_trigger_depth
+-- above 1: the foreign key's own trigger) goes through: removing a committed batch's staged rows is the purge's decision
+-- (#139), and the issues of a row go with it.
 CREATE FUNCTION import_issues_batch_kept() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -70,7 +76,7 @@ DECLARE
 BEGIN
     IF TG_OP = 'DELETE' THEN
         IF (session_user = 'bms_owner' AND coalesce(current_setting('bms.allow_mutation', true), '') = 'on')
-           OR bms_erasing(to_jsonb(OLD)) THEN
+           OR bms_erasing(to_jsonb(OLD)) OR pg_trigger_depth() > 1 THEN
             RETURN OLD;
         END IF;
         v_batch := OLD.batch_id;

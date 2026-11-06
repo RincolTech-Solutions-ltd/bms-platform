@@ -25,9 +25,10 @@ public interface ImportValidation {
 
     /**
      * Validates every parsed batch of a run that is {@code uploaded} or {@code in_review}, and moves an {@code uploaded} run
-     * to {@code in_review}. Refused with 409 {@code run_not_open} for a run in any other state, 422
-     * {@code BATCH_HAS_NO_MAPPING} when a parsed batch was read without a mapping, and 409 {@code templates_differ} when the
-     * batches name more than one template version. Audited as {@code core.import_run.validated} with counts by code. Takes
+     * to {@code in_review}. Refused with 409 {@code run_not_open} for a run in any other state, 409 {@code batch_not_parsed}
+     * while a file of the run is stored and not yet read, 422 {@code BATCH_HAS_NO_MAPPING} when a parsed batch was read
+     * without a mapping, 409 {@code templates_differ} when the batches name more than one template version, and 409
+     * {@code batch_changed} when a file is added, read again, cancelled or committed while the run is checked. Audited as {@code core.import_run.validated} with counts by code. Takes
      * its own transactions, one per batch written; none may be open around it.
      */
     RunReport validate(UUID runId);

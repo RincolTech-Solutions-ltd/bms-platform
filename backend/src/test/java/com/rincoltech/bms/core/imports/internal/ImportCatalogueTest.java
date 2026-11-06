@@ -45,33 +45,60 @@ class ImportCatalogueTest {
     static final Path TESTS = Path.of("src/test/java/com/rincoltech/bms/core/imports");
 
     /**
-     * Codes another stage of the pipeline reports, each with the test that produces it from a fabricated file, mapping or
-     * run: the upload and parse (#128), the mapping validator (#129) and the commit guards (#127).
+     * Codes another stage of the pipeline reports, each with the test method that produces it from a fabricated file,
+     * mapping or run and asserts it: the upload and parse (#128), the mapping validator (#129) and the commit guards (#127).
+     * The completeness test reads that method's body and requires the code inside one of its assertions, so a mention
+     * elsewhere in the file (a comment, an import) does not count (review of #867).
      */
     static final Map<String, String> PRODUCED_ELSEWHERE = Map.ofEntries(
-            Map.entry("FILE_TYPE_UNSUPPORTED", "internal/SourceParserTest.java"),
-            Map.entry("FILE_TOO_LARGE", "internal/SourceParserTest.java"),
-            Map.entry("TOO_MANY_ROWS", "internal/SourceParserTest.java"),
-            Map.entry("HEADER_NOT_FOUND", "internal/MappingValidatorTest.java"),
-            Map.entry("TOO_MANY_COLUMNS", "internal/SourceParserTest.java"),
-            Map.entry("FILE_UNREADABLE", "internal/SourceParserTest.java"),
-            Map.entry("FILE_ALREADY_UPLOADED", "internal/ImportUploadsIT.java"),
-            Map.entry("UPLOAD_DISK_LOW", "internal/ImportUploadsIT.java"),
-            Map.entry("COLUMN_UNMAPPED", "internal/MappingValidatorTest.java"),
-            Map.entry("ENCODING_CONVERTED", "internal/SourceParserTest.java"),
-            Map.entry("TENANT_TRADING", "ImportRunsIT.java"),
-            Map.entry("IMPORT_IN_PROGRESS", "ImportRunsIT.java"),
-            Map.entry("TEMPLATE_UNKNOWN", "internal/MappingValidatorTest.java"),
-            Map.entry("MAPPING_INVALID", "internal/MappingValidatorTest.java"),
-            Map.entry("REQUIRED_FIELD_UNMAPPED", "internal/MappingValidatorTest.java"),
-            Map.entry("FIELD_MAPPED_TWICE", "internal/MappingValidatorTest.java"),
-            Map.entry("COLUMN_DUPLICATE", "internal/MappingValidatorTest.java"),
-            Map.entry("MAP_FIELD_UNMAPPED", "internal/MappingValidatorTest.java"),
-            Map.entry("SOURCE_REF_COLUMN_UNKNOWN", "internal/MappingValidatorTest.java"),
-            Map.entry("ZONE_UNKNOWN", "internal/MappingValidatorTest.java"),
-            Map.entry("SOURCE_UNKNOWN", "internal/MappingValidatorTest.java"),
-            Map.entry("BATCH_HAS_NO_MAPPING", "internal/ImportMappingsIT.java"),
-            Map.entry("REQUIRED_COLUMN_MISSING", "internal/MappingValidatorTest.java"));
+            Map.entry(
+                    "FILE_TYPE_UNSUPPORTED",
+                    "internal/SourceParserTest.java#theWriterRefusesAWrongTypeAndAFileOverTheLimit"),
+            Map.entry(
+                    "FILE_TOO_LARGE", "internal/SourceParserTest.java#theWriterRefusesAWrongTypeAndAFileOverTheLimit"),
+            Map.entry("TOO_MANY_ROWS", "internal/SourceParserTest.java#theRowLimitIsExactAndOneMoreIsRefused"),
+            Map.entry("HEADER_NOT_FOUND", "internal/SourceParserTest.java#theHeaderMustBeInTheFirstTwentyRows"),
+            Map.entry("TOO_MANY_COLUMNS", "internal/SourceParserTest.java#tooManyColumnsInTheHeaderOrInARowIsRefused"),
+            Map.entry("FILE_UNREADABLE", "internal/SourceParserTest.java#anUnclosedQuoteOrAHugeCellIsUnreadable"),
+            Map.entry("FILE_ALREADY_UPLOADED", "internal/ImportUploadsIT.java#everyRefusalAtUploadStoresNothing"),
+            Map.entry("UPLOAD_DISK_LOW", "internal/ImportUploadsIT.java#everyRefusalAtUploadStoresNothing"),
+            Map.entry(
+                    "COLUMN_UNMAPPED",
+                    "internal/MappingValidatorTest.java#everyColumnNeitherMappedNorIgnoredIsReportedOnceAsColumnUnmapped"),
+            Map.entry("ENCODING_CONVERTED", "internal/SourceParserTest.java#windows1252IsReadAndWarned"),
+            Map.entry(
+                    "TENANT_TRADING",
+                    "ImportRunsIT.java#aTradingBusinessIsRefusedWithoutTheOverrideAndAllowedWithItBothAudited"),
+            Map.entry("IMPORT_IN_PROGRESS", "ImportRunsIT.java#twoConcurrentCommitsOfOneRunExactlyOneProceeds"),
+            Map.entry(
+                    "TEMPLATE_UNKNOWN",
+                    "internal/MappingValidatorTest.java#aDocumentForATemplateNotRegisteredHasOneProblem"),
+            Map.entry(
+                    "MAPPING_INVALID",
+                    "internal/MappingValidatorTest.java#theSchemaRefusesWhatTheTemplateDoesNotHaveWithAPointerAndNoValue"),
+            Map.entry(
+                    "REQUIRED_FIELD_UNMAPPED",
+                    "internal/MappingValidatorTest.java#aRequiredFieldWithNoColumnIsReportedAndSoIsItsColumnMissingFromTheFile"),
+            Map.entry(
+                    "FIELD_MAPPED_TWICE",
+                    "internal/MappingValidatorTest.java#theInvalidFixtureHasEachProblemTheSchemaCannotSay"),
+            Map.entry(
+                    "COLUMN_DUPLICATE", "internal/MappingValidatorTest.java#aColumnWrittenTwiceIgnoringCaseIsReported"),
+            Map.entry(
+                    "MAP_FIELD_UNMAPPED",
+                    "internal/MappingValidatorTest.java#theInvalidFixtureHasEachProblemTheSchemaCannotSay"),
+            Map.entry(
+                    "SOURCE_REF_COLUMN_UNKNOWN",
+                    "internal/MappingValidatorTest.java#theInvalidFixtureHasEachProblemTheSchemaCannotSay"),
+            Map.entry("ZONE_UNKNOWN", "internal/MappingValidatorTest.java#anUnknownZoneAndAnUnknownSourceAreReported"),
+            Map.entry(
+                    "SOURCE_UNKNOWN", "internal/MappingValidatorTest.java#anUnknownZoneAndAnUnknownSourceAreReported"),
+            Map.entry(
+                    "BATCH_HAS_NO_MAPPING",
+                    "internal/ImportMappingsIT.java#aBatchRecordsItsMappingVersionAndEveryUnmappedColumnIsReported"),
+            Map.entry(
+                    "REQUIRED_COLUMN_MISSING",
+                    "internal/MappingValidatorTest.java#aRequiredFieldWithNoColumnIsReportedAndSoIsItsColumnMissingFromTheFile"));
 
     /**
      * Codes whose producer is a later build step of spec section 9: they compare a row with its reviewed or imported
@@ -133,6 +160,7 @@ class ImportCatalogueTest {
 
         assertThat(originals)
                 .containsEntry("fab-item-list.csv|3|code", " fab-002 ")
+                .containsEntry("fab-item-list.csv|3|price", "12,500")
                 .containsEntry("fab-buyers.csv|3|phone", "0700000101")
                 .containsEntry("fab-buyers.csv|4|nin", "cm 0000 0000 000B")
                 .containsEntry("fab-till-roll.csv|6|item", "fab-002");
@@ -175,10 +203,7 @@ class ImportCatalogueTest {
                 continue;
             }
             String test = PRODUCED_ELSEWHERE.get(c.code());
-            if (test == null
-                    || !Pattern.compile("\\b" + c.code() + "\\b")
-                            .matcher(Files.readString(TESTS.resolve(test)))
-                            .find()) {
+            if (test == null || !assertedIn(test, c.code())) {
                 unproduced.add(c.code());
             }
         }
@@ -200,11 +225,19 @@ class ImportCatalogueTest {
             }
             String[] parts = line.trim().split("\\s+");
             assertThat(parts[0]).isIn("shared", "fixture_shop_v1");
-            pinned.put(parts[1], parts[2] + (parts.length > 3 && "retired".equals(parts[3]) ? " retired" : ""));
+            pinned.put(
+                    parts[1],
+                    parts[0] + " " + parts[2] + (parts.length > 3 && "retired".equals(parts[3]) ? " retired" : ""));
         }
+        // The catalogue a code is in counts too: a shared code moved into a template's own list fails (review of #867).
+        Set<String> shared = new LinkedHashSet<>();
+        ImportTemplates.SHARED_CODES.forEach(c -> shared.add(c.code()));
         Map<String, String> current = new LinkedHashMap<>();
         for (IssueCode c : catalogue()) {
-            current.put(c.code(), c.severity().key() + (c.retired() ? " retired" : ""));
+            current.put(
+                    c.code(),
+                    (shared.contains(c.code()) ? "shared" : "fixture_shop_v1") + " "
+                            + c.severity().key() + (c.retired() ? " retired" : ""));
         }
 
         assertThat(current)
@@ -274,6 +307,61 @@ class ImportCatalogueTest {
                 .hasMessageContaining("not a message placeholder");
     }
 
+    /**
+     * Two long file names in one message still fit {@code import_issues.message} (500) (review of #867).
+     * JUSTIFICATION-A3: new test cases for the reviewer's must-fix 2 and item 6.
+     */
+    @Test
+    void aMessageWithTwoLongFileNamesStaysInsideItsColumn() {
+        String longName = "fab-" + "x".repeat(240) + ".csv";
+        assertThat(RowValidator.shortName(longName))
+                .hasSize(RowValidator.MAX_FILE_NAME)
+                .contains("...");
+        assertThat(RowValidator.shortName("fab-item-list.csv")).isEqualTo("fab-item-list.csv");
+        Map<String, Object> mapping = mapping();
+        RowValidator engine = new RowValidator(new FixtureShopTemplate(), catalogue(), null);
+        BatchInput first = new BatchInput(UUID.randomUUID(), "a-" + longName, mapping, "item_list");
+        BatchInput second = new BatchInput(UUID.randomUUID(), "b-" + longName, mapping, "item_list");
+        SourceRow row = new SourceRow(
+                UUID.randomUUID(),
+                2,
+                Map.of("Fab Item Code", new RawCell("FAB-001", "text"), "Fab Item Label", new RawCell("Fab", "text")));
+        engine.index(first, row);
+        engine.index(second, row);
+
+        List<RowValidator.Finding> findings = engine.validate(second, row).findings();
+
+        assertThat(findings).extracting(RowValidator.Finding::code).contains("DUPLICATE_SOURCE_REF", "CODE_DUPLICATE");
+        assertThat(findings).allSatisfy(f -> assertThat(f.message().length()).isLessThanOrEqualTo(500));
+    }
+
+    /** A cross-field rule cannot put a value of a personal field into a message, whatever key it uses (review of #867). */
+    @Test
+    void aRowCheckThatPutsAPersonalValueIntoAMessageIsRefused() {
+        ImportTemplate leaky = new FixtureShopTemplate() {
+            @Override
+            public List<RowCheck> rowChecks(String entitySet) {
+                return "customers".equals(entitySet)
+                        ? List.of(values -> List.of(new RowFinding(
+                                "FIXTURE_SALE_QTY_NOT_POSITIVE", "name", Map.of("range", (String) values.get("name")))))
+                        : List.of();
+            }
+        };
+        RowValidator engine = new RowValidator(leaky, catalogue(), null);
+        BatchInput batch = new BatchInput(UUID.randomUUID(), "fab-buyers.csv", mapping(), "buyer_book");
+        SourceRow row = new SourceRow(
+                UUID.randomUUID(),
+                3,
+                Map.of(
+                        "Fab Buyer No", new RawCell("B-001", "text"),
+                        "Fab Buyer", new RawCell("Fabricated Buyer Alpha", "text")));
+        engine.index(batch, row);
+
+        assertThatThrownBy(() -> engine.validate(batch, row))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("personal value");
+    }
+
     @Test
     void codesAreComparedIgnoringCaseAndSpacesAndAHiddenCharacterIsFound() {
         assertThat(RowValidator.compare(" fab 001 ")).isEqualTo(RowValidator.compare("FAB001"));
@@ -282,7 +370,14 @@ class ImportCatalogueTest {
         assertThat(RowValidator.hidden("FAB\t001")).isTrue();
         assertThat(RowValidator.hidden("FAB 001")).isFalse();
         assertThat(RowValidator.decimal("12,500")).isEqualByComparingTo("12500");
+        assertThat(RowValidator.decimal("1 234 567.5")).isEqualByComparingTo("1234567.5");
         assertThat(RowValidator.decimal("1.5e3")).isNull();
+        // Commas only between groups of three: never 1250 from 12,50 nor 15 from 1,5 (review of #867).
+        assertThat(RowValidator.decimal("12,50")).isNull();
+        assertThat(RowValidator.decimal("1,5")).isNull();
+        assertThat(RowValidator.decimal("1,2345")).isNull();
+        assertThat(RowValidator.grouped("12,500")).isTrue();
+        assertThat(RowValidator.grouped(" 12500 ")).isFalse();
         assertThat(RowValidator.dateTime("day_first", "30/06/2026", false)).hasToString("2026-06-30T00:00");
         assertThat(RowValidator.dateTime("month_first", "06/30/2026 14:05", true))
                 .hasToString("2026-06-30T14:05");
@@ -292,6 +387,45 @@ class ImportCatalogueTest {
     }
 
     // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Whether the named test method ({@code file#method}) asserts the code: one statement of its body, from the previous
+     * {@code ;} or brace to the next {@code ;}, holds both an assertion and the code as a text literal or a constant.
+     * JUSTIFICATION-A3: the reviewer's item 3 asks for method-level evidence instead of a grep of the file.
+     */
+    static boolean assertedIn(String test, String code) throws IOException {
+        String file = Files.readString(TESTS.resolve(test.substring(0, test.indexOf('#'))));
+        int start = file.indexOf(" void " + test.substring(test.indexOf('#') + 1) + "(");
+        if (start < 0) {
+            return false;
+        }
+        int end = file.indexOf("\n    }\n", start);
+        String body = file.substring(start, end < 0 ? file.length() : end);
+        for (String statement : body.split("[;{]")) {
+            boolean names = statement.contains("\"" + code + "\"")
+                    || Pattern.compile("\\." + code + "\\b").matcher(statement).find();
+            boolean asserts = statement.contains("assert") || statement.contains("refused(");
+            if (names && asserts) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Test
+    void theEvidenceOfAnotherStageIsAnAssertionInTheNamedMethod() throws IOException {
+        // A method that does not exist, or that does not assert the code, is no evidence.
+        assertThat(assertedIn("internal/MappingValidatorTest.java#noSuchMethod", "ZONE_UNKNOWN"))
+                .isFalse();
+        assertThat(assertedIn(
+                        "internal/MappingValidatorTest.java#anUnknownZoneAndAnUnknownSourceAreReported",
+                        "TOO_MANY_ROWS"))
+                .isFalse();
+        assertThat(assertedIn(
+                        "internal/MappingValidatorTest.java#anUnknownZoneAndAnUnknownSourceAreReported",
+                        "ZONE_UNKNOWN"))
+                .isTrue();
+    }
 
     private static void runWithCheck(RowCheck check) {
         ImportTemplate template = new FixtureShopTemplate() {

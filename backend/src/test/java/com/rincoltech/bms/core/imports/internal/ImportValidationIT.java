@@ -227,6 +227,9 @@ class ImportValidationIT extends IntegrationTest {
                 .hasStackTraceContaining("the rows of a committed import batch never change");
         assertThatThrownBy(() -> asApp(t, "UPDATE import_rows SET raw = '{}' WHERE batch_id = ?", items))
                 .hasStackTraceContaining("permission denied");
+        // Removing the staged rows themselves (the purge of #139) takes their issues with them (review of #867).
+        assertThat(asApp(t, "DELETE FROM import_rows WHERE batch_id = ?", items))
+                .isPositive();
     }
 
     @Test
@@ -259,6 +262,35 @@ class ImportValidationIT extends IntegrationTest {
         UUID batch = run.batches().get("fab-item-list.csv").id();
         assertCode(() -> as(other, () -> validation.validate(run.runId())), "not_found");
         assertCode(() -> as(other, () -> validation.issues(batch)), "not_found");
+    }
+
+    /**
+     * A file read again between the passes (here its parse stamp moves, as a new parse with a new mapping version moves
+     * it) is never checked with what pass 1 learned: the batch is refused with {@code batch_changed} and the run does not
+     * move to review. A file stored and not yet read refuses the validation before it starts (review of #867).
+     * JUSTIFICATION-A3: a new test case for the reviewer's must-fix 1.
+     */
+    @Test
+    void aFileReadAgainDuringTheValidationOrNotYetReadIsRefused() throws IOException {
+        GoldenUpload run = uploadGolden(t, GoldenRun.FILES);
+        UUID tillRoll = run.batches().get("fab-till-roll.csv").id();
+        FixtureShopTemplate.BETWEEN_PASSES = () -> TestDatabase.owner()
+                .sql("UPDATE import_batches SET parsed_at = parsed_at + interval '1 second' WHERE id = ?")
+                .param(tillRoll)
+                .update();
+        try {
+            assertCode(() -> as(t, () -> validation.validate(run.runId())), "batch_changed");
+        } finally {
+            FixtureShopTemplate.BETWEEN_PASSES = null;
+        }
+        assertThat(as(t, () -> runs.get(run.runId()).status())).isEqualTo("uploaded");
+        assertThat(as(t, () -> validation.issues(tillRoll))).isEmpty();
+
+        TestDatabase.owner()
+                .sql("UPDATE import_batches SET status = 'uploaded' WHERE id = ?")
+                .param(tillRoll)
+                .update();
+        assertCode(() -> as(t, () -> validation.validate(run.runId())), "batch_not_parsed");
     }
 
     @Test

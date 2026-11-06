@@ -1,5 +1,6 @@
 fab-item-list.csv|3|code|VALUE_NORMALISED|info|code on fab-item-list.csv line 3 was tidied by the rule upper; the original is kept with this note.
 fab-item-list.csv|3|name|VALUE_NORMALISED|info|name on fab-item-list.csv line 3 was tidied by the rule collapse_spaces; the original is kept with this note.
+fab-item-list.csv|3|price|VALUE_NORMALISED|info|price on fab-item-list.csv line 3 was tidied by the rule thousands_separator; the original is kept with this note.
 fab-item-list.csv|4|code|CODE_DUPLICATE|warning|code on fab-item-list.csv line 4 is the same as line 2 ignoring case and spaces; they become one record of items.
 fab-item-list.csv|5|name|REQUIRED_MISSING|blocking|name is empty on fab-item-list.csv line 5.
 fab-item-list.csv|6|price|MONEY_FRACTION|blocking|price on fab-item-list.csv line 6 has a fraction; amounts are whole shillings.

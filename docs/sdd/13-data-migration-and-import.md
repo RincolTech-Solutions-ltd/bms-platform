@@ -887,7 +887,9 @@ operator's tooling calls the services, as it calls the upload and the commit.
   issue; the normaliser, which is the shared form function (section 13.6): the field's own `Normaliser` for text, codes and
   references (`collapse_spaces`, `upper`, `RetailCatalogue.normaliseCode` for retail codes under the vertical's own name),
   `PhoneNumbers.normaliseUganda` for a `phone` and `NationalIds.normaliseNin` for a `nin`, each change an `info`
-  `VALUE_NORMALISED` with the original; the type (`TYPE_INVALID`, `MONEY_FRACTION` for a fraction of a shilling,
+  `VALUE_NORMALISED` with the original; group separators in a number are taken only between groups of three digits
+  (`12,500`, `12 500`; `12,50` and `1,5` are `TYPE_INVALID`, never 1250 or 15) and their removal is a `VALUE_NORMALISED`
+  of the rule `thousands_separator`; the type (`TYPE_INVALID`, `MONEY_FRACTION` for a fraction of a shilling,
   `QTY_PRECISION` beyond three places, `TEXT_TOO_LONG`; dates and moments read as ISO under every convention and day first
   or month first under the mapping's, a moment in the mapping's zone); a hidden character inside a key or a reference
   (`CODE_CONTROL_CHAR`); the field's range (`VALUE_OUT_OF_RANGE`); a date or moment after the run's `cutover_at`
@@ -895,8 +897,10 @@ operator's tooling calls the services, as it calls the upload and the commit.
   cells), repeated in the run (`DUPLICATE_SOURCE_REF`); a reference to a code no batch of the run holds and the business does
   not hold either (`REF_UNKNOWN`; the template answers for its own tables through `existingKeys`, inside a read-only
   transaction bound to the business); a key repeated across the run ignoring case and spaces (`CODE_DUPLICATE`); a NIN
-  repeated in the entity set (`NIN_DUPLICATE`); then the template's cross-field rules (`rowChecks`). A row whose kept cells
-  are all empty is `BLANK_ROW` and nothing else.
+  repeated in the entity set within the run (`NIN_DUPLICATE`; a NIN the business already holds is matched by the
+  template's linking step, section 13.9, with #136); then the template's cross-field rules (`rowChecks`), whose parameters
+  may not hold any personal value of the row (the engine refuses one that does). A row whose kept cells are all empty is
+  `BLANK_ROW` and nothing else.
 - **The template contract grows.** A `Field` may be `personalData()` (never interpolated; a `phone` or `nin` always is), the
   set's key (`asKey()`, at most one, a `text`, which a `ref` to the set names) and have a `range(min, max)` (money and qty).
   A template may offer `rowChecks(set)` and `existingKeys(set, keys)`. The registry refuses at start-up a key that is not
@@ -908,16 +912,24 @@ operator's tooling calls the services, as it calls the upload and the commit.
   `source_ref` and its issues in a fixed order (fields in the template's order, then the row's reference, then per field its
   reference and duplicates, then the cross-field rules). The same rows, template and mapping version give the same issues,
   messages and values every time.
+- **A run that changes while it is checked.** A validation refuses to start while a file of the run is stored and not
+  yet read (409 `batch_not_parsed`). Pass 1 records each batch's stamp (status, mapping version, parse time, row count);
+  each batch is written only if its stamp is unchanged under its lock, and the validation finishes, in one transaction
+  that holds the run `FOR UPDATE` as an upload does, only if every batch of the run still has the stamp pass 1 saw (none
+  added, read again with a new mapping version, cancelled or committed); otherwise 409 `batch_changed`, and the run stays
+  where it was. A second validation that finishes later finds the run already in review.
 - **Where the results are.** Each parsed batch is written in one transaction that holds the run `FOR SHARE` and the batch
-  `FOR UPDATE` (the parse's order) and checks again that the run is open and the batch parsed: the batch's issues are
+  `FOR UPDATE` (the parse's order) and checks again that the run is open and the batch unchanged: the batch's issues are
   deleted and written again in `import_issues` (code, severity, field, line, message, the original cell text, `open` or
   `resolved` for `info`), and each row's `normalised` and `source_ref` are set; `raw` is never changed (a column grant). A
   committed batch is read for its keys and references and never written; the triggers `import_issues_batch_kept` and
-  `import_rows_validation_kept` refuse it for every role but a migration and the removal of a business. An `uploaded` run
+  `import_rows_validation_kept` refuse it for every role but a migration and the removal of a business (a delete of the
+  rows themselves, the purge of #139, takes their issues with it through the foreign key). An issue's row is of its
+  business and its batch (the foreign key `(tenant_id, batch_id, row_id)`). An `uploaded` run
   moves to `in_review`. Audited as `core.import_run.validated` with counts by code; the log line carries the run id and the
   counts by code only.
-- **Messages.** Built from the code's template with the field name, the batch's file name, line numbers and the rule; never
-  a cell's text. Section 13.7 sets the rules of the catalogue; the golden run proves them.
+- **Messages.** Built from the code's template with the field name, the batch's file name (at most 100 characters, the
+  middle elided, so a message naming two files fits its 500), line numbers and the rule; never a cell's text. Section 13.7 sets the rules of the catalogue; the golden run proves them.
 - **Not in this step.** The row rules a mapping switches on (the sub-header rows, totals row and placeholder rows of
   section 13.5) are not applied yet: a totals row is checked as a data row. `ROW_CHANGED_SINCE_REVIEW` (#131) and
   `CHANGED_SINCE_IMPORT` (#133) are pending the steps that hold a row's reviewed and imported content.
@@ -930,5 +942,8 @@ operator's tooling calls the services, as it calls the upload and the commit.
   expected issues, with typed values stored and `raw` unchanged; the messages, the audit row and the logs hold none of the
   fixture's names, phones or NINs; validating again stores the same issues, values and references; a committed batch is
   read and never written, by the service or by `bms_app` directly; another business can neither validate the run, read
-  its issues nor lend it a reference; a cancelled run is not validated), `RlsIsolationIT` (forced RLS on `import_issues`),
+  its issues nor lend it a reference; a cancelled run is not validated; a file read again between the passes is refused
+  with `batch_changed` and a file not yet read with `batch_not_parsed`; deleting a committed batch's rows takes their
+  issues; and, in `ImportCatalogueTest`, each code of another stage is asserted in its named test method, two long file
+  names fit a message, ambiguous commas are refused and a rule's personal parameter is refused), `RlsIsolationIT` (forced RLS on `import_issues`),
   `MigrationOrderIT` (V140 keeps every staged row) and `ModularityTest`.
