@@ -107,3 +107,30 @@ never the item's own unit on this screen: stock is counted in the smallest unit 
 
 **Watch for:** another caller of the route that leaves the category out still files under General; a screen that adds an item
 should ask for the category as Quick add does. A carton pack that failed is said once; nothing retries it.
+
+## Amendment of 6 Nov 2026: a list of Quick adds in one request (issue #870)
+
+A pilot shop owner stopped using the app after adding about 20 items: one item per form was too slow. Add many items is one
+screen of rows, with a paste box, saved at once.
+
+1. `POST /retail/quick-add/list` takes up to 200 rows at one branch. Each row is one Quick add, run through the same service
+   method as `POST /retail/quick-add` (the catalogue's `createItem`, the `opening` movement of source `retail.quick_add`
+   against opening balance equity, the audit row): there is no second way to make an item or its starting stock. The rows have
+   no packages, no `paid_from` and no `duplicate_reason`; those stay on Quick add.
+2. The whole list is one transaction under one `Idempotency-Key`. A replay is the stored answer and adds nothing twice, and it
+   answers only the person who stored it (ADR-026 decision 5). A refused row stops the list and nothing of it is saved; the
+   problem names `row_index` and its fields as `rows[i].<field>`, so the screen shows it on that row. The screen checks every
+   row before it sends and sends only the good ones, so "18 items added, 2 need a look" comes from the screen's checks, and a
+   refusal from the server is the rare case (a name added elsewhere meanwhile).
+3. Offline the list is one outbox entry (ADR-067 decision 13, kind `items`): sent later under its key, dated the day the phone
+   made it, and audited `retail.entry.recorded_offline`. A refused list is fixed on the phone with Fix, which reopens the rows.
+4. The group is optional on the list, as issue #870 asks: a row starts with the group of the row above, the first row with the
+   group this person last used at the shop, and the picker shows General when none is chosen, so nothing goes under General
+   without the owner seeing it.
+
+**Better:** twenty items are one screen and one tap, typed or pasted, online or offline.
+
+**Worse:** one bad row the screen could not see refuses the whole list; the owner fixes that row and saves again.
+
+**Watch for:** a list near 200 rows is one long transaction holding the name locks of every new item; if lists grow, split
+them on the screen rather than raise the limit.

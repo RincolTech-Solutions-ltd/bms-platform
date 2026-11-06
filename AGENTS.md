@@ -836,6 +836,13 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   transaction; with `product_id` only the quantity is added. The Quick add screen (`/staff/retail/quick-add`): the Stock menu
   row and More, the first-run card's first action, the catalogue home, the Items page and Sell's not-found line; Add another and Sell it
   (`/staff/retail/sale?item=`). Help: How do I add an item quickly?. Tests: `RetailQuickAddIT`, `quick-add.dom.test.tsx`.
+- **Built (Add many items, issue #870, ADR-101 amendment of 6 Nov 2026, FR-RET-93):** no migration. `POST /api/v1/retail/quick-add/list`
+  (`retail.stock`, permission `retail.catalogue.manage`, one `Idempotency-Key` per list) runs every row through `QuickAddService`'s own
+  path at one branch in one transaction; a refused row names `row_index` and saves nothing of the list; `offline` dates a list sent
+  from the outbox (entry kind `items`). The screen `/staff/retail/add-many` (`add-many.tsx`, pure part `add-many-state.ts`): rows,
+  Paste a list (tab, two spaces or comma), row checks (a comma decimal refused as in #867), Save the list in the sticky bar, the
+  rows that need a look kept; linked from Items, the first-run card, the catalogue home and Quick add. Tour `page-add-many`.
+  Tests: `RetailQuickAddListIT`, `add-many-state.test.ts`, `add-many.dom.test.tsx`, `layout/add-many.layout.test.ts`.
 - **Built (add it in place, issue #688, owner decision D75, FR-UXN-12, ADR-101 amendment of 29 Oct 2026):** PWA only, no
   migration, no API change. `PickerWithAdd` and `useAddInPlace` (`frontend/src/app/ui/PickerWithAdd.tsx`): a record picker ends
   its list with "+ Add a <thing>" for whoever holds the full add screen's permission, which opens the kit's Sheet over the form

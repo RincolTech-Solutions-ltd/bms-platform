@@ -767,6 +767,12 @@ Notes:
   is refused as on Items, and adding it anyway still needs `core.settings.manage` and a reason. Paying for the goods from the branch's cash
   or mobile money (`paid_from`, issue #646) also needs `retail.purchase.create` at that branch, Buy stock's own permission, checked before
   anything is made (403 `permission_denied`).
+- Add many items (issue #870, ADR-101 amendment of 6 Nov 2026, FR-RET-93) adds no permission, so the matrix is unchanged.
+  `POST /retail/quick-add/list` needs what Quick add needs: `retail.catalogue.manage`, and `retail.stocktake.commit` at the list's
+  branch for its stock, checked once before any item is made. It is tenant scoped like every route and branch scoped through that
+  check; the whole list is one transaction under one `Idempotency-Key`, whose stored answer replays only to the person who stored it
+  (ADR-026 decision 5). The answer carries no cost, and the screen asks the buying price only of whoever holds `retail.profit.read`,
+  as Quick add does; adding a name that exists already is not offered on the list.
 - Corrections of entry mistakes (issues #351 and #352, ADR-044, FR-RET-44 to FR-RET-46) add no permission, so the matrix is unchanged. Voiding a
   restock (`POST /retail/purchases/{id}/void`) and reading one restock need `retail.purchase.create`; the void needs it at **every** branch the
   restock added stock to (403 `permission_denied` when one is outside the caller's scope), because it takes stock out of all of them. Correcting a
