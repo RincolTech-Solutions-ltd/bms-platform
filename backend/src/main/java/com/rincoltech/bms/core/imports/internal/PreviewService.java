@@ -4,6 +4,7 @@ import com.rincoltech.bms.core.imports.BatchWriter;
 import com.rincoltech.bms.core.imports.ImportForecast;
 import com.rincoltech.bms.core.imports.ImportMappings;
 import com.rincoltech.bms.core.imports.ImportPreview;
+import com.rincoltech.bms.core.imports.ImportRefs;
 import com.rincoltech.bms.core.imports.ImportTemplate;
 import com.rincoltech.bms.core.imports.ImportTemplate.EntitySet;
 import com.rincoltech.bms.core.imports.ImportTemplate.Field;
@@ -144,20 +145,18 @@ class PreviewService implements ImportPreview {
         Map<String, Integer> records = new LinkedHashMap<>();
         order.forEach(set -> records.put(set, 0));
         List<BatchOutcome> outcomes = new ArrayList<>();
-        ImportForecast forecast = template == null ? ImportForecast.NONE : template.forecast();
+        ImportForecast forecast = template == null ? ImportForecast.NONE : template.forecast(policy(runId));
         for (BatchRow b : ordered) {
             String set = sets.get(b.id());
             BatchOutcome outcome = outcome(b, set);
             outcomes.add(outcome);
             if (set != null) {
                 records.merge(set, outcome.write(), Integer::sum);
-                feed(
-                        forecast,
-                        b.id(),
-                        template.entitySets().stream()
-                                .filter(e -> e.key().equals(set))
-                                .findFirst()
-                                .orElseThrow());
+                EntitySet entities = template.entitySets().stream()
+                        .filter(e -> e.key().equals(set))
+                        .findFirst()
+                        .orElseThrow();
+                feed(forecast, b.id(), entities, sourceOf(documents.get(b.mappingId()), b.source(), entities));
             }
         }
         return new Preview(
@@ -290,6 +289,16 @@ class PreviewService implements ImportPreview {
     // The policy decisions a run needs, and the rows a writer reads (issue #133, spec sections 3.7 and 3.8).
     // JUSTIFICATION-A3: new reads of the staged rows the commit of #133 needs, beside the preview's own reads.
     // ---------------------------------------------------------------------------------------------
+
+    /** The run's recorded policy decisions, by key the option chosen. */
+    private Map<String, String> policy(UUID runId) {
+        Map<String, String> out = new LinkedHashMap<>();
+        jdbc.sql("SELECT key, value ->> 'option' FROM import_runs, jsonb_each(policy) WHERE id = ? ORDER BY key")
+                .param(runId)
+                .query((rs, n) -> out.put(rs.getString(1), rs.getString(2)))
+                .list();
+        return out;
+    }
 
     /** The policies the run's template declares; none when no batch was read with a mapping. */
     List<ImportTemplate.Policy> policies(UUID runId) {
@@ -446,19 +455,31 @@ class PreviewService implements ImportPreview {
         return n == null ? 0 : Math.toIntExact(((Number) n).longValue());
     }
 
-    /** Gives the forecast every row of the batch the commit would write, in line order, 1,000 at a time. */
-    private void feed(ImportForecast forecast, UUID batchId, EntitySet set) {
+    /**
+     * Gives the forecast every row of the batch the commit would write, in line order, 1,000 at a time: since issue #133
+     * not a row the business's imports already hold with the same content, which the commit counts as existing and writes
+     * nothing for, so the preview of a re-run predicts only what is new.
+     */
+    private void feed(ImportForecast forecast, UUID batchId, EntitySet set, BatchSource source) {
+        Map<String, Set<String>> imported = RefService.imported(jdbc, source.file(), source.tab());
         int after = 0;
         while (true) {
-            List<Object[]> chunk = jdbc.sql("SELECT r.source_row_no, r.normalised::text FROM import_rows r"
-                            + " WHERE r.batch_id = ? AND r.source_row_no > ? AND r.normalised IS NOT NULL AND " + WRITE
-                            + " ORDER BY r.source_row_no LIMIT " + CHUNK)
+            List<Object[]> chunk = jdbc.sql("SELECT r.source_row_no, r.normalised::text, r.source_ref"
+                            + " FROM import_rows r WHERE r.batch_id = ? AND r.source_row_no > ?"
+                            + " AND r.normalised IS NOT NULL AND " + WRITE + " ORDER BY r.source_row_no LIMIT " + CHUNK)
                     .params(batchId, after)
-                    .query((rs, n) -> new Object[] {rs.getInt(1), rs.getString(2)})
+                    .query((rs, n) -> new Object[] {rs.getInt(1), rs.getString(2), rs.getString(3)})
                     .list();
             for (Object[] row : chunk) {
-                forecast.row(set.key(), typed(set, JSON.readValue((String) row[1], OBJECT)));
                 after = (Integer) row[0];
+                Map<String, Object> stored = JSON.readValue((String) row[1], OBJECT);
+                if (!imported.isEmpty()) {
+                    String ref = RefService.sourceRef(source, (String) row[2], after, stored);
+                    if (imported.getOrDefault(ImportRefs.keyOf(ref), Set.of()).contains(ref)) {
+                        continue;
+                    }
+                }
+                forecast.row(set.key(), typed(set, stored));
             }
             if (chunk.size() < CHUNK) {
                 return;

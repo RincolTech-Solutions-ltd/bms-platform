@@ -68,6 +68,11 @@ class RefService {
      * validation compares each row with ({@code CHANGED_SINCE_IMPORT}).
      */
     Map<String, Set<String>> imported(String file, String tab) {
+        return imported(jdbc, file, tab);
+    }
+
+    /** As {@link #imported(String, String)}, for the preview, which this service depends on. */
+    static Map<String, Set<String>> imported(JdbcClient jdbc, String file, String tab) {
         String prefix = ImportRefs.sourceKey(file, tab, "x");
         prefix = prefix.substring(0, prefix.length() - 1);
         String like = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";

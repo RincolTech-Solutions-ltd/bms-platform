@@ -31,6 +31,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -58,6 +59,9 @@ class ImportRunsIT extends IntegrationTest {
 
     @Autowired
     PlatformTransactionManager transactionManager;
+
+    @Autowired
+    TestRestTemplate http;
 
     TestDatabase.Fixture t;
     UUID operator = UUID.randomUUID();
@@ -110,8 +114,18 @@ class ImportRunsIT extends IntegrationTest {
         return TenantContext.callAs(f.tenantId(), work);
     }
 
-    /** A run with {@code batches} pending batches, moved to ready with its dump recorded. */
+    /**
+     * A run with {@code batches} pending batches, moved to ready with its dump recorded and checked, and its commit approved
+     * by a second person (issue #133).
+     */
     Run readyRun(int batches) {
+        Run run = unapprovedRun(batches);
+        CommitApproval.readyToCommit(http, t, runs, run.id(), SHA);
+        return as(t, () -> runs.get(run.id()));
+    }
+
+    /** A run as {@link #readyRun} without the dump's check and the commit's approval. */
+    Run unapprovedRun(int batches) {
         return as(t, () -> {
             Run run = runs.open(operator);
             for (int seq = 1; seq <= batches; seq++) {
@@ -631,8 +645,11 @@ class ImportRunsIT extends IntegrationTest {
             assertCode(() -> runs.approveTradingTenant(run.id(), maker), "self_approval_forbidden");
             assertThat(runs.approveTradingTenant(run.id(), checker).tradingOverrideApproved())
                     .isTrue();
+            // The override changed the run after its commit was approved (issue #133): the approval is asked again.
+            assertCode(() -> runs.commit(script(run.id(), NOTHING)), "commit_not_approved");
             return null;
         });
+        CommitApproval.approved(http, t, runs, run.id());
         assertThat(as(t, () -> runs.commit(script(run.id(), NOTHING)))).isEqualTo(CommitOutcome.COMMITTED);
         assertThat(audits("core.import_run.trading_override_set")).isEqualTo(1);
         assertThat(audits("core.import_run.trading_override_approved")).isEqualTo(1);

@@ -282,6 +282,15 @@ public interface ImportTemplate {
     }
 
     /**
+     * The forecast for a run with these policy decisions recorded, by key the option chosen (issue #133): a template whose
+     * opening balances depend on a decision (the receivable decision opens a receivable or none) predicts by it, so the
+     * preview and the dry run agree. {@link #forecast()} by default.
+     */
+    default ImportForecast forecast(Map<String, String> policy) {
+        return forecast();
+    }
+
+    /**
      * The policy decisions the template's loader reads (issue #133, spec section 3.8, ADR-027 decision 7): a run is not
      * {@code ready}, and does not commit, while one it needs is not recorded ({@link Policy#missingCode}). None by default.
      */
