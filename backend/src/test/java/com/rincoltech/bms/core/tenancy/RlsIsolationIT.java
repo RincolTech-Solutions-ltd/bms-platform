@@ -1229,6 +1229,15 @@ public class RlsIsolationIT {
                         """)
                 .params(UUID.randomUUID(), t.tenantId(), importBatch, importRow)
                 .update();
+        // The review queue (migration V141, #131): one resolution of that issue, its note fabricated.
+        owner.sql("""
+                        INSERT INTO import_issue_resolutions (id, tenant_id, run_id, batch_id, issue_id, row_key, raw_sha256,
+                                                              source_row_no, code, field, resolution, note, resolved_by)
+                        VALUES (?, ?, ?, ?, ?, 'row:item_list:2', repeat('a', 64), 2, 'REQUIRED_MISSING', 'code',
+                                'exclude_row', 'Fabricated reason', ?)
+                        """)
+                .params(UUID.randomUUID(), t.tenantId(), importRun, importBatch, UUID.randomUUID(), user)
+                .update();
     }
 
     /**
@@ -2007,7 +2016,9 @@ public class RlsIsolationIT {
                 "lending_savings_interest_postings",
                 "lending_investment_transactions",
                 // A business's import mapping versions (#129).
-                "import_mappings")) {
+                "import_mappings",
+                // The resolutions of the review queue (#131).
+                "import_issue_resolutions")) {
             assertThatThrownBy(() -> asApp(
                             a.tenantId(),
                             c -> count(c, "WITH d AS (DELETE FROM " + table + " RETURNING 1) SELECT count(*) FROM d")))
