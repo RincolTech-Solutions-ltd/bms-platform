@@ -363,6 +363,36 @@ The cost is what the provider reported for each message; the report prices nothi
 `SmsUsageReportIT` (a golden fabricated September against hand-computed totals, month edges in the business's time zone, another business's
 messages never counted, the offer rule).
 
+### `core.import_reconciliation` (`core.imports.sign_off`)
+
+The reconciliation of an imported run (FR-IMP-08, spec section 3.9, chapter 13 section 13.11; built in issue #134,
+migration `V144`): what the customer's sheet says against what the books hold after the import, which the tenant admin
+signs in the app (spec section 3.10). It is not a run of the reports pack: the commit makes it as it finishes and stores it
+as a document, versioned per run, and the sign-off screen (Imports to sign off) shows it; `GET
+/imports/runs/{run_id}/reconciliation` answers it as JSON and `.../reconciliation.txt` as the plain text whose SHA-256 is
+signed (chapter 7 section 7.11.9).
+
+Parameters: the run. As at: the cutover moment's day in the business's time zone (the commit's day when none was set).
+Every value is an exact decimal string, money in minor units, never rounded. Per section, each check is
+`source`, `system`, `difference = source - system`, `itemised` (the sum of the items that name it) and
+`unitemised = difference - itemised`; a check ties when `unitemised = 0`.
+
+| Section | Source (the staged rows, each measured alone by the template's forecast) | System (the books) |
+|---|---|---|
+| Rows and records | per file and per entity set: rows that are not blank | rows whose `source_ref` is in `import_refs` |
+| Stock quantity | per branch and product: the sum of each row's stock | the stock ledger's balance (`ImportBooks.stock`) |
+| Stock value | per branch: the sum of each row's stock value | `D - C` of the run's journal lines on `inventory`, plus each negative balance listed at its value |
+| Money owed by customers | per branch: each row's receivable as if opened (`open_from_list`) | `D - C` of the run's journal lines on `trade_debtors` |
+| Loan principal outstanding | per branch: each row's principal | `D - C` of the run's journal lines on `loans_receivable` |
+| Loans by days past due | per branch and bucket, as at the cutover day: loans and principal | the loan book (`ImportBooks.arrears`) |
+| Journals and trial balance | per branch and kind: each row's opening journal debit | the debits of the run's journals of that kind; then the run's debits against its credits, its entries out of balance and not opening journals (both 0), and the business's total debits against total credits and its entries out of balance (0) |
+
+Items: one per row left out (`excluded`, with its file, line and codes and its own part of each check), per written row
+with an overridden warning (`overridden`, amount 0), per check the receivable decision changes (`policy`, the option and
+the day confirmed) and per negative stock balance (`policy`). Signable when every check ties. Holds no personal value:
+branches and products by code, rows by file and line, decisions by option and day. Test: `ImportReconciliationIT` (the
+golden files of `fixture_shop` against hand-computed system values; a broken balance; the decision as a policy item).
+
 ## 14.7 Compliance reports (`lending.reports.compliance`)
 
 The regulator's return formats for the pilot tenant are an open question

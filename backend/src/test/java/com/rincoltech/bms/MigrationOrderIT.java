@@ -3694,6 +3694,108 @@ class MigrationOrderIT {
         }
     }
 
+    /**
+     * V144 (issue #134) is expand only: a run committed before it keeps its state and has no reconciliation or sign-off;
+     * the tenant administrator alone holds {@code core.imports.sign_off}; both new tables are append-only under forced
+     * row-level security; and the database refuses a sign-off of a reconciliation with a difference that is not itemised,
+     * of one that is not the newest, of a run that is not committed, and any new reconciliation once signed.
+     * JUSTIFICATION-A3: a new test case; no existing case covers V144.
+     */
+    @Test
+    void importReconciliationMigrationKeepsEveryRunAndGuardsTheSignOff() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            String before = VERSIONS.get(VERSIONS.indexOf("144") - 1);
+            assertThat(flyway(postgres, before).migrate().targetSchemaVersion).isEqualTo(before);
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            UUID tenant = UUID.randomUUID();
+            owner.sql("INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v144', 'Test Tenant V144',"
+                            + " '00000000-0000-4000-8000-000000000001')")
+                    .param(tenant)
+                    .update();
+            UUID run = UUID.randomUUID();
+            owner.sql("INSERT INTO import_runs (id, tenant_id, created_by, status) VALUES (?, ?, ?, 'committed')")
+                    .params(run, tenant, UUID.randomUUID())
+                    .update();
+
+            assertThat(DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD)
+                            .success)
+                    .isTrue();
+
+            assertThat(owner.sql("SELECT status FROM import_runs WHERE id = ?")
+                            .param(run)
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("committed");
+            assertThat(owner.sql("SELECT role_key FROM role_permissions WHERE permission_key = 'core.imports.sign_off'")
+                            .query(String.class)
+                            .list())
+                    .containsExactly("tenant_admin");
+            assertThat(owner.sql("SELECT bool_and(relrowsecurity AND relforcerowsecurity) FROM pg_class WHERE relname"
+                                    + " IN ('import_reconciliations', 'import_signoffs')")
+                            .query(Boolean.class)
+                            .single())
+                    .isTrue();
+
+            String sha = "a".repeat(64);
+            UUID unsignable = UUID.randomUUID();
+            owner.sql("INSERT INTO import_reconciliations (id, tenant_id, run_id, version, as_at, report, sha256,"
+                            + " signable) VALUES (?, ?, ?, 1, DATE '2026-10-01', '{}', ?, false)")
+                    .params(unsignable, tenant, run, sha)
+                    .update();
+            String signOff = "INSERT INTO import_signoffs (id, tenant_id, run_id, reconciliation_id, report_sha256,"
+                    + " sections, signed_name, signed_on, signed_by) VALUES (?, ?, ?, ?, ?, ARRAY['counts'],"
+                    + " 'Test Signer', DATE '2026-10-02', ?)";
+            assertThatThrownBy(() -> owner.sql(signOff)
+                            .params(UUID.randomUUID(), tenant, run, unsignable, sha, UUID.randomUUID())
+                            .update())
+                    .hasStackTraceContaining("not itemised is never signed");
+            UUID signable = UUID.randomUUID();
+            owner.sql("INSERT INTO import_reconciliations (id, tenant_id, run_id, version, as_at, report, sha256,"
+                            + " signable) VALUES (?, ?, ?, 2, DATE '2026-10-01', '{}', ?, true)")
+                    .params(signable, tenant, run, sha)
+                    .update();
+            assertThatThrownBy(() -> owner.sql(signOff)
+                            .params(UUID.randomUUID(), tenant, run, unsignable, sha, UUID.randomUUID())
+                            .update())
+                    .hasStackTraceContaining("names the newest reconciliation");
+            assertThatThrownBy(() -> owner.sql(signOff)
+                            .params(UUID.randomUUID(), tenant, run, signable, "b".repeat(64), UUID.randomUUID())
+                            .update())
+                    .hasStackTraceContaining("as it is stored");
+            owner.sql(signOff)
+                    .params(UUID.randomUUID(), tenant, run, signable, sha, UUID.randomUUID())
+                    .update();
+            assertThatThrownBy(() -> owner.sql("INSERT INTO import_reconciliations (id, tenant_id, run_id, version,"
+                                    + " as_at, report, sha256, signable) VALUES (?, ?, ?, 3, DATE '2026-10-01', '{}', ?,"
+                                    + " true)")
+                            .params(UUID.randomUUID(), tenant, run, sha)
+                            .update())
+                    .hasStackTraceContaining("signed off import never changes");
+            for (String table : List.of("import_reconciliations", "import_signoffs")) {
+                assertThatThrownBy(() -> owner.sql("DELETE FROM " + table + " WHERE run_id = ?")
+                                .param(run)
+                                .update())
+                        .as(table)
+                        .hasStackTraceContaining("append-only");
+            }
+            UUID draft = UUID.randomUUID();
+            owner.sql("INSERT INTO import_runs (id, tenant_id, created_by, status) VALUES (?, ?, ?, 'ready')")
+                    .params(draft, tenant, UUID.randomUUID())
+                    .update();
+            UUID ofDraft = UUID.randomUUID();
+            owner.sql("INSERT INTO import_reconciliations (id, tenant_id, run_id, version, as_at, report, sha256,"
+                            + " signable) VALUES (?, ?, ?, 1, DATE '2026-10-01', '{}', ?, true)")
+                    .params(ofDraft, tenant, draft, sha)
+                    .update();
+            assertThatThrownBy(() -> owner.sql(signOff)
+                            .params(UUID.randomUUID(), tenant, draft, ofDraft, sha, UUID.randomUUID())
+                            .update())
+                    .hasStackTraceContaining("only a committed import is signed off");
+        }
+    }
+
     private static PostgreSQLContainer database() {
         // Shared rootless Docker on the runners can hand out a host port another job just took.
         return new PostgreSQLContainer("postgres:16-alpine")

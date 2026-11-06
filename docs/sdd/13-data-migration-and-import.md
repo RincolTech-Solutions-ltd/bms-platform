@@ -518,6 +518,42 @@ Contents (FR-IMP-08):
 - Opening journal entry numbers per branch and their totals.
 - Every resolution with who, when, before, after and note.
 
+As built for every template (#134, section 13.14.1 8/16; spec sections 3.9 and 3.10): the reconciliation is made by the
+commit as it finishes and stored as a document (`import_reconciliations`, append-only, migration `V144`), and made again
+on request as the next version until the customer signs it. Each check shows a **source value**, a **system value** and the
+**difference** (source less system). The source is the run's staged rows: every row that is not blank, the rows left out
+included, each measured alone by the template's own forecast, so a row's part in every check is known. The system is the
+books, never the commit's report: the run's journals (found in `import_refs`) read line by line through the ledger's port,
+the ledger of the whole business, and the stock ledger and loan book through the template's `ImportBooks`. The sections
+are:
+
+| Section | Checks | System side |
+|---|---|---|
+| `counts` | rows per file and per entity set (not blank); facts per file: read, blank, left out, written by this import, already imported before, not found in the books; records created per target type | rows whose `source_ref` `import_refs` holds |
+| `stock_quantity` | per branch and product: the balances checksum | the template's stock ledger |
+| `stock_value` | per branch | the run's journal lines on `inventory`; each negative balance listed separately as a `policy` item at its value |
+| `receivables` | per branch, as if every credit sale were opened | the run's journal lines on `trade_debtors` |
+| `loan_principal` | per branch | the run's journal lines on `loans_receivable` |
+| `arrears` | loans and principal per branch and bucket, as at the cutover day | the template's loan book |
+| `ledger` | each opening journal per branch and kind; the run's journals balanced, none out of balance, none other than opening journals; the business's trial balance balanced, no entry out of balance | the ledger |
+
+Every difference is itemised: `excluded` (a row left out in the review or held back by an open blocking issue, with its
+file, line, codes and its own part of each check; a row an earlier run already imported, for the values this run did not
+post), `overridden` (a written row whose warning was overridden, listed with no amount for the signer to see) and `policy`
+(the receivable decision's effect, as the source measured under `open_from_list` less the books under the decision, with
+the option and the day the customer confirmed it; a negative stock balance). A check whose difference the items do not
+explain does not tie, and a reconciliation with such a check is not signable: the sign-off is refused (409
+`unitemised_difference`) and the database refuses it too (`import_signoff_rules`). Values are exact decimal strings, money
+in minor units, never rounded; branches and products are named by their codes, rows by file and line, and a text that names
+a personal value of the run is hidden.
+
+The **sign-off** (spec section 3.10, `core.imports.sign_off`, the tenant admin's): the admin opens the newest
+reconciliation, ticks each section, types their name and today's date; the sign-off names the reconciliation and its
+SHA-256 as read (409 `reconciliation_changed` if it was made again), is stored in `import_signoffs` (append-only, one per
+run), moves the run to `signed_off` and is audited `core.import_run.signed_off` without the name. The run reaches
+`signed_off` no other way. After it, no new reconciliation of the run is stored (a trigger refuses it), so the signed
+document stays the run's newest for good.
+
 ## 13.12 Golden fixture and expected outcome
 
 `fixtures/pilot_loan_register_sample.csv` holds 12 fabricated rows reproducing every
@@ -1272,3 +1308,42 @@ path, `ImportRuns.commit(run)` and `resume(run)`; the dry run runs the same batc
   `ImportRunsIT`, `ImportPreviewIT` and `ImportMappingsIT` (every commit through the request and approval),
   `ImportCatalogueTest` (`CHANGED_SINCE_IMPORT` and `CREDIT_DECISION_MISSING` produced by named tests, none pending) and
   `MigrationOrderIT` (V143 keeps every run, the CHECKs, append-only `import_refs` under forced RLS, the trigger).
+
+**8/16, the reconciliation and the sign-off (#134, migration `V144`, FR-IMP-08, ADR-027 decision 8, spec sections 3.9 and
+3.10).** `core.imports` gains the public API `ImportReconciliation` (`reconcile`, `latest`, `forSignOff`, `signOff`), the
+template SPI `ImportBooks` (`ImportTemplate.books()`: the stock ledger and the loan book a template answers for, none by
+default), `ImportForecast.productStock()` (the forecast's stock per branch and product, none by default), and on the
+ledger's port `LedgerAccounts.lines(entries)` and `trialBalanceCheck()`. The first routes for the tenant admin and the
+sign-off screen (chapter 7 section 7.11.9). What each check reads and how differences are itemised is section 13.11.
+
+- **Made after the commit.** The commit's last step, once the run is `committed`, makes version 1 in its own transaction;
+  a failure there is logged (the run and the kind of failure) and never undoes the commit, and the reconciliation is made
+  again on request (`core.imports.manage`, audited `core.import_run.reconciled` with the version, whether it can be signed
+  and how many checks do not tie).
+- **Independent of the writer.** Neither the commit's stored report nor a writer's counts are read: the source is the
+  staged rows measured by the template's own forecast, one row at a time, and the system is what the ledger, the stock
+  ledger, the loan book and `import_refs` hold. A writer that posts more or less than it reported, or registers no record
+  for a row, shows as a difference no item explains.
+- **Stored as a document, signed once.** `import_reconciliations` (one row per version: the whole report as JSON, its
+  SHA-256, the day it is as at, whether it can be signed) and `import_signoffs` (one per run: the reconciliation and its
+  SHA-256 as read, the sections ticked, the name and date typed, who signed). Both append-only under forced row-level
+  security, with no update path; the trigger `import_signoff_rules` refuses a sign-off of a run that is not `committed`, of
+  a reconciliation that is not the newest, with a difference not itemised or with another SHA-256, and any new
+  reconciliation of a signed run. `ImportRuns.transition` no longer reaches `signed_off`.
+- **Templates until #135 and #136.** No production template is registered yet: the retail checks are proven with the
+  test-only `fixture_shop` template, whose books are the retail stock ledger its test writer posts to, and the lending
+  checks (loan principal, arrears) with the same template, whose loan book is the lines of its `loans_receivable` opening
+  journals aged from their day; `retail_v1` (#135) and `lending_loans_v1` (#136) give their own `ImportBooks` and
+  `productStock` and run the same reconciliation on their golden files.
+- **Not in this step.** The certificate of deletion and the purge that sign-off starts are #139; the operator's screens
+  are #141. A business that already held stock before the import (a top-up under the trading override) shows that stock in
+  the quantity check, which the operator explains before the customer signs.
+- **Proven by** `ImportReconciliationIT` (on the golden files every check ties and every difference is exactly the rows left
+  out, by file and line, the system values worked out by hand from the books; a receivable decision is one `policy` item;
+  a deliberately broken balance does not tie and the sign-off is refused by the service and by the database; the sign-off
+  needs `core.imports.sign_off`, every section, the name and today's date, refuses a reconciliation made again since it was
+  read and an unknown property, and is audited without the name; the signed report never changes and no new one is stored;
+  no text of the report holds a personal value of the golden files; another business reaches none of it, through the
+  service, the routes or `bms_app`), `RlsIsolationIT` (forced RLS and append-only on both tables), `MigrationOrderIT` (V144
+  keeps every run, the permission is the tenant admin's alone, the trigger's refusals), `PermissionMatrixIT` and
+  `RoutePermissionIT`.

@@ -1,0 +1,54 @@
+package com.rincoltech.bms.core.imports;
+
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+/**
+ * What a template's own books hold after a commit (issue #134, spec section 3.9): the system side of the reconciliation that
+ * the ledger cannot answer, because the vertical keeps it. The core reads the journals itself, through the ledger's port;
+ * a template answers for its stock ledger and its loan book. Every answer is read from those tables inside the caller's
+ * read-only transaction, bound to the business, and never from the commit's report or from the staged rows, so the
+ * reconciliation does not depend on what the writer said it did.
+ *
+ * <p>A product and a branch are named by their codes, as the template's forecast names them, never by a personal value.
+ */
+public interface ImportBooks {
+
+    /**
+     * Stock on hand per branch and product as the vertical's stock ledger holds it now, quantity and value at current cost,
+     * for every product the business holds stock of. A negative balance is answered as it is: the reconciliation lists it
+     * separately (spec section 3.9). None by default, for a template that keeps no stock.
+     */
+    default List<ImportForecast.ProductStock> stock(Scope scope) {
+        return List.of();
+    }
+
+    /**
+     * The run's loans by days-past-due bucket per branch, aged as at the day (the cutover day), as the vertical's loan book
+     * holds them: the buckets the template's forecast names. None by default, for a template that makes no loans.
+     */
+    default List<ImportForecast.ArrearsBucket> arrears(Scope scope, LocalDate asAt) {
+        return List.of();
+    }
+
+    /**
+     * The run asked about: its id, and every record it registered in {@code import_refs} by target type (its opening
+     * journals as {@code ledger.journal_entry}).
+     */
+    record Scope(UUID runId, Map<String, List<UUID>> targets) {
+
+        public Scope {
+            targets = Map.copyOf(targets);
+        }
+
+        /** The records of one target type the run registered, or none. */
+        public List<UUID> of(String targetType) {
+            return targets.getOrDefault(targetType, List.of());
+        }
+    }
+
+    /** Books that hold nothing: the default of a template that keeps neither stock nor loans. */
+    ImportBooks NONE = new ImportBooks() {};
+}
