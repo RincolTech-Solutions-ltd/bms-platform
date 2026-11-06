@@ -150,9 +150,8 @@ class ImportReviewIT extends IntegrationTest {
     }
 
     Issue issue(Batch batch, int line, String code) {
-        List<Issue> found = onLine(batch, line).stream()
-                .filter(i -> i.code().equals(code))
-                .toList();
+        List<Issue> found =
+                onLine(batch, line).stream().filter(i -> i.code().equals(code)).toList();
         assertThat(found).as("%s line %d %s", batch.fileName(), line, code).hasSize(1);
         return found.getFirst();
     }
@@ -162,12 +161,15 @@ class ImportReviewIT extends IntegrationTest {
         List<Issue> found = onLine(batch, line).stream()
                 .filter(i -> i.code().equals(code) && field.equals(i.field()))
                 .toList();
-        assertThat(found).as("%s line %d %s %s", batch.fileName(), line, code, field).hasSize(1);
+        assertThat(found)
+                .as("%s line %d %s %s", batch.fileName(), line, code, field)
+                .hasSize(1);
         return found.getFirst();
     }
 
     Outcome resolve(Issue i, String kind, String value, String note) {
-        return as(t, () -> review.resolve(i.id(), new Resolution(kind, i.version(), value, null, null, note), operator));
+        return as(
+                t, () -> review.resolve(i.id(), new Resolution(kind, i.version(), value, null, null, note), operator));
     }
 
     long count(String sql, Object... params) {
@@ -239,25 +241,34 @@ class ImportReviewIT extends IntegrationTest {
                         .single())
                 .isEqualTo("+256700000177");
         // The exclusion resolved every open issue of its row and marks the row; the row stays in the batch.
-        assertThat(onLine(items, 5)).allMatch(i -> "resolved".equals(i.status()) && "exclude_row".equals(i.resolution()));
-        assertThat(count("SELECT count(*) FROM import_rows WHERE batch_id = ? AND source_row_no = 5 AND excluded_by IS NOT"
-                        + " NULL", items.id()))
+        assertThat(onLine(items, 5))
+                .allMatch(i -> "resolved".equals(i.status()) && "exclude_row".equals(i.resolution()));
+        assertThat(count(
+                        "SELECT count(*) FROM import_rows WHERE batch_id = ? AND source_row_no = 5 AND excluded_by IS NOT"
+                                + " NULL",
+                        items.id()))
                 .isEqualTo(1);
         assertThat(issue(items, 4, "CODE_DUPLICATE").status()).isEqualTo("resolved");
         assertThat(issue(till, 5, "REF_UNKNOWN", "item").resolution()).isEqualTo("link_row");
         assertThat(issue(till, 5, "REF_UNKNOWN", "customer").status()).isEqualTo("open");
-        assertThat(count("SELECT count(*) FROM import_rows WHERE batch_id = ? AND source_row_no = 5 AND linked_row_id = ?",
-                        till.id(), itemRow))
+        assertThat(count(
+                        "SELECT count(*) FROM import_rows WHERE batch_id = ? AND source_row_no = 5 AND linked_row_id = ?",
+                        till.id(),
+                        itemRow))
                 .isEqualTo(1);
 
         // Who, when, the kind, before, after, note: one row each, in the order made.
-        List<String> rows = TestDatabase.owner().sql("""
+        List<String> rows = TestDatabase.owner()
+                .sql("""
                         SELECT resolution || '|' || code || '|' || coalesce(field, '-') || '|' || source_row_no || '|'
                                || (resolved_by = ?) || '|' || (created_at IS NOT NULL) || '|'
                                || coalesce(before_value::text, '-') || '|' || coalesce(after_value::text, '-') || '|'
                                || coalesce(note, '-')
                           FROM import_issue_resolutions WHERE run_id = ? ORDER BY seq
-                        """).params(operator, run.runId()).query(String.class).list();
+                        """)
+                .params(operator, run.runId())
+                .query(String.class)
+                .list();
         assertThat(rows)
                 .containsExactly(
                         "override|CODE_DUPLICATE|code|4|true|true|-|-|The twin is the same fabricated kettle",
@@ -283,7 +294,8 @@ class ImportReviewIT extends IntegrationTest {
                         .query(String.class)
                         .list());
         List<String> stored = TestDatabase.owner()
-                .sql("SELECT message || ' ' || coalesce(original_value::text, '') FROM import_issues WHERE tenant_id = ?")
+                .sql(
+                        "SELECT message || ' ' || coalesce(original_value::text, '') FROM import_issues WHERE tenant_id = ?")
                 .param(t.tenantId())
                 .query(String.class)
                 .list();
@@ -296,8 +308,10 @@ class ImportReviewIT extends IntegrationTest {
         // The bad phone's cell text too; not looked for in the logs, where any id could hold five such digits.
         assertThat(audit).doesNotContain("12345");
         assertThat(stored).noneMatch(s -> s.contains(TYPED_PHONE) || s.contains("700000177"));
-        assertThat(count("SELECT count(*) FROM import_issue_resolutions WHERE run_id = ? AND after_value::text LIKE ?",
-                        run.runId(), "%" + TYPED_PHONE + "%"))
+        assertThat(count(
+                        "SELECT count(*) FROM import_issue_resolutions WHERE run_id = ? AND after_value::text LIKE ?",
+                        run.runId(),
+                        "%" + TYPED_PHONE + "%"))
                 .isEqualTo(1);
 
         // Append-only for every role.
@@ -311,8 +325,8 @@ class ImportReviewIT extends IntegrationTest {
                 .param(run.runId())
                 .query(UUID.class)
                 .single();
-        assertThatThrownBy(
-                        () -> ImportValidationIT.asApp(t, "UPDATE import_issue_resolutions SET note = 'x' WHERE id = ?", any))
+        assertThatThrownBy(() ->
+                        ImportValidationIT.asApp(t, "UPDATE import_issue_resolutions SET note = 'x' WHERE id = ?", any))
                 .hasStackTraceContaining("permission denied");
         assertThatThrownBy(() -> ImportValidationIT.asApp(t, "DELETE FROM import_issue_resolutions WHERE id = ?", any))
                 .hasStackTraceContaining("permission denied");
@@ -341,22 +355,28 @@ class ImportReviewIT extends IntegrationTest {
                         operator));
 
         assertThat(o.resolved()).isEqualTo(3);
-        assertThat(count("SELECT count(*) FROM import_issue_resolutions WHERE run_id = ? AND bulk_id = ?",
-                        run.runId(), o.bulkId()))
+        assertThat(count(
+                        "SELECT count(*) FROM import_issue_resolutions WHERE run_id = ? AND bulk_id = ?",
+                        run.runId(),
+                        o.bulkId()))
                 .isEqualTo(3);
         assertThat(count(
                         "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'core.import_issue.resolved'",
                         t.tenantId()))
                 .isEqualTo(3);
-        assertThat(count("SELECT count(*) FROM import_issues i JOIN import_batches b ON b.id = i.batch_id WHERE b.run_id"
-                        + " = ? AND i.code = 'CODE_DUPLICATE' AND i.status = 'open'", run.runId()))
+        assertThat(count(
+                        "SELECT count(*) FROM import_issues i JOIN import_batches b ON b.id = i.batch_id WHERE b.run_id"
+                                + " = ? AND i.code = 'CODE_DUPLICATE' AND i.status = 'open'",
+                        run.runId()))
                 .isZero();
         // A blocking code is never overridden, in bulk either: nothing is written.
         assertCode(
                 () -> as(
                         t,
                         () -> review.resolveAll(
-                                run.runId(), new Bulk("REQUIRED_MISSING", null, "override", null, "Not allowed"), operator)),
+                                run.runId(),
+                                new Bulk("REQUIRED_MISSING", null, "override", null, "Not allowed"),
+                                operator)),
                 "override_not_allowed");
         assertThat(count("SELECT count(*) FROM import_issue_resolutions WHERE run_id = ?", run.runId()))
                 .isEqualTo(3);
@@ -426,7 +446,8 @@ class ImportReviewIT extends IntegrationTest {
         // The row the map reaches: its kind is typed, its other issue written again with the next version.
         assertThat(onLine(till, 9)).extracting(Issue::code).containsExactly("REQUIRED_MISSING");
         Issue sold = issue(till, 9, "REQUIRED_MISSING");
-        assertThat(sold.version()).isEqualTo(Integer.parseInt(before.get(sold.id()).split("\\|")[0]) + 1);
+        assertThat(sold.version())
+                .isEqualTo(Integer.parseInt(before.get(sold.id()).split("\\|")[0]) + 1);
         assertThat(TestDatabase.owner()
                         .sql("SELECT normalised ->> 'kind' FROM import_rows WHERE batch_id = ? AND source_row_no = 9")
                         .param(till.id())
@@ -435,9 +456,11 @@ class ImportReviewIT extends IntegrationTest {
                 .isEqualTo("adjustment");
         // Every other issue of the run is untouched: same id, version and status.
         Map<UUID, String> after = new LinkedHashMap<>();
-        run.batches().values().forEach(b -> issues(b).stream()
-                .filter(i -> !(b.id().equals(till.id()) && i.line() == 9))
-                .forEach(i -> after.put(i.id(), i.version() + "|" + i.status())));
+        run.batches()
+                .values()
+                .forEach(b -> issues(b).stream()
+                        .filter(i -> !(b.id().equals(till.id()) && i.line() == 9))
+                        .forEach(i -> after.put(i.id(), i.version() + "|" + i.status())));
         assertThat(after).hasSize(before.size() - 2);
         after.forEach((id, state) -> assertThat(state).as("issue %s", id).isEqualTo(before.get(id)));
         // The resolution names both versions, the label and the value; a value of a personal field is never mapped.
@@ -451,7 +474,10 @@ class ImportReviewIT extends IntegrationTest {
                         + " \"mapping_version\": 2}");
         assertCode(
                 () -> resolve(
-                        issue(run.batches().get(BUYERS), 5, "TYPE_INVALID", "phone"), "map_value", "+256700000188", null),
+                        issue(run.batches().get(BUYERS), 5, "TYPE_INVALID", "phone"),
+                        "map_value",
+                        "+256700000188",
+                        null),
                 "field_is_personal");
         assertThat(as(t, () -> mappings.versions("fab-shop"))).hasSize(2);
     }
@@ -515,7 +541,8 @@ class ImportReviewIT extends IntegrationTest {
         assertThat(onLine(items, 9)).isEmpty();
         // The customer sends the file again with line 4 changed and line 5 as it was.
         String original = new String(golden(ITEMS), StandardCharsets.UTF_8);
-        String changed = original.replace("FAB -001,Fabricated Kettle Twin,pcs,45000", "FAB -001,Fabricated Kettle Twin,pcs,46000");
+        String changed = original.replace(
+                "FAB -001,Fabricated Kettle Twin,pcs,45000", "FAB -001,Fabricated Kettle Twin,pcs,46000");
         assertThat(changed).isNotEqualTo(original);
         as(t, () -> uploads.cancelBatch(items.id()));
         UUID mapping = as(t, () -> mappings.latest("fab-shop").orElseThrow().id());
@@ -533,9 +560,12 @@ class ImportReviewIT extends IntegrationTest {
         assertThat(changedRow.message()).isEqualTo("Line 4 changed since it was reviewed; review it again.");
         assertThat(changedRow.suggestion()).containsEntry("review", "as_uploaded");
         // The unchanged row keeps its exclusion, made on the batch that was cancelled.
-        assertThat(onLine(again, 5)).allMatch(i -> "resolved".equals(i.status()) && "exclude_row".equals(i.resolution()));
-        assertThat(count("SELECT count(*) FROM import_rows WHERE batch_id = ? AND source_row_no = 5 AND excluded_by IS NOT"
-                        + " NULL", again.id()))
+        assertThat(onLine(again, 5))
+                .allMatch(i -> "resolved".equals(i.status()) && "exclude_row".equals(i.resolution()));
+        assertThat(count(
+                        "SELECT count(*) FROM import_rows WHERE batch_id = ? AND source_row_no = 5 AND excluded_by IS NOT"
+                                + " NULL",
+                        again.id()))
                 .isEqualTo(1);
         // The duplicate pair: line 10 keeps its override, line 9 is not taken for a changed row.
         assertThat(onLine(again, 10)).extracting(Issue::code).containsExactly("DUPLICATE_SOURCE_REF", "CODE_DUPLICATE");
@@ -566,7 +596,10 @@ class ImportReviewIT extends IntegrationTest {
         assertThat(asked.version()).isEqualTo(phone.version() + 1);
         assertThat(asked.status()).isEqualTo("open");
         as(t, () -> review.askCustomer(nin.id(), nin.version(), true, operator));
-        as(t, () -> review.resolveAll(run.runId(), new Bulk("NIN_DUPLICATE", null, "ask_customer", null, null), operator));
+        as(
+                t,
+                () -> review.resolveAll(
+                        run.runId(), new Bulk("NIN_DUPLICATE", null, "ask_customer", null, null), operator));
         // An issue asked about and then resolved is no longer a question.
         Issue duplicateRef = issue(buyers, 7, "CODE_DUPLICATE");
         as(t, () -> review.askCustomer(duplicateRef.id(), duplicateRef.version(), true, operator));
@@ -584,8 +617,9 @@ class ImportReviewIT extends IntegrationTest {
         List<String> questions = new ArrayList<>();
         list.getBody()
                 .get("items")
-                .forEach(q -> questions.add(q.get("number").asInt() + "|" + q.get("file").asString() + "|"
-                        + q.get("line").asInt() + "|" + q.get("field").asString() + "|" + q.get("code").asString()));
+                .forEach(q -> questions.add(q.get("number").asInt() + "|"
+                        + q.get("file").asString() + "|" + q.get("line").asInt() + "|"
+                        + q.get("field").asString() + "|" + q.get("code").asString()));
         assertThat(questions)
                 .containsExactly(
                         "1|fab-buyers.csv|5|phone|TYPE_INVALID",
@@ -607,8 +641,8 @@ class ImportReviewIT extends IntegrationTest {
                         t.tenantId()))
                 .isEqualTo(2);
         // The queue filters on the questions too.
-        ResponseEntity<JsonNode> queue = send(
-                t, HttpMethod.GET, "/api/v1/imports/runs/" + run.runId() + "/issues?ask_customer=true", null);
+        ResponseEntity<JsonNode> queue =
+                send(t, HttpMethod.GET, "/api/v1/imports/runs/" + run.runId() + "/issues?ask_customer=true", null);
         assertThat(queue.getBody().get("items").size()).isEqualTo(3);
     }
 
@@ -645,9 +679,11 @@ class ImportReviewIT extends IntegrationTest {
         assertThat(answers).allSatisfy(a -> assertThat(a.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
         assertThat(count("SELECT count(*) FROM import_issue_resolutions WHERE run_id = ?", run.runId()))
                 .isZero();
-        assertThat(issue(run.batches().get(ITEMS), 4, "CODE_DUPLICATE").version()).isEqualTo(duplicate.version());
+        assertThat(issue(run.batches().get(ITEMS), 4, "CODE_DUPLICATE").version())
+                .isEqualTo(duplicate.version());
         // The business's own call answers, and an unknown property is refused (fail-on-unknown-properties).
-        assertThat(send(t, HttpMethod.GET, runPath + "/issues", null).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(send(t, HttpMethod.GET, runPath + "/issues", null).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
         assertThat(send(
                                 t,
                                 HttpMethod.POST,

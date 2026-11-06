@@ -238,14 +238,16 @@ class ValidationService implements ImportValidation {
 
     /** The checks before any row is read, and pass 1: what the run holds. */
     private Prepared prepare(UUID runId, boolean here) {
-        RunRow run = read(here, () -> jdbc.sql("SELECT status, cutover_at FROM import_runs WHERE id = ?")
-                .param(runId)
-                .query((rs, n) -> {
-                    Timestamp cutover = rs.getTimestamp("cutover_at");
-                    return new RunRow(rs.getString("status"), cutover == null ? null : cutover.toInstant());
-                })
-                .optional()
-                .orElseThrow(ApiException::notFound));
+        RunRow run = read(
+                here,
+                () -> jdbc.sql("SELECT status, cutover_at FROM import_runs WHERE id = ?")
+                        .param(runId)
+                        .query((rs, n) -> {
+                            Timestamp cutover = rs.getTimestamp("cutover_at");
+                            return new RunRow(rs.getString("status"), cutover == null ? null : cutover.toInstant());
+                        })
+                        .optional()
+                        .orElseThrow(ApiException::notFound));
         requireOpen(run.status());
         List<BatchRow> all = read(here, () -> batches(runId));
         Map<UUID, String> seen = stamps(all);
@@ -266,8 +268,7 @@ class ValidationService implements ImportValidation {
         }
         // A committed batch stored before #129 has no mapping: its records are the business's now, and the template
         // answers for them through existingKeys.
-        List<BatchRow> batches =
-                all.stream().filter(b -> b.mappingId() != null).toList();
+        List<BatchRow> batches = all.stream().filter(b -> b.mappingId() != null).toList();
         if (batches.stream()
                         .map(b -> b.templateKey() + "_v" + b.templateVersion())
                         .distinct()
@@ -422,7 +423,9 @@ class ValidationService implements ImportValidation {
                 })
                 .list();
         if (only == null) {
-            jdbc.sql("DELETE FROM import_issues WHERE batch_id = ?").param(b.id()).update();
+            jdbc.sql("DELETE FROM import_issues WHERE batch_id = ?")
+                    .param(b.id())
+                    .update();
         } else {
             jdbc.sql("DELETE FROM import_issues WHERE batch_id = ? AND row_id = ANY(?)")
                     .params(b.id(), ids)
@@ -436,8 +439,8 @@ class ValidationService implements ImportValidation {
         Consumer<Staged> each = staged -> {
             SourceRow row = staged.row();
             String rowKey = engine.rowKey(input, row);
-            ReviewState.Row decided = p.review()
-                    .row(rowKey, staged.sha(), p.shasByKey().getOrDefault(rowKey, Set.of(staged.sha())));
+            ReviewState.Row decided =
+                    p.review().row(rowKey, staged.sha(), p.shasByKey().getOrDefault(rowKey, Set.of(staged.sha())));
             RowResult result = engine.validate(input, reviewed(staged, decided));
             rows[0]++;
             updates.add(new Object[] {
@@ -480,7 +483,8 @@ class ValidationService implements ImportValidation {
                     f.field(),
                     f.message(),
                     // An edited field's text is the operator's, kept only in its resolution row (issue #131).
-                    f.original() == null || (f.field() != null && decided.edits().containsKey(f.field()))
+                    f.original() == null
+                                    || (f.field() != null && decided.edits().containsKey(f.field()))
                             ? null
                             : JSON.writeValueAsString(f.original()),
                     info || resolution != null ? "resolved" : "open",

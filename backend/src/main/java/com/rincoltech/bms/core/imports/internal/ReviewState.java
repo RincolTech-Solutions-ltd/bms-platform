@@ -88,7 +88,8 @@ final class ReviewState {
                     return m;
                 })
                 .list()
-                .forEach(m -> byRow.computeIfAbsent(m.rowKey(), k -> new ArrayList<>()).add(m));
+                .forEach(m -> byRow.computeIfAbsent(m.rowKey(), k -> new ArrayList<>())
+                        .add(m));
         return new ReviewState(byRow, last[0]);
     }
 
@@ -157,7 +158,10 @@ final class ReviewState {
                     resolvedBy.put(key(m.code(), m.field()), m.id());
                 }
                 case "override" -> resolvedBy.put(key(m.code(), m.field()), m.id());
-                case "ask_customer" -> asked.put(key(m.code(), m.field()), Boolean.TRUE.equals(m.after().get("ask_customer")));
+                case "ask_customer" ->
+                    asked.put(
+                            key(m.code(), m.field()),
+                            Boolean.TRUE.equals(m.after().get("ask_customer")));
                 default -> {
                     // map_value lives in the mapping version it made, not on the row.
                 }

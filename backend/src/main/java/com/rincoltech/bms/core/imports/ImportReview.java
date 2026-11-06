@@ -75,14 +75,14 @@ public interface ImportReview {
      * {@code linkRowId} for {@code link_row}, {@code linkMemberId} for {@code link_member}. {@code note}: required for
      * {@code override} and {@code exclude_row}.
      */
-    record Resolution(
-            String resolution, int version, String value, UUID linkRowId, UUID linkMemberId, String note) {}
+    record Resolution(String resolution, int version, String value, UUID linkRowId, UUID linkMemberId, String note) {}
 
     /**
      * What a resolution did: its row, the rows validated again, the mapping version a {@code map_value} made (else null), and
      * the issues of the resolved issue's row as they now are.
      */
-    record Outcome(UUID resolutionId, String resolution, int rowsValidated, Integer mappingVersion, List<Issue> issues) {
+    record Outcome(
+            UUID resolutionId, String resolution, int rowsValidated, Integer mappingVersion, List<Issue> issues) {
 
         public Outcome {
             issues = List.copyOf(issues);

@@ -648,7 +648,8 @@ final class RowValidator {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // What the review queue needs (issue #131). JUSTIFICATION-A3: three engine answers the queue needs, beside the engine.
+    // What the review queue needs (issue #131). JUSTIFICATION-A3: three engine answers the queue needs, beside the
+    // engine.
     // ---------------------------------------------------------------------------------------------
 
     /**
@@ -692,7 +693,8 @@ final class RowValidator {
         }
         return switch (f.code()) {
             case "MONEY_FRACTION" -> d.setScale(0, RoundingMode.HALF_UP).toPlainString();
-            case "QTY_PRECISION" -> d.setScale(3, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
+            case "QTY_PRECISION" ->
+                d.setScale(3, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
             default -> null;
         };
     }

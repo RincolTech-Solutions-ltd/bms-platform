@@ -164,8 +164,7 @@ class ReviewService implements ImportReview {
         TenantContext.require();
         String status = filter == null || filter.status() == null ? "open" : filter.status();
         if (!Set.of("open", "resolved", "all").contains(status)) {
-            throw ApiException.validation(
-                    List.of(new FieldProblem("status", "invalid", "Use open, resolved or all.")));
+            throw ApiException.validation(List.of(new FieldProblem("status", "invalid", "Use open, resolved or all.")));
         }
         int size = limit == null ? DEFAULT_PAGE : limit;
         if (size < 1 || size > MAX_PAGE) {
@@ -284,9 +283,7 @@ class ReviewService implements ImportReview {
                     by,
                     null,
                     null);
-            int rows = applied.revalidate()
-                    ? validation.revalidate(t.runId(), applied.rows())
-                    : 0;
+            int rows = applied.revalidate() ? validation.revalidate(t.runId(), applied.rows()) : 0;
             List<Issue> now = jdbc.sql("SELECT " + ValidationService.ISSUE_COLUMNS + """
                               FROM import_issues i LEFT JOIN import_issue_resolutions r ON r.id = i.resolution_id
                              WHERE i.row_id = ? ORDER BY i.ordinal
@@ -411,8 +408,8 @@ class ReviewService implements ImportReview {
             case "edit_value" -> {
                 requireField(t);
                 if (value != null && value.length() > MAX_VALUE) {
-                    throw ApiException.validation(List.of(new FieldProblem(
-                            "value", "too_long", "At most " + MAX_VALUE + " characters, as a cell.")));
+                    throw ApiException.validation(List.of(
+                            new FieldProblem("value", "too_long", "At most " + MAX_VALUE + " characters, as a cell.")));
                 }
                 before = valueMap(currentText(t, review));
                 after = valueMap(value == null || value.isBlank() ? null : value);
@@ -541,9 +538,7 @@ class ReviewService implements ImportReview {
                 jdbc.sql("""
                                 UPDATE import_issues SET status = 'resolved', resolution_id = ?, version = version + 1
                                  WHERE row_id = ? AND status = 'open'
-                                """)
-                        .params(resolutionId, t.rowId())
-                        .update();
+                                """).params(resolutionId, t.rowId()).update();
             }
             case "override", "link_row", "link_member" -> {
                 if ("link_row".equals(kind)) {
@@ -563,12 +558,13 @@ class ReviewService implements ImportReview {
                         .params(resolutionId, t.rowId(), t.code(), t.field())
                         .update();
             }
-            case "ask_customer" -> jdbc.sql("""
+            case "ask_customer" ->
+                jdbc.sql("""
                             UPDATE import_issues SET ask_customer = ?, version = version + 1
                              WHERE row_id = ? AND code = ? AND field IS NOT DISTINCT FROM ?
                             """)
-                    .params(Boolean.TRUE.equals(after.get("ask_customer")), t.rowId(), t.code(), t.field())
-                    .update();
+                        .params(Boolean.TRUE.equals(after.get("ask_customer")), t.rowId(), t.code(), t.field())
+                        .update();
             default -> {
                 // An edit, an accepted value or a value map: the validation of the rows writes their issues again.
             }
@@ -595,7 +591,8 @@ class ReviewService implements ImportReview {
     }
 
     private static ApiException linkUnknown() {
-        return ApiException.rule("link_target_unknown", "Choose another row of this import, or a record of the business.");
+        return ApiException.rule(
+                "link_target_unknown", "Choose another row of this import, or a record of the business.");
     }
 
     /** The field's text as the row now reads it: the edit in force (in {@code review}, read now when null), or the cell. */
@@ -678,7 +675,8 @@ class ReviewService implements ImportReview {
         if (field.isPersonal()) {
             throw ApiException.rule(
                     "field_is_personal",
-                    "A value of " + t.field() + " is personal data and never goes into a mapping; edit the row instead.");
+                    "A value of " + t.field()
+                            + " is personal data and never goes into a mapping; edit the row instead.");
         }
         if (t.original() == null || t.original().isBlank()) {
             throw ApiException.rule("nothing_to_map", "The cell is empty; there is no value to map.");
@@ -702,7 +700,8 @@ class ReviewService implements ImportReview {
         @SuppressWarnings("unchecked")
         Map<String, Object> byField = (Map<String, Object>) source.computeIfAbsent(maps, k -> new LinkedHashMap<>());
         @SuppressWarnings("unchecked")
-        Map<String, Object> labels = (Map<String, Object>) byField.computeIfAbsent(t.field(), k -> new LinkedHashMap<>());
+        Map<String, Object> labels =
+                (Map<String, Object>) byField.computeIfAbsent(t.field(), k -> new LinkedHashMap<>());
         // One label per spelling the parse compares alike: a map written for another spelling of it gives way.
         labels.keySet().removeIf(l -> Parsing.key(l).equals(Parsing.key(t.original())));
         labels.put(t.original().strip(), value.strip());
@@ -724,7 +723,8 @@ class ReviewService implements ImportReview {
                         """)
                 .params(t.runId(), saved.id(), t.source())
                 .query((rs, n) -> {
-                    String key = RowValidator.rowKeyOf(rs.getString("source_ref"), t.source(), rs.getInt("source_row_no"));
+                    String key =
+                            RowValidator.rowKeyOf(rs.getString("source_ref"), t.source(), rs.getInt("source_row_no"));
                     ReviewState.Row decided = review.row(key, rs.getString("sha"));
                     String text = decided.edits().containsKey(t.field())
                             ? decided.edits().get(t.field())

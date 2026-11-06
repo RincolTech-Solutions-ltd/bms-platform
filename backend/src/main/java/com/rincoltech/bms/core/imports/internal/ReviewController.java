@@ -50,25 +50,39 @@ class ReviewController {
         this.review = review;
     }
 
-    @Schema(name = "ImportIssue", description = "One issue of the review queue; its message never holds a value of a row")
+    @Schema(
+            name = "ImportIssue",
+            description = "One issue of the review queue; its message never holds a value of a row")
     record IssueResponse(
             UUID id,
             UUID batchId,
             UUID rowId,
             @Schema(description = "The line of the file") int line,
             String code,
-            @Schema(description = "info, warning or blocking") String severity,
-            @Schema(description = "The template's field, or null for the whole row") String field,
+
+            @Schema(description = "info, warning or blocking")
+            String severity,
+
+            @Schema(description = "The template's field, or null for the whole row")
+            String field,
+
             String message,
             @Schema(description = "open or resolved") String status,
-            @Schema(description = "Name it when resolving; another resolver's version is version_conflict") int version,
+
+            @Schema(description = "Name it when resolving; another resolver's version is version_conflict")
+            int version,
+
             boolean askCustomer,
+
             @Schema(
-                            description = "The engine's suggestion, never personal: {\"value\": \"1501\"}, or"
-                                    + " {\"review\": \"as_uploaded\"} for a row that changed")
-                    Map<String, Object> suggestion,
+                    description = "The engine's suggestion, never personal: {\"value\": \"1501\"}, or"
+                            + " {\"review\": \"as_uploaded\"} for a row that changed")
+            Map<String, Object> suggestion,
+
             UUID resolutionId,
-            @Schema(description = "The kind of the resolution that resolved it") String resolution) {
+
+            @Schema(description = "The kind of the resolution that resolved it")
+            String resolution) {
 
         static IssueResponse of(Issue i) {
             return new IssueResponse(
@@ -95,35 +109,51 @@ class ReviewController {
     @Schema(name = "ImportResolveRequest")
     record ResolveRequest(
             @NotNull
-                    @Schema(
-                            description = "edit_value, exclude_row, accept_suggestion, link_row, link_member, override or"
-                                    + " map_value")
-                    String resolution,
-            @NotNull @Positive @Schema(description = "The issue's version as read") Integer version,
+            @Schema(
+                    description = "edit_value, exclude_row, accept_suggestion, link_row, link_member, override or"
+                            + " map_value")
+            String resolution,
+
+            @NotNull @Positive @Schema(description = "The issue's version as read")
+            Integer version,
+
             @Size(max = 32767)
-                    @Schema(
-                            description = "edit_value: the text in place of the cell (empty leaves the field empty);"
-                                    + " map_value: the value the cell stands for")
-                    String value,
-            @Schema(description = "link_row: another row of the run") UUID linkRowId,
-            @Schema(description = "link_member: a record the business holds") UUID linkMemberId,
-            @Size(max = 500) @Schema(description = "Required for override and exclude_row") String note) {}
+            @Schema(
+                    description = "edit_value: the text in place of the cell (empty leaves the field empty);"
+                            + " map_value: the value the cell stands for")
+            String value,
+
+            @Schema(description = "link_row: another row of the run")
+            UUID linkRowId,
+
+            @Schema(description = "link_member: a record the business holds")
+            UUID linkMemberId,
+
+            @Size(max = 500) @Schema(description = "Required for override and exclude_row")
+            String note) {}
 
     @Schema(name = "ImportResolveOutcome")
     record OutcomeResponse(
             UUID resolutionId,
             String resolution,
             @Schema(description = "Rows validated again") int rowsValidated,
-            @Schema(description = "The mapping version a map_value made") Integer mappingVersion,
-            @Schema(description = "The issues of the row as they now are") List<IssueResponse> issues) {}
+
+            @Schema(description = "The mapping version a map_value made")
+            Integer mappingVersion,
+
+            @Schema(description = "The issues of the row as they now are")
+            List<IssueResponse> issues) {}
 
     @Schema(name = "ImportBulkResolveRequest")
     record BulkRequest(
             @NotNull @Size(min = 2, max = 60) String code,
-            @Schema(description = "One batch of the run, or every batch") UUID batchId,
-            @NotNull
-                    @Schema(description = "edit_value, exclude_row, accept_suggestion, override or ask_customer")
-                    String resolution,
+
+            @Schema(description = "One batch of the run, or every batch")
+            UUID batchId,
+
+            @NotNull @Schema(description = "edit_value, exclude_row, accept_suggestion, override or ask_customer")
+            String resolution,
+
             @Size(max = 32767) String value,
             @Size(max = 500) String note) {}
 
@@ -131,7 +161,8 @@ class ReviewController {
     record BulkResponse(UUID bulkId, int resolved, int rowsValidated) {}
 
     @Schema(name = "ImportAskCustomerRequest")
-    record AskRequest(@NotNull Boolean askCustomer, @NotNull @Positive Integer version) {}
+    record AskRequest(
+            @NotNull Boolean askCustomer, @NotNull @Positive Integer version) {}
 
     @Schema(name = "ImportQuestion", description = "One question for the customer, without any value of a row")
     record QuestionResponse(int number, String file, int line, String field, String code, String message) {
@@ -164,8 +195,9 @@ class ReviewController {
     @PostMapping("/issues/{issue_id}/resolve")
     @RequiresPermission("core.imports.manage")
     @Operation(
-            summary = "Resolve one issue: edit, leave the row out, accept the suggestion, link, override a warning or map"
-                    + " the value (FR-IMP-05)",
+            summary =
+                    "Resolve one issue: edit, leave the row out, accept the suggestion, link, override a warning or map"
+                            + " the value (FR-IMP-05)",
             operationId = "resolveImportIssue")
     OutcomeResponse resolve(@PathVariable("issue_id") UUID issueId, @Valid @RequestBody ResolveRequest request) {
         Outcome o = review.resolve(
@@ -189,7 +221,8 @@ class ReviewController {
     @PostMapping("/runs/{run_id}/issues/bulk-resolve")
     @RequiresPermission("core.imports.manage")
     @Operation(
-            summary = "Resolve every open issue of one code in the run, or in one of its files, the same way (FR-IMP-05)",
+            summary =
+                    "Resolve every open issue of one code in the run, or in one of its files, the same way (FR-IMP-05)",
             operationId = "bulkResolveImportIssues")
     BulkResponse bulk(@PathVariable("run_id") UUID runId, @Valid @RequestBody BulkRequest request) {
         BulkOutcome o = review.resolveAll(
@@ -206,7 +239,10 @@ class ReviewController {
             operationId = "askCustomerAboutImportIssue")
     IssueResponse ask(@PathVariable("issue_id") UUID issueId, @Valid @RequestBody AskRequest request) {
         return IssueResponse.of(review.askCustomer(
-                issueId, request.version(), request.askCustomer(), CurrentPrincipal.require().userId()));
+                issueId,
+                request.version(),
+                request.askCustomer(),
+                CurrentPrincipal.require().userId()));
     }
 
     @GetMapping("/runs/{run_id}/questions")

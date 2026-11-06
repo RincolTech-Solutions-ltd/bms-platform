@@ -3477,9 +3477,10 @@ class MigrationOrderIT {
                     .params(row, tenant, batch)
                     .update();
             UUID issue = UUID.randomUUID();
-            owner.sql("INSERT INTO import_issues (id, tenant_id, batch_id, row_id, source_row_no, ordinal, code, severity,"
-                            + " field, message, status) VALUES (?, ?, ?, ?, 2, 1, 'REQUIRED_MISSING', 'blocking', 'code',"
-                            + " 'code is empty on fab-items.csv line 2.', 'open')")
+            owner.sql(
+                            "INSERT INTO import_issues (id, tenant_id, batch_id, row_id, source_row_no, ordinal, code, severity,"
+                                    + " field, message, status) VALUES (?, ?, ?, ?, 2, 1, 'REQUIRED_MISSING', 'blocking', 'code',"
+                                    + " 'code is empty on fab-items.csv line 2.', 'open')")
                     .params(issue, tenant, batch, row)
                     .update();
 
@@ -3487,15 +3488,17 @@ class MigrationOrderIT {
                             .success)
                     .isTrue();
 
-            assertThat(owner.sql("SELECT code = 'REQUIRED_MISSING' AND message = 'code is empty on fab-items.csv line 2.'"
-                                    + " AND status = 'open' AND version = 1 AND NOT ask_customer AND suggested_value IS NULL"
-                                    + " AND resolution_id IS NULL FROM import_issues WHERE id = ?")
+            assertThat(owner.sql(
+                                    "SELECT code = 'REQUIRED_MISSING' AND message = 'code is empty on fab-items.csv line 2.'"
+                                            + " AND status = 'open' AND version = 1 AND NOT ask_customer AND suggested_value IS NULL"
+                                            + " AND resolution_id IS NULL FROM import_issues WHERE id = ?")
                             .param(issue)
                             .query(Boolean.class)
                             .single())
                     .isTrue();
-            assertThat(owner.sql("SELECT raw -> 'Fab Item' ->> 'value' = 'Fabricated item' AND excluded_by IS NULL AND"
-                                    + " linked_row_id IS NULL AND linked_member_id IS NULL FROM import_rows WHERE id = ?")
+            assertThat(owner.sql(
+                                    "SELECT raw -> 'Fab Item' ->> 'value' = 'Fabricated item' AND excluded_by IS NULL AND"
+                                            + " linked_row_id IS NULL AND linked_member_id IS NULL FROM import_rows WHERE id = ?")
                             .param(row)
                             .query(Boolean.class)
                             .single())
