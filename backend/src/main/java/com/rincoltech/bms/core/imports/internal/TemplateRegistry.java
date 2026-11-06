@@ -162,12 +162,12 @@ class TemplateRegistry implements ImportTemplates {
             // JUSTIFICATION-A3: the personal-placeholder check of #130 belongs with the registry's other start-up checks.
             for (String p : placeholders(c.message())) {
                 require(
+                        !personal.contains(p),
+                        where + "code " + c.code() + " interpolates the personal field {" + p + "}");
+                require(
                         MESSAGE_PLACEHOLDERS.contains(p),
                         where + "code " + c.code() + " interpolates {" + p + "}, which is not a placeholder a message may"
                                 + " hold");
-                require(
-                        !personal.contains(p),
-                        where + "code " + c.code() + " interpolates the personal field {" + p + "}");
             }
         }
     }
