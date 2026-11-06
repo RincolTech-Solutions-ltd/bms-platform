@@ -25,7 +25,8 @@ import java.util.UUID;
  *     transaction ({@link ImportedRecords}) is marked, and the handler sends nothing for it
  */
 public record PushNotice(
-        String template, String eventRef, Audience audience, Map<String, String> params, boolean imported) {
+        String template, String eventRef, Audience audience, Map<String, String> params, boolean imported)
+        implements ImportedRecords.Marked {
 
     public PushNotice {
         if (template == null || template.isBlank() || eventRef == null || eventRef.isBlank() || audience == null) {

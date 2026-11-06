@@ -57,6 +57,10 @@ class ImportRunsIT extends IntegrationTest {
     @Autowired
     LedgerPosting ledger;
 
+    /** The application's client: inside a batch, it writes in the batch's own transaction. */
+    @Autowired
+    JdbcClient jdbc;
+
     @Autowired
     PlatformTransactionManager transactionManager;
 
@@ -152,19 +156,7 @@ class ImportRunsIT extends IntegrationTest {
 
     /** Posts one balanced journal for the business. */
     UUID postJournal(String sourceModule) {
-        return ledger.post(new EntryRequest(
-                        t.headOffice(),
-                        DAY,
-                        "IMP-TEST",
-                        null,
-                        sourceModule,
-                        "test_import",
-                        UUID.randomUUID(),
-                        null,
-                        List.of(
-                                Line.debit(t.account("loans_receivable"), Money.of(100_000, "UGX")),
-                                Line.credit(t.account("cash_on_hand"), Money.of(100_000, "UGX")))))
-                .entryId();
+        return postJournal(sourceModule, "test_import");
     }
 
     long journals() {
@@ -436,9 +428,38 @@ class ImportRunsIT extends IntegrationTest {
         assertThat(as(t, () -> runs.get(run.id())).status()).isEqualTo("committed");
     }
 
-    // JUSTIFICATION-A3: the review of 8e570b0 on #872 (must-fix 1): each journal a batch may not post, shown refused.
+    /** Posts a journal of the given source, debit loans and credit cash: no line on opening balance equity. */
+    UUID postJournal(String sourceModule, String sourceType) {
+        return ledger.post(new EntryRequest(
+                        t.headOffice(),
+                        DAY,
+                        "IMP-TEST",
+                        null,
+                        sourceModule,
+                        sourceType,
+                        UUID.randomUUID(),
+                        null,
+                        List.of(
+                                Line.debit(t.account("loans_receivable"), Money.of(100_000, "UGX")),
+                                Line.credit(t.account("cash_on_hand"), Money.of(100_000, "UGX")))))
+                .entryId();
+    }
+
+    /** Registers a journal in import_refs by the writer's own SQL, past the checkpoint, as a careless writer could. */
+    void registerBehindTheCheckpoint(UUID runId, UUID batchId, UUID entry) {
+        String ref = ImportRefs.sourceRef("test-journal", null, "batch:" + batchId, "0");
+        jdbc.sql("""
+                        INSERT INTO import_refs (id, tenant_id, run_id, batch_id, source_key, source_ref, target_type,
+                                                 target_id)
+                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, 'ledger.journal_entry', ?)
+                        """)
+                .params(UUID.randomUUID(), runId, batchId, ImportRefs.keyOf(ref), ref, entry)
+                .update();
+    }
+
+    // JUSTIFICATION-A3: the review of 8e570b0 and the Lead's note on #872: each journal a batch may not post, refused.
     @Test
-    void aBatchThatPostsAnyJournalButARegisteredOpeningJournalFailsAndRollsBack() {
+    void aBatchThatPostsAnyJournalButItsOpeningJournalsFailsAndRollsBack() {
         Run run = readyRun(1);
         // A disbursement-like journal (debit loans, credit cash), left unregistered: the end-of-batch check refuses it.
         BatchWriter unregistered = (runId, batchId, seq, checkpoint) -> {
@@ -446,8 +467,8 @@ class ImportRunsIT extends IntegrationTest {
             return Map.of();
         };
         assertThatThrownBy(() -> as(t, () -> runs.commit(script(run.id(), unregistered))))
-                .hasStackTraceContaining("not registered opening journals");
-        // The same journal registered as a record: register takes no journal.
+                .hasStackTraceContaining("not its opening journals");
+        // The same journal offered to the checkpoint as a record: a writer never registers a journal.
         BatchWriter asRecord = (runId, batchId, seq, checkpoint) -> {
             checkpoint.register(
                     ImportRefs.sourceRef("test-journal", null, "batch:" + batchId, "0"),
@@ -457,35 +478,27 @@ class ImportRunsIT extends IntegrationTest {
         };
         assertThatThrownBy(() -> as(t, () -> runs.resume(script(run.id(), asRecord))))
                 .hasStackTraceContaining("registered only as an opening journal");
-        // The same journal registered as an opening journal: it is not one by what the ledger holds.
-        BatchWriter selfAttested = (runId, batchId, seq, checkpoint) -> {
-            checkpoint.registerOpeningJournal(
-                    ImportRefs.sourceRef("test-journal", null, "batch:" + batchId, "0"), postJournal("lending"));
+        // The same journal registered by the writer's own SQL: registered, but not an opening journal by the ledger.
+        BatchWriter registered = (runId, batchId, seq, checkpoint) -> {
+            registerBehindTheCheckpoint(runId, batchId, postJournal("lending"));
             return Map.of();
         };
-        assertThatThrownBy(() -> as(t, () -> runs.resume(script(run.id(), selfAttested))))
-                .hasStackTraceContaining("only an opening journal");
-        // A journal named as the framework's opening journal but with no line on opening balance equity.
+        assertThatThrownBy(() -> as(t, () -> runs.resume(script(run.id(), registered))))
+                .hasStackTraceContaining("not its opening journals");
+        // Named as the framework's opening journal, registered, but with no line on opening balance equity.
         BatchWriter misnamed = (runId, batchId, seq, checkpoint) -> {
-            UUID entry = ledger.post(new EntryRequest(
-                            t.headOffice(),
-                            DAY,
-                            "IMP-TEST",
-                            null,
-                            "core.imports",
-                            "opening_balance",
-                            UUID.randomUUID(),
-                            null,
-                            List.of(
-                                    Line.debit(t.account("loans_receivable"), Money.of(100_000, "UGX")),
-                                    Line.credit(t.account("cash_on_hand"), Money.of(100_000, "UGX")))))
-                    .entryId();
-            checkpoint.registerOpeningJournal(
-                    ImportRefs.sourceRef("test-journal", null, "batch:" + batchId, "0"), entry);
+            registerBehindTheCheckpoint(runId, batchId, postJournal("core.imports", "opening_balance"));
             return Map.of();
         };
         assertThatThrownBy(() -> as(t, () -> runs.resume(script(run.id(), misnamed))))
-                .hasStackTraceContaining("only an opening journal");
+                .hasStackTraceContaining("not its opening journals");
+        // Named as the import-retail command's opening journal, with no line on opening balance equity.
+        BatchWriter posing = (runId, batchId, seq, checkpoint) -> {
+            postJournal("retail", "retail.cash_opening");
+            return Map.of();
+        };
+        assertThatThrownBy(() -> as(t, () -> runs.resume(script(run.id(), posing))))
+                .hasStackTraceContaining("not its opening journals");
         // Every refused batch rolled back whole: no journal, no reference, the batch still to write.
         assertThat(journals()).isZero();
         assertThat(TestDatabase.owner()
@@ -495,7 +508,7 @@ class ImportRunsIT extends IntegrationTest {
                         .single())
                 .isZero();
         assertThat(batchStatus(run.id(), 1)).isEqualTo("pending");
-        assertThat(audits("core.import_run.batch_failed")).isEqualTo(4);
+        assertThat(audits("core.import_run.batch_failed")).isEqualTo(5);
 
         // The batch's own opening journal goes through.
         BatchWriter opening = (runId, batchId, seq, checkpoint) -> {

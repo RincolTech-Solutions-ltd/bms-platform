@@ -264,7 +264,7 @@ batch, branch and kind (the register batch of a lending run is one batch, so one
 inside an import batch. The preview leaves out rows already imported with the same content. A source known by position
 (a till roll) is keyed by its upload's SHA-256, so two rolls of one run, or next month's, never share a line. An event an
 import publishes carries an `imported` marker its listeners skip (no low-stock notice from an imported stock change), and
-a batch that posts any journal but a registered opening journal fails. A resume needs the verified dump, the approval and
+a batch that posts any journal but its opening journals, as the ledger shows them, fails. A resume needs the verified dump, the approval and
 the build the dry run rehearsed.
 
 ### 3.8 The receivable decision

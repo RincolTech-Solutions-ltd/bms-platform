@@ -134,7 +134,7 @@ class RefService {
      * Registers a record a writer created, in the caller's transaction. A key already held with another content hash is
      * refused ({@code CHANGED_SINCE_IMPORT}); the same record registered twice for one reference is refused by the
      * table's unique key. A row may create several records of one type (a loan's collateral items), each registered. A
-     * journal is not taken here: only {@link #openingJournal} and {@link #registerOpeningJournal} register one.
+     * journal is not taken here: a writer registers one only by posting it through {@link #openingJournal}.
      */
     void register(UUID runId, UUID batchId, String sourceRef, String targetType, UUID targetId) {
         if (JOURNAL.equals(targetType)) {
@@ -233,14 +233,16 @@ class RefService {
 
     // JUSTIFICATION-A3: the Lead's ruling 6 on #872, the end-of-batch check of the journals a batch posted.
     /**
-     * Refuses a batch that posted a journal other than a registered opening journal (Lead ruling 6 and the review of
-     * 8e570b0 on #872). Every entry the transaction posted must be registered in {@code import_refs} as
-     * {@code ledger.journal_entry}, and must be an opening journal by what the ledger holds, not by what its writer says:
-     * the framework's own ({@code core.imports}, {@code opening_balance}, with a line on {@code opening_balance_equity}),
-     * or one of the {@code import-retail} command's opening journals ({@link #RETAIL_OPENINGS}), until #135 moves retail
-     * onto {@code openingJournal}. The batch then fails and rolls back whole.
+     * Refuses a batch that posted a journal other than an opening journal (Lead ruling 6, and the Lead's note on the
+     * review of 8e570b0, #872). Writers never vouch for their journals: the check reads each entry the transaction posted
+     * from the ledger. One passes only as the framework's opening journal, {@code core.imports}, {@code opening_balance},
+     * with a line on {@code opening_balance_equity}, registered by {@link #openingJournal} (the only way a journal is
+     * registered from a writer: {@link #register} refuses one). The one exception, until #135 moves retail onto
+     * {@code openingJournal}: an opening journal of the {@code import-retail} command, whose logic the retail export's
+     * writer reuses, recognised by the ledger alone ({@link #isRetailCommandOpening}) and registered here by the framework,
+     * never by the writer. Anything else fails the batch, which rolls back whole.
      */
-    void requireOnlyOpeningJournals() {
+    void requireOnlyOpeningJournals(UUID runId, UUID batchId) {
         List<TransactionEntry> posted = ledger.postedInThisTransaction();
         if (posted.isEmpty()) {
             return;
@@ -251,41 +253,45 @@ class RefService {
                 .query(UUID.class)
                 .list();
         Set<UUID> registered = new HashSet<>(held);
-        long refused = posted.stream()
-                .filter(e -> !registered.contains(e.entryId()) || !isOpeningJournal(e))
-                .count();
+        long refused = 0;
+        for (TransactionEntry e : posted) {
+            if (isFrameworkOpening(e) && registered.contains(e.entryId())) {
+                continue;
+            }
+            if (isRetailCommandOpening(e) && !registered.contains(e.entryId())) {
+                insert(
+                        runId,
+                        batchId,
+                        ImportRefs.sourceRef("import-retail", e.sourceType(), "entry:" + e.entryId(), "0"),
+                        JOURNAL,
+                        e.entryId());
+                continue;
+            }
+            refused++;
+        }
         if (refused > 0) {
             throw new IllegalStateException(
-                    "an import batch posted " + refused + " journal(s) that are not registered opening journals");
+                    "an import batch posted " + refused + " journal(s) that are not its opening journals");
         }
     }
 
-    /** The {@code import-retail} command's opening journals: module {@code retail}, by source type. */
+    /** The {@code import-retail} command's opening journals, by source type (module {@code retail}). */
     static final Set<String> RETAIL_OPENINGS = Set.of(
             "retail.import_opening",
             "retail.cash_opening",
             "retail.advance_opening",
             "retail.advance_repayment_opening");
 
-    static boolean isOpeningJournal(TransactionEntry e) {
-        if (MODULE.equals(e.sourceModule())) {
-            return "opening_balance".equals(e.sourceType()) && e.againstOpeningEquity();
-        }
-        return "retail".equals(e.sourceModule()) && RETAIL_OPENINGS.contains(e.sourceType());
+    /** The framework's opening journal, by what the ledger holds. */
+    static boolean isFrameworkOpening(TransactionEntry e) {
+        return MODULE.equals(e.sourceModule()) && "opening_balance".equals(e.sourceType()) && e.againstOpeningEquity();
     }
 
-    /**
-     * Registers a journal a writer posted itself as the batch's opening journal: only one this transaction posted that is
-     * an opening journal by what the ledger holds ({@link #isOpeningJournal}). A writer cannot register any other journal,
-     * and {@link #register} takes no journal at all.
-     */
-    void registerOpeningJournal(UUID runId, UUID batchId, String sourceRef, UUID entryId) {
-        boolean opening = ledger.postedInThisTransaction().stream()
-                .anyMatch(e -> e.entryId().equals(entryId) && isOpeningJournal(e));
-        if (!opening) {
-            throw new IllegalStateException("only an opening journal posted in this batch is registered as one");
-        }
-        insert(runId, batchId, sourceRef, JOURNAL, entryId);
+    /** An opening journal of the {@code import-retail} command, by what the ledger holds. */
+    static boolean isRetailCommandOpening(TransactionEntry e) {
+        return "retail".equals(e.sourceModule())
+                && RETAIL_OPENINGS.contains(e.sourceType())
+                && e.againstOpeningEquity();
     }
 
     static ApiException changedSinceImport(int line) {

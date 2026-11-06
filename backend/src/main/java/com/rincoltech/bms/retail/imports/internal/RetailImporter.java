@@ -3,7 +3,6 @@ package com.rincoltech.bms.retail.imports.internal;
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.imports.BatchWriter;
 import com.rincoltech.bms.core.imports.CommitReport;
-import com.rincoltech.bms.core.imports.ImportRefs;
 import com.rincoltech.bms.core.jobs.TenantJobs;
 import com.rincoltech.bms.core.tenancy.BranchProvisioning;
 import com.rincoltech.bms.core.tenancy.Branches;
@@ -318,26 +317,7 @@ public class RetailImporter {
                 }
                 report.into(checkpoint, RetailImporter.this::ledgerTotals);
                 branchStock(checkpoint);
-                registerOpeningJournals(checkpoint);
                 return Map.of();
-            }
-
-            // JUSTIFICATION-A3: the Lead's ruling 6 on #872: a batch's journals are registered, the command's too.
-            /**
-             * The command's opening journals (stock, cash book and advances), posted in this batch's transaction, are
-             * the batch's opening journals: registered in {@code import_refs} as the framework requires of every journal
-             * a batch posts (issue #133, Lead ruling 6 on #872). Any other journal stays unregistered, and the framework
-             * refuses the batch.
-             */
-            private void registerOpeningJournals(Checkpoint checkpoint) {
-                jdbc.sql("SELECT id, source_type FROM journal_entries WHERE created_at = now() AND source_type IN"
-                                + " ('" + OPENING + "', 'retail.cash_opening', 'retail.advance_opening',"
-                                + " 'retail.advance_repayment_opening')")
-                        .query((rs, n) -> Map.entry(rs.getObject("id", UUID.class), rs.getString("source_type")))
-                        .list()
-                        .forEach(e -> checkpoint.registerOpeningJournal(
-                                ImportRefs.sourceRef("retail-export", e.getValue(), "entry:" + e.getKey(), "0"),
-                                e.getKey()));
             }
 
             /**

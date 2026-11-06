@@ -1207,9 +1207,9 @@ path, `ImportRuns.commit(run)` and `resume(run)`; the dry run runs the same batc
 - **Dependency order, one transaction each, 10 minutes a statement.** The batches are written in the template's
   dependency order, its entity sets and then their number (as the validation and the preview order them), so a run
   uploaded sales first still writes items first; a resume goes on from the first batch of that order not committed. Each
-  batch's transaction runs `SET LOCAL app.import_commit = 'on'` after it takes the import key, and, on a real commit
-  only, `SET LOCAL statement_timeout = '10min'`: a dry run into a trading business keeps its 60 second limit (Lead ruling
-  4 on #872). The run's report lists the batches by the dependency index of their entity set (`dependency_rank`) and
+  batch's transaction runs `SET LOCAL app.import_commit = 'on'` after it takes the import key, and sets the statement
+  timeout: 10 minutes on a real commit, the dry run's own limit in a dry run (60 seconds into a trading business, 15
+  minutes otherwise; Lead ruling 4 on #872). The run's report lists the batches by the dependency index of their entity set (`dependency_rank`) and
   then by batch. A resume is refused without the verified dump, without the approval, or on another build than the one
   the dry run rehearsed (`dry_run_writer_differs`).
 - **`import_refs` and `source_ref`.** The generalisation of `retail_import_refs` (V20): `run_id`, `batch_id`, `source_key`,
@@ -1243,15 +1243,19 @@ path, `ImportRuns.commit(run)` and `resume(run)`; the dry run runs the same batc
   the forecast with `ImportTemplate.forecast(policy)`, so the preview predicts the journals the decision gives.
 - **No side effects.** While `app.import_commit` is on, triggers refuse a new row of `notification_outbox`,
   `sms_deliveries`, `approval_requests` and `scheduled_tasks`: an imported record sends no SMS or email, starts no task and
-  raises no approval; such a writer fails its batch. An event published in a batch's transaction carries the `imported`
-  marker (`ImportedRecords`, `PushNotice.imported`), and its listeners skip it, so a stock change an import makes raises
-  no low-stock notice (V76) through `event_publication` either. At the end of each batch, a journal posted in it that is
-  not a registered opening journal fails the batch (Lead ruling 6 on #872). An opening journal is one by what the ledger
-  holds, not by what its writer says (review of 8e570b0): the framework's own (`core.imports`, `opening_balance`, with a
-  line on `opening_balance_equity`, registered by `Checkpoint.openingJournal`), or one of the `import-retail` command's
-  (module `retail`, source types `retail.import_opening`, `retail.cash_opening`, `retail.advance_opening` and
-  `retail.advance_repayment_opening`, registered by `Checkpoint.registerOpeningJournal`) until #135 moves retail onto
-  `openingJournal`. `Checkpoint.register` takes no journal, and `registerOpeningJournal` refuses any other entry.
+  raises no approval; such a writer fails its batch. Every application event carries the `imported` marker
+  (`ImportedRecords.Marked`: `PushNotice` and `ApprovalAmountsChanged`, set when an import batch's transaction makes
+  them), and every listener skips an imported one, so a stock change an import makes commits and raises no low-stock
+  notice (V76). `ImportSideEffectGuardTest` fails the build on a published event without the marker, a listener that
+  does not skip it, and a `REQUIRES_NEW` (which `SET LOCAL` does not reach) not listed with a reason.
+- **Only opening journals (Lead ruling 6 and the Lead's note on the review of 8e570b0, #872).** Writers never vouch for
+  their journals: at the end of each batch the framework reads every entry the transaction posted from the ledger. One
+  passes as the framework's opening journal (`core.imports`, `opening_balance`, a line on `opening_balance_equity`,
+  registered by `Checkpoint.openingJournal`, the only way a writer registers a journal: `Checkpoint.register` refuses
+  `ledger.journal_entry`). The one exception until #135 moves retail onto `openingJournal`: an opening journal of the
+  `import-retail` command, whose logic the retail export's writer reuses (module `retail`, source type
+  `retail.import_opening`, `retail.cash_opening`, `retail.advance_opening` or `retail.advance_repayment_opening`, a line
+  on `opening_balance_equity`), which the framework, not the writer, registers. Any other journal fails the batch.
 - **Kill and resume.** `CommitSeams.afterBatch` is a test hook only: a test bean ends the loop after batch k as a killed
   process would. The run stays `committing`, the batches before stay committed with their references, and the resume
   reaches the state of an uninterrupted run.

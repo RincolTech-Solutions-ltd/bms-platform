@@ -873,7 +873,7 @@ class ImportRunService implements ImportRuns {
                 PreviewService.RunPrivacy privacy = preview.privacy(runId);
                 for (PendingBatch batch : ordered(pending(runId), writers)) {
                     try {
-                        CommitReport part = writeBatch(runId, batch, writers, true, privacy);
+                        CommitReport part = writeBatch(runId, batch, writers, limitSeconds, privacy);
                         if (part != null) {
                             parts.add(part);
                         }
@@ -1259,7 +1259,7 @@ class ImportRunService implements ImportRuns {
                 return CommitOutcome.HALTED;
             }
             try {
-                tx.executeWithoutResult(s -> writeBatch(runId, batch, writers, false, privacy));
+                tx.executeWithoutResult(s -> writeBatch(runId, batch, writers, 0, privacy));
             } catch (Halted e) {
                 tx.executeWithoutResult(s -> audit(
                         runId,
@@ -1319,8 +1319,10 @@ class ImportRunService implements ImportRuns {
             UUID runId,
             PendingBatch batch,
             PreviewService.Writers writers,
-            boolean dryRun,
+            long dryRunLimitSeconds,
             PreviewService.RunPrivacy privacy) {
+        // A dry run's batch has its limit in seconds; a committed batch has none here (0).
+        boolean dryRun = dryRunLimitSeconds > 0;
         BatchWriter writer = writers.of(batch.id());
         // Never a wait (Lead ruling 5 on #869). A dry run holds the key to its end, so a commit that waited would fail
         // at the statement timeout as a failed batch; whoever finds the key taken is answered at once instead.
@@ -1345,12 +1347,15 @@ class ImportRunService implements ImportRuns {
             stopIfRequested(runId);
         }
         // Each statement of a committed batch has at most 10 minutes (spec section 3.7, issue #133). A dry run keeps
-        // its own limits, which it applies as the outer transaction's timeout (review of f3be0a6 on #872), so the
-        // setting is left alone there. In both, nothing the batch writes may send a message, start a task or raise
-        // an approval: V143's triggers refuse it while app.import_commit is on, until the transaction ends.
-        if (!dryRun) {
-            jdbc.sql("SET LOCAL statement_timeout = '10min'").update();
-        }
+        // its own limit, the outer transaction's timeout, and its statements have that limit too (60 seconds into a
+        // trading business; Lead ruling 4 and the Lead's note on the review of 8e570b0, #872). In both, nothing the
+        // batch writes may send a message, start a task or raise an approval: V143's triggers refuse it while
+        // app.import_commit is on, until the transaction ends.
+        String statementLimit = dryRun ? dryRunLimitSeconds + "s" : "10min";
+        jdbc.sql("SELECT set_config('statement_timeout', ?, true)")
+                .param(statementLimit)
+                .query()
+                .singleRow();
         jdbc.sql("SET LOCAL app.import_commit = 'on'").update();
         // And every event the batch publishes is an imported record's: its listeners send nothing (Lead ruling 3).
         ImportedRecords.markTransaction();
@@ -1361,7 +1366,7 @@ class ImportRunService implements ImportRuns {
                 new RowCheckpoint(runId, batch.id(), writers.source(batch.id()), !dryRun, file, privacy);
         Map<String, Object> counts = writer.write(runId, batch.id(), batch.seq(), checkpoint);
         // No journal but the registered opening journals (Lead ruling 6 on #872): checked at the batch's end, in both.
-        refs.requireOnlyOpeningJournals();
+        refs.requireOnlyOpeningJournals(runId, batch.id());
         CommitReport part = checkpoint.part(counts, (Integer) row.get("row_count"));
         jdbc.sql("""
                         UPDATE import_batches SET status = 'committed', committed_at = now(), counts = CAST(? AS jsonb),
@@ -1458,11 +1463,6 @@ class ImportRunService implements ImportRuns {
         @Override
         public void register(String sourceRef, String targetType, UUID targetId) {
             refs.register(runId, batchId, sourceRef, targetType, targetId);
-        }
-
-        @Override
-        public void registerOpeningJournal(String sourceRef, UUID entryId) {
-            refs.registerOpeningJournal(runId, batchId, sourceRef, entryId);
         }
 
         @Override

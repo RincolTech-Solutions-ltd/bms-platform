@@ -77,16 +77,10 @@ public interface BatchWriter {
          * a resume, of the same row then finds it {@link ImportRefs.Status#EXISTING} and writes nothing for it again.
          * {@code targetType} is a code such as {@code retail.product}. A source_ref whose key the business already holds
          * with another content hash is refused ({@code CHANGED_SINCE_IMPORT}), and so the batch. A journal is refused
-         * here: a batch posts only opening journals, through {@link #openingJournal} or {@link #registerOpeningJournal}.
+         * here: a writer never vouches for a journal; it posts one only through {@link #openingJournal} (Lead's note on
+         * the review of 8e570b0, #872).
          */
         void register(String sourceRef, String targetType, UUID targetId);
-
-        /**
-         * Registers an opening journal the writer posted itself through its own module (the {@code import-retail}
-         * command's, until #135): only one this batch posted that is an opening journal by what the ledger holds, never
-         * any other journal (review of 8e570b0 on #872). At the batch's end every journal it posted must be one.
-         */
-        void registerOpeningJournal(String sourceRef, UUID entryId);
 
         /**
          * Posts one opening journal (spec section 3.7) through {@code post_entry} against {@code opening_balance_equity},

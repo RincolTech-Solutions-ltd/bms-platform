@@ -6,6 +6,8 @@ import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.TenantContext;
+import com.rincoltech.bms.testsupport.Api;
+import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -77,5 +79,53 @@ public final class CommitApproval {
             TestRestTemplate http, TestDatabase.Fixture t, ImportRuns runs, UUID runId, String sha256) {
         verifyDump(t, runs, runId, sha256);
         approved(http, t, runs, runId);
+    }
+
+    // JUSTIFICATION-A3: the Lead's note on the review of 8e570b0 (#872): another module's test drives a real commit.
+    /**
+     * Commits one batch written by {@code writer} through the real path, for a test outside the imports module: a run of
+     * the test-only {@link ScriptedTemplate}, its dry run, ready, the dump recorded and checked, the commit approved by a
+     * second person, then {@code ImportRuns.commit}. Into a business that already trades, the trading override is set and
+     * approved by two fabricated platform operators first, as the import of a top-up would be.
+     */
+    public static ImportRuns.CommitOutcome commitScripted(
+            TestRestTemplate http,
+            TestDatabase.Fixture t,
+            ImportRuns runs,
+            ImportMappings mappings,
+            BatchWriter writer) {
+        UUID operator = UUID.randomUUID();
+        String sha = "c".repeat(64);
+        ScriptedTemplate.SCRIPT = writer;
+        try {
+            UUID runId = TenantContext.callAs(t.tenantId(), () -> {
+                UUID run = runs.open(operator).id();
+                runs.addBatch(run, 1);
+                UUID mapping = mappings.latest("scripted")
+                        .orElseGet(() -> mappings.save("scripted", ScriptedTemplate.mapping(), operator, null))
+                        .id();
+                TestDatabase.owner()
+                        .sql("""
+                                UPDATE import_batches SET mapping_id = ?, mapping_source = 'rows', template_key = ?,
+                                       template_version = 1
+                                 WHERE run_id = ?
+                                """)
+                        .params(mapping, ScriptedTemplate.KEY, run)
+                        .update();
+                runs.transition(run, "uploaded");
+                runs.transition(run, "in_review");
+                runs.allowTradingTenant(
+                        run, Api.platformUser(Api.email("import-maker")), "Top-up import of a fabricated tab");
+                runs.approveTradingTenant(run, Api.platformUser(Api.email("import-checker")));
+                runs.dryRun(run, operator);
+                runs.transition(run, "ready");
+                runs.recordPreImportDump(run, "pre-import-fabricated.dump", Instant.now(), sha);
+                return run;
+            });
+            readyToCommit(http, t, runs, runId, sha);
+            return TenantContext.callAs(t.tenantId(), () -> runs.commit(runId));
+        } finally {
+            ScriptedTemplate.SCRIPT = null;
+        }
     }
 }

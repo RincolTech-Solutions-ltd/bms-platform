@@ -458,9 +458,9 @@ class ImportCommitIT extends IntegrationTest {
     void aRunCommitsItsBatchesInDependencyOrderOncePerBatchWithBalancedOpeningJournalsOnly() {
         UUID run = fullRun(t);
         ready(t, run, Policy.OPEN_FROM_LIST);
-        // The dry run keeps its own time limits: the commit's statement timeout is not set in it.
+        // The dry run keeps its own time limit (15 minutes, not trading) for its statements, not the commit's.
         assertThat(settings).containsEntry("app.import_commit", "on");
-        assertThat(settings.get("statement_timeout")).isNotEqualTo("10min");
+        assertThat(settings.get("statement_timeout")).isEqualTo("15min");
 
         assertThat(as(t, () -> runs.commit(run))).isEqualTo(CommitOutcome.COMMITTED);
 
@@ -950,14 +950,30 @@ class ImportCommitIT extends IntegrationTest {
                         t.tenantId()))
                 .isEqualTo(2);
 
-        // Next month's roll in a new run: the same lines with other content, never reported as changed since import.
+        // Next month's roll in a new run, with the item list again (every item already imported, so written no more):
+        // the same lines with other content, never reported as changed since import, and committed (Lead's note on
+        // the review of 8e570b0, #872), its stock take posting an inventory journal of its own.
         UUID next = as(t, () -> runs.open(operator).id());
         Batch month =
                 upload(t, next, "fab-till-roll-october.csv", "till_roll", TILL_TWO.replace("17/09/2026", "17/10/2026"));
+        upload(t, next, "fab-item-list.csv", "item_list", ITEMS_A);
         as(t, () -> validation.validate(next));
         assertThat(as(t, () -> validation.issues(month.id())))
                 .extracting(ImportValidation.Issue::code)
                 .doesNotContain("CHANGED_SINCE_IMPORT");
+        ready(t, next, Policy.OPEN_FROM_LIST);
+        assertThat(as(t, () -> runs.commit(next))).isEqualTo(CommitOutcome.COMMITTED);
+        assertThat(state(t))
+                .containsEntry("products", 5L)
+                .containsEntry("refs retail.stock_movement", 4L)
+                .containsEntry("refs test.cash_sale", 3L)
+                .containsEntry("journals", 4L);
+        onlyBalancedOpeningJournals(t);
+        assertThat(count(
+                        "SELECT count(DISTINCT source_key) FROM import_refs WHERE tenant_id = ? AND source_key LIKE"
+                                + " 'upload:%|line:2'",
+                        t.tenantId()))
+                .isEqualTo(3);
     }
 
     @Test
@@ -996,6 +1012,23 @@ class ImportCommitIT extends IntegrationTest {
         as(t, () -> runs.dryRun(run, operator));
         assertThat(as(t, () -> runs.dryRunReport(run)).orElseThrow().current()).isTrue();
 
+        // The stamp holds the policy, not the run's version (Lead's note on the review of 8e570b0, #872): the version
+        // alone moved leaves the dry run counting, and the option alone changed, the version kept, makes it stop.
+        TestDatabase.owner()
+                .sql("UPDATE import_runs SET version = version + 1 WHERE id = ?")
+                .param(run)
+                .update();
+        assertThat(as(t, () -> runs.dryRunReport(run)).orElseThrow().current()).isTrue();
+        int version = as(t, () -> runs.get(run)).version();
+        TestDatabase.owner()
+                .sql("UPDATE import_runs SET policy = jsonb_set(policy, '{receivable,option}', '\"defer\"')"
+                        + " WHERE id = ?")
+                .param(run)
+                .update();
+        assertThat(as(t, () -> runs.get(run)).version()).isEqualTo(version);
+        assertThat(as(t, () -> runs.dryRunReport(run)).orElseThrow().current()).isFalse();
+
+        // And through the service, which moves the version too.
         as(t, () -> runs.recordPolicy(run, Policy.RECEIVABLE, decision(Policy.OPEN_FROM_LIST)));
 
         assertThat(as(t, () -> runs.dryRunReport(run)).orElseThrow().current()).isFalse();

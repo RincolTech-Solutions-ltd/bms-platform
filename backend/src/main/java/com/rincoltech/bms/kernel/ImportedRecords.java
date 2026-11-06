@@ -15,6 +15,17 @@ public final class ImportedRecords {
 
     private ImportedRecords() {}
 
+    /**
+     * An application event that says whether an import batch published it (Lead's note on the review of 8e570b0, #872):
+     * every event the application publishes is one, set from {@link #inImport()} when it is made, and every listener that
+     * writes to the outbox, sends or starts a workflow skips an imported one.
+     */
+    public interface Marked {
+
+        /** Whether an import batch's transaction published this event. */
+        boolean imported();
+    }
+
     /** Marks the current transaction as an import batch's, until it ends. Needs an active transaction. */
     public static void markTransaction() {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {

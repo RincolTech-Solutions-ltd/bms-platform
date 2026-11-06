@@ -17,7 +17,6 @@ import com.rincoltech.bms.core.imports.ImportMappings.Mapping;
 import com.rincoltech.bms.core.imports.ImportPreview;
 import com.rincoltech.bms.core.imports.ImportPreview.BatchOutcome;
 import com.rincoltech.bms.core.imports.ImportPreview.Preview;
-import com.rincoltech.bms.core.imports.ImportRefs;
 import com.rincoltech.bms.core.imports.ImportReview;
 import com.rincoltech.bms.core.imports.ImportReview.Resolution;
 import com.rincoltech.bms.core.imports.ImportRuns;
@@ -351,7 +350,8 @@ class ImportPreviewIT extends IntegrationTest {
                         "IMP-OPEN",
                         "Opening balance from the fabricated import",
                         "retail",
-                        // The import-retail command's opening journal, the kind a writer of its own may post.
+                        // As the import-retail command posts its opening stock (until #135): the only journal besides
+                        // the framework's own that a batch may post, recognised and registered by the framework.
                         "retail.import_opening",
                         null,
                         null,
@@ -361,11 +361,7 @@ class ImportPreviewIT extends IntegrationTest {
                 .entryNo();
     }
 
-    /**
-     * Reports a posted journal with the debit and credit totals its lines hold, read back from the ledger, and registers it
-     * as the batch's opening journal: since issue #133 a batch posts no journal it does not register (Lead ruling 6 on
-     * #872).
-     */
+    /** Reports a posted journal with the debit and credit totals its lines hold, read back from the ledger. */
     void report(BatchWriter.Checkpoint checkpoint, String branch, String kind, String entryNo) {
         long[] totals = jdbc.sql("""
                         SELECT coalesce(sum(l.debit), 0), coalesce(sum(l.credit), 0)
@@ -374,11 +370,6 @@ class ImportPreviewIT extends IntegrationTest {
                 .param(entryNo)
                 .query((rs, n) -> new long[] {rs.getLong(1), rs.getLong(2)})
                 .single();
-        UUID entry = jdbc.sql("SELECT id FROM journal_entries WHERE entry_no = ?")
-                .param(entryNo)
-                .query(UUID.class)
-                .single();
-        checkpoint.registerOpeningJournal(ImportRefs.sourceRef("test-opening", kind, "entry:" + entryNo, "0"), entry);
         checkpoint.journal(branch, kind, totals[0], totals[1], "posted", entryNo);
     }
 
@@ -951,8 +942,8 @@ class ImportPreviewIT extends IntegrationTest {
         } finally {
             service.tradingDryRunLimit(Duration.ofSeconds(60));
         }
-        // Inside the trading dry run's batch, the commit's 10 minute statement limit is not set (Lead ruling 4 and the
-        // review of 8e570b0 on #872): the dry run's own limit is the one that holds, and it still stops a slow batch.
+        // Inside the trading dry run's batch, each statement has the dry run's own 60 second limit, not the commit's 10
+        // minutes (Lead ruling 4 and the Lead's note on the review of 8e570b0, #872). PostgreSQL shows 60s as 1min.
         List<String> timeouts = new ArrayList<>();
         BatchWriter reads = (r, b, s, c) -> {
             timeouts.add(jdbc.sql("SELECT current_setting('statement_timeout')")
@@ -963,7 +954,7 @@ class ImportPreviewIT extends IntegrationTest {
         DryRun dry = as(t, () -> runs.dryRun(scripted(run, reads), operator));
         assertThat(dry.report().failure()).isNull();
         assertThat(dry.current()).isTrue();
-        assertThat(timeouts).isNotEmpty().doesNotContain("10min");
+        assertThat(timeouts).isNotEmpty().containsOnly("1min");
     }
 
     // JUSTIFICATION-A3: the Lead's ruling 5 on #869: a dry run and a commit are answered at once, never kept waiting.
