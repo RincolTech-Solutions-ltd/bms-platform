@@ -255,6 +255,14 @@ commit of #133; until #135 the retail export's writer is `import-retail` itself.
   requests. Scheduled jobs pick them up from the next nightly run, as chapter 13 section 13.10
   states for loans.
 
+Built in #133 (SDD chapter 13 section 13.14.1, 7/16; migration V143): `import_commit` registered with the approvals (the
+approval marks the run approved at its version, and a change after it needs a new approval); the verified dump as a
+recorded check (`pg_restore --list` entries and the SHA-256 again); the batches in the template's dependency order with a
+10 minute statement timeout each; `import_refs` with `ImportRefs.sourceRef`, the one function of file, tab, row and
+content hash, and `CHANGED_SINCE_IMPORT` reported by the validation; the opening journals through the checkpoint, one per
+run, branch and kind; and triggers that refuse an outbox row, an SMS delivery, a scheduled task or an approval request
+inside an import batch. The preview leaves out rows already imported with the same content.
+
 ### 3.8 The receivable decision
 
 A source that records credit sales or loans without their payments (the first retail import) needs
@@ -271,6 +279,12 @@ a recorded decision before the run can be `ready`. The run's `policy` holds one 
 `CREDIT_DECISION_MISSING` blocks the run until one is recorded with the customer's confirmation.
 The same mechanism carries other policy decisions a template declares (for lending: whether the
 requested principal is taken as disbursed, chapter 13 section 13.8 row 15).
+
+Built in #133: a template declares its decisions (`ImportTemplate.Policy`, `Policy.receivable` for this one) with the rows
+that need it; `ImportRuns.recordPolicy` stores the option with the day and reference of the customer's confirmation, and for
+`defer` the platform operator who granted the exception and the follow-up day; `ready`, the commit request and the commit
+refuse a run that needs a decision it lacks (`CREDIT_DECISION_MISSING`); the loader and the forecast read the decision, so
+the preview predicts the journals it gives.
 
 ### 3.9 Reconciliation
 
