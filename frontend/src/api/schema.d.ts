@@ -6715,6 +6715,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/quick-add/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add many items: every row one Quick add at one branch, in one transaction under one Idempotency-Key; a refused row names its row_index and saves nothing of the list (issue #870, ADR-101); M */
+        post: operations["quickAddRetailItemList"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/quotations": {
         parameters: {
             query?: never;
@@ -17726,6 +17743,75 @@ export interface components {
             unit?: string;
             /** @description True when this add made the Piece unit */
             unit_made?: boolean;
+        };
+        /** @description Issue #870: the list saved, one result per row in the order sent */
+        RetailQuickAddList: {
+            /**
+             * Format: uuid
+             * @description Where the stock went; null when no row had a quantity
+             */
+            branch_id?: string;
+            /**
+             * Format: uuid
+             * @description The list's own id, also the source of its offline audit row
+             */
+            id?: string;
+            /**
+             * Format: int32
+             * @description How many rows made a new item
+             */
+            items_made?: number;
+            rows?: components["schemas"]["RetailQuickAdd"][];
+            /**
+             * Format: int32
+             * @description How many rows added stock to an item already in the list
+             */
+            stock_added?: number;
+        };
+        /** @description Issue #870: Add many items. Every row is one Quick add at branch_id, all in one transaction under one Idempotency-Key: a refused row names its row_index, its fields as rows[i].field, and nothing of the list is saved */
+        RetailQuickAddListRequest: {
+            /**
+             * Format: uuid
+             * @description Where the stock of every row goes; defaults to the caller's one branch
+             */
+            branch_id?: string;
+            offline?: components["schemas"]["RetailOfflineEntry"];
+            rows: components["schemas"]["RetailQuickAddListRow"][];
+        };
+        /** @description Issue #870: one row of Add many items, the fields of Quick add without packages or paid_from. With product_id, an item already in the list, only qty is added and the other item fields are ignored */
+        RetailQuickAddListRow: {
+            /**
+             * Format: uuid
+             * @description Left out: the item goes under General, made when the business has none
+             */
+            category_id?: string;
+            /**
+             * Format: int64
+             * @description Left out: 0, set by the first restock
+             */
+            cost_minor?: number;
+            /** @description The new item's name; required without product_id */
+            description?: string;
+            /**
+             * Format: uuid
+             * @description An item already in the list: add qty to its stock instead of a new item of that name
+             */
+            product_id?: string;
+            /**
+             * @description How many there are now at the list's branch, added as opening stock; more than 0 with product_id; left out, no stock is recorded for this row
+             * @example 12
+             */
+            qty?: string;
+            /**
+             * Format: int64
+             * @description Required without product_id
+             */
+            sell_minor?: number;
+            /**
+             * Format: uuid
+             * @description Left out: the shop's piece unit (Piece or pc), made when the business has none
+             */
+            unit_id?: string;
         };
         /** @description As RetailPackRequest: a size, or what it holds and how many */
         RetailQuickAddPack: {
@@ -33830,6 +33916,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailQuickAdd"];
+                };
+            };
+        };
+    };
+    quickAddRetailItemList: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailQuickAddListRequest"];
+            };
+        };
+        responses: {
+            /** @description One result per row, in the order sent */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailQuickAddList"];
                 };
             };
         };
