@@ -611,7 +611,7 @@ export function ProductList({ onEdit, onPrice, onAdd, added }: { onEdit: (id: st
       {unknownUnit && <p className="hint" role="status" data-testid="unit-not-found">That unit could not be found, so the items of every unit are shown.</p>}
       {shownUnit !== '' && (unitName !== undefined || units.isError) && (
         <div role="status" className="alert alert-info" data-testid="one-unit">
-          <p>Showing the items sold or counted in {unitName ?? 'one unit'} only.</p>
+          <p>Showing only the items whose single unit or package is {unitName ?? 'this unit'}.</p>
           <button type="button" className="btn-sm" onClick={() => setUnitId('')}>Show every unit</button>
         </div>
       )}
