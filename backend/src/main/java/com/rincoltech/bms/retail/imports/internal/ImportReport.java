@@ -1,5 +1,6 @@
 package com.rincoltech.bms.retail.imports.internal;
 
+import com.rincoltech.bms.core.imports.CommitReport;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -39,6 +40,10 @@ public final class ImportReport {
     private final boolean dryRun;
     private final Map<String, Counts> files = new LinkedHashMap<>();
     private final List<String> anomalies = new ArrayList<>();
+
+    /** The anomalies with their file and line apart, for the report shape of the import framework (issue #132). */
+    private final List<CommitReport.Anomaly> sourced = new ArrayList<>();
+
     private final List<String> negatives = new ArrayList<>();
     private final List<Opening> openings = new ArrayList<>();
     private final List<String> notes = new ArrayList<>();
@@ -58,6 +63,7 @@ public final class ImportReport {
 
     void anomaly(String file, int line, String message) {
         anomalies.add(line > 0 ? file + ":" + line + ": " + message : file + ": " + message);
+        sourced.add(new CommitReport.Anomaly(file, Math.max(0, line), message));
     }
 
     void skip(String file, int line, String message) {
@@ -109,6 +115,37 @@ public final class ImportReport {
     public int[] counts(String name) {
         Counts c = files.getOrDefault(name, new Counts());
         return new int[] {c.read, c.written, c.existing, c.skipped};
+    }
+
+    // JUSTIFICATION-A3: issue #132 tells the framework's report what this one holds, one shape for every run.
+    /**
+     * Tells a report of the import framework (issue #132) what this one holds: a line per file, the anomalies with their file
+     * and line, the opening journals (inventory per branch, and the cash book's per branch, each with its debit and credit
+     * totals), the negative balances and the notes as notes, and the checksum. A failure is not told: the framework records
+     * the batch that failed itself.
+     */
+    public void into(CommitReport.Sink sink) {
+        files.forEach((name, c) -> sink.counts(name, c.read, c.written, c.existing, c.skipped));
+        sourced.forEach(a -> sink.anomaly(a.file(), a.line(), a.message()));
+        openings.forEach(
+                o -> sink.journal(o.branch(), "inventory", o.debitMinor(), o.debitMinor(), o.status(), o.entryNo()));
+        cashOpenings.forEach(o -> {
+            long sum = o.cashMinor() + o.bankMinor() + o.savingsMinor() + o.advancesMinor();
+            sink.journal(o.branch(), "cash_book", sum, sum, o.status(), o.entryNo());
+        });
+        negatives.forEach(n -> sink.note("negative source balance, excluded from the opening journal: " + n));
+        notes.forEach(sink::note);
+        sink.checksum(checksum);
+    }
+
+    /** This report in the framework's shape, for a run of the command itself. */
+    public CommitReport toCommitReport() {
+        CommitReport.Builder builder = new CommitReport.Builder(null);
+        into(builder);
+        if (failure != null) {
+            builder.fail(failure);
+        }
+        return builder.build(dryRun ? CommitReport.DRY_RUN : CommitReport.COMMIT);
     }
 
     public String render() {

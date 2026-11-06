@@ -3,6 +3,8 @@ package com.rincoltech.bms.core.imports.internal;
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.audit.PlatformAuditLog;
 import com.rincoltech.bms.core.imports.BatchWriter;
+import com.rincoltech.bms.core.imports.CommitReport;
+import com.rincoltech.bms.core.imports.ImportForecast;
 import com.rincoltech.bms.core.imports.ImportRuns;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.LiveRecordProbe;
@@ -13,9 +15,11 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import javax.sql.DataSource;
@@ -92,6 +96,7 @@ class ImportRunService implements ImportRuns {
     private final PlatformAuditLog platformAudit;
     private final List<LiveRecordProbe> probes;
     private final ObjectMapper mapper;
+    private final PreviewService preview;
 
     ImportRunService(
             JdbcClient jdbc,
@@ -100,7 +105,8 @@ class ImportRunService implements ImportRuns {
             AuditLog audit,
             PlatformAuditLog platformAudit,
             List<LiveRecordProbe> probes,
-            ObjectMapper mapper) {
+            ObjectMapper mapper,
+            PreviewService preview) {
         this.jdbc = jdbc;
         this.dataSource = dataSource;
         this.tx = new TransactionTemplate(transactions);
@@ -108,6 +114,7 @@ class ImportRunService implements ImportRuns {
         this.platformAudit = platformAudit;
         this.probes = List.copyOf(probes);
         this.mapper = mapper;
+        this.preview = preview;
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -155,6 +162,10 @@ class ImportRunService implements ImportRuns {
                                     """).param(runId).query(Boolean.class).single()) {
                 throw invalidTransition(
                         "A file of this import is not read yet or was refused; read it again or cancel it.");
+            }
+            // Ready means a stored dry run of the run as it is now, which did not fail and matched the preview (#132).
+            if (RunStates.READY.equals(status)) {
+                requireDryRun(runId);
             }
             setStatus(runId, status);
             audit(runId, "core.import_run.status_changed", Map.of("status", run.status()), Map.of("status", status));
@@ -325,6 +336,8 @@ class ImportRunService implements ImportRuns {
                     "Only an import that is ready can start; this one is " + RunStates.words(run.status()) + ".");
         }
         requireCommitPossible(run);
+        // The run cannot change once ready, so this holds; checked again so no path commits without its dry run (#132).
+        requireDryRun(runId);
         List<String> trading = probes.stream()
                 .filter(LiveRecordProbe::hasLiveRecords)
                 .map(LiveRecordProbe::area)
@@ -372,6 +385,223 @@ class ImportRunService implements ImportRuns {
             });
             return writeBatches(runId, writer, claim);
         }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The dry run and the stored reports (issue #132).
+    // ---------------------------------------------------------------------------------------------
+
+    // JUSTIFICATION-A3: issue #132's dry run, the commit's batch code inside one outer transaction rolled back.
+    /**
+     * The stamp of a run's inputs: an MD5 over the cutover moment and policy decisions, every batch (status, file, mapping
+     * version, parse, rows), every issue (status, version, resolution), every resolution and every staged row's review
+     * columns and typed values. Anything a commit reads from the staging area changes it; the dry run's own writes are
+     * rolled back and never do.
+     */
+    private static final String STAMP = """
+            SELECT md5(concat_ws('#',
+                     (SELECT concat_ws('|', cutover_at, policy::text) FROM import_runs WHERE id = ?),
+                     (SELECT string_agg(concat_ws('|', b.id, b.seq, b.status, b.source_sha256, b.mapping_id,
+                                                  b.mapping_source, b.template_key, b.template_version, b.parsed_at,
+                                                  b.row_count), ',' ORDER BY b.seq, b.id)
+                        FROM import_batches b WHERE b.run_id = ?),
+                     (SELECT string_agg(concat_ws('|', i.id, i.status, i.version, i.resolution_id, i.ask_customer), ','
+                                        ORDER BY i.id)
+                        FROM import_issues i JOIN import_batches b ON b.id = i.batch_id WHERE b.run_id = ?),
+                     (SELECT string_agg(r.id::text, ',' ORDER BY r.id) FROM import_issue_resolutions r WHERE r.run_id = ?),
+                     (SELECT string_agg(concat_ws('|', w.id, w.excluded_by, w.linked_row_id, w.linked_member_id,
+                                                  w.source_ref, md5(w.normalised::text)), ',' ORDER BY w.id)
+                        FROM import_rows w JOIN import_batches b ON b.id = w.batch_id WHERE b.run_id = ?)))
+            """;
+
+    private String stamp(UUID runId) {
+        return jdbc.sql(STAMP)
+                .params(runId, runId, runId, runId, runId)
+                .query(String.class)
+                .single();
+    }
+
+    @Override
+    public DryRun dryRun(UUID runId, BatchWriter writer, UUID by) {
+        requireNoTransaction();
+        if (writer == null || by == null) {
+            throw new IllegalArgumentException("a dry run needs the writer and who runs it");
+        }
+        String[] inputs = new String[1];
+        List<CommitReport> parts = new ArrayList<>();
+        String[] failure = new String[1];
+        tx.executeWithoutResult(outer -> {
+            // Rolled back whatever happens inside: the dry run writes nothing (spec section 3.6).
+            outer.setRollbackOnly();
+            requireDryRunPossible(find(runId, false));
+            inputs[0] = stamp(runId);
+            for (PendingBatch batch : pending(runId)) {
+                try {
+                    CommitReport part = writeBatch(runId, batch, writer, true);
+                    if (part != null) {
+                        parts.add(part);
+                    }
+                } catch (RuntimeException e) {
+                    // As a real run, the first batch that fails stops it; the report names the batch and the kind of
+                    // failure, never the message, which may quote a row. The outer transaction is rolled back below.
+                    failure[0] =
+                            "batch " + batch.seq() + " failed (" + e.getClass().getSimpleName() + ")";
+                    break;
+                }
+            }
+        });
+        CommitReport.Builder whole = new CommitReport.Builder(null);
+        parts.forEach(whole::add);
+        if (failure[0] != null) {
+            whole.fail(failure[0]);
+        }
+        CommitReport report = whole.build(CommitReport.DRY_RUN);
+        boolean matches = sameJournals(preview.preview(runId).balances().journals(), report.journals());
+        DryRun stored = tx.execute(s -> {
+            requireDryRunPossible(find(runId, true));
+            if (!inputs[0].equals(stamp(runId))) {
+                throw new ApiException(
+                        HttpStatus.CONFLICT,
+                        "run_changed",
+                        "Import changed",
+                        "A file, mapping or review decision of this import changed while the dry run ran; run it again.");
+            }
+            jdbc.sql("""
+                            UPDATE import_runs SET dry_run_report = CAST(? AS jsonb), dry_run_at = now(), dry_run_by = ?,
+                                   dry_run_stamp = ?, dry_run_preview_matches = ?, version = version + 1, updated_at = now()
+                             WHERE id = ?
+                            """)
+                    .params(mapper.writeValueAsString(report), by, inputs[0], matches, runId)
+                    .update();
+            return storedDryRun(runId).orElseThrow();
+        });
+        // The run, the counts and the outcome only: never a file name, an anomaly or a value.
+        log.info(
+                "import run {} dry run: {} batches, {} anomalies, {} journals, failed {}, preview matches {}",
+                runId,
+                parts.size(),
+                report.anomalies().size(),
+                report.journals().size(),
+                failure[0] != null,
+                matches);
+        return stored;
+    }
+
+    @Override
+    public Optional<DryRun> dryRunReport(UUID runId) {
+        TenantContext.require();
+        return tx.execute(s -> {
+            find(runId, false);
+            return storedDryRun(runId);
+        });
+    }
+
+    @Override
+    public CommitReport commitReport(UUID runId) {
+        TenantContext.require();
+        return tx.execute(s -> {
+            find(runId, false);
+            CommitReport.Builder whole = new CommitReport.Builder(null);
+            // A batch committed before V142 stored no part; no run was committed then (no writer existed).
+            jdbc.sql("""
+                            SELECT report::text FROM import_batches
+                             WHERE run_id = ? AND status = 'committed' AND report IS NOT NULL ORDER BY seq
+                            """)
+                    .param(runId)
+                    .query(String.class)
+                    .list()
+                    .forEach(part -> whole.add(mapper.readValue(part, CommitReport.class)));
+            return whole.build(CommitReport.COMMIT);
+        });
+    }
+
+    /** The stored dry run of a run, inside the caller's transaction, with whether it still counts. */
+    private Optional<DryRun> storedDryRun(UUID runId) {
+        String now = stamp(runId);
+        return jdbc.sql("""
+                        SELECT dry_run_report::text AS report, dry_run_at, dry_run_by, dry_run_stamp, dry_run_preview_matches
+                          FROM import_runs WHERE id = ? AND dry_run_report IS NOT NULL
+                        """)
+                .param(runId)
+                .query((rs, n) -> new DryRun(
+                        mapper.readValue(rs.getString("report"), CommitReport.class),
+                        instant(rs, "dry_run_at"),
+                        rs.getObject("dry_run_by", UUID.class),
+                        rs.getBoolean("dry_run_preview_matches"),
+                        rs.getString("dry_run_stamp").equals(now)))
+                .optional();
+    }
+
+    /** Refuses a run that may not be made ready: no dry run that counts, a failed one, or one the preview did not match. */
+    private void requireDryRun(UUID runId) {
+        DryRun dry = storedDryRun(runId).orElse(null);
+        if (dry == null || !dry.current()) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "dry_run_required",
+                    "Dry run required",
+                    "Run the dry run of this import first: there is none, or a file, mapping or review decision changed"
+                            + " after it.");
+        }
+        if (dry.report().failure() != null) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "dry_run_failed",
+                    "Dry run failed",
+                    "The last dry run of this import stopped at a batch; fix the cause and run it again.");
+        }
+        if (!dry.previewMatches()) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "preview_differs",
+                    "Preview differs",
+                    "The opening journals of the dry run differ from the preview's; the import is not ready.");
+        }
+    }
+
+    private void requireDryRunPossible(Run run) {
+        if (!RunStates.IN_REVIEW.equals(run.status())) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "run_not_open",
+                    "Import not open",
+                    "Only an import in review can be dry run; this one is " + RunStates.words(run.status()) + ".");
+        }
+        if (jdbc.sql(
+                        "SELECT EXISTS (SELECT 1 FROM import_batches WHERE run_id = ? AND status IN ('uploaded', 'failed'))")
+                .param(run.id())
+                .query(Boolean.class)
+                .single()) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "batch_not_parsed",
+                    "File not read",
+                    "A file of this import is not read yet or was refused; read it again or cancel it first.");
+        }
+    }
+
+    /** Whether two lists hold the same opening journals (branch, kind, debit, credit), in any order, ignoring empty ones. */
+    static boolean sameJournals(List<ImportForecast.Journal> predicted, List<CommitReport.Journal> posted) {
+        List<String> a = predicted.stream()
+                .filter(j -> j.debitMinor() != 0 || j.creditMinor() != 0)
+                .map(j -> j.branch() + "|" + j.kind() + "|" + j.debitMinor() + "|" + j.creditMinor())
+                .sorted()
+                .toList();
+        List<String> b = posted.stream()
+                .filter(j -> j.debitMinor() != 0 || j.creditMinor() != 0)
+                .map(j -> j.branch() + "|" + j.kind() + "|" + j.debitMinor() + "|" + j.creditMinor())
+                .sorted()
+                .toList();
+        return a.equals(b);
+    }
+
+    private List<PendingBatch> pending(UUID runId) {
+        return jdbc.sql("""
+                        SELECT id, seq FROM import_batches WHERE run_id = ? AND status IN ('pending', 'parsed') ORDER BY seq
+                        """)
+                .param(runId)
+                .query((rs, n) -> new PendingBatch(rs.getObject("id", UUID.class), rs.getInt("seq")))
+                .list();
     }
 
     /**
@@ -480,12 +710,7 @@ class ImportRunService implements ImportRuns {
     }
 
     private CommitOutcome writeBatches(UUID runId, BatchWriter writer, LoopClaim claim) {
-        List<PendingBatch> pending = tx.execute(s -> jdbc.sql("""
-                        SELECT id, seq FROM import_batches WHERE run_id = ? AND status IN ('pending', 'parsed') ORDER BY seq
-                        """)
-                .param(runId)
-                .query((rs, n) -> new PendingBatch(rs.getObject("id", UUID.class), rs.getInt("seq")))
-                .list());
+        List<PendingBatch> pending = tx.execute(s -> pending(runId));
         for (PendingBatch batch : pending) {
             // Without the claim a resume may already own the business: write nothing more, leave the run resumable.
             String lost = claim.lostReason();
@@ -499,7 +724,7 @@ class ImportRunService implements ImportRuns {
                 return CommitOutcome.HALTED;
             }
             try {
-                tx.executeWithoutResult(s -> writeBatch(runId, batch, writer));
+                tx.executeWithoutResult(s -> writeBatch(runId, batch, writer, false));
             } catch (Halted e) {
                 tx.executeWithoutResult(s -> audit(
                         runId,
@@ -547,23 +772,42 @@ class ImportRunService implements ImportRuns {
         return CommitOutcome.COMMITTED;
     }
 
-    private void writeBatch(UUID runId, PendingBatch batch, BatchWriter writer) {
+    // JUSTIFICATION-A3: issue #132 makes the batch's commit report its part and serve the dry run, one code for both.
+    /**
+     * Writes one batch: the commit's code, and the dry run's inside its outer transaction ({@code dryRun}: the kill switch
+     * and the halt, which guard writes, do not stop it). Returns the batch's part of the run's report, also stored on the
+     * batch with its counts; null for a batch already committed.
+     */
+    private CommitReport writeBatch(UUID runId, PendingBatch batch, BatchWriter writer, boolean dryRun) {
         jdbc.sql("SELECT pg_advisory_xact_lock(" + LOCK_KEY + ")").query().singleRow();
-        String status = jdbc.sql("SELECT status FROM import_batches WHERE id = ? FOR UPDATE")
+        Map<String, Object> row = jdbc.sql(
+                        "SELECT status, source_filename, row_count FROM import_batches WHERE id = ? FOR UPDATE")
                 .param(batch.id())
-                .query(String.class)
-                .single();
-        if ("committed".equals(status)) {
-            return;
+                .query()
+                .singleRow();
+        if ("committed".equals(row.get("status"))) {
+            return null;
         }
-        stopIfRequested(runId);
-        Map<String, Object> counts = writer.write(runId, batch.id(), batch.seq(), new RowCheckpoint(runId));
+        if (!dryRun) {
+            stopIfRequested(runId);
+        }
+        String file = row.get("source_filename") == null
+                ? "batch " + batch.seq()
+                : RowValidator.shortName((String) row.get("source_filename"));
+        RowCheckpoint checkpoint = new RowCheckpoint(runId, !dryRun, file, preview.privacy(batch.id()));
+        Map<String, Object> counts = writer.write(runId, batch.id(), batch.seq(), checkpoint);
+        CommitReport part = checkpoint.part(counts, (Integer) row.get("row_count"));
         jdbc.sql("""
-                        UPDATE import_batches SET status = 'committed', committed_at = now(), counts = CAST(? AS jsonb)
+                        UPDATE import_batches SET status = 'committed', committed_at = now(), counts = CAST(? AS jsonb),
+                               report = CAST(? AS jsonb)
                          WHERE id = ?
                         """)
-                .params(mapper.writeValueAsString(counts == null ? Map.of() : counts), batch.id())
+                .params(
+                        mapper.writeValueAsString(counts == null ? Map.of() : counts),
+                        mapper.writeValueAsString(part),
+                        batch.id())
                 .update();
+        return part;
     }
 
     /**
@@ -593,21 +837,88 @@ class ImportRunService implements ImportRuns {
         }
     }
 
+    // JUSTIFICATION-A3: issue #132 makes the checkpoint the report's sink as well as the guard.
+    /**
+     * The guard a writer calls after each row, and the sink of the batch's part of the report. An anomaly on a line of the
+     * batch's own file is kept as {@link CommitReport#HIDDEN} when it holds a personal value of that row.
+     */
     private final class RowCheckpoint implements BatchWriter.Checkpoint {
 
         private final UUID runId;
+        private final boolean stops;
+        private final String file;
+        private final PreviewService.RowPrivacy privacy;
+        private final CommitReport.Builder part;
         private long rows;
 
-        RowCheckpoint(UUID runId) {
+        RowCheckpoint(UUID runId, boolean stops, String file, PreviewService.RowPrivacy privacy) {
             this.runId = runId;
+            this.stops = stops;
+            this.file = file;
+            this.privacy = privacy;
+            this.part = new CommitReport.Builder(file);
         }
 
         @Override
         public void rowWritten() {
-            if (++rows % CHECKPOINT_ROWS == 0) {
+            if (++rows % CHECKPOINT_ROWS == 0 && stops) {
                 stopIfRequested(runId);
             }
         }
+
+        @Override
+        public void counts(String source, int read, int written, int existing, int skipped) {
+            part.counts(source, read, written, existing, skipped);
+        }
+
+        @Override
+        public void anomaly(int line, String message) {
+            part.anomaly(file, line, safe(line, message));
+        }
+
+        @Override
+        public void anomaly(String other, int line, String message) {
+            part.anomaly(other, line, file.equals(other) ? safe(line, message) : String.valueOf(message));
+        }
+
+        @Override
+        public void journal(
+                String branch, String kind, long debitMinor, long creditMinor, String status, String entryNo) {
+            part.journal(branch, kind, debitMinor, creditMinor, status, entryNo);
+        }
+
+        @Override
+        public void note(String note) {
+            part.note(note);
+        }
+
+        @Override
+        public void checksum(String line) {
+            part.checksum(line);
+        }
+
+        private String safe(int line, String message) {
+            String text = String.valueOf(message);
+            return line > 0 && RowValidator.holds(text, privacy.values(line)) ? CommitReport.HIDDEN : text;
+        }
+
+        /** The batch's part: one line of the table from the writer's counts unless it gave its files' own lines. */
+        CommitReport part(Map<String, Object> counts, Integer rowCount) {
+            if (!part.hasCounts()) {
+                Map<String, Object> c = counts == null ? Map.of() : counts;
+                part.counts(
+                        file,
+                        number(c.get("read"), rowCount == null ? 0 : rowCount),
+                        number(c.get("written"), 0),
+                        number(c.get("existing"), 0),
+                        number(c.get("skipped"), 0));
+            }
+            return part.build(CommitReport.COMMIT);
+        }
+    }
+
+    private static int number(Object value, int otherwise) {
+        return value instanceof Number n ? Math.toIntExact(n.longValue()) : otherwise;
     }
 
     /** Stops a batch and rolls it back; the run stays committing. */

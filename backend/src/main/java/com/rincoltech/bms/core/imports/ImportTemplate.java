@@ -269,6 +269,14 @@ public interface ImportTemplate {
     }
 
     /**
+     * A new forecast of what the commit will post (issue #132): the preview's predicted balances, computed by the rules the
+     * loader posts by. {@link ImportForecast#NONE} by default, for a template that posts no opening balance.
+     */
+    default ImportForecast forecast() {
+        return ImportForecast.NONE;
+    }
+
+    /**
      * The row rules a template may offer an entity set, each switched on per source by the mapping (spec section 4.2):
      * sub-header rows that carry the month for the rows below them, a totals row at the first or last position to ignore,
      * and the cell texts that mark a row as a placeholder.

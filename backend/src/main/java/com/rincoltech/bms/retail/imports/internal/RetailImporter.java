@@ -1,6 +1,7 @@
 package com.rincoltech.bms.retail.imports.internal;
 
 import com.rincoltech.bms.core.audit.AuditLog;
+import com.rincoltech.bms.core.imports.BatchWriter;
 import com.rincoltech.bms.core.jobs.TenantJobs;
 import com.rincoltech.bms.core.tenancy.BranchProvisioning;
 import com.rincoltech.bms.core.tenancy.Branches;
@@ -264,16 +265,7 @@ public class RetailImporter {
      * journals are dated the day before it. {@code null} means the import day in the tenant's zone.
      */
     public ImportReport run(String tenantSlug, Path dir, boolean dryRun, LocalDate firstLiveDate) {
-        if (!dir.toFile().isDirectory()) {
-            throw new IllegalArgumentException("Not a directory: " + dir);
-        }
-        Map<String, ExportFile> export = new LinkedHashMap<>();
-        for (String name : FILES) {
-            export.put(name, ExportFile.read(dir, name, FIELDS.get(name)));
-        }
-        for (String name : CASH_FILES) {
-            export.put(name, ExportFile.read(dir, name, FIELDS.get(name)));
-        }
+        Map<String, ExportFile> export = readExport(dir);
         ImportReport report = new ImportReport(tenantSlug, dir.toString(), dryRun);
         return tenants.callAsTenant(tenantSlug, "retail", () -> {
             if (dryRun) {
@@ -286,6 +278,43 @@ public class RetailImporter {
             }
             return report;
         });
+    }
+
+    // JUSTIFICATION-A3: issue #132 runs this command's real path as a batch of the import framework, no second path.
+    /**
+     * This command's real path as the writer of one batch of the import framework (issue #132), until the retail template
+     * of #135 gives each file its own batch: it imports the whole export directory in the batch's transaction (each file's
+     * transaction joins it), for the business the framework bound, and tells the batch's report what this command's report
+     * holds. So the framework's dry run of a run is this path rolled back, and its report equals a real run's
+     * ({@link ImportReport#toCommitReport()}). A file that fails throws, so the batch, or the dry run, stops there. The
+     * checkpoint's kill switch is not read between rows: the command never read it either.
+     */
+    public BatchWriter exportWriter(Path dir, LocalDate firstLiveDate) {
+        return (runId, batchId, seq, checkpoint) -> {
+            ImportReport report = new ImportReport("", dir.toString(), false);
+            importAll(readExport(dir), report, firstLiveDate);
+            if (report.failed()) {
+                // The cause is in the command's own report; it may quote a row, so it is not the exception's message.
+                throw new IllegalStateException("the retail export stopped at a file");
+            }
+            report.into(checkpoint);
+            return Map.of();
+        };
+    }
+
+    /** Every file of the export directory, read once; an absent file is an empty one. */
+    private static Map<String, ExportFile> readExport(Path dir) {
+        if (!dir.toFile().isDirectory()) {
+            throw new IllegalArgumentException("Not a directory: " + dir);
+        }
+        Map<String, ExportFile> export = new LinkedHashMap<>();
+        for (String name : FILES) {
+            export.put(name, ExportFile.read(dir, name, FIELDS.get(name)));
+        }
+        for (String name : CASH_FILES) {
+            export.put(name, ExportFile.read(dir, name, FIELDS.get(name)));
+        }
+        return export;
     }
 
     private void importAll(Map<String, ExportFile> export, ImportReport report, LocalDate firstLiveDate) {

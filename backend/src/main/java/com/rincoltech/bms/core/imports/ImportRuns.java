@@ -1,6 +1,7 @@
 package com.rincoltech.bms.core.imports;
 
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -25,7 +26,8 @@ public interface ImportRuns {
      * Moves a run along the diagram of spec section 3.11, stamping the stage time: {@code draft} to {@code uploaded} to
      * {@code in_review} to {@code ready}, {@code committed} to {@code signed_off} to {@code purged}, and {@code cancelled}
      * from any state before {@code committing}. {@code committing} and {@code committed} are reached only through
-     * {@link #commit}.
+     * {@link #commit}. {@code ready} needs a stored dry run that still counts, did not fail and matched the preview
+     * (issue #132): 409 {@code dry_run_required}, {@code dry_run_failed} or {@code preview_differs} otherwise.
      */
     Run transition(UUID runId, String status);
 
@@ -52,6 +54,34 @@ public interface ImportRuns {
 
     /** Continues a {@code committing} run from its first uncommitted batch, after a halt, a failure or a restart. */
     CommitOutcome resume(UUID runId, BatchWriter writer);
+
+    // JUSTIFICATION-A3: issue #132 adds the dry run and the stored reports to the run's API, new methods beside commit.
+    /**
+     * The dry run of a run {@code in_review} (issue #132, ADR-027 decision 5): the commit's own batch code, with the same
+     * writer, inside one outer transaction that is rolled back, so nothing is written (no business, ledger or audit row);
+     * then its report is stored on the run with the stamp of the run's inputs and whether the preview's opening journals
+     * equal the dry run's. It is not stopped by the kill switch or the halt, which guard writes. A writer that throws stops
+     * the dry run at that batch, and the stored report says which batch failed and the kind of failure. Refused with 409
+     * {@code run_not_open} for a run in another state, 409 {@code batch_not_parsed} while a file of the run is stored and not
+     * read or was refused, and 409 {@code run_changed} when a batch, issue or resolution of the run changed while it ran
+     * (nothing is stored). Takes its own transactions; none may be open around it.
+     */
+    DryRun dryRun(UUID runId, BatchWriter writer, UUID by);
+
+    /**
+     * The run's stored dry run, if any. It no longer counts ({@link DryRun#current()} false) once any batch, mapping
+     * version, issue, resolution, the cutover moment or a policy decision of the run changed after it.
+     */
+    Optional<DryRun> dryRunReport(UUID runId);
+
+    /** The report of the real run so far: the parts its committed batches stored, in order. */
+    CommitReport commitReport(UUID runId);
+
+    /**
+     * A stored dry run: its report, when and by whom it ran, whether the preview's opening journals equalled its own, and
+     * whether it still counts (the run's inputs are those it ran on).
+     */
+    record DryRun(CommitReport report, Instant at, UUID by, boolean previewMatches, boolean current) {}
 
     /** The platform kill switch {@code imports.commit_enabled}. */
     boolean commitEnabled();
