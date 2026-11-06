@@ -58,7 +58,7 @@ describe('catalogue permission gating', () => {
   it('lists a catalogue manager without the purchase permission no Suppliers link', () => {
     const permissions = ['retail.catalogue.manage', 'retail.stock.read'];
     const labels = catalogueLinksFor({ permissions }).map((l) => l.label);
-    expect(labels).toEqual(['Quick add', 'Add many items', 'Items', 'Categories', 'Units', 'Barcode labels']);
+    expect(labels).toEqual(['Quick add', 'Items', 'Categories', 'Units', 'Barcode labels']);
   });
 });
 
@@ -257,12 +257,11 @@ describe('the mock catalogue (the server rules the screens rely on)', () => {
 describe('importing items from a file', () => {
   const csv = 'code,description,category,unit,sell price\nIMP-1,Test cable,Cables,roll,12000\nP003,Test existing,Lighting,piece,500\nIMP-2,Test bulb,Lighting,piece,abc\n';
 
-  it('is for an administrator only', () => {
+  it('is for whoever may manage the catalogue, as Quick add (issue #870; administrators only before)', () => {
     const catalogueManager = { permissions: ['retail.catalogue.manage', 'retail.stock.read'] };
-    expect(canUse(catalogueManager, 'importer')).toBe(false);
-    expect(canUse({ permissions: [...catalogueManager.permissions, 'core.settings.manage'] }, 'importer')).toBe(true);
+    expect(canUse(catalogueManager, 'importer')).toBe(true);
     expect(canUse(mockMe('sales'), 'importer')).toBe(false);
-    const html = page('admin', <Gate screen="importer" title="Import items"><p>FORM</p></Gate>, catalogueManager.permissions);
+    const html = page('admin', <Gate screen="importer" title="Import items"><p>FORM</p></Gate>, ['retail.stock.read']);
     expect(html).toContain('You do not have access');
     expect(html).not.toContain('FORM');
   });

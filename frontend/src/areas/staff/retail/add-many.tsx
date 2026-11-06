@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createLazyRoute } from '@tanstack/react-router';
 import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { RETAIL_CURRENCY, RetailError, retail, type QuickAddList, type QuickAddListRequest } from '../../../api/retail';
+import { RETAIL_CURRENCY, RetailError, retail, type ImportResult } from '../../../api/retail';
 import { WORDS } from '../../../app/glossary';
 import { ActionBar } from '../../../app/ui/ActionBar';
 import { BusyButton } from '../../../app/ui/BusyButton';
@@ -14,7 +13,7 @@ import type { OutboxItem } from '../../../offline/outbox';
 import { AddsTo } from '../branch-picker';
 import { useStaff } from '../context';
 import {
-  COLUMNS, checkRows, emptyRow, fillRows, groupsOf, isBlank, nameKey, nextKey, resultLine, rowsFromPaste, startRows,
+  COLUMNS, checkRows, emptyRow, fillRows, groupsOf, isBlank, listCsv, nameKey, nextKey, resultLine, rowsFromPaste, startRows,
   type ListRow, type RowCheck,
 } from './add-many-state';
 import { CategoryPicker } from './category-picker';
@@ -22,19 +21,19 @@ import { existsText, type ExistingItem } from './catalogue-names';
 import { newIdempotencyKey, usePersistedDraft } from './idempotency';
 import { branchesWhere } from './permissions';
 import { NO_COUNT_HERE, NO_PLACE, notSureLine, pieceUnit, readLastGroup, refusedForCertain, writeLastGroup } from './quick-add';
-import { ScreenLink } from './screen-link';
-import { Gate, Problem, useProfitAccess, useStockingBranch } from './ui';
+import { Problem, useProfitAccess, useStockingBranch } from './ui';
 import { UnitPicker } from './unit-picker';
 
-// Add many items (issue #870): a pilot shop owner stopped using the app after adding about 20 items one at a time. One screen of
-// rows (name, group, unit, how many now at the shop chosen at the top, buying price, selling price), five to start and Add
-// another row; Tab or Enter moves to the next cell; on a phone each row is a small card. Paste a list fills the rows from lines
-// copied out of Excel, Google Sheets or WhatsApp, for the owner to check. Each row is checked where it is: a missing name, a
-// name already in the items (Add to its stock instead), a number that is not one, a comma used as a decimal point; selling
-// below buying is a warning only. Save the list sends every good row in one request (POST /retail/quick-add/list, through
-// Quick add's own path, ADR-101) under one key, so it is never added twice; the rows that need a look stay on the screen.
-// Offline the list is kept on the phone as one entry and sent once (ADR-067 decision 13). The buying price is entered only by
-// whoever may see it, as on Quick add.
+// Add many items on Import items (issue #870, folded into #146 on the Lead's review): a pilot shop owner stopped using the app
+// after adding about 20 items one at a time. Rows of the item's name, group, unit, how many now at the shop chosen at the top,
+// buying price (only for whoever may see it, as on Quick add) and selling price; five to start and Add another row; Tab or
+// Enter moves to the next cell; on a phone each row is a small card. Paste a list fills the rows from lines copied out of
+// Excel, Google Sheets or WhatsApp, for the owner to check. Each row is checked where it is (a missing name, the same name twice,
+// a number that is not one, a comma used as a decimal point; selling below buying is a warning). Save the list turns the good
+// rows into the import's own file and runs the import's check, which also finds a name already in the items (Add to its stock
+// instead); then one apply adds every row the check passed, each with its opening stock at the chosen shop, under the list's
+// one key, so a resend adds nothing twice. The rows that need a look stay. Offline the apply is kept on the phone as one entry
+// and sent once (ADR-067 decision 13); the import checks it when it arrives.
 
 export const ADD_MANY = 'Add many items';
 const COUNT = 'retail.stocktake.commit';
@@ -44,7 +43,7 @@ interface ListDraft {
   rows: ListRow[];
   /** The shop chosen at the top; null follows the branch in use. */
   where: string | null;
-  /** The request sent, with its key, while its answer is not certain: Save sends exactly it again, under that key. */
+  /** The apply sent, with its key, while its answer is not certain: Save sends exactly it again, under that key. */
   pending: Plan | null;
   /**
    * The list's one Idempotency-Key once a list was answered for certain on this screen: a new one after each answer, so the
@@ -53,11 +52,14 @@ interface ListDraft {
   listKey?: string;
 }
 
-/** One save: the request, the rows it carries (by row key) and the key it goes under. */
-interface Plan { body: QuickAddListRequest; keys: number[]; key: string }
+/** One apply: the import file of the rows it carries (by row key), the shop, and the key it goes under. */
+interface Plan { csv: string; branchId?: string; keys: number[]; key: string }
 
-/** The name panel's state of a row: the item already in the list under that name, for the name it was found for. */
+/** The item already in the list under a row's name, for the name it was found for (from the import's check). */
 type Found = Record<number, { forName: string; item: ExistingItem }>;
+
+/** The import's answer for one line of a file: line 2 is the first row after the header. */
+const rowOf = (line: number | undefined) => (line ?? 0) - 2;
 
 export function AddManyForm() {
   const { me } = useStaff();
@@ -87,19 +89,28 @@ export function AddManyForm() {
   const [keptItem, setKeptItem] = useState<OutboxItem | null>(null);
   const [notSure, setNotSure] = useState(false);
   const [refusal, setRefusal] = useState<unknown>(null);
+  const [checking, setChecking] = useState(false);
   const [paste, setPaste] = useState('');
   const [pasteNote, setPasteNote] = useState<string | null>(null);
   const list = useRef<HTMLOListElement>(null);
   const held = draft.pending !== null;
+  const context = {
+    groups,
+    pieceId: piece?.id,
+    categoryName: (id: string) => (categories.data ?? []).find((c) => c.id === id)?.name,
+    unitName: (id: string) => (units.data ?? []).find((u) => u.id === id)?.name,
+    profit,
+    mayCount,
+  };
 
-  const checksWith = (map: Found): RowCheck[] => checkRows(draft.rows, { groups, pieceId: piece?.id, profit, mayCount }).map((c, i) => {
-    const r = draft.rows[i];
+  const checksWith = (rows: ListRow[], map: Found): RowCheck[] => checkRows(rows, context).map((c, i) => {
+    const r = rows[i];
     const hit = r && !r.addTo ? map[r.key] : undefined;
     // A name already in the items is not saved twice: the row asks to add to its stock, or a new name.
     if (r && hit && hit.forName === nameKey(r.name) && !c.errors.name) return { ...c, errors: { ...c.errors, name: existsText(hit.item) }, send: undefined };
     return c;
   });
-  const checks = checksWith(found);
+  const checks = checksWith(draft.rows, found);
   const filled = draft.rows.filter((r) => !isBlank(r)).length;
   const ready = checks.filter((c) => c.send).length;
 
@@ -107,24 +118,6 @@ export function AddManyForm() {
     setResult(null);
     setDraft((d) => ({ ...d, rows: d.rows.map((r) => (r.key === rowKey ? { ...r, ...patch, refused: undefined } : r)) }));
   };
-
-  /** The item already in the list under the row's name and unit, read from the server; nothing offline. */
-  const lookUp = async (r: ListRow, map: Found): Promise<Found> => {
-    const text = r.name.trim();
-    if (text === '' || r.addTo || map[r.key]?.forName === nameKey(text) || entries.offlineMode) return map;
-    try {
-      const same = await retail.similarProducts({ description: text, unitId: r.unitId || piece?.id });
-      const hit = (same.exact ?? [])[0];
-      const next = { ...map };
-      if (hit?.id) next[r.key] = { forName: nameKey(text), item: { id: hit.id, code: hit.code ?? '', name: hit.description ?? text, mayAddAnyway: false } };
-      else delete next[r.key];
-      return next;
-    } catch {
-      // Not known now: the server checks the name again when the list is saved.
-      return map;
-    }
-  };
-  const checkName = async (r: ListRow) => setFound(await lookUp(r, found));
 
   const addRow = () => {
     const k = nextKey(draft.rows);
@@ -162,18 +155,18 @@ export function AddManyForm() {
 
   const save = useMutation({
     // An entry kept on the phone is said by the toast itself (doneToasts); a saved list says how many were added.
-    meta: { success: (done: QuickAddList) => resultLine((done?.rows ?? []).length, 0).replace(/\.$/, '') },
+    meta: { success: (done: ImportResult) => resultLine((done?.added ?? 0) + (done?.stock_added ?? 0), 0).replace(/\.$/, '') },
     mutationFn: async (plan: Plan) => {
       setDraft((d) => ({ ...d, pending: plan }));
-      const count = plan.body.rows.length;
+      const count = plan.keys.length;
       return entries.save(
         {
-          kind: 'items', body: plan.body as unknown as Record<string, unknown>, key: plan.key, branchId: where,
+          kind: 'items', body: { csv: plan.csv, ...(plan.branchId ? { branch_id: plan.branchId } : {}) }, key: plan.key, branchId: where,
           detail: `${count} ${count === 1 ? 'item' : 'items'}`,
           // Fixed later, the list comes back without its spent key, so it is a new request.
-          fix: { to: '/staff/retail/add-many', draftName, draft: { rows: draft.rows, where: draft.where, pending: null } },
+          fix: { to: '/staff/retail/catalogue/import', draftName, draft: { rows: draft.rows, where: draft.where, pending: null } },
         },
-        () => retail.quickAddList(plan.body, plan.key),
+        () => retail.importProducts(plan.csv, false, false, { branchId: plan.branchId, key: plan.key }),
       );
     },
     onSuccess: (answer, plan) => {
@@ -198,64 +191,78 @@ export function AddManyForm() {
           + (needLook > 0 ? ` ${needLook} ${needLook === 1 ? 'needs' : 'need'} a look.` : ''));
         return;
       }
-      const done = answer as QuickAddList;
       setKeptItem(null);
-      setResult(resultLine((done.rows ?? []).length, needLook));
-      for (const k of [['retail', 'catalogue'], ['retail', 'products'], ['retail', 'stock'], ['retail', 'stocked-branches'], ['retail', 'home']]) {
-        void queryClient.invalidateQueries({ queryKey: k });
-      }
+      setResult(resultLine((answer.added ?? 0) + (answer.stock_added ?? 0), needLook));
+      void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
-    onError: (error, plan) => {
+    onError: (error) => {
       if (!refusedForCertain(error)) {
         // It may have gone through: the key and the request are kept, every field is locked, Save sends exactly it again.
         setNotSure(true);
         return;
       }
+      // Nothing was saved: a new key for the next try, and the import's words say why.
       setNotSure(false);
-      const problem = error instanceof RetailError ? error.problem ?? {} : {};
-      const index = typeof problem['row_index'] === 'number' ? (problem['row_index'] as number) : -1;
-      const rowKey = plan.keys[index];
-      const field = String(((problem['errors'] as { field?: string }[] | undefined) ?? [])[0]?.field ?? '');
-      const message = String(((problem['errors'] as { message?: string }[] | undefined) ?? [])[0]?.message ?? (error instanceof Error ? error.message : ''));
-      // Nothing was saved: a new key for the next try, and the row the server named shows why.
-      setDraft({
-        rows: draft.rows.map((r) => (r.key === rowKey && !(error instanceof RetailError && error.code === 'duplicate_product_name') ? { ...r, refused: { field, message } } : r)),
-        where: draft.where,
-        pending: null,
-        listKey: newIdempotencyKey(),
-      });
-      if (rowKey !== undefined && error instanceof RetailError && error.code === 'duplicate_product_name') {
-        const r = draft.rows.find((x) => x.key === rowKey);
-        if (r) setFound((m) => ({ ...m, [rowKey]: { forName: nameKey(r.name), item: { id: String(problem['existing_id'] ?? ''), code: String(problem['existing_code'] ?? ''), name: String(problem['existing_name'] ?? r.name), mayAddAnyway: false } } }));
-      }
-      setShowErrors(true);
+      setDraft({ rows: draft.rows, where: draft.where, pending: null, listKey: newIdempotencyKey() });
       setResult(null);
-      setRefusal(rowKey === undefined ? error : null);
-      if (rowKey !== undefined) {
-        setResult(`Nothing was saved. Row ${draft.rows.findIndex((r) => r.key === rowKey) + 1} needs a look.`);
-      }
+      setRefusal(error);
     },
   });
 
+  /** The import's check of the rows sent: the rows it would add, and the others marked on the screen. */
+  const checkOnServer = async (plan: Plan): Promise<number[]> => {
+    const answer = await retail.importProducts(plan.csv, true, false, { branchId: plan.branchId });
+    const ok: number[] = [];
+    const nextFound: Found = { ...found };
+    const marks = new Map<number, { field: string; message: string }>();
+    for (const row of answer.rows ?? []) {
+      const rowKey = plan.keys[rowOf(row.line)];
+      if (rowKey === undefined) continue;
+      const r = draft.rows.find((x) => x.key === rowKey);
+      if (row.outcome === 'added' || row.outcome === 'stock') ok.push(rowKey);
+      else if (row.outcome === 'skipped' && row.existing_code && r) {
+        nextFound[rowKey] = { forName: nameKey(r.name), item: { id: row.existing_code, code: row.existing_code, name: r.name.trim(), mayAddAnyway: false } };
+      } else marks.set(rowKey, { field: 'row', message: row.message ?? 'This row has a problem.' });
+    }
+    setFound(nextFound);
+    if (marks.size > 0) setDraft((d) => ({ ...d, rows: d.rows.map((r) => (marks.has(r.key) ? { ...r, refused: marks.get(r.key) } : r)) }));
+    return ok;
+  };
+
   const submit = async (e?: FormEvent) => {
     e?.preventDefault();
-    if (save.isPending) return;
+    if (save.isPending || checking) return;
     setRefusal(null);
+    setResult(null);
     if (draft.pending) return save.mutate(draft.pending);
-    let map = found;
-    for (const r of draft.rows) if (!isBlank(r)) map = await lookUp(r, map);
-    setFound(map);
-    const now = checksWith(map);
+    const now = checksWith(draft.rows, found);
     setShowErrors(true);
-    const keys = draft.rows.flatMap((r, i) => (now[i]?.send ? [r.key] : []));
-    if (keys.length === 0) {
+    const good = draft.rows.flatMap((r, i) => (now[i]?.send ? [{ key: r.key, send: now[i].send }] : []));
+    if (good.length === 0) {
       setResult(filled === 0 ? 'Type or paste at least one item.' : resultLine(0, filled));
       const first = draft.rows.find((r, i) => !isBlank(r) && Object.keys(now[i]?.errors ?? {}).length > 0);
       if (first) setTimeout(() => document.getElementById(`am-name-${first.key}`)?.focus());
       return;
     }
-    const body: QuickAddListRequest = { ...(mayCount ? { branch_id: where } : {}), rows: draft.rows.flatMap((_, i) => (now[i]?.send ? [now[i].send] : [])) as QuickAddListRequest['rows'] };
-    save.mutate({ body, keys, key: draft.listKey ?? draftKey });
+    const key = draft.listKey ?? draftKey;
+    const branchId = mayCount ? where : undefined;
+    const planOf = (rows: typeof good): Plan => ({ csv: listCsv(rows.map((g) => g.send), profit, mayCount), branchId, keys: rows.map((g) => g.key), key });
+    // Offline nothing can be checked now: the apply goes to the phone's outbox, and the import checks it when it arrives.
+    if (entries.offlineMode) return save.mutate(planOf(good));
+    setChecking(true);
+    try {
+      const ok = new Set(await checkOnServer(planOf(good)));
+      const passed = good.filter((g) => ok.has(g.key));
+      if (passed.length === 0) {
+        setResult(resultLine(0, filled));
+        return;
+      }
+      save.mutate(planOf(passed));
+    } catch (error) {
+      setRefusal(error);
+    } finally {
+      setChecking(false);
+    }
   };
 
   return (
@@ -297,22 +304,21 @@ export function AddManyForm() {
               showErrors={showErrors}
               found={found[r.key]?.forName === nameKey(r.name) ? found[r.key]?.item : undefined}
               onChange={(patch) => change(r.key, patch)}
-              onNameDone={() => void checkName(r)}
               onRemove={() => removeRow(r.key)}
             />
           ))}
         </ol>
         <button type="button" className="btn am-another" onClick={addRow}>Add another row</button>
       </fieldset>
-      {result && <p role="status" className={`alert ${result.startsWith('Nothing') || result.startsWith('0 ') ? 'alert-warning' : 'alert-success'}`} data-testid="am-result">{result}</p>}
+      {result && <p role="status" className={`alert ${result.startsWith('0 ') ? 'alert-warning' : 'alert-success'}`} data-testid="am-result">{result}</p>}
       {keptItem && <EntryState item={keptItem} />}
       {notSure && <p role="alert" className="alert alert-warning" data-testid="am-not-sure">{notSureLine(SAVE)}</p>}
-      <Problem error={refusal} />
+      <Problem error={refusal instanceof RetailError || refusal instanceof Error ? refusal : null} />
       <ActionBar testId="am-save-bar">
         <p className="hint am-count" data-tour="add-many-save" data-testid="am-count">
           <span className="num">{ready}</span> ready{filled > ready ? <>, <span className="num">{filled - ready}</span> {filled - ready === 1 ? 'needs' : 'need'} a look</> : ''}
         </p>
-        <BusyButton busy={save.isPending} type="submit" className="rt-primary">{SAVE}</BusyButton>
+        <BusyButton busy={save.isPending || checking} type="submit" className="rt-primary">{SAVE}</BusyButton>
       </ActionBar>
     </form>
   );
@@ -324,7 +330,7 @@ function columnsHint(): string {
   return [2, 3, 4, 5].map((n) => (COLUMNS[n] ?? []).map((c) => words[c]).join(', ')).join('; or ');
 }
 
-function RowCard({ row: r, index, check, group, categories, units, unitsLoad, pieceId, profit, mayCount, whereName, showErrors, found, onChange, onNameDone, onRemove }: {
+function RowCard({ row: r, index, check, group, categories, units, unitsLoad, pieceId, profit, mayCount, whereName, showErrors, found, onChange, onRemove }: {
   row: ListRow;
   index: number;
   check: RowCheck;
@@ -339,7 +345,6 @@ function RowCard({ row: r, index, check, group, categories, units, unitsLoad, pi
   showErrors: boolean;
   found?: ExistingItem;
   onChange: (patch: Partial<ListRow>) => void;
-  onNameDone: () => void;
   onRemove: () => void;
 }) {
   const id = (f: string) => `am-${f}-${r.key}`;
@@ -353,15 +358,15 @@ function RowCard({ row: r, index, check, group, categories, units, unitsLoad, pi
         <span className="am-row-no">{label}</span>
         <button type="button" className="btn-ghost" onClick={onRemove} aria-label={`Remove row ${index + 1}`}>Remove</button>
       </div>
-      {e.row && shown && <p role="alert" className="field-error">{e.row}</p>}
-      {r.addTo ? (
+      {e.row && shown && <p role="alert" className="field-error" data-testid={`am-problem-${index + 1}`}>{e.row}</p>}
+      {r.addTo && (
         <div className="stack am-adds-to">
           <p data-testid={`am-adds-to-${index + 1}`}>Adds to the stock of <strong>{r.addTo.name}</strong> ({r.addTo.code}) at {whereName}.</p>
           <p className="cluster">
             <button type="button" className="btn-ghost" onClick={() => onChange({ addTo: undefined })}>Make it a new item instead</button>
           </p>
         </div>
-      ) : null}
+      )}
       <div className="am-cells">
         {!r.addTo && (
           <Field
@@ -376,17 +381,15 @@ function RowCard({ row: r, index, check, group, categories, units, unitsLoad, pi
             error={blank ? null : e.name ?? null}
             showError={shown || found !== undefined}
             onChange={(ev) => onChange({ name: ev.target.value })}
-            onBlur={onNameDone}
           />
         )}
         {found && !r.addTo && (
           <div className="am-full stack" data-testid={`am-exists-${index + 1}`}>
-            {mayCount && (
+            {mayCount ? (
               <p className="cluster">
                 <button type="button" className="btn" onClick={() => onChange({ addTo: { id: found.id, code: found.code, name: found.name } })}>Add to its stock instead</button>
               </p>
-            )}
-            {!mayCount && <p className="hint">Change the name, or remove this row: it is already in your items.</p>}
+            ) : <p className="hint">Change the name, or remove this row: it is already in your items.</p>}
           </div>
         )}
         {!r.addTo && (
@@ -395,14 +398,14 @@ function RowCard({ row: r, index, check, group, categories, units, unitsLoad, pi
               id={id('category')}
               label="Group"
               thing="group"
-              placeholder="General"
+              placeholder={r.pastedCategory ?? 'General'}
               noneLabel="General"
               categories={categories}
-              value={group}
+              value={r.pastedCategory ? '' : group}
               onChange={(next) => onChange({ categoryId: next, categoryChosen: true, pastedCategory: undefined })}
               error={e.category ?? null}
               showError={shown}
-              hint={!r.categoryChosen && group ? (index === 0 ? 'The group you used last time.' : 'The same as the row above.') : undefined}
+              hint={r.pastedCategory ? `New group: ${r.pastedCategory}.` : !r.categoryChosen && group ? (index === 0 ? 'The group you used last time.' : 'The same as the row above.') : undefined}
             />
           </div>
         )}
@@ -413,11 +416,12 @@ function RowCard({ row: r, index, check, group, categories, units, unitsLoad, pi
               units={units}
               loading={unitsLoad.data === undefined}
               load={unitsLoad}
-              value={r.unitId || pieceId}
+              value={r.pastedUnit ? '' : r.unitId || pieceId}
               onChange={(next) => onChange({ unitId: next === pieceId ? '' : next, pastedUnit: undefined })}
               required={false}
               error={e.unit ?? null}
               showError={shown}
+              hint={r.pastedUnit ? `New unit: ${r.pastedUnit}.` : undefined}
             />
           </div>
         )}
@@ -471,15 +475,3 @@ function RowCard({ row: r, index, check, group, categories, units, unitsLoad, pi
     </li>
   );
 }
-
-function AddManyScreen() {
-  return (
-    <Gate screen="addMany" title={ADD_MANY}>
-      <p>Type or paste your items, check each row, then save them all at once.</p>
-      <p className="cluster"><ScreenLink screen="quickAdd" to="/staff/retail/quick-add" step>Add one item instead</ScreenLink></p>
-      <AddManyForm />
-    </Gate>
-  );
-}
-
-export const Route = createLazyRoute('/staff/retail/add-many')({ component: AddManyScreen });

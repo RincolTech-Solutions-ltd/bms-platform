@@ -10,15 +10,15 @@ import { router as appRouter } from '../../../app/router';
 import type { OutboxItem } from '../../../offline/outbox';
 import { StaffContext } from '../context';
 
-// Add many items (issue #870): a pasted list fills the rows for checking, a name already in the items offers to add to its
-// stock instead, a bad number is refused on its row, one save sends every good row under one key and leaves the rows that need
-// a look, a lost answer sends exactly the same again, a refusal shows on the row the server named, and offline the list is one
-// entry on the phone, sent once. Every item, group and price is fabricated.
+// Add many items on Import items (issue #870): a pasted list fills the rows for checking; Save the list runs the import's check
+// on the good rows and then one apply of the rows it passed, under the list's one key, with how many there are now at the
+// chosen shop; a name already in the items offers to add to its stock instead; a bad number is refused on its row and the rows
+// that need a look stay; a lost answer sends exactly the same apply again; offline the apply is one entry on the phone, sent
+// once. Every item, group and price is fabricated.
 
 vi.setConfig({ testTimeout: 20000 });
 
-const quickAddList = vi.fn();
-const similarProducts = vi.fn();
+const importProducts = vi.fn();
 
 vi.mock('../../../api/retail', async (original) => {
   const real = await original<typeof import('../../../api/retail')>();
@@ -28,8 +28,7 @@ vi.mock('../../../api/retail', async (original) => {
       ...real.retail,
       listCategories: () => Promise.resolve([{ id: 'c1', name: 'Test Drinks', active: true, product_count: 0, version: 1, code_prefix: 'DRK' }]),
       listUnits: () => Promise.resolve([{ id: 'u1', name: 'Piece', active: true, product_count: 0, version: 1 }, { id: 'u2', name: 'Bottle', active: true, product_count: 0, version: 1 }]),
-      quickAddList: (...a: unknown[]) => quickAddList(...a),
-      similarProducts: (...a: unknown[]) => similarProducts(...a),
+      importProducts: (...a: unknown[]) => importProducts(...a),
     },
   };
 });
@@ -46,7 +45,7 @@ function withoutProfit(): Me {
 }
 
 function open(me: Me = owner, offline: ReturnType<typeof testOffline> | null = null) {
-  const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff/retail/add-many'] }) });
+  const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff/retail/catalogue/import'] }) });
   const form = <AddManyForm />;
   render(
     <RouterContextProvider router={router}>
@@ -63,26 +62,46 @@ const input = (id: string) => document.getElementById(id) as HTMLInputElement;
 const type = (id: string, value: string) => fireEvent.change(input(id), { target: { value } });
 const saveButton = () => screen.getAllByRole('button', { name: 'Save the list' }).find((b) => b.getAttribute('type') === 'submit') as HTMLButtonElement;
 
-/** The server's answer for the rows sent: each a new item, or stock added to the one named. */
-function answer(body: { rows: { description?: string; product_id?: string; qty?: string }[] }) {
+/** The lines of an import file after its header, each as its cells (the screen quotes no cell of these names). */
+const linesOf = (csv: string) => csv.trim().split('\n').slice(1).map((l) => l.split(','));
+const headerOf = (csv: string) => csv.split('\n')[0];
+
+/** Names the fabricated server already holds, as Test Rice 1kg (GNR-0009), and a name it refuses. */
+let existing: Record<string, string> = {};
+let refused: Record<string, string> = {};
+
+/** The import's answer: each line added (or stock with stock_only), skipped for a name it holds, or refused. */
+function answer(csv: string, dry: boolean) {
+  const head = (headerOf(csv) ?? '').split(',');
+  const stockAt = head.indexOf('stock_only');
+  const rows = linesOf(csv).map((cells, i) => {
+    const name = cells[0] ?? '';
+    if (refused[name]) return { line: i + 2, description: name, outcome: 'error', message: refused[name] };
+    if (cells[stockAt] === 'yes') return { line: i + 2, description: name, outcome: 'stock', message: 'Would add.', existing_code: existing[name] };
+    if (existing[name]) return { line: i + 2, description: name, outcome: 'skipped', message: 'An item with this name exists already.', existing_code: existing[name] };
+    return { line: i + 2, description: name, outcome: 'added', message: dry ? 'Would be added.' : 'Added.' };
+  });
   return {
-    id: 'list-1',
-    branch_id: branch,
-    items_made: body.rows.filter((r) => !r.product_id).length,
-    stock_added: body.rows.filter((r) => r.product_id).length,
-    rows: body.rows.map((r, i) => ({ product_id: r.product_id ?? `p${i}`, description: r.description ?? 'Test', item_made: !r.product_id, qty: r.qty })),
+    dry_run: dry, rows_read: rows.length, rows, categories_created: [], units_created: [],
+    added: rows.filter((r) => r.outcome === 'added').length,
+    stock_added: rows.filter((r) => r.outcome === 'stock').length,
+    skipped: rows.filter((r) => r.outcome === 'skipped').length,
+    errors: rows.filter((r) => r.outcome === 'error').length,
   };
 }
 
+/** The applies sent: [csv, stock] of each call that was not a check. */
+const applies = () => importProducts.mock.calls.filter((c) => c[1] === false) as [string, boolean, boolean, { branchId?: string; key?: string }][];
+
 beforeEach(() => {
-  similarProducts.mockResolvedValue({ exact: [], similar: [] });
-  quickAddList.mockImplementation(async (body) => answer(body));
+  existing = {};
+  refused = {};
+  importProducts.mockImplementation(async (csv: string, dry: boolean) => answer(csv, dry));
 });
 
 afterEach(() => {
   cleanup();
-  quickAddList.mockReset();
-  similarProducts.mockReset();
+  importProducts.mockReset();
   sessionStorage.clear();
   localStorage.clear();
 });
@@ -95,7 +114,7 @@ describe('Add many items', () => {
     await waitFor(() => expect(document.getElementById('am-name-6')).toBeTruthy());
   });
 
-  it('fills the rows from a pasted list and saves them all in one request under one key', async () => {
+  it('fills the rows from a pasted list, checks them, and adds them all in one apply under one key', async () => {
     open();
     fireEvent.change(input('am-paste'), { target: { value: 'Name\tHow many\tBuying\tSelling\nTest Soda 300ml\t24\t1,000\t1,500\nTest Bar Soap\t10\t2000\t2500\nTest Candle\t5\t300\t500' } });
     fireEvent.click(screen.getByRole('button', { name: 'Fill the rows' }));
@@ -103,40 +122,46 @@ describe('Add many items', () => {
     expect(input('am-qty-2').value).toBe('10');
     expect(input('am-sell-3').value).toBe('500');
     expect(screen.getByTestId('am-paste-note').textContent).toContain('3 lines filled in');
-    // Filled for checking: nothing is saved until Save the list.
-    expect(quickAddList).not.toHaveBeenCalled();
+    // Filled for checking: nothing is sent until Save the list.
+    expect(importProducts).not.toHaveBeenCalled();
 
     fireEvent.click(saveButton());
-    await waitFor(() => expect(quickAddList).toHaveBeenCalledTimes(1));
-    const [body, key] = quickAddList.mock.calls[0] as [Record<string, unknown>, string];
-    expect(body).toEqual({
-      branch_id: branch,
-      rows: [
-        { description: 'Test Soda 300ml', sell_minor: 1500, cost_minor: 1000, qty: '24' },
-        { description: 'Test Bar Soap', sell_minor: 2500, cost_minor: 2000, qty: '10' },
-        { description: 'Test Candle', sell_minor: 500, cost_minor: 300, qty: '5' },
-      ],
-    });
-    expect(key).toMatch(/^[0-9a-f-]{36}$/);
+    await waitFor(() => expect(applies()).toHaveLength(1));
+    const [check] = importProducts.mock.calls;
+    expect(check?.[1]).toBe(true);
+    const [csv, , codes, stock] = applies()[0] ?? [];
+    expect(codes).toBe(false);
+    expect(stock?.branchId).toBe(branch);
+    expect(stock?.key).toMatch(/^[0-9a-f-]{36}$/);
+    expect(headerOf(csv ?? '')).toBe('description,category,unit,qty,cost_price,sell_price,stock_only');
+    // Numbers as typed, the thousands commas taken out; no group chosen is General, the unit the shop's piece.
+    expect(linesOf(csv ?? '')).toEqual([
+      ['Test Soda 300ml', 'General', 'Piece', '24', '1000', '1500', ''],
+      ['Test Bar Soap', 'General', 'Piece', '10', '2000', '2500', ''],
+      ['Test Candle', 'General', 'Piece', '5', '300', '500', ''],
+    ]);
     expect((await screen.findByTestId('am-result')).textContent).toBe('3 items added.');
     // The saved rows leave the screen: five empty rows again.
     await waitFor(() => expect(input('am-name-1').value).toBe(''));
-    expect(screen.getAllByRole('listitem').filter((l) => l.className === 'am-row')).toHaveLength(5);
   });
 
   it('offers to add to the stock of an item already in the list instead of a duplicate', async () => {
-    similarProducts.mockImplementation(async ({ description }: { description: string }) =>
-      description === 'Test Rice 1kg' ? { exact: [{ id: 'p9', code: 'GNR-0009', description: 'Test Rice 1kg', unit: 'Piece', distance: 0 }], similar: [] } : { exact: [], similar: [] });
+    existing = { 'Test Rice 1kg': 'GNR-0009' };
     open();
     type('am-name-1', 'Test Rice 1kg');
-    fireEvent.blur(input('am-name-1'));
+    type('am-qty-1', '8');
+    type('am-sell-1', '5000');
+    fireEvent.click(saveButton());
     await screen.findByText('This product already exists: Test Rice 1kg (GNR-0009).');
+    // The check found it: nothing was added.
+    expect(applies()).toHaveLength(0);
+    expect(screen.getByTestId('am-result').textContent).toBe('0 items added, 1 needs a look.');
     fireEvent.click(screen.getByRole('button', { name: 'Add to its stock instead' }));
     expect(screen.getByTestId('am-adds-to-1').textContent).toContain('Adds to the stock of Test Rice 1kg (GNR-0009)');
-    type('am-qty-1', '8');
     fireEvent.click(saveButton());
-    await waitFor(() => expect(quickAddList).toHaveBeenCalledTimes(1));
-    expect(quickAddList.mock.calls[0]?.[0]).toEqual({ branch_id: branch, rows: [{ product_id: 'p9', qty: '8' }] });
+    await waitFor(() => expect(applies()).toHaveLength(1));
+    expect(linesOf(applies()[0]?.[0] ?? '')).toEqual([['Test Rice 1kg', 'General', 'Piece', '8', '', '', 'yes']]);
+    expect((await screen.findByTestId('am-result')).textContent).toBe('1 item added.');
   });
 
   it('refuses a comma decimal on its row and saves the good rows, leaving the bad one on the screen', async () => {
@@ -151,15 +176,30 @@ describe('Add many items', () => {
     type('am-qty-3', '12');
     type('am-sell-3', '1,200');
     fireEvent.click(saveButton());
-    await waitFor(() => expect(quickAddList).toHaveBeenCalledTimes(1));
-    const body = quickAddList.mock.calls[0]?.[0] as { rows: { description: string }[] };
-    expect(body.rows.map((r) => r.description)).toEqual(['Test Bulb', 'Test Hook']);
+    await waitFor(() => expect(applies()).toHaveLength(1));
+    expect(linesOf(applies()[0]?.[0] ?? '').map((l) => l[0])).toEqual(['Test Bulb', 'Test Hook']);
     expect((await screen.findByTestId('am-result')).textContent).toBe('2 items added, 1 needs a look.');
     // The bad row stays, with what was typed, never rewritten, and its problem under the field.
     expect(input('am-name-2').value).toBe('Test Rope');
     expect(input('am-qty-2').value).toBe('2,5');
     expect(screen.getByText('Use a point for decimals, like 2.5. A comma only goes between thousands, like 12,500.')).toBeTruthy();
-    expect(input('am-name-1')).toBeNull();
+  });
+
+  it('keeps a row the import refused on the screen with its words, and adds the others', async () => {
+    refused = { 'Test Lamp': 'The unit "Box" is switched off. Switch it on or use another unit.' };
+    open();
+    type('am-name-1', 'Test Fan');
+    type('am-qty-1', '2');
+    type('am-sell-1', '90000');
+    type('am-name-2', 'Test Lamp');
+    type('am-qty-2', '3');
+    type('am-sell-2', '9000');
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(applies()).toHaveLength(1));
+    expect(linesOf(applies()[0]?.[0] ?? '').map((l) => l[0])).toEqual(['Test Fan']);
+    expect((await screen.findByTestId('am-result')).textContent).toBe('1 item added, 1 needs a look.');
+    expect(screen.getByTestId('am-problem-1').textContent).toContain('switched off');
+    expect(input('am-name-2').value).toBe('Test Lamp');
   });
 
   it('warns, without blocking, when the selling price is below the buying price', async () => {
@@ -170,30 +210,18 @@ describe('Add many items', () => {
     type('am-sell-1', '4000');
     expect(screen.getByText('The selling price is below the buying price. Check it, or save it like this.')).toBeTruthy();
     fireEvent.click(saveButton());
-    await waitFor(() => expect(quickAddList).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(applies()).toHaveLength(1));
   });
 
-  it('shows a refusal on the row the server named, saves nothing, and sends the next try under a new key', async () => {
-    quickAddList.mockRejectedValueOnce(new RetailError('Check the list.', 422, 'validation_failed', { code: 'validation_failed', row_index: 1, errors: [{ field: 'rows[1].sell_minor', code: 'invalid', message: 'Type a lower selling price.' }] }));
-    open();
-    type('am-name-1', 'Test Fan');
-    type('am-qty-1', '2');
-    type('am-sell-1', '90000');
-    type('am-name-2', 'Test Lamp');
-    type('am-qty-2', '3');
-    type('am-sell-2', '99999');
-    fireEvent.click(saveButton());
-    expect((await screen.findByTestId('am-result')).textContent).toBe('Nothing was saved. Row 2 needs a look.');
-    expect(screen.getByText('Type a lower selling price.')).toBeTruthy();
-    const firstKey = quickAddList.mock.calls[0]?.[1];
-    type('am-sell-2', '9000');
-    fireEvent.click(saveButton());
-    await waitFor(() => expect(quickAddList).toHaveBeenCalledTimes(2));
-    expect(quickAddList.mock.calls[1]?.[1]).not.toBe(firstKey);
-  });
-
-  it('after a lost answer sends exactly the same list again under the same key, so nothing is added twice', async () => {
-    quickAddList.mockRejectedValueOnce(new RetailError('Bad gateway', 502, undefined));
+  it('after a lost answer sends exactly the same apply again under the same key, so nothing is added twice', async () => {
+    let first = true;
+    importProducts.mockImplementation(async (csv: string, dry: boolean) => {
+      if (!dry && first) {
+        first = false;
+        throw new RetailError('Bad gateway', 502, undefined);
+      }
+      return answer(csv, dry);
+    });
     open();
     type('am-name-1', 'Test Kettle');
     type('am-qty-1', '1');
@@ -203,9 +231,30 @@ describe('Add many items', () => {
     // Locked while it may have gone through.
     expect(input('am-name-1').closest('fieldset')?.disabled).toBe(true);
     fireEvent.click(saveButton());
-    await waitFor(() => expect(quickAddList).toHaveBeenCalledTimes(2));
-    expect(quickAddList.mock.calls[1]).toEqual(quickAddList.mock.calls[0]);
+    await waitFor(() => expect(applies()).toHaveLength(2));
+    expect(applies()[1]).toEqual(applies()[0]);
     expect((await screen.findByTestId('am-result')).textContent).toBe('1 item added.');
+  });
+
+  it('after a certain refusal says why, saves nothing and sends the next try under a new key', async () => {
+    let first = true;
+    importProducts.mockImplementation(async (csv: string, dry: boolean) => {
+      if (!dry && first) {
+        first = false;
+        throw new RetailError('Another change added an item named Test Fan. Nothing was added.', 409, 'import_conflict');
+      }
+      return answer(csv, dry);
+    });
+    open();
+    type('am-name-1', 'Test Fan');
+    type('am-qty-1', '2');
+    type('am-sell-1', '9000');
+    fireEvent.click(saveButton());
+    expect(await screen.findByText('Another change added an item named Test Fan. Nothing was added.')).toBeTruthy();
+    expect(input('am-name-1').value).toBe('Test Fan');
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(applies()).toHaveLength(2));
+    expect(applies()[1]?.[3]?.key).not.toBe(applies()[0]?.[3]?.key);
   });
 
   it('moves to the next cell on Enter, and adds a row after the last one', async () => {
@@ -220,24 +269,24 @@ describe('Add many items', () => {
     await waitFor(() => expect(document.activeElement?.id).toBe('am-name-6'));
   });
 
-  it('asks no buying price of someone who may not see it, and sends none', async () => {
+  it('asks no buying price of someone who may not see it, and sends no buying price column', async () => {
     open(withoutProfit());
     expect(screen.queryByLabelText(/Buying price/)).toBeNull();
     type('am-name-1', 'Test Comb');
     type('am-qty-1', '4');
     type('am-sell-1', '700');
     fireEvent.click(saveButton());
-    await waitFor(() => expect(quickAddList).toHaveBeenCalledTimes(1));
-    expect(quickAddList.mock.calls[0]?.[0]).toEqual({ branch_id: branch, rows: [{ description: 'Test Comb', sell_minor: 700, qty: '4' }] });
+    await waitFor(() => expect(applies()).toHaveLength(1));
+    expect(headerOf(applies()[0]?.[0] ?? '')).toBe('description,category,unit,qty,sell_price,stock_only');
   });
 
   it('keeps the list on the phone as one entry while offline and sends it once when back online', async () => {
-    const recorded = new Map<string, string>();
+    const recorded = new Map<string, number>();
     const sends: OutboxItem[] = [];
     const send = async (item: OutboxItem) => {
       sends.push(item);
-      if (!recorded.has(item.key)) recorded.set(item.key, `list-${recorded.size + 1}`);
-      return { status: 201, body: { id: recorded.get(item.key) } };
+      recorded.set(item.key, (recorded.get(item.key) ?? 0) + 1);
+      return { status: 200, body: { added: 2, skipped: 0, errors: 0, rows: [] } };
     };
     const offline = testOffline(owner, { online: false, deps: { send } });
     open(owner, offline);
@@ -250,15 +299,16 @@ describe('Add many items', () => {
     type('am-sell-2', '6000');
     fireEvent.click(saveButton());
     expect((await screen.findByTestId('am-result')).textContent).toBe('2 items saved on this phone. They are sent when the phone is back online.');
-    expect(quickAddList).not.toHaveBeenCalled();
-    expect(similarProducts).not.toHaveBeenCalled();
+    // Nothing went to the server: no check and no apply.
+    expect(importProducts).not.toHaveBeenCalled();
 
     const items = offline?.engine.snapshot().items ?? [];
     expect(items).toHaveLength(1);
     expect(items[0]?.entry?.kind).toBe('items');
-    expect(items[0]?.entry?.path).toBe('/api/v1/retail/quick-add/list');
-    const body = items[0]?.entry?.body as { rows: unknown[]; offline: { occurred_at: string } };
-    expect(body.rows).toHaveLength(2);
+    expect(items[0]?.entry?.path).toBe('/api/v1/retail/products/import?dry_run=false');
+    const body = items[0]?.entry?.body as { csv: string; branch_id: string; offline: { occurred_at: string } };
+    expect(linesOf(body.csv)).toHaveLength(2);
+    expect(body.branch_id).toBe(branch);
     expect(body.offline.occurred_at).toBe(items[0]?.occurredAt);
 
     offline?.connectivity.set(true);

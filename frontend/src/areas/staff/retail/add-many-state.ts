@@ -1,5 +1,12 @@
-import { RETAIL_CURRENCY, type Category, type QuickAddListRow, type Unit } from '../../../api/retail';
+import { RETAIL_CURRENCY, type Category, type Unit } from '../../../api/retail';
 import { exponentOf, parseMinor } from '../../../components/money';
+import { csvCell } from '../setup-helper/setup-helper-state';
+
+/** A number checked by `readNumber`, as the import file carries it: its thousands commas taken out, nothing else changed. */
+const plainNumber = (text: string): string => {
+  const n = readNumber(text);
+  return 'value' in n ? n.value : text.trim();
+};
 
 // Add many items (issue #870): a shop owner stopped using the app after adding about 20 items one at a time on Quick add. This
 // file is the screen's pure part, shared with its tests: the rows, reading a list pasted from Excel, Google Sheets or WhatsApp,
@@ -122,8 +129,20 @@ export interface RowCheck {
   errors: Partial<Record<'name' | 'category' | 'unit' | 'qty' | 'cost' | 'sell' | 'row', string>>;
   /** Shown, never a block. */
   warning?: string;
-  /** The row as the request sends it; only when there is no error. */
-  send?: QuickAddListRow;
+  /** The row as Import items takes it (`listCsv`); only when there is no error. */
+  send?: CsvRow;
+}
+
+/** One line of the import file a list becomes (issue #870): the import's own columns, the numbers as typed without commas. */
+export interface CsvRow {
+  description: string;
+  category: string;
+  unit: string;
+  qty?: string;
+  cost?: string;
+  sell?: string;
+  /** Add the quantity to the item of this name and unit already in the list (the import's stock_only). */
+  stockOnly?: boolean;
 }
 
 export interface CheckContext {
@@ -131,10 +150,23 @@ export interface CheckContext {
   groups: string[];
   /** The unit an empty unit stands for (the shop's piece unit), when the shop has one. */
   pieceId?: string;
+  /** The name of a group or unit by its id, as the import file names them. */
+  categoryName?: (id: string) => string | undefined;
+  unitName?: (id: string) => string | undefined;
   /** May enter the buying price (the profit permission, as on Quick add). */
   profit: boolean;
   /** May add stock at the chosen shop; without it rows are sent with no quantity. */
   mayCount: boolean;
+}
+
+/** The group a row goes under when none is chosen and none was used before: the import files it under General. */
+export const GENERAL = 'General';
+
+/** The import file of the rows: a header, then a line each; the buying price only for whoever may see it. */
+export function listCsv(rows: CsvRow[], profit: boolean, withQty: boolean): string {
+  const header = ['description', 'category', 'unit', ...(withQty ? ['qty'] : []), ...(profit ? ['cost_price'] : []), 'sell_price', 'stock_only'];
+  const body = rows.map((r) => [r.description, r.category, r.unit, ...(withQty ? [r.qty ?? ''] : []), ...(profit ? [r.cost ?? ''] : []), r.sell ?? '', r.stockOnly ? 'yes' : '']);
+  return [header, ...body].map((cells) => cells.map(csvCell).join(',')).join('\n') + '\n';
 }
 
 /** Every row checked, in order; a blank row has no errors and nothing to send. */
@@ -146,21 +178,25 @@ export function checkRows(rows: ListRow[], ctx: CheckContext): RowCheck[] {
     if (r.extraColumns) errors.row = `This line had ${r.extraColumns} columns; the list takes 6. Check what went where.`;
     const qty = ctx.mayCount ? readQty(r.qty, r.addTo !== undefined) : { qty: undefined };
     if ('error' in qty) errors.qty = qty.error;
+    const unit = r.unitId || ctx.pieceId || '';
+    // As the import file names them: a group or unit typed or pasted that the shop does not have yet is made by the import,
+    // and says so on the row; none chosen is General, which the picker shows.
+    const unitText = r.pastedUnit ?? ((unit && ctx.unitName?.(unit)) || 'Piece');
+    const group = ctx.groups[i] ?? '';
+    const categoryText = r.pastedCategory ?? ((group && ctx.categoryName?.(group)) || GENERAL);
     if (r.addTo) {
       // Only stock is added to an item already in the list, so the quantity is needed.
       const adds = 'qty' in qty ? qty.qty : undefined;
       if (adds === undefined && !errors.qty) errors.qty = QTY_TO_ADD;
       if (r.refused) errors[fieldOf(r.refused.field)] = r.refused.message;
       if (Object.keys(errors).length > 0 || adds === undefined) return { errors };
-      return { errors, send: { product_id: r.addTo.id, qty: adds } };
+      return { errors, send: { description: r.name.trim(), category: categoryText, unit: unitText, qty: adds, stockOnly: true } };
     }
-    const unit = r.unitId || ctx.pieceId || '';
-    const key = `${nameKey(r.name)}|${unit}`;
+    const key = `${nameKey(r.name)}|${unit || nameKey(unitText)}`;
     if (r.name.trim() === '') errors.name = NAME_NEEDED;
     else if (seen.has(key)) errors.name = `This name is on row ${(seen.get(key) ?? 0) + 1} too. Change one of them.`;
     else seen.set(key, i);
-    if (r.pastedCategory) errors.category = `There is no group called ${r.pastedCategory}. Choose one, or add it.`;
-    if (r.pastedUnit) errors.unit = `There is no unit called ${r.pastedUnit}. Choose one, or add it.`;
+    const made = [r.pastedCategory ? `the group ${r.pastedCategory}` : '', r.pastedUnit ? `the unit ${r.pastedUnit}` : ''].filter(Boolean);
     const sell = readPrice(r.sell);
     if ('error' in sell) errors.sell = sell.error;
     else if (sell.minor === null) errors.sell = SELL_NEEDED;
@@ -169,18 +205,19 @@ export function checkRows(rows: ListRow[], ctx: CheckContext): RowCheck[] {
     if (r.refused) errors[fieldOf(r.refused.field)] = r.refused.message;
     const sellMinor = 'minor' in sell ? sell.minor : null;
     const costMinor = 'minor' in cost ? cost.minor : null;
-    const warning = sellMinor !== null && costMinor !== null && costMinor > 0 && sellMinor < costMinor ? SELL_BELOW : undefined;
+    const below = sellMinor !== null && costMinor !== null && costMinor > 0 && sellMinor < costMinor ? SELL_BELOW : undefined;
+    const fresh = made.length > 0 ? `This adds ${made.join(' and ')}, which your shop does not have yet.` : undefined;
+    const warning = [below, fresh].filter(Boolean).join(' ') || undefined;
     if (Object.keys(errors).length > 0) return { errors, warning };
-    const group = ctx.groups[i] ?? '';
     return {
       errors,
       warning,
       send: {
         description: r.name.trim(),
-        sell_minor: sellMinor ?? 0,
-        ...(costMinor ? { cost_minor: costMinor } : {}),
-        ...(group ? { category_id: group } : {}),
-        ...(r.unitId ? { unit_id: r.unitId } : {}),
+        category: categoryText,
+        unit: unitText,
+        sell: plainNumber(r.sell),
+        ...(costMinor ? { cost: plainNumber(r.cost) } : {}),
         ...('qty' in qty && qty.qty !== undefined ? { qty: qty.qty } : {}),
       },
     };

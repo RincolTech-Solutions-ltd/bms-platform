@@ -54,7 +54,8 @@ export const SYNONYMS: Record<string, readonly string[]> = {
   '/staff/retail/usage': ['use', 'used', 'damage', 'broken', 'spoilt', 'expired', 'lost', 'write off'],
   '/staff/retail/stock': ['stock', 'shelf', 'inventory', 'quantity', 'how many', 'low stock', 'ebintu'],
   '/staff/retail/quick-add': ['quick add', 'add item', 'new item', 'add stock', 'how many i have', 'quick', 'yongera'],
-  '/staff/retail/add-many': ['add many', 'many items', 'list', 'paste', 'excel', 'sheets', 'whatsapp list', 'bulk'],
+  // Issue #870: Import items is where many items are added at once, typed, pasted or from a file.
+  '/staff/retail/catalogue/import': ['add many', 'many items', 'import', 'list', 'paste', 'excel', 'sheets', 'whatsapp list', 'bulk'],
   '/staff/retail/stocktake': ['count', 'stock take', 'stocktake', 'check stock', 'audit', 'bala', 'okubala'],
   '/staff/retail/transfer': ['move', 'transfer', 'send stock', 'branch', 'store'],
   '/staff/retail/stock-by-location': ['store', 'shop', 'location', 'where', 'warehouse'],

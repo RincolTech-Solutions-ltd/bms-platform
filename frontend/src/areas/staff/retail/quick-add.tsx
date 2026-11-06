@@ -664,7 +664,7 @@ function QuickAddScreen() {
     <Gate screen="quickAdd" title={QUICK_ADD}>
       <p>An item, its prices and how many you have, in one tap.</p>
       {/* Issue #870: the owner adding stock for a whole shop is sent to the list. */}
-      <ScreenLink screen="addMany" to="/staff/retail/add-many">Adding many? Add them as a list</ScreenLink>
+      <ScreenLink screen="importer" to="/staff/retail/catalogue/import">Adding many? Add them as a list</ScreenLink>
       <QuickAddForm
         initialName={name}
         onSell={(productId, branchId) => {

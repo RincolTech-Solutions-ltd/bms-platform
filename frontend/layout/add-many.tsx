@@ -4,16 +4,15 @@ import { createRoot } from 'react-dom/client';
 import type { Me } from '../src/api/client';
 import { mockMe } from '../src/api/retail-mock';
 import { StaffContext } from '../src/areas/staff/context';
-import { ADD_MANY, AddManyForm } from '../src/areas/staff/retail/add-many';
-import { Gate } from '../src/areas/staff/retail/ui';
+import { ImportPage } from '../src/areas/staff/retail/catalogue-import';
 import { StaffTabBar } from '../src/areas/staff/tabs';
 import '../src/app/theme.css';
 import '../src/app/ui/index.css';
 import { layoutRouter } from './router';
 
-// The page add-many.layout.test.ts lays out in a real browser (issue #870): Add many items of an owner, inside the staff layout
-// and under the app's own stylesheets, with its groups and units already read. ?font= scales the root font size as a phone's
-// large text setting does. Every name is invented.
+// The page add-many.layout.test.ts lays out in a real browser (issue #870): Import items of an owner, open on Type or paste
+// (Add many items), inside the staff layout and under the app's own stylesheets, with its groups and units already read.
+// ?font= scales the root font size as a phone's large text setting does. Every name is invented.
 
 const query = new URLSearchParams(window.location.search);
 document.documentElement.style.fontSize = `${16 * Number(query.get('font') ?? '1')}px`;
@@ -23,7 +22,7 @@ const branch = me.branches?.[0]?.id ?? null;
 const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
 client.setQueryData(['retail', 'catalogue', 'categories'], [{ id: 'c1', name: 'Test Household Goods', active: true, product_count: 0, version: 1 }]);
 client.setQueryData(['retail', 'catalogue', 'units'], [{ id: 'u1', name: 'Piece', active: true, product_count: 0, version: 1 }, { id: 'u2', name: 'Bottle', active: true, product_count: 0, version: 1 }]);
-const router = layoutRouter('/staff/retail/add-many');
+const router = layoutRouter('/staff/retail/catalogue/import');
 
 createRoot(document.getElementById('root') as HTMLElement).render(
   <RouterContextProvider router={router}>
@@ -33,9 +32,7 @@ createRoot(document.getElementById('root') as HTMLElement).render(
         <div className="app-shell"><div className="app-content">
           <div className="nav-layout">
             <div className="nav-layout-main">
-              <Gate screen="addMany" title={ADD_MANY}>
-                <AddManyForm />
-              </Gate>
+              <ImportPage />
             </div>
             <StaffTabBar me={me} />
           </div>

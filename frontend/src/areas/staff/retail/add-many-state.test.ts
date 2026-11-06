@@ -2,14 +2,17 @@ import { describe, expect, it } from 'vitest';
 import type { Category, Unit } from '../../../api/retail';
 import {
   COMMA_DECIMAL, NAME_NEEDED, NOT_A_NUMBER, QTY_NEEDED, SELL_BELOW, SELL_NEEDED, checkRows, emptyRow, fieldOf, fillRows, groupsOf,
-  readNumber, readPrice, readQty, resultLine, rowsFromPaste, splitPaste, startRows, type ListRow,
+  listCsv, readNumber, readPrice, readQty, resultLine, rowsFromPaste, splitPaste, startRows, type ListRow,
 } from './add-many-state';
 
 // Add many items (issue #870): the paste, the numbers and the checks of each row. Every item, group and price is fabricated.
 
 const CATS: Category[] = [{ id: 'c1', name: 'Test Drinks', active: true } as Category, { id: 'c2', name: 'Test Soap', active: true } as Category];
 const UNITS: Unit[] = [{ id: 'u1', name: 'Piece', active: true } as Unit, { id: 'u2', name: 'Bottle', active: true } as Unit, { id: 'u9', name: 'Carton', active: true, is_package: true } as Unit];
-const ctx = { groups: [] as string[], pieceId: 'u1', profit: true, mayCount: true };
+const ctx = {
+  groups: [] as string[], pieceId: 'u1', profit: true, mayCount: true,
+  categoryName: (id: string) => CATS.find((c) => c.id === id)?.name, unitName: (id: string) => UNITS.find((u) => u.id === id)?.name,
+};
 const row = (patch: Partial<ListRow>, key = 1): ListRow => ({ ...emptyRow(key), ...patch });
 
 describe('the numbers (never rounded, a comma decimal refused as in #867)', () => {
@@ -90,7 +93,8 @@ describe('the checks of each row', () => {
     const rows = [row({ name: ' Test Juice ', qty: '12.5', cost: '1,200', sell: '1,800', unitId: 'u2' }), emptyRow(2)];
     const [good, blank] = checkRows(rows, { ...ctx, groups: ['c1', 'c1'] });
     expect(good?.errors).toEqual({});
-    expect(good?.send).toEqual({ description: 'Test Juice', sell_minor: 1800, cost_minor: 1200, category_id: 'c1', unit_id: 'u2', qty: '12.5' });
+    // As Import items takes it: the group and unit by name, the numbers as typed without their thousands commas.
+    expect(good?.send).toEqual({ description: 'Test Juice', category: 'Test Drinks', unit: 'Bottle', sell: '1800', cost: '1200', qty: '12.5' });
     expect(blank).toEqual({ errors: {} });
   });
 
@@ -121,18 +125,25 @@ describe('the checks of each row', () => {
 
   it('sends only the quantity for a row that adds to an item already in the list', () => {
     const [c] = checkRows([row({ name: 'Test Rice', qty: '8', sell: '', addTo: { id: 'p1', code: 'GNR-0001', name: 'Test Rice' } })], ctx);
-    expect(c?.send).toEqual({ product_id: 'p1', qty: '8' });
+    expect(c?.send).toEqual({ description: 'Test Rice', category: 'General', unit: 'Piece', qty: '8', stockOnly: true });
   });
 
   it('leaves the buying price out without the profit permission, and the quantity without the count permission', () => {
     const [c] = checkRows([row({ name: 'Test Mug', qty: '3', cost: '900', sell: '1500' })], { ...ctx, profit: false, mayCount: false });
-    expect(c?.send).toEqual({ description: 'Test Mug', sell_minor: 1500 });
+    expect(c?.send).toEqual({ description: 'Test Mug', category: 'General', unit: 'Piece', sell: '1500' });
   });
 
-  it('asks for a group or unit pasted that the shop does not have', () => {
+  it('says a group or unit pasted that the shop does not have is made, and sends it by its name', () => {
     const [c] = checkRows([row({ name: 'Test Bag', qty: '1', sell: '100', pastedCategory: 'Test Bags', pastedUnit: 'Sack' })], ctx);
-    expect(c?.errors.category).toContain('Test Bags');
-    expect(c?.errors.unit).toContain('Sack');
+    expect(c?.errors).toEqual({});
+    expect(c?.warning).toBe('This adds the group Test Bags and the unit Sack, which your shop does not have yet.');
+    expect(c?.send).toMatchObject({ category: 'Test Bags', unit: 'Sack' });
+  });
+
+  it('writes the import file, quoting a cell with a comma and the buying price only with the permission', () => {
+    const rows = [{ description: 'Test Rice, 5kg', category: 'Test Food', unit: 'Bag', qty: '2', cost: '9000', sell: '12000' }, { description: 'Test Salt', category: 'General', unit: 'Piece', qty: '3', stockOnly: true }];
+    expect(listCsv(rows, true, true)).toBe('description,category,unit,qty,cost_price,sell_price,stock_only\n"Test Rice, 5kg",Test Food,Bag,2,9000,12000,\nTest Salt,General,Piece,3,,,yes\n');
+    expect(listCsv(rows, false, false).split('\n')[0]).toBe('description,category,unit,sell_price,stock_only');
   });
 });
 

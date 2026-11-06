@@ -2,7 +2,7 @@ import { chromium, type Browser, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { openLayout } from './open';
 
-// Add many items laid out in Chromium (issue #870): on a phone 360, 390 and 412 wide, at the default and a large font size, the
+// Add many items on Import items laid out in Chromium (issue #870): on a phone 360, 390 and 412 wide, at the default and a large font size, the
 // page never scrolls sideways, each row is a card whose fields all end inside it, every control is a 48px target, and the
 // errors under the fields wrap inside the card; from 720px a row is one line of cells. The page is layout/add-many.html under
 // the app's own stylesheets.
@@ -59,6 +59,21 @@ describe.each([360, 390, 412])('Add many items at %ipx wide', (width) => {
       const another = await page.getByRole('button', { name: 'Add another row' }).boundingBox();
       expect(another?.height ?? 0).toBeGreaterThanOrEqual(47.5);
     }
+    await page.close();
+  });
+});
+
+describe('Import items with From a file open at 412px wide', () => {
+  it('still fits the phone, the file part under the rows', async () => {
+    const page = await browser.newPage({ viewport: { width: 412, height: 900 }, hasTouch: true, isMobile: true });
+    await openLayout(page, 'layout/add-many.html', page.locator('#am-name-1'));
+    await page.getByText('From a file', { exact: true }).click();
+    await page.locator('#import-text').waitFor();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(412);
+    const check = await page.getByRole('button', { name: 'Check the file' }).boundingBox();
+    expect(check?.height ?? 0).toBeGreaterThanOrEqual(47.5);
+    // Save the list stays the one main action: the file's buttons are plain ones.
+    expect(await page.locator('.rt-primary').count()).toBe(1);
     await page.close();
   });
 });
