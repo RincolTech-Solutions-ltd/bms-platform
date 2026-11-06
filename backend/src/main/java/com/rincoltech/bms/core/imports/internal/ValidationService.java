@@ -132,7 +132,8 @@ class ValidationService implements ImportValidation {
             String templateKey,
             Integer templateVersion,
             Instant parsedAt,
-            Integer rowCount) {
+            Integer rowCount,
+            String sha) {
 
         String stamp() {
             return status + "|" + mappingId + "|" + parsedAt + "|" + rowCount;
@@ -162,7 +163,7 @@ class ValidationService implements ImportValidation {
 
     private static final String BATCHES = """
             SELECT id, seq, status, source_filename, mapping_id, mapping_source, template_key, template_version,
-                   parsed_at, row_count
+                   parsed_at, row_count, source_sha256
               FROM import_batches
              WHERE run_id = ? AND status IN ('uploaded', 'parsed', 'committed')
              ORDER BY seq
@@ -184,7 +185,8 @@ class ValidationService implements ImportValidation {
                             rs.getString("template_key"),
                             (Integer) rs.getObject("template_version"),
                             parsed == null ? null : parsed.toInstant(),
-                            (Integer) rs.getObject("row_count"));
+                            (Integer) rs.getObject("row_count"),
+                            rs.getString("source_sha256"));
                 })
                 .list();
     }
@@ -298,10 +300,6 @@ class ValidationService implements ImportValidation {
         Map<UUID, Map<String, Object>> documents = new LinkedHashMap<>();
         List<BatchInput> inputs = new ArrayList<>();
         List<BatchRow> ordered = commitOrder(template, batches, documents);
-        // Two files of one position-keyed source under one name are refused here already (review of f3be0a6 on #872).
-        PreviewService.requireDistinctFiles(ordered.stream()
-                .map(b -> PreviewService.sourceOf(documents.get(b.mappingId()), b.source(), null, b.file()))
-                .toList());
         for (BatchRow b : ordered) {
             inputs.add(new BatchInput(
                     b.id(),
@@ -472,7 +470,7 @@ class ValidationService implements ImportValidation {
         }
         // The keys of this source file and tab the business already imported (issue #133): a row whose key is held with
         // another content hash is CHANGED_SINCE_IMPORT, blocking, so it is never written twice (spec section 10.1).
-        PreviewService.BatchSource from = PreviewService.sourceOf(input.mapping(), input.sourceKey(), null, b.file());
+        PreviewService.BatchSource from = PreviewService.sourceOf(input.mapping(), input.sourceKey(), null, b.sha());
         Map<String, Set<String>> imported = refs.imported(from.file(), from.tab());
         Map<String, Integer> bySeverity = new TreeMap<>();
         Map<String, Integer> byCode = new TreeMap<>();

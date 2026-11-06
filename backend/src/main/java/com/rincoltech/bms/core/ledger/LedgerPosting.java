@@ -47,6 +47,13 @@ public interface LedgerPosting {
 
     record Totals(long debitMinor, long creditMinor) {}
 
+    /**
+     * The entries of the bound tenant posted in the current transaction (issue #133): those whose {@code created_at}, the
+     * database's default, is this transaction's start. An import batch reads it at its end to refuse a journal that is not
+     * one of its registered opening journals.
+     */
+    List<UUID> postedInThisTransaction();
+
     record ReversalRequest(UUID entryId, LocalDate entryDate, String reference, String memo, String idempotencyKey) {}
 
     record EntryRequest(

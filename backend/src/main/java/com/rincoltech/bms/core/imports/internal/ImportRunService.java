@@ -13,6 +13,7 @@ import com.rincoltech.bms.core.imports.ImportTemplate;
 import com.rincoltech.bms.core.tenancy.Branches;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
+import com.rincoltech.bms.kernel.ImportedRecords;
 import com.rincoltech.bms.kernel.LiveRecordProbe;
 import com.rincoltech.bms.kernel.TenantContext;
 import java.math.BigDecimal;
@@ -716,6 +717,15 @@ class ImportRunService implements ImportRuns {
                             + RunStates.words(run.status()) + ".");
                 }
                 requireCommitPossible(run);
+                // A resume goes on with a commit that was approved (Lead ruling 8 on #872); the run's version
+                // moves with its own commit, so the approval is required, not its version.
+                if (run.commitApprovedBy() == null) {
+                    throw new ApiException(
+                            HttpStatus.CONFLICT,
+                            "commit_not_approved",
+                            "Commit not approved",
+                            "This import's commit has no second person's approval, so it does not go on.");
+                }
                 // The run's own commits make its dry run's stamp differ now, so the build and the writers are checked
                 // again: a resume goes on only on the build, and with the writers, the dry run rehearsed for the
                 // batches left (Lead ruling 4 and the review of d8d1e5b on #869).
@@ -944,7 +954,7 @@ class ImportRunService implements ImportRuns {
             // A batch committed before V142 stored no part; no run was committed then (no writer existed).
             jdbc.sql("""
                             SELECT report::text FROM import_batches
-                             WHERE run_id = ? AND status = 'committed' AND report IS NOT NULL ORDER BY commit_seq, seq
+                             WHERE run_id = ? AND status = 'committed' AND report IS NOT NULL ORDER BY dependency_rank, seq
                             """)
                     .param(runId)
                     .query(String.class)
@@ -1342,24 +1352,26 @@ class ImportRunService implements ImportRuns {
             jdbc.sql("SET LOCAL statement_timeout = '10min'").update();
         }
         jdbc.sql("SET LOCAL app.import_commit = 'on'").update();
+        // And every event the batch publishes is an imported record's: its listeners send nothing (Lead ruling 3).
+        ImportedRecords.markTransaction();
         String file = row.get("source_filename") == null
                 ? "batch " + batch.seq()
                 : RowValidator.shortName((String) row.get("source_filename"));
         RowCheckpoint checkpoint =
                 new RowCheckpoint(runId, batch.id(), writers.source(batch.id()), !dryRun, file, privacy);
         Map<String, Object> counts = writer.write(runId, batch.id(), batch.seq(), checkpoint);
+        // No journal but the registered opening journals (Lead ruling 6 on #872): checked at the batch's end, in both.
+        refs.requireOnlyOpeningJournals();
         CommitReport part = checkpoint.part(counts, (Integer) row.get("row_count"));
         jdbc.sql("""
                         UPDATE import_batches SET status = 'committed', committed_at = now(), counts = CAST(? AS jsonb),
-                               report = CAST(? AS jsonb),
-                               commit_seq = (SELECT coalesce(max(c.commit_seq), 0) + 1 FROM import_batches c
-                                              WHERE c.run_id = ?)
+                               report = CAST(? AS jsonb), dependency_rank = ?
                          WHERE id = ?
                         """)
                 .params(
                         mapper.writeValueAsString(counts == null ? Map.of() : counts),
                         mapper.writeValueAsString(part),
-                        runId,
+                        writers.setRank(batch.id()),
                         batch.id())
                 .update();
         return part;

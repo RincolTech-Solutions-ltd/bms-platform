@@ -63,11 +63,11 @@ ALTER TABLE import_runs
         CHECK ((pre_import_dump_verified_at IS NULL) = (pre_import_dump_entries IS NULL)
                AND (pre_import_dump_verified_at IS NULL OR pre_import_dump_file IS NOT NULL));
 
--- The order a run's batches committed in, 1, 2, ...: the run's report lists its parts in that order, which is the template's
--- dependency order and not the upload order `seq` (review of f3be0a6 on #872). NULL until the batch commits.
+-- A committed batch's place in its template's dependency order, the index of its entity set (0, 1, ...): the run's report
+-- lists its parts by it, then by `seq`, as the commit wrote them, and not by the upload order or a time (Lead ruling 10
+-- on #872). NULL until the batch commits.
 ALTER TABLE import_batches
-    ADD COLUMN commit_seq integer CHECK (commit_seq > 0),
-    ADD CONSTRAINT import_batches_commit_seq_once UNIQUE (run_id, commit_seq);
+    ADD COLUMN dependency_rank integer CHECK (dependency_rank >= 0);
 
 CREATE TABLE import_refs (
     id          uuid         NOT NULL PRIMARY KEY,

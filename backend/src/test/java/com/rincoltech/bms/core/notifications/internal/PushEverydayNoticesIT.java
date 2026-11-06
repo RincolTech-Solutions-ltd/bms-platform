@@ -5,10 +5,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
+import com.rincoltech.bms.kernel.ImportedRecords;
 import com.rincoltech.bms.kernel.TenantContext;
 import com.rincoltech.bms.retail.RetailTestSupport;
+import com.rincoltech.bms.retail.stock.StockLedger;
+import com.rincoltech.bms.retail.stock.StockLedger.HistoricalMovement;
 import com.rincoltech.bms.testsupport.Api;
 import com.rincoltech.bms.testsupport.Api.Role;
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
@@ -291,6 +296,43 @@ class PushEverydayNoticesIT extends IntegrationTest {
         // A second sale the same day tells nobody again.
         sell(t.headOffice(), product, "1");
         assertThat(told("retail.low_stock")).hasSize(2);
+    }
+
+    /** A stock-out of the head office written as the import framework writes it, or not, in its own transaction. */
+    void usedUp(UUID product, String qty, boolean imported) {
+        List<HistoricalMovement> use = List.of(new HistoricalMovement(
+                t.headOffice(),
+                product,
+                "usage",
+                new BigDecimal(qty).negate(),
+                600,
+                Instant.now(),
+                "test_import",
+                null,
+                null,
+                "Fabricated use"));
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        TenantContext.callAs(
+                t.tenantId(),
+                () -> tx.execute(s -> {
+                    if (imported) {
+                        ImportedRecords.markTransaction();
+                    }
+                    return context.getBean(StockLedger.class).recordHistorical(LocalDate.now(KAMPALA), use);
+                }));
+    }
+
+    // JUSTIFICATION-A3: the Lead's ruling 3 on #872: the low-stock notice is not sent for an imported stock change.
+    @Test
+    void anImportedStockChangeTellsNobodyAndTheSameChangeOutsideAnImportDoes() {
+        UUID product = stocked("EV-LOW-IMP", "10");
+        minimum(product, null, "5");
+        // An import batch's change takes the head office under its minimum: its notice, marked imported, is unsent.
+        usedUp(product, "6", true);
+        assertThat(told("retail.low_stock")).isEmpty();
+        // The same change outside an import tells that shop's staff and the administrator, as every other test here.
+        usedUp(product, "1", false);
+        assertThat(told("retail.low_stock")).containsExactlyInAnyOrder(user(hqSeller), user(admin));
     }
 
     @Test

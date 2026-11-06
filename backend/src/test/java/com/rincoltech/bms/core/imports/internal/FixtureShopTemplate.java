@@ -260,38 +260,59 @@ class FixtureShopTemplate implements ImportTemplate {
             return forecast();
         }
         boolean open = Policy.OPEN_FROM_LIST.equals(policy.get(Policy.RECEIVABLE));
+        // One inventory and one trade debtors journal per batch, as the commit posts them (Lead ruling 2 on #872).
         return new ImportForecast() {
+            final List<Journal> journals = new ArrayList<>();
             BigDecimal qty = BigDecimal.ZERO;
             long value;
             long owed;
+            long batchValue;
+            long batchOwed;
+
+            @Override
+            public void batch(int seq) {
+                close();
+            }
+
+            private void close() {
+                if (batchValue != 0) {
+                    journals.add(new Journal(HEAD_OFFICE, "inventory", batchValue, batchValue));
+                }
+                if (batchOwed != 0) {
+                    journals.add(new Journal(HEAD_OFFICE, "trade_debtors", batchOwed, batchOwed));
+                }
+                batchValue = 0;
+                batchOwed = 0;
+            }
 
             @Override
             public void row(String entitySet, Map<String, Object> values) {
                 if (!"sales".equals(entitySet)) {
                     return;
                 }
+                long amount = (Long) values.get("amount");
                 if ("adjustment".equals(values.get("kind"))) {
                     qty = qty.add((BigDecimal) values.get("qty"));
-                    value = Math.addExact(value, (Long) values.get("amount"));
+                    value = Math.addExact(value, amount);
+                    batchValue = Math.addExact(batchValue, amount);
                 } else if (open && RECEIVABLE.neededBy().test(values)) {
-                    owed = Math.addExact(owed, (Long) values.get("amount"));
+                    owed = Math.addExact(owed, amount);
+                    batchOwed = Math.addExact(batchOwed, amount);
                 }
             }
 
             @Override
             public Balances balances() {
+                close();
                 List<Stock> stock = new ArrayList<>();
                 List<Amount> receivables = new ArrayList<>();
-                List<Journal> journals = new ArrayList<>();
                 if (value != 0 || qty.signum() != 0) {
                     stock.add(new Stock(HEAD_OFFICE, qty, value));
-                    journals.add(new Journal(HEAD_OFFICE, "inventory", value, value));
                 }
                 if (owed != 0) {
                     receivables.add(new Amount(HEAD_OFFICE, owed));
-                    journals.add(new Journal(HEAD_OFFICE, "trade_debtors", owed, owed));
                 }
-                return new Balances(stock, receivables, List.of(), List.of(), journals);
+                return new Balances(stock, receivables, List.of(), List.of(), List.copyOf(journals));
             }
         };
     }

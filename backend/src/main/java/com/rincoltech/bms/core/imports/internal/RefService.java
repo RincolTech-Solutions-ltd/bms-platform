@@ -222,6 +222,28 @@ class RefService {
         return new Posted("posted", totals.debitMinor(), totals.creditMinor(), entry.entryNo());
     }
 
+    // JUSTIFICATION-A3: the Lead's ruling 6 on #872, the end-of-batch check of the journals a batch posted.
+    /**
+     * Refuses a batch that posted a journal other than a registered opening journal (Lead ruling 6 on #872): every entry
+     * the transaction posted must be registered in {@code import_refs} as {@code ledger.journal_entry}, so an import posts
+     * no journal but its opening journals. The batch then fails and rolls back whole.
+     */
+    void requireOnlyOpeningJournals() {
+        List<UUID> posted = ledger.postedInThisTransaction();
+        if (posted.isEmpty()) {
+            return;
+        }
+        long registered = jdbc.sql("SELECT count(DISTINCT target_id) FROM import_refs"
+                        + " WHERE target_type = ? AND target_id = ANY(?)")
+                .params(JOURNAL, posted.toArray(UUID[]::new))
+                .query(Long.class)
+                .single();
+        if (registered != posted.size()) {
+            throw new IllegalStateException("an import batch posted " + (posted.size() - registered)
+                    + " journal(s) that are not registered opening journals");
+        }
+    }
+
     static ApiException changedSinceImport(int line) {
         return new ApiException(
                 HttpStatus.CONFLICT,

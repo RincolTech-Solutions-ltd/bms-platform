@@ -21,6 +21,9 @@ import org.junit.jupiter.api.Test;
  * {@code @TransactionalEventListener}, no {@code @ApplicationModuleListener} or {@code @Async} listener, no persisted
  * event publication (Spring Modulith's events starters), and the only after-commit work is the documents module's object
  * storage clean-up. This fails as soon as one of those appears, so whoever adds it extends the import's guard first.
+ * Beyond the triggers, an event published in a batch carries the {@code imported} marker ({@code ImportedRecords}, Lead
+ * ruling 3 on #872), which its listeners skip, so a listener moved to a persisted {@code event_publication} would still
+ * see that the record was imported.
  */
 class ImportSideEffectGuardTest {
 
@@ -30,8 +33,12 @@ class ImportSideEffectGuardTest {
     private static final Pattern LATER = Pattern.compile(
             "@TransactionalEventListener|@ApplicationModuleListener|@Async\\b|\\bafterCommit\\(|\\bafterCompletion\\(");
 
-    /** The after-commit work that sends nothing: the documents module removes stored objects after its transaction. */
-    private static final Set<String> STORAGE_ONLY = Set.of("DocumentService.java", "DocumentErasure.java");
+    /**
+     * The after-commit work that sends nothing: the documents module removes stored objects after its transaction, and the
+     * import's own mark of a batch's transaction is let go when it ends.
+     */
+    private static final Set<String> STORAGE_ONLY =
+            Set.of("DocumentService.java", "DocumentErasure.java", "ImportedRecords.java");
 
     @Test
     void noWorkRunsAfterABatchCommitsWhereTheImportGuardCannotSeeIt() throws IOException {

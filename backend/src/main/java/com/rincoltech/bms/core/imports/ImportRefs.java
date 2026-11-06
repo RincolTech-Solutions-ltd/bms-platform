@@ -62,10 +62,11 @@ public final class ImportRefs {
     }
 
     /**
-     * The hash of a row's mapped content: the first 32 hex digits of the SHA-256 of its fields sorted by name, each value
-     * written in one form whatever its type (a number without trailing zeros, so {@code 1.10} and {@code 1.1} are one
-     * value; a null field left out), so the validation's typed values and the same values read back from the database hash
-     * alike.
+     * The hash of a row's mapped content: the first 32 hex digits of the SHA-256 of its canonical JSON (Lead ruling 11 on
+     * #872), the one form every type is written in whatever it was typed as: an object with its fields sorted by name and
+     * a null field left out; a number without trailing zeros, so {@code 1.10} and {@code 1.1} are one value; a boolean as
+     * itself; and every other value (text, a {@code LocalDate}, an {@code Instant}, an enum) as the JSON string of its ISO
+     * text. So the validation's typed values and the same values read back from the database hash alike.
      */
     public static String contentHash(Map<String, ?> values) {
         StringBuilder canonical = new StringBuilder();
@@ -73,32 +74,62 @@ public final class ImportRefs {
         return sha256(canonical.toString()).substring(0, 32);
     }
 
+    /** The canonical JSON of a value: what {@link #contentHash} hashes. */
+    static String canonicalJson(Object value) {
+        StringBuilder out = new StringBuilder();
+        write(out, value);
+        return out.toString();
+    }
+
     private static void write(StringBuilder out, Object value) {
         switch (value) {
-            case null -> out.append('~');
+            case null -> out.append("null");
             case Map<?, ?> map -> {
                 out.append('{');
+                boolean[] first = {true};
                 new TreeMap<>(map).forEach((k, v) -> {
                     if (v != null) {
-                        out.append(k).append('\u001f');
+                        out.append(first[0] ? "" : ",");
+                        first[0] = false;
+                        string(out, String.valueOf(k));
+                        out.append(':');
                         write(out, v);
-                        out.append('\u001e');
                     }
                 });
                 out.append('}');
             }
             case List<?> list -> {
                 out.append('[');
-                list.forEach(v -> {
-                    write(out, v);
-                    out.append('\u001e');
-                });
+                for (int i = 0; i < list.size(); i++) {
+                    out.append(i == 0 ? "" : ",");
+                    write(out, list.get(i));
+                }
                 out.append(']');
             }
-            case Number n -> out.append('n').append(plain(n));
-            case Boolean b -> out.append('b').append(b);
-            default -> out.append('s').append(value);
+            case Number n -> out.append(plain(n));
+            case Boolean b -> out.append(b);
+            default -> string(out, value.toString());
         }
+    }
+
+    /** A JSON string: quoted, with a quote, a backslash and every control character escaped. */
+    private static void string(StringBuilder out, String s) {
+        out.append('"');
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"' -> out.append("\\\"");
+                case '\\' -> out.append("\\\\");
+                default -> {
+                    if (c < 0x20) {
+                        out.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        out.append(c);
+                    }
+                }
+            }
+        }
+        out.append('"');
     }
 
     /** A number in one form: {@code 1.10}, {@code 1.1} and {@code 1.100} are {@code 1.1}; {@code 5.0} is {@code 5}. */

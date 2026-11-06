@@ -1207,14 +1207,19 @@ path, `ImportRuns.commit(run)` and `resume(run)`; the dry run runs the same batc
 - **Dependency order, one transaction each, 10 minutes a statement.** The batches are written in the template's
   dependency order, its entity sets and then their number (as the validation and the preview order them), so a run
   uploaded sales first still writes items first; a resume goes on from the first batch of that order not committed. Each
-  batch's transaction runs `SET LOCAL statement_timeout = '10min'` and `SET LOCAL app.import_commit = 'on'` after it takes
-  the import key.
+  batch's transaction runs `SET LOCAL app.import_commit = 'on'` after it takes the import key, and, on a real commit
+  only, `SET LOCAL statement_timeout = '10min'`: a dry run into a trading business keeps its 60 second limit (Lead ruling
+  4 on #872). The run's report lists the batches by the dependency index of their entity set (`dependency_rank`) and
+  then by batch. A resume is refused without the verified dump, without the approval, or on another build than the one
+  the dry run rehearsed (`dry_run_writer_differs`).
 - **`import_refs` and `source_ref`.** The generalisation of `retail_import_refs` (V20): `run_id`, `batch_id`, `source_key`,
   `source_ref`, `target_type`, `target_id`, append-only under forced RLS. `ImportRefs.sourceRef(file, tab, row,
   contentHash)` is the one function that makes a reference: the mapping source's file and tab, the row (`ref:<code>` for
   a source known by its reference column, `line:<n>` for one known by position) and `ImportRefs.contentHash` of the row's
-  mapped values (sorted by field, each number in one form, so the validation's values and the same values read back hash
-  alike). `source_key` is the reference without the hash. A writer reads its rows through `BatchWriter.Checkpoint.rows`,
+  mapped values (their canonical JSON: fields sorted, a null left out, each number in one form, a date, an instant or any
+  other value as its ISO text, so the validation's values and the same values read back hash alike). A source known by
+  position is keyed by its upload instead of its file name (`upload:<sha256>`), so two till rolls of one run, or next
+  month's roll, never share a line key (Lead ruling 1 on #872). `source_key` is the reference without the hash. A writer reads its rows through `BatchWriter.Checkpoint.rows`,
   each with its reference and whether the business's imports hold it (`NEW`, `EXISTING`), and registers every record it
   creates with `Checkpoint.register` in the batch's transaction; an `EXISTING` row is counted existing and written no
   more, so a resume, or a re-run of the same rows, writes nothing twice. A row whose key is held with another hash is
@@ -1238,7 +1243,10 @@ path, `ImportRuns.commit(run)` and `resume(run)`; the dry run runs the same batc
   the forecast with `ImportTemplate.forecast(policy)`, so the preview predicts the journals the decision gives.
 - **No side effects.** While `app.import_commit` is on, triggers refuse a new row of `notification_outbox`,
   `sms_deliveries`, `approval_requests` and `scheduled_tasks`: an imported record sends no SMS or email, starts no task and
-  raises no approval; such a writer fails its batch.
+  raises no approval; such a writer fails its batch. An event published in a batch's transaction carries the `imported`
+  marker (`ImportedRecords`, `PushNotice.imported`), and its listeners skip it, so a stock change an import makes raises
+  no low-stock notice (V76) through `event_publication` either. At the end of each batch, a journal posted in it that is
+  not a registered opening journal fails the batch (Lead ruling 6 on #872).
 - **Kill and resume.** `CommitSeams.afterBatch` is a test hook only: a test bean ends the loop after batch k as a killed
   process would. The run stays `committing`, the batches before stay committed with their references, and the resume
   reaches the state of an uninterrupted run.
@@ -1248,7 +1256,10 @@ path, `ImportRuns.commit(run)` and `resume(run)`; the dry run runs the same batc
   of a batch; a kill after batch k and the resume equal an uninterrupted run, no reference, row or journal twice; a failing
   batch rolled back alone and the run resumed; every journal balanced and none but the registered opening journals; each
   receivable decision's journals; every refusal of the commit and the request; `CHANGED_SINCE_IMPORT` and a re-run that
-  writes nothing; no message and no approval from a batch; another business reads no reference and reaches no run),
+  writes nothing; two till rolls and next month's roll; two stock batches of one branch; a dates and instants hash;
+  each refusal of a resume; no message and no approval from a batch; another business reads no reference and reaches no
+  run), `RetailDryRunIT` (the retail export committed through this path with `import-retail`'s own logic),
+  `PushEverydayNoticesIT` (an imported stock change tells nobody),
   `ImportRunsIT`, `ImportPreviewIT` and `ImportMappingsIT` (every commit through the request and approval),
   `ImportCatalogueTest` (`CHANGED_SINCE_IMPORT` and `CREDIT_DECISION_MISSING` produced by named tests, none pending) and
   `MigrationOrderIT` (V143 keeps every run, the CHECKs, append-only `import_refs` under forced RLS, the trigger).

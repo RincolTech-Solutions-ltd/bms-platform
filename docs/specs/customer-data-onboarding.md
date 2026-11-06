@@ -261,7 +261,11 @@ recorded check (`pg_restore --list` entries and the SHA-256 again); the batches 
 10 minute statement timeout each; `import_refs` with `ImportRefs.sourceRef`, the one function of file, tab, row and
 content hash, and `CHANGED_SINCE_IMPORT` reported by the validation; the opening journals through the checkpoint, one per
 batch, branch and kind (the register batch of a lending run is one batch, so one per branch); and triggers that refuse an outbox row, an SMS delivery, a scheduled task or an approval request
-inside an import batch. The preview leaves out rows already imported with the same content.
+inside an import batch. The preview leaves out rows already imported with the same content. A source known by position
+(a till roll) is keyed by its upload's SHA-256, so two rolls of one run, or next month's, never share a line. An event an
+import publishes carries an `imported` marker its listeners skip (no low-stock notice from an imported stock change), and
+a batch that posts any journal but a registered opening journal fails. A resume needs the verified dump, the approval and
+the build the dry run rehearsed.
 
 ### 3.8 The receivable decision
 

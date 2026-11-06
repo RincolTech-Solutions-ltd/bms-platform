@@ -235,16 +235,21 @@ class ImportCommitIT extends IntegrationTest {
         as(f, () -> runs.transition(runId, "ready"));
         as(f, () -> runs.recordPreImportDump(runId, "pre-import-fabricated.dump", Instant.now(), SHA));
         CommitApproval.readyToCommit(http, f, runs, runId, SHA);
+        wrote.clear();
     }
 
-    /** The batch numbers of the run in the order their commits were stamped. */
+    /** The batch numbers the writer finished since the run was made ready, in the order it wrote them. */
+    final List<Integer> wrote = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    /** The batches of the run the writer wrote to the end, in order, checked against the batches committed. */
     List<Integer> committedOrder(UUID runId) {
-        return TestDatabase.owner()
-                .sql("SELECT seq FROM import_batches WHERE run_id = ? AND status = 'committed'"
-                        + " ORDER BY commit_seq")
+        List<Integer> committed = TestDatabase.owner()
+                .sql("SELECT seq FROM import_batches WHERE run_id = ? AND status = 'committed'")
                 .param(runId)
                 .query(Integer.class)
                 .list();
+        assertThat(wrote).containsExactlyInAnyOrderElementsOf(committed);
+        return List.copyOf(wrote);
     }
 
     // JUSTIFICATION-A3: the writer a real template's loader would be, by the fixture's made-up rules (its forecast).
@@ -376,6 +381,7 @@ class ImportCommitIT extends IntegrationTest {
             counts.put("read", read);
             counts.put("written", written);
             counts.put("existing", existing);
+            wrote.add(seq);
             return counts;
         };
     }
@@ -526,6 +532,75 @@ class ImportCommitIT extends IntegrationTest {
         // A committed run neither resumes nor commits again.
         assertCode(() -> as(t, () -> runs.resume(run)), "invalid_status_transition");
         assertThat(state(t)).isEqualTo(expected);
+    }
+
+    @Autowired
+    ImportRunService service;
+
+    // JUSTIFICATION-A3: the Lead's ruling 8 on #872: each refusal of a resume tested on its own, then the resume.
+    @Test
+    void aResumeIsRefusedWithoutTheVerifiedDumpTheApprovalOrTheRehearsedBuild() {
+        UUID run = fullRun(t);
+        ready(t, run, Policy.OPEN_FROM_LIST);
+        seams.killAfter = 4;
+        assertThatThrownBy(() -> as(t, () -> runs.commit(run))).isInstanceOf(CommitTestSeams.Killed.class);
+        seams.killAfter = 0;
+        Map<String, Object> left = state(t);
+
+        // No verified dump: the check is cleared, the resume refused, the check put back.
+        Map<String, Object> dump = TestDatabase.owner()
+                .sql("SELECT pre_import_dump_verified_at, pre_import_dump_entries FROM import_runs WHERE id = ?")
+                .param(run)
+                .query()
+                .singleRow();
+        TestDatabase.owner()
+                .sql("UPDATE import_runs SET pre_import_dump_verified_at = NULL, pre_import_dump_entries = NULL"
+                        + " WHERE id = ?")
+                .param(run)
+                .update();
+        assertCode(() -> as(t, () -> runs.resume(run)), "pre_import_dump_unverified");
+        TestDatabase.owner()
+                .sql("UPDATE import_runs SET pre_import_dump_verified_at = ?, pre_import_dump_entries = ? WHERE id = ?")
+                .params(dump.get("pre_import_dump_verified_at"), dump.get("pre_import_dump_entries"), run)
+                .update();
+
+        // No approval: the approval is cleared, the resume refused, the approval put back.
+        Map<String, Object> approval = TestDatabase.owner()
+                .sql("SELECT commit_approval_id, commit_approved_by, commit_approved_at, commit_approved_version"
+                        + " FROM import_runs WHERE id = ?")
+                .param(run)
+                .query()
+                .singleRow();
+        TestDatabase.owner()
+                .sql("UPDATE import_runs SET commit_approval_id = NULL, commit_approved_by = NULL,"
+                        + " commit_approved_at = NULL, commit_approved_version = NULL WHERE id = ?")
+                .param(run)
+                .update();
+        assertCode(() -> as(t, () -> runs.resume(run)), "commit_not_approved");
+        TestDatabase.owner()
+                .sql("UPDATE import_runs SET commit_approval_id = ?, commit_approved_by = ?, commit_approved_at = ?,"
+                        + " commit_approved_version = ? WHERE id = ?")
+                .params(
+                        approval.get("commit_approval_id"),
+                        approval.get("commit_approved_by"),
+                        approval.get("commit_approved_at"),
+                        approval.get("commit_approved_version"),
+                        run)
+                .update();
+
+        // Another build than the one the dry run rehearsed.
+        String had = service.buildIdentity("other-fabricated-build");
+        try {
+            assertCode(() -> as(t, () -> runs.resume(run)), "dry_run_writer_differs");
+        } finally {
+            service.buildIdentity(had);
+        }
+
+        // Nothing was written by a refused resume; with all three back it goes on and ends committed.
+        assertThat(state(t)).isEqualTo(left);
+        assertThat(as(t, () -> runs.get(run)).status()).isEqualTo("committing");
+        assertThat(as(t, () -> runs.resume(run))).isEqualTo(CommitOutcome.COMMITTED);
+        assertThat(committedOrder(run)).containsExactly(2, 4, 3, 1);
     }
 
     @Test
@@ -835,40 +910,54 @@ class ImportCommitIT extends IntegrationTest {
     // JUSTIFICATION-A3: the reviewer's must-fix 1 and 2 and items 7 and 11, each proven by a test of its own.
     // ---------------------------------------------------------------------------------------------
 
-    /** A second till roll of the same lines, other content: cash sales only, so it posts no journal of its own. */
+    /**
+     * A second till roll whose lines 2 and 3 hold other content: a stock take of the head office (3 on hand worth 1,500),
+     * so the run has two stock files for one branch, and a cash sale.
+     */
     static final String TILL_TWO =
             "Fab Item Code,Fab Buyer No,Fab When,Fab Count,Fab Paid,Fab Entry Type,Fab Cashier\r\n"
-                    + "FAB-102,,17/09/2026 10:30,1,800,Sold,\r\n"
-                    + "FAB-103,,17/09/2026 10:40,1,1200,Sold,\r\n";
+                    + "FAB-103,,17/09/2026 10:30,3,1500,Stock take,\r\n"
+                    + "FAB-102,,17/09/2026 10:40,1,800,Sold,\r\n";
 
     @Test
-    void twoFilesOfAPositionKeyedSourceNeverShareTheirKeysAndOneNameTwiceIsRefused() {
-        // Two till rolls in one run, each with a line 2 and a line 3: keyed by their own file, they never collide.
+    void twoTillRollsOfOneRunAndNextMonthsRollNeverShareALineKeyAndPostAJournalEach() {
+        // Two till rolls in one run, each with a line 2 and a line 3: keyed by their upload, they never collide, and
+        // the two stock files of the head office post an inventory journal each (Lead rulings 1 and 2 on #872).
         UUID run = fullRun(t);
-        upload(t, run, "fab-till-roll-week-2.csv", "till_roll", TILL_TWO);
+        Batch second = upload(t, run, "fab-till-roll-week-2.csv", "till_roll", TILL_TWO);
         as(t, () -> validation.validate(run));
+        assertThat(as(t, () -> validation.issues(second.id())))
+                .extracting(ImportValidation.Issue::code)
+                .doesNotContain("CHANGED_SINCE_IMPORT");
         ready(t, run, Policy.OPEN_FROM_LIST);
         assertThat(as(t, () -> runs.commit(run))).isEqualTo(CommitOutcome.COMMITTED);
-        assertThat(state(t)).containsEntry("refs test.cash_sale", 3L).containsEntry("refs test.credit_sale", 2L);
+        assertThat(state(t))
+                .containsEntry("refs retail.stock_movement", 3L)
+                .containsEntry("refs test.cash_sale", 2L)
+                .containsEntry("on_hand", "17")
+                .containsEntry("journals", 3L)
+                .containsEntry("debits", STOCK_VALUE + 1_500 + OWED);
+        assertThat(as(t, () -> runs.commitReport(run)).journals())
+                .extracting(CommitReport.Journal::kind, CommitReport.Journal::debitMinor)
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.groups.Tuple.tuple("inventory", STOCK_VALUE),
+                        org.assertj.core.groups.Tuple.tuple("inventory", 1_500L),
+                        org.assertj.core.groups.Tuple.tuple("trade_debtors", OWED));
+        onlyBalancedOpeningJournals(t);
         assertThat(count(
                         "SELECT count(DISTINCT source_key) FROM import_refs WHERE tenant_id = ? AND source_key LIKE"
-                                + " 'fab-till-roll%|line:2'",
+                                + " 'upload:%|line:2'",
                         t.tenantId()))
                 .isEqualTo(2);
 
-        // Next week's roll in a new run: other lines, another file, nothing reported as changed since its import.
+        // Next month's roll in a new run: the same lines with other content, never reported as changed since import.
         UUID next = as(t, () -> runs.open(operator).id());
-        Batch week3 = upload(t, next, "fab-till-roll-week-3.csv", "till_roll", TILL_TWO);
+        Batch month =
+                upload(t, next, "fab-till-roll-october.csv", "till_roll", TILL_TWO.replace("17/09/2026", "17/10/2026"));
         as(t, () -> validation.validate(next));
-        assertThat(as(t, () -> validation.issues(week3.id())))
+        assertThat(as(t, () -> validation.issues(month.id())))
                 .extracting(ImportValidation.Issue::code)
                 .doesNotContain("CHANGED_SINCE_IMPORT");
-
-        // Two files of the source under one name in one run cannot be told apart: refused before anything is written.
-        UUID twice = as(t, () -> runs.open(operator).id());
-        upload(t, twice, "fab-till-roll.csv", "till_roll", TILL);
-        upload(t, twice, "fab-till-roll.csv", "till_roll", TILL_TWO);
-        assertCode(() -> as(t, () -> validation.validate(twice)), "file_name_repeated");
     }
 
     @Test
@@ -936,6 +1025,17 @@ class ImportCommitIT extends IntegrationTest {
         Map<String, Object> readBack = json.readValue(stored, new TypeReference<>() {});
 
         assertThat(ImportRefs.contentHash(readBack)).isEqualTo(ImportRefs.contentHash(typed));
+
+        // A writer that hands the hash a date or an instant as an object, and numbers of another scale or kind, gets
+        // the same canonical JSON (Lead ruling 11 on #872); a changed value does not.
+        Map<String, Object> objects = new LinkedHashMap<>(typed);
+        objects.put("sold_at", Instant.parse("2026-09-15T07:30:00Z"));
+        objects.put("joined_on", LocalDate.of(2025, 1, 15));
+        objects.put("qty", new BigDecimal("1.5"));
+        objects.put("amount", new BigDecimal("7000.00"));
+        assertThat(ImportRefs.contentHash(objects)).isEqualTo(ImportRefs.contentHash(typed));
+        objects.put("joined_on", LocalDate.of(2025, 1, 16));
+        assertThat(ImportRefs.contentHash(objects)).isNotEqualTo(ImportRefs.contentHash(typed));
     }
 
     @Autowired

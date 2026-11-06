@@ -58,6 +58,14 @@ class JdbcLedgerPosting implements LedgerPosting {
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
+    public List<UUID> postedInThisTransaction() {
+        return jdbc.sql("SELECT id FROM journal_entries WHERE created_at = now()")
+                .query(UUID.class)
+                .list();
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
     public PostedEntry reverse(ReversalRequest request) {
         Original original = jdbc.sql("""
                         SELECT branch_id, source_module, source_type, source_id, reverses_entry_id

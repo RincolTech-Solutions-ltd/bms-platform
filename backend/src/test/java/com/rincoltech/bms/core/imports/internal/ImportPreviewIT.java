@@ -17,6 +17,7 @@ import com.rincoltech.bms.core.imports.ImportMappings.Mapping;
 import com.rincoltech.bms.core.imports.ImportPreview;
 import com.rincoltech.bms.core.imports.ImportPreview.BatchOutcome;
 import com.rincoltech.bms.core.imports.ImportPreview.Preview;
+import com.rincoltech.bms.core.imports.ImportRefs;
 import com.rincoltech.bms.core.imports.ImportReview;
 import com.rincoltech.bms.core.imports.ImportReview.Resolution;
 import com.rincoltech.bms.core.imports.ImportRuns;
@@ -359,7 +360,11 @@ class ImportPreviewIT extends IntegrationTest {
                 .entryNo();
     }
 
-    /** Reports a posted journal with the debit and credit totals its lines hold, read back from the ledger. */
+    /**
+     * Reports a posted journal with the debit and credit totals its lines hold, read back from the ledger, and registers it
+     * as the batch's opening journal: since issue #133 a batch posts no journal it does not register (Lead ruling 6 on
+     * #872).
+     */
     void report(BatchWriter.Checkpoint checkpoint, String branch, String kind, String entryNo) {
         long[] totals = jdbc.sql("""
                         SELECT coalesce(sum(l.debit), 0), coalesce(sum(l.credit), 0)
@@ -368,6 +373,12 @@ class ImportPreviewIT extends IntegrationTest {
                 .param(entryNo)
                 .query((rs, n) -> new long[] {rs.getLong(1), rs.getLong(2)})
                 .single();
+        UUID entry = jdbc.sql("SELECT id FROM journal_entries WHERE entry_no = ?")
+                .param(entryNo)
+                .query(UUID.class)
+                .single();
+        checkpoint.register(
+                ImportRefs.sourceRef("test-opening", kind, "entry:" + entryNo, "0"), "ledger.journal_entry", entry);
         checkpoint.journal(branch, kind, totals[0], totals[1], "posted", entryNo);
     }
 

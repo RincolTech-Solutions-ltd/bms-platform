@@ -1394,8 +1394,9 @@ expand only:
   together and only with a dump recorded (`import_runs_dump_verified_whole`). The policy decisions stay in `policy jsonb`
   (V127), keyed by decision: `option`, `confirmed_on`, `confirmation` (a reference, never a personal value), `recorded_by`,
   and for an option that needs the dev lead's exception `exception_by` and `follow_up_on`.
-- **`import_batches`** gains `commit_seq integer` (1, 2, ... in the order the run's batches committed, unique per run with
-  `import_batches_commit_seq_once`), so the run's report lists its parts in commit order, the template's dependency order.
+- **`import_batches`** gains `dependency_rank integer` (at or above 0: the index of the batch's entity set in its template's
+  dependency order, written with the batch's part of the report), so the run's report lists its parts by dependency index
+  and then by batch, the same order for a run resumed or not (Lead ruling 10 on #872).
 - **`import_refs`** (RLS forced, `SELECT, INSERT`, append-only by `reject_mutation`, the generalisation of
   `retail_import_refs`): one row per record a commit created, `id`, `tenant_id`, `created_at`, `run_id`, `batch_id` (FKs
   `(tenant_id, run_id)` and `(tenant_id, batch_id)`), `source_key varchar(330)` (the source file, tab and row),

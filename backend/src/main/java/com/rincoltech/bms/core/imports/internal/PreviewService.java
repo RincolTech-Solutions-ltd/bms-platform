@@ -98,7 +98,8 @@ class PreviewService implements ImportPreview {
             UUID mappingId,
             String source,
             String templateKey,
-            Integer templateVersion) {}
+            Integer templateVersion,
+            String sha) {}
 
     @Override
     public Preview preview(UUID runId) {
@@ -114,7 +115,8 @@ class PreviewService implements ImportPreview {
                 .optional()
                 .orElseThrow(ApiException::notFound);
         List<BatchRow> batches = jdbc.sql("""
-                        SELECT id, seq, source_filename, mapping_id, mapping_source, template_key, template_version
+                        SELECT id, seq, source_filename, mapping_id, mapping_source, template_key, template_version,
+                               source_sha256
                           FROM import_batches
                          WHERE run_id = ? AND status IN ('pending', 'parsed')
                          ORDER BY seq
@@ -127,7 +129,8 @@ class PreviewService implements ImportPreview {
                         rs.getObject("mapping_id", UUID.class),
                         rs.getString("mapping_source"),
                         rs.getString("template_key"),
-                        (Integer) rs.getObject("template_version")))
+                        (Integer) rs.getObject("template_version"),
+                        rs.getString("source_sha256")))
                 .list();
         ImportTemplate template = template(batches);
         Map<UUID, String> sets = new HashMap<>();
@@ -156,11 +159,8 @@ class PreviewService implements ImportPreview {
                         .filter(e -> e.key().equals(set))
                         .findFirst()
                         .orElseThrow();
-                feed(
-                        forecast,
-                        b.id(),
-                        entities,
-                        sourceOf(documents.get(b.mappingId()), b.source(), entities, b.file()));
+                forecast.batch(b.seq());
+                feed(forecast, b.id(), entities, sourceOf(documents.get(b.mappingId()), b.source(), entities, b.sha()));
             }
         }
         return new Preview(
@@ -179,7 +179,17 @@ class PreviewService implements ImportPreview {
      * version, the template's class, the entity set and the loader's {@link BatchWriter#identity()}. A caller never passes
      * a writer, so the dry run rehearses exactly the code the commit runs.
      */
-    record Writers(Map<UUID, BatchWriter> byBatch, String identity, List<UUID> order, Map<UUID, BatchSource> sources) {
+    record Writers(
+            Map<UUID, BatchWriter> byBatch,
+            String identity,
+            List<UUID> order,
+            Map<UUID, BatchSource> sources,
+            Map<UUID, Integer> setRanks) {
+
+        /** The index of the batch's entity set in its template: its place in the dependency order (Lead ruling 10). */
+        int setRank(UUID batchId) {
+            return setRanks.getOrDefault(batchId, Integer.MAX_VALUE);
+        }
 
         BatchWriter of(UUID batchId) {
             BatchWriter writer = byBatch.get(batchId);
@@ -211,7 +221,8 @@ class PreviewService implements ImportPreview {
     /** The writers of the run's pending and parsed batches, inside the caller's transaction. */
     Writers writers(UUID runId) {
         List<BatchRow> batches = jdbc.sql("""
-                        SELECT id, seq, source_filename, mapping_id, mapping_source, template_key, template_version
+                        SELECT id, seq, source_filename, mapping_id, mapping_source, template_key, template_version,
+                               source_sha256
                           FROM import_batches
                          WHERE run_id = ? AND status IN ('pending', 'parsed')
                          ORDER BY seq
@@ -224,7 +235,8 @@ class PreviewService implements ImportPreview {
                         rs.getObject("mapping_id", UUID.class),
                         rs.getString("mapping_source"),
                         rs.getString("template_key"),
-                        (Integer) rs.getObject("template_version")))
+                        (Integer) rs.getObject("template_version"),
+                        rs.getString("source_sha256")))
                 .list();
         Map<UUID, BatchWriter> byBatch = new LinkedHashMap<>();
         Map<UUID, Map<String, Object>> documents = new HashMap<>();
@@ -269,9 +281,7 @@ class PreviewService implements ImportPreview {
                         .thenComparingInt(BatchRow::seq))
                 .map(BatchRow::id)
                 .toList();
-        // Two files of one position-keyed source under one name would share their keys: refused before any is written.
-        requireDistinctFiles(sources.values());
-        return new Writers(byBatch, identity.toString(), order, sources);
+        return new Writers(byBatch, identity.toString(), order, sources, ranks);
     }
 
     /** The source of a batch: its entity set, and the file and tab its mapping source names. */
@@ -280,24 +290,24 @@ class PreviewService implements ImportPreview {
                 .filter(e -> e.key().equals(set))
                 .findFirst()
                 .orElseThrow();
-        return sourceOf(document, b.source(), entities, b.file());
+        return sourceOf(document, b.source(), entities, b.sha());
     }
 
-    // JUSTIFICATION-A3: the review of f3be0a6 on #872 (must-fix 1): a position-keyed source is keyed by its own file.
+    // JUSTIFICATION-A3: the review of f3be0a6 on #872 (must-fix 1, Lead ruling 1): a line-keyed source has its upload.
     /**
      * The file and tab of a batch's rows: the commit's, the preview's and the validation's one reading of them. A source
      * whose rows are known by a reference column is the mapping's file (or the source's key), so a code is the same record
-     * whatever the upload is called. A source whose rows are known by their position ({@code row_hash}) is the uploaded
-     * file itself (review of f3be0a6 on #872): its line 7 is another row in another file, so two till rolls of one run, or
-     * this month's and next month's, never share a key; a run holding two files of such a source under one name is
-     * refused ({@link #requireDistinctFiles}).
+     * whatever the upload is called, across files and runs. A source whose rows are known by their position
+     * ({@code row_hash}) carries its upload's identity, the SHA-256 of the file (Lead ruling 1 on #872): its line 7 is
+     * another row in another file, so two till rolls of one run, or this month's and next month's, never share a key, and
+     * only the same file uploaded again matches. A run never holds one file twice ({@code FILE_ALREADY_UPLOADED}).
      */
-    static BatchSource sourceOf(Map<String, Object> document, String sourceKey, EntitySet set, String uploadedFile) {
+    static BatchSource sourceOf(Map<String, Object> document, String sourceKey, EntitySet set, String uploadSha256) {
         Map<String, Object> source = MappingValidator.sources(document).get(sourceKey);
         String mapped = source != null && source.get("file") instanceof String f && !f.isBlank() ? f : sourceKey;
         // A batch added without a file holds no row, so it has no line to key.
-        boolean position = byPosition(source) && uploadedFile != null && !uploadedFile.isBlank();
-        String file = position ? RowValidator.shortName(uploadedFile.strip()) : mapped;
+        boolean position = byPosition(source) && uploadSha256 != null && !uploadSha256.isBlank();
+        String file = position ? "upload:" + uploadSha256.strip() : mapped;
         String tab = source != null && source.get("sheet") instanceof String s && !s.isBlank() ? s : null;
         return new BatchSource(set, sourceKey, file, tab, position);
     }
@@ -307,25 +317,6 @@ class PreviewService implements ImportPreview {
         return source == null
                 || !(source.get("source_ref") instanceof Map<?, ?> ref)
                 || !"column".equals(ref.get("rule"));
-    }
-
-    /**
-     * Refuses a run with two files of one position-keyed source under one name (review of f3be0a6 on #872): their rows
-     * would share their {@code source_ref} keys, and the second to commit would find the first's rows as changed. 409
-     * {@code file_name_repeated}; the operator renames one and uploads it again.
-     */
-    static void requireDistinctFiles(java.util.Collection<BatchSource> sources) {
-        Set<String> seen = new HashSet<>();
-        for (BatchSource s : sources) {
-            if (s != null && s.byPosition() && !seen.add(s.source() + "\u001f" + s.file() + "\u001f" + s.tab())) {
-                throw new ApiException(
-                        HttpStatus.CONFLICT,
-                        "file_name_repeated",
-                        "File name repeated",
-                        "Two files of this import for source " + s.source() + " have the same name, so their lines"
-                                + " cannot be told apart; give one another name and upload it again.");
-            }
-        }
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -406,7 +397,8 @@ class PreviewService implements ImportPreview {
 
     private List<BatchRow> batchRows(UUID runId) {
         return jdbc.sql("""
-                        SELECT id, seq, source_filename, mapping_id, mapping_source, template_key, template_version
+                        SELECT id, seq, source_filename, mapping_id, mapping_source, template_key, template_version,
+                               source_sha256
                           FROM import_batches
                          WHERE run_id = ? AND status IN ('pending', 'parsed', 'committed')
                          ORDER BY seq
@@ -419,7 +411,8 @@ class PreviewService implements ImportPreview {
                         rs.getObject("mapping_id", UUID.class),
                         rs.getString("mapping_source"),
                         rs.getString("template_key"),
-                        (Integer) rs.getObject("template_version")))
+                        (Integer) rs.getObject("template_version"),
+                        rs.getString("source_sha256")))
                 .list();
     }
 
@@ -637,7 +630,8 @@ class PreviewService implements ImportPreview {
     RunPrivacy privacy(UUID runId) {
         RunPrivacy privacy = new RunPrivacy();
         List<BatchRow> batches = jdbc.sql("""
-                        SELECT id, seq, source_filename, mapping_id, mapping_source, template_key, template_version
+                        SELECT id, seq, source_filename, mapping_id, mapping_source, template_key, template_version,
+                               source_sha256
                           FROM import_batches
                          WHERE run_id = ? AND status IN ('parsed', 'committed') AND mapping_id IS NOT NULL
                          ORDER BY seq
@@ -650,7 +644,8 @@ class PreviewService implements ImportPreview {
                         rs.getObject("mapping_id", UUID.class),
                         rs.getString("mapping_source"),
                         rs.getString("template_key"),
-                        (Integer) rs.getObject("template_version")))
+                        (Integer) rs.getObject("template_version"),
+                        rs.getString("source_sha256")))
                 .list();
         for (BatchRow b : batches) {
             ImportTemplate template = b.templateKey() == null

@@ -141,20 +141,31 @@ class ImportRunsIT extends IntegrationTest {
         });
     }
 
-    /** Posts one balanced journal for the business, the visible effect of a batch. */
-    void postJournal(String sourceModule) {
-        ledger.post(new EntryRequest(
-                t.headOffice(),
-                DAY,
-                "IMP-TEST",
-                null,
-                sourceModule,
-                "test_import",
-                UUID.randomUUID(),
-                null,
-                List.of(
-                        Line.debit(t.account("loans_receivable"), Money.of(100_000, "UGX")),
-                        Line.credit(t.account("cash_on_hand"), Money.of(100_000, "UGX")))));
+    /**
+     * Posts the batch's balanced journal, the visible effect of a batch, and registers it as the batch's opening journal:
+     * since issue #133 a batch posts no journal it does not register (Lead ruling 6 on #872).
+     */
+    void postJournal(UUID batchId, BatchWriter.Checkpoint checkpoint) {
+        UUID entry = postJournal("lending");
+        checkpoint.register(
+                ImportRefs.sourceRef("test-journal", null, "batch:" + batchId, "0"), "ledger.journal_entry", entry);
+    }
+
+    /** Posts one balanced journal for the business. */
+    UUID postJournal(String sourceModule) {
+        return ledger.post(new EntryRequest(
+                        t.headOffice(),
+                        DAY,
+                        "IMP-TEST",
+                        null,
+                        sourceModule,
+                        "test_import",
+                        UUID.randomUUID(),
+                        null,
+                        List.of(
+                                Line.debit(t.account("loans_receivable"), Money.of(100_000, "UGX")),
+                                Line.credit(t.account("cash_on_hand"), Money.of(100_000, "UGX")))))
+                .entryId();
     }
 
     long journals() {
@@ -230,7 +241,7 @@ class ImportRunsIT extends IntegrationTest {
                 t,
                 () -> runs.commit(script(run.id(), (runId, batchId, seq, checkpoint) -> {
                     order.add(seq);
-                    postJournal("lending");
+                    postJournal(batchId, checkpoint);
                     checkpoint.rowWritten();
                     return Map.of("written", 1);
                 })));
@@ -337,7 +348,7 @@ class ImportRunsIT extends IntegrationTest {
         Run run = readyRun(1);
         AtomicBoolean switchedOff = new AtomicBoolean();
         BatchWriter writer = (runId, batchId, seq, checkpoint) -> {
-            postJournal("lending");
+            postJournal(batchId, checkpoint);
             for (int row = 1; row <= 1_500; row++) {
                 if (row == 500 && switchedOff.compareAndSet(false, true)) {
                     // First pass only: the operator switches commits off while the batch runs.
@@ -372,7 +383,7 @@ class ImportRunsIT extends IntegrationTest {
         List<Integer> written = new CopyOnWriteArrayList<>();
         BatchWriter writer = (runId, batchId, seq, checkpoint) -> {
             written.add(seq);
-            postJournal("lending");
+            postJournal(batchId, checkpoint);
             if (seq == 1 && written.size() == 1) {
                 TestDatabase.owner()
                         .sql("UPDATE import_runs SET halt_requested = true WHERE id = ?")
@@ -404,7 +415,7 @@ class ImportRunsIT extends IntegrationTest {
         Run run = readyRun(1);
         AtomicBoolean failed = new AtomicBoolean();
         BatchWriter writer = (runId, batchId, seq, checkpoint) -> {
-            postJournal("lending");
+            postJournal(batchId, checkpoint);
             for (int row = 1; row <= 1_000; row++) {
                 if (row == 700 && failed.compareAndSet(false, true)) {
                     // First pass only: a row the business's tables refuse, as a constraint would.
@@ -430,7 +441,7 @@ class ImportRunsIT extends IntegrationTest {
     void aHaltPressedDuringTheLastBatchIsClearedWhenTheRunEnds() {
         Run run = readyRun(1);
         BatchWriter writer = (runId, batchId, seq, checkpoint) -> {
-            postJournal("lending");
+            postJournal(batchId, checkpoint);
             // The halt lands after the batch's last checkpoint: fewer than 1,000 rows follow it.
             TestDatabase.owner()
                     .sql("UPDATE import_runs SET halt_requested = true WHERE id = ?")
@@ -501,7 +512,7 @@ class ImportRunsIT extends IntegrationTest {
         List<Integer> written = new CopyOnWriteArrayList<>();
         BatchWriter writer = (runId, batchId, seq, checkpoint) -> {
             written.add(seq);
-            postJournal("lending");
+            postJournal(batchId, checkpoint);
             if (seq == 1) {
                 // Runs once batch 1 has committed and its business lock is gone: the loop waits here, before batch 2.
                 TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
@@ -559,7 +570,7 @@ class ImportRunsIT extends IntegrationTest {
         AtomicBoolean killed = new AtomicBoolean();
         BatchWriter writer = (runId, batchId, seq, checkpoint) -> {
             written.add(seq);
-            postJournal("lending");
+            postJournal(batchId, checkpoint);
             if (seq == 1 && killed.compareAndSet(false, true)) {
                 // As bms_app, the role of the loop's own connections: end the session that holds the loop key.
                 List<Boolean> ended = JdbcClient.create(TestDatabase.appDataSource())
