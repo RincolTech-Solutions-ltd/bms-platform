@@ -60,7 +60,8 @@ public interface ImportRuns {
     /**
      * Continues a {@code committing} run from its first uncommitted batch, after a halt, a failure or a restart, only on
      * the build and with the writers its dry run rehearsed (409 {@code dry_run_writer_differs}); after a new deploy, a new
-     * {@link #dryRun} of the batches it has left comes first, and one that failed is 409 {@code dry_run_failed}.
+     * {@link #dryRun} of the batches it has left comes first, and one that failed is 409 {@code dry_run_failed}, one that
+     * did not match the preview 409 {@code preview_differs}.
      */
     CommitOutcome resume(UUID runId);
 
@@ -80,7 +81,8 @@ public interface ImportRuns {
      * {@code BATCH_HAS_NO_MAPPING} for a batch read without a mapping, and 409 {@code run_changed} when a batch, issue or
      * resolution of the run changed while it ran (nothing is stored). Into a business that already trades it is 409
      * {@code TENANT_TRADING} without the approved override, and under it bounded by
-     * {@code bms.imports.dry-run-limit-while-trading}, since its writes hold the business's rows until the rollback. A
+     * {@code bms.imports.dry-run-limit-while-trading}, since its writes hold the business's rows until the rollback; any
+     * other dry run by {@code bms.imports.dry-run-limit}. A
      * server with no build identity refuses it, the commit and a resume with 503 {@code build_unknown}. Takes its own
      * transactions; none may be open around it.
      */

@@ -118,6 +118,9 @@ class ImportRunService implements ImportRuns {
     /** How long a dry run into a business that trades, under the approved override, may hold its rows (review of #869). */
     private volatile Duration tradingDryRunLimit;
 
+    /** How long any other dry run may hold the business's rows (review of 1c607ea on #869). */
+    private final Duration dryRunLimit;
+
     ImportRunService(
             JdbcClient jdbc,
             DataSource dataSource,
@@ -130,7 +133,8 @@ class ImportRunService implements ImportRuns {
             ObjectProvider<BuildProperties> build,
             ObjectProvider<GitProperties> git,
             @Value("${bms.git-sha:}") String gitSha,
-            @Value("${bms.imports.dry-run-limit-while-trading:60s}") Duration tradingDryRunLimit) {
+            @Value("${bms.imports.dry-run-limit-while-trading:60s}") Duration tradingDryRunLimit,
+            @Value("${bms.imports.dry-run-limit:15m}") Duration dryRunLimit) {
         this.jdbc = jdbc;
         this.dataSource = dataSource;
         this.transactions = transactions;
@@ -142,6 +146,7 @@ class ImportRunService implements ImportRuns {
         this.preview = preview;
         this.codeVersion = codeVersion(build.getIfAvailable(), git.getIfAvailable(), gitSha);
         this.tradingDryRunLimit = tradingDryRunLimit;
+        this.dryRunLimit = dryRunLimit;
     }
 
     /**
@@ -451,13 +456,22 @@ class ImportRunService implements ImportRuns {
                 // again: a resume goes on only on the build, and with the writers, the dry run rehearsed for the
                 // batches left (Lead ruling 4 and the review of d8d1e5b on #869).
                 requireSameWriters(runId);
-                // A dry run of the batches left, taken for a new build, must not have failed either.
-                if (storedDryRun(runId).map(d -> d.report().failure() != null).orElse(false)) {
+                // A dry run of the batches left, taken for a new build, must not have failed and must have matched the
+                // preview, as ready requires (review of 1c607ea on #869); on the normal path ready already did.
+                Optional<DryRun> dry = storedDryRun(runId);
+                if (dry.map(d -> d.report().failure() != null).orElse(false)) {
                     throw new ApiException(
                             HttpStatus.CONFLICT,
                             "dry_run_failed",
                             "Dry run failed",
                             "The last dry run of this import stopped at a batch; fix the cause and run it again.");
+                }
+                if (dry.map(d -> !d.previewMatches()).orElse(false)) {
+                    throw new ApiException(
+                            HttpStatus.CONFLICT,
+                            "preview_differs",
+                            "Preview differs",
+                            "The balances of the last dry run differ from the preview's; the import does not go on.");
                 }
                 // The trading guard is not asked again: it was passed when the run started, and the batches this run
                 // already committed are the business's records now.
@@ -567,11 +581,11 @@ class ImportRunService implements ImportRuns {
                 }
                 return !areas.isEmpty();
             }));
+            // Every dry run is bounded, so one into a business whose staff begin to post while it runs still ends
+            // (review of 1c607ea); one into a business already trading, more tightly.
             TransactionTemplate outerTx = new TransactionTemplate(transactions);
-            long limitSeconds = Math.max(1, tradingDryRunLimit.toSeconds());
-            if (trading) {
-                outerTx.setTimeout(Math.toIntExact(limitSeconds));
-            }
+            long limitSeconds = Math.max(1, (trading ? tradingDryRunLimit : dryRunLimit).toSeconds());
+            outerTx.setTimeout(Math.toIntExact(limitSeconds));
             long deadline = System.nanoTime() + Duration.ofSeconds(limitSeconds).toNanos();
             outerTx.executeWithoutResult(outer -> {
                 // Rolled back whatever happens inside: the dry run writes nothing (spec section 3.6).
@@ -600,9 +614,9 @@ class ImportRunService implements ImportRuns {
                     } catch (RuntimeException e) {
                         // As a real run, the first batch that fails stops it; the report names the batch and the kind
                         // of failure, never the message, which may quote a row. The outer transaction is rolled back.
-                        failure[0] = trading && System.nanoTime() - deadline >= 0
-                                ? "batch " + batch.seq() + " stopped at the time limit of a dry run into a trading"
-                                        + " business (" + limitSeconds + "s)"
+                        failure[0] = System.nanoTime() - deadline >= 0
+                                ? "batch " + batch.seq() + " stopped at the time limit of a dry run"
+                                        + (trading ? " into a trading business" : "") + " (" + limitSeconds + "s)"
                                 : "batch " + batch.seq() + " failed ("
                                         + e.getClass().getSimpleName() + ")";
                         break;

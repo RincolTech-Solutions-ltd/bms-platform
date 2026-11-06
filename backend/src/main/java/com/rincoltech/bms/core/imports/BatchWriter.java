@@ -16,6 +16,10 @@ import java.util.UUID;
  * {@link CommitReport.Sink} methods) what the report prints: per file counts when the batch holds several files, anomalies
  * with their line, opening journals with their totals, notes and the balances checksum.
  *
+ * <p>So that the dry run writes nothing and stays bounded, a writer never calls {@code nextval}, writes a file, opens a
+ * transaction of its own or keeps a long step without a statement: the dry run's time limit is a deadline the database
+ * driver checks at each statement (review of 1c607ea on #869), so the business's rows are held until the next one.
+ *
  * <p>Branch limits are the writer's contract, not the run's (review of #736): each template's writer checks that every row
  * it writes falls in a branch the import may write to and refuses the batch otherwise. The first writer, and so the first
  * place this is enforced and tested, is the template of #136.

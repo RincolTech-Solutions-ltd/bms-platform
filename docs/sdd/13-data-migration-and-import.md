@@ -1096,7 +1096,9 @@ commit only through test-only templates (`FixtureShopTemplate`, `ScriptedTemplat
   dry run only under the approved trading override (409 `TENANT_TRADING` otherwise, with nothing audited), and then within
   `bms.imports.dry-run-limit-while-trading` (60 seconds), the outer transaction's timeout: past it every statement of the
   dry run is refused, it fails as `batch N stopped at the time limit of a dry run into a trading business`, and the staff's
-  postings wait no longer. One outer transaction, marked rollback-only first, resolves the writers as the commit does and
+  postings wait no longer. Every other dry run is bounded by `bms.imports.dry-run-limit` (15 minutes), so one into a
+  business whose staff begin to post while it runs still ends. The limit is a deadline checked at each statement, so a
+  writer never keeps a long step without one. One outer transaction, marked rollback-only first, resolves the writers as the commit does and
   runs the commit's own batch code for every batch in order: the import key, the batch taken `FOR UPDATE`, the writer, the
   batch's move to `committed` with its counts and report part. The kill switch and the halt, which guard writes, do not
   stop it. The first batch that throws stops it, as in a real run, and the failure is recorded. Then the transaction is
@@ -1118,7 +1120,9 @@ commit only through test-only templates (`FixtureShopTemplate`, `ScriptedTemplat
   those lines (409 `dry_run_writer_differs`), so a run never commits code its dry run did not run: a loader's class name
   alone does not tell two builds apart. A run part committed when a new build is deployed needs a new dry run before it
   resumes (Lead on #869): a run `committing` and not being written may be dry run for the batches it has left, on the
-  build that will resume it, and a resume refuses a dry run that failed (409 `dry_run_failed`). The trading guard is not
+  build that will resume it, and a resume refuses a dry run that failed (409 `dry_run_failed`) or did not match the
+  preview (409 `preview_differs`), as `ready` does. A loader whose behaviour depends on state it captures names that state
+  in its identity (`ImportTemplate.loader`), since two loaders of one lambda are otherwise the same writer. The trading guard is not
   asked of that dry run, as it is not asked of the resume, but the time limit holds while the business trades.
 - **When it counts.** `ImportRuns.dryRunReport(run)` answers the stored dry run and whether it still counts: its stamp is
   the run's stamp now. The stamp is an MD5 over the application's version and commit (another build of the templates' code),

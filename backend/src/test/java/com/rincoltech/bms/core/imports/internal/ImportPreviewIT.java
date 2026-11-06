@@ -825,7 +825,17 @@ class ImportPreviewIT extends IntegrationTest {
         assertCode(() -> as(t, () -> runs.resume(scripted(run, NOTHING))), "dry_run_writer_differs");
         assertThat(as(t, () -> runs.get(run)).status()).isEqualTo("committing");
 
-        // A resume after a new deploy needs a new dry run (Lead on #869): one of the batches left, on this build.
+        // A resume after a new deploy needs a new dry run (Lead on #869): one of the batches left, on this build. One
+        // whose balances the preview did not predict keeps the run from going on, as it keeps a run from ready (review
+        // of 1c607ea).
+        BatchWriter differs = (r, b, s, c) -> {
+            c.stock(FixtureShopTemplate.HEAD_OFFICE, BigDecimal.ONE, 100);
+            return Map.of();
+        };
+        assertThat(as(t, () -> runs.dryRun(scripted(run, differs), operator)).previewMatches())
+                .isFalse();
+        assertCode(() -> as(t, () -> runs.resume(scripted(run, NOTHING))), "preview_differs");
+        assertThat(as(t, () -> runs.get(run)).status()).isEqualTo("committing");
         DryRun again = as(t, () -> runs.dryRun(scripted(run, NOTHING), operator));
         assertThat(again.writer()).isEqualTo(rehearsed);
         assertThat(as(t, () -> runs.get(run)).status()).isEqualTo("committing");
