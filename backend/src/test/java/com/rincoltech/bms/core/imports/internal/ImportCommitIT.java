@@ -768,6 +768,9 @@ class ImportCommitIT extends IntegrationTest {
         // Line 2 (FAB-101) only, blocking and open: it is never written.
         assertThat(changed).containsExactly("2 blocking open");
         assertThat(as(t, () -> validation.issues(batch)))
+                .extracting(ImportValidation.Issue::code)
+                .contains("CHANGED_SINCE_IMPORT");
+        assertThat(as(t, () -> validation.issues(batch)))
                 .filteredOn(i -> "CHANGED_SINCE_IMPORT".equals(i.code()))
                 .allSatisfy(i -> assertThat(i.message()).doesNotContain("1600").doesNotContain("Ladle"));
 
