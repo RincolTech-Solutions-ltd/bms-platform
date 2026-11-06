@@ -3435,241 +3435,6 @@
           }
         }
       },
-      "ImportAskCustomerRequest" : {
-        "properties" : {
-          "ask_customer" : {
-            "type" : "boolean"
-          },
-          "version" : {
-            "format" : "int32",
-            "minimum" : 0,
-            "type" : "integer"
-          }
-        },
-        "required" : [ "ask_customer", "version" ]
-      },
-      "ImportBulkResolveOutcome" : {
-        "properties" : {
-          "bulk_id" : {
-            "format" : "uuid",
-            "type" : "string"
-          },
-          "resolved" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "rows_validated" : {
-            "format" : "int32",
-            "type" : "integer"
-          }
-        }
-      },
-      "ImportBulkResolveRequest" : {
-        "properties" : {
-          "batch_id" : {
-            "description" : "One batch of the run, or every batch",
-            "format" : "uuid",
-            "type" : "string"
-          },
-          "code" : {
-            "maxLength" : 60,
-            "minLength" : 2,
-            "type" : "string"
-          },
-          "note" : {
-            "maxLength" : 500,
-            "minLength" : 0,
-            "type" : "string"
-          },
-          "resolution" : {
-            "description" : "edit_value, exclude_row, accept_suggestion, override or ask_customer",
-            "type" : "string"
-          },
-          "value" : {
-            "maxLength" : 32767,
-            "minLength" : 0,
-            "type" : "string"
-          }
-        },
-        "required" : [ "code", "resolution" ]
-      },
-      "ImportIssue" : {
-        "description" : "One issue of the review queue; its message never holds a value of a row",
-        "properties" : {
-          "ask_customer" : {
-            "type" : "boolean"
-          },
-          "batch_id" : {
-            "format" : "uuid",
-            "type" : "string"
-          },
-          "code" : {
-            "type" : "string"
-          },
-          "field" : {
-            "description" : "The template's field, or null for the whole row",
-            "type" : "string"
-          },
-          "id" : {
-            "format" : "uuid",
-            "type" : "string"
-          },
-          "line" : {
-            "description" : "The line of the file",
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "message" : {
-            "type" : "string"
-          },
-          "resolution" : {
-            "description" : "The kind of the resolution that resolved it",
-            "type" : "string"
-          },
-          "resolution_id" : {
-            "format" : "uuid",
-            "type" : "string"
-          },
-          "row_id" : {
-            "format" : "uuid",
-            "type" : "string"
-          },
-          "severity" : {
-            "description" : "info, warning or blocking",
-            "type" : "string"
-          },
-          "status" : {
-            "description" : "open or resolved",
-            "type" : "string"
-          },
-          "suggestion" : {
-            "additionalProperties" : {
-              "description" : "The engine's suggestion, never personal: {\"value\": \"1501\"}, or {\"review\": \"as_uploaded\"} for a row that changed",
-              "type" : "object"
-            },
-            "description" : "The engine's suggestion, never personal: {\"value\": \"1501\"}, or {\"review\": \"as_uploaded\"} for a row that changed",
-            "type" : "object"
-          },
-          "version" : {
-            "description" : "Name it when resolving; another resolver's version is version_conflict",
-            "format" : "int32",
-            "type" : "integer"
-          }
-        }
-      },
-      "ImportIssuePage" : {
-        "properties" : {
-          "items" : {
-            "items" : {
-              "$ref" : "#/components/schemas/ImportIssue"
-            },
-            "type" : "array"
-          },
-          "next_cursor" : {
-            "type" : "string"
-          }
-        }
-      },
-      "ImportQuestion" : {
-        "description" : "One question for the customer, without any value of a row",
-        "properties" : {
-          "code" : {
-            "type" : "string"
-          },
-          "field" : {
-            "type" : "string"
-          },
-          "file" : {
-            "type" : "string"
-          },
-          "line" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "message" : {
-            "type" : "string"
-          },
-          "number" : {
-            "format" : "int32",
-            "type" : "integer"
-          }
-        }
-      },
-      "ImportQuestionList" : {
-        "properties" : {
-          "items" : {
-            "items" : {
-              "$ref" : "#/components/schemas/ImportQuestion"
-            },
-            "type" : "array"
-          }
-        }
-      },
-      "ImportResolveOutcome" : {
-        "properties" : {
-          "issues" : {
-            "description" : "The issues of the row as they now are",
-            "items" : {
-              "$ref" : "#/components/schemas/ImportIssue"
-            },
-            "type" : "array"
-          },
-          "mapping_version" : {
-            "description" : "The mapping version a map_value made",
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "resolution" : {
-            "type" : "string"
-          },
-          "resolution_id" : {
-            "format" : "uuid",
-            "type" : "string"
-          },
-          "rows_validated" : {
-            "description" : "Rows validated again",
-            "format" : "int32",
-            "type" : "integer"
-          }
-        }
-      },
-      "ImportResolveRequest" : {
-        "properties" : {
-          "link_member_id" : {
-            "description" : "link_member: a record the business holds",
-            "format" : "uuid",
-            "type" : "string"
-          },
-          "link_row_id" : {
-            "description" : "link_row: another row of the run",
-            "format" : "uuid",
-            "type" : "string"
-          },
-          "note" : {
-            "description" : "Required for override and exclude_row",
-            "maxLength" : 500,
-            "minLength" : 0,
-            "type" : "string"
-          },
-          "resolution" : {
-            "description" : "edit_value, exclude_row, accept_suggestion, link_row, link_member, override or map_value",
-            "type" : "string"
-          },
-          "value" : {
-            "description" : "edit_value: the text in place of the cell (empty leaves the field empty); map_value: the value the cell stands for",
-            "maxLength" : 32767,
-            "minLength" : 0,
-            "type" : "string"
-          },
-          "version" : {
-            "description" : "The issue's version as read",
-            "format" : "int32",
-            "minimum" : 0,
-            "type" : "integer"
-          }
-        },
-        "required" : [ "resolution", "version" ]
-      },
       "ImportSmsOptOutsRequest" : {
         "properties" : {
           "dry_run" : {
@@ -3802,7 +3567,7 @@
             "type" : "string"
           },
           "kind" : {
-            "description" : "text, money, count, date, days, basis_points, or id: a record id (loan_id, member_id) for a link, not drawn as a column and left out of the CSV (issue #863)",
+            "description" : "text, money, count, date, days or basis_points",
             "type" : "string"
           },
           "label" : {
@@ -17447,13 +17212,37 @@
           }
         }
       },
+      "RetailProductImportOffline" : {
+        "description" : "A list kept on the phone offline: its stock is dated the day it was made, judged as every entry kept offline is (RetailOfflineEntry)",
+        "properties" : {
+          "occurred_at" : {
+            "description" : "When the list was made on the phone",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "online_as_of" : {
+            "description" : "The server's time when the phone was last online",
+            "format" : "date-time",
+            "type" : "string"
+          }
+        },
+        "required" : [ "occurred_at", "online_as_of" ]
+      },
       "RetailProductImportRequest" : {
         "properties" : {
+          "branch_id" : {
+            "description" : "Issue #870: where the qty of every row goes; defaults to the caller's one branch",
+            "format" : "uuid",
+            "type" : "string"
+          },
           "csv" : {
-            "description" : "The CSV text: a header row, then one item per row. Columns code, description, category, unit, sell_price and optionally cost_price (only with retail.profit.read). Comma, semicolon or tab separated.",
+            "description" : "The CSV text: a header row, then one item per row. Columns code, description, category, unit, sell_price and optionally cost_price (only with retail.profit.read). Comma, semicolon or tab separated. Issue #870: optionally qty, how many there are now at branch_id, and stock_only (yes) to add qty to the item of that name and unit instead of a new item",
             "maxLength" : 1000000,
             "minLength" : 0,
             "type" : "string"
+          },
+          "offline" : {
+            "$ref" : "#/components/schemas/RetailProductImportOffline"
           }
         },
         "required" : [ "csv" ]
@@ -17463,6 +17252,11 @@
           "added" : {
             "format" : "int32",
             "type" : "integer"
+          },
+          "branch_id" : {
+            "description" : "Issue #870: where the quantities go; null when no row has one",
+            "format" : "uuid",
+            "type" : "string"
           },
           "categories_created" : {
             "description" : "Categories that are new (would be created on a dry run, were created on an apply)",
@@ -17493,6 +17287,11 @@
             "format" : "int32",
             "type" : "integer"
           },
+          "stock_added" : {
+            "description" : "Issue #870: rows whose qty goes to an item already in the list (outcome stock)",
+            "format" : "int32",
+            "type" : "integer"
+          },
           "units_created" : {
             "items" : {
               "type" : "string"
@@ -17510,6 +17309,10 @@
           "description" : {
             "type" : "string"
           },
+          "existing_code" : {
+            "description" : "Issue #870: the code of the item already in the list that a skipped or stock row names",
+            "type" : "string"
+          },
           "line" : {
             "format" : "int32",
             "type" : "integer"
@@ -17518,7 +17321,11 @@
             "type" : "string"
           },
           "outcome" : {
-            "description" : "added, skipped (the code exists already or repeats in the file) or error",
+            "description" : "added, stock (issue #870: qty added to the item already in the list), skipped (the code or the name exists already or repeats in the file) or error",
+            "type" : "string"
+          },
+          "qty" : {
+            "description" : "Issue #870: the quantity the row adds at the branch; null when it adds none",
             "type" : "string"
           }
         }
@@ -18364,104 +18171,6 @@
           "unit_made" : {
             "description" : "True when this add made the Piece unit",
             "type" : "boolean"
-          }
-        }
-      },
-      "RetailQuickAddList" : {
-        "description" : "Issue #870: the list saved, one result per row in the order sent",
-        "properties" : {
-          "branch_id" : {
-            "description" : "Where the stock went; null when no row had a quantity",
-            "format" : "uuid",
-            "type" : "string"
-          },
-          "id" : {
-            "description" : "The list's own id, also the source of its offline audit row",
-            "format" : "uuid",
-            "type" : "string"
-          },
-          "items_made" : {
-            "description" : "How many rows made a new item",
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "rows" : {
-            "items" : {
-              "$ref" : "#/components/schemas/RetailQuickAdd"
-            },
-            "type" : "array"
-          },
-          "stock_added" : {
-            "description" : "How many rows added stock to an item already in the list",
-            "format" : "int32",
-            "type" : "integer"
-          }
-        }
-      },
-      "RetailQuickAddListRequest" : {
-        "description" : "Issue #870: Add many items. Every row is one Quick add at branch_id, all in one transaction under one Idempotency-Key: a refused row names its row_index, its fields as rows[i].field, and nothing of the list is saved",
-        "properties" : {
-          "branch_id" : {
-            "description" : "Where the stock of every row goes; defaults to the caller's one branch",
-            "format" : "uuid",
-            "type" : "string"
-          },
-          "offline" : {
-            "$ref" : "#/components/schemas/RetailOfflineEntry"
-          },
-          "rows" : {
-            "items" : {
-              "$ref" : "#/components/schemas/RetailQuickAddListRow"
-            },
-            "maxItems" : 200,
-            "minItems" : 0,
-            "type" : "array"
-          }
-        },
-        "required" : [ "rows" ]
-      },
-      "RetailQuickAddListRow" : {
-        "description" : "Issue #870: one row of Add many items, the fields of Quick add without packages or paid_from. With product_id, an item already in the list, only qty is added and the other item fields are ignored",
-        "properties" : {
-          "category_id" : {
-            "description" : "Left out: the item goes under General, made when the business has none",
-            "format" : "uuid",
-            "type" : "string"
-          },
-          "cost_minor" : {
-            "description" : "Left out: 0, set by the first restock",
-            "format" : "int64",
-            "maximum" : 10000000000000,
-            "minimum" : 0,
-            "type" : "integer"
-          },
-          "description" : {
-            "description" : "The new item's name; required without product_id",
-            "maxLength" : 300,
-            "minLength" : 0,
-            "type" : "string"
-          },
-          "product_id" : {
-            "description" : "An item already in the list: add qty to its stock instead of a new item of that name",
-            "format" : "uuid",
-            "type" : "string"
-          },
-          "qty" : {
-            "description" : "How many there are now at the list's branch, added as opening stock; more than 0 with product_id; left out, no stock is recorded for this row",
-            "example" : "12",
-            "type" : "string"
-          },
-          "sell_minor" : {
-            "description" : "Required without product_id",
-            "format" : "int64",
-            "maximum" : 10000000000000,
-            "minimum" : 0,
-            "type" : "integer"
-          },
-          "unit_id" : {
-            "description" : "Left out: the shop's piece unit (Piece or pc), made when the business has none",
-            "format" : "uuid",
-            "type" : "string"
           }
         }
       },
@@ -29060,248 +28769,6 @@
         },
         "summary" : "Whether the setup helper can read a list, a photo or a file for this business",
         "tags" : [ "help" ]
-      }
-    },
-    "/api/v1/imports/issues/{issue_id}/ask-customer" : {
-      "put" : {
-        "operationId" : "askCustomerAboutImportIssue",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "issue_id",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        } ],
-        "requestBody" : {
-          "content" : {
-            "application/json" : {
-              "schema" : {
-                "$ref" : "#/components/schemas/ImportAskCustomerRequest"
-              }
-            }
-          },
-          "required" : true
-        },
-        "responses" : {
-          "200" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ImportIssue"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "summary" : "Mark an issue as a question for the customer, or no longer one",
-        "tags" : [ "imports" ]
-      }
-    },
-    "/api/v1/imports/issues/{issue_id}/resolve" : {
-      "post" : {
-        "operationId" : "resolveImportIssue",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "issue_id",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        } ],
-        "requestBody" : {
-          "content" : {
-            "application/json" : {
-              "schema" : {
-                "$ref" : "#/components/schemas/ImportResolveRequest"
-              }
-            }
-          },
-          "required" : true
-        },
-        "responses" : {
-          "200" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ImportResolveOutcome"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "summary" : "Resolve one issue: edit, leave the row out, accept the suggestion, link, override a warning or map the value (FR-IMP-05)",
-        "tags" : [ "imports" ]
-      }
-    },
-    "/api/v1/imports/runs/{run_id}/issues" : {
-      "get" : {
-        "operationId" : "listImportIssues",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "run_id",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        }, {
-          "in" : "query",
-          "name" : "status",
-          "required" : false,
-          "schema" : {
-            "type" : "string"
-          }
-        }, {
-          "in" : "query",
-          "name" : "code",
-          "required" : false,
-          "schema" : {
-            "type" : "string"
-          }
-        }, {
-          "in" : "query",
-          "name" : "batch_id",
-          "required" : false,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        }, {
-          "in" : "query",
-          "name" : "ask_customer",
-          "required" : false,
-          "schema" : {
-            "type" : "boolean"
-          }
-        }, {
-          "in" : "query",
-          "name" : "limit",
-          "required" : false,
-          "schema" : {
-            "format" : "int32",
-            "type" : "integer"
-          }
-        }, {
-          "in" : "query",
-          "name" : "cursor",
-          "required" : false,
-          "schema" : {
-            "type" : "string"
-          }
-        } ],
-        "responses" : {
-          "200" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ImportIssuePage"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "summary" : "The review queue of an import run, in commit order, open issues by default (FR-IMP-05)",
-        "tags" : [ "imports" ]
-      }
-    },
-    "/api/v1/imports/runs/{run_id}/issues/bulk-resolve" : {
-      "post" : {
-        "operationId" : "bulkResolveImportIssues",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "run_id",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        } ],
-        "requestBody" : {
-          "content" : {
-            "application/json" : {
-              "schema" : {
-                "$ref" : "#/components/schemas/ImportBulkResolveRequest"
-              }
-            }
-          },
-          "required" : true
-        },
-        "responses" : {
-          "200" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ImportBulkResolveOutcome"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "summary" : "Resolve every open issue of one code in the run, or in one of its files, the same way (FR-IMP-05)",
-        "tags" : [ "imports" ]
-      }
-    },
-    "/api/v1/imports/runs/{run_id}/questions" : {
-      "get" : {
-        "operationId" : "listImportQuestions",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "run_id",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        } ],
-        "responses" : {
-          "200" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ImportQuestionList"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "summary" : "The numbered questions for the customer, with file and line and no value of a row",
-        "tags" : [ "imports" ]
-      }
-    },
-    "/api/v1/imports/runs/{run_id}/questions.csv" : {
-      "get" : {
-        "operationId" : "exportImportQuestions",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "run_id",
-          "required" : true,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        } ],
-        "responses" : {
-          "200" : {
-            "content" : {
-              "text/csv" : {
-                "schema" : {
-                  "type" : "string"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "summary" : "The same questions as a CSV file to send to the customer; audited",
-        "tags" : [ "imports" ]
       }
     },
     "/api/v1/ledger/payment-methods" : {
@@ -43024,15 +42491,6 @@
             "type" : "string"
           }
         }, {
-          "description" : "Only items in this unit: their own unit, or an active package of it (issue #863)",
-          "in" : "query",
-          "name" : "unit_id",
-          "required" : false,
-          "schema" : {
-            "format" : "uuid",
-            "type" : "string"
-          }
-        }, {
           "in" : "query",
           "name" : "active",
           "required" : false,
@@ -43174,6 +42632,13 @@
       "post" : {
         "operationId" : "importRetailProducts",
         "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
           "in" : "query",
           "name" : "dry_run",
           "required" : false,
@@ -43213,7 +42678,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Import items from CSV for a new client: dry run first, then apply; administrators only (#146)",
+        "summary" : "Import items from CSV: dry run first, then apply (#146); with qty, how many there are now at branch_id, added as opening stock (retail.stocktake.commit there) under an Idempotency-Key (issue #870)",
         "tags" : [ "retail-catalogue" ]
       }
     },
@@ -44722,43 +44187,6 @@
           }
         },
         "summary" : "Quick add: a new item (or one already in the list) and stock added at a branch as opening stock, in one transaction; the stock also needs retail.stocktake.commit there (issue #632, ADR-101); M",
-        "tags" : [ "retail-stock" ]
-      }
-    },
-    "/api/v1/retail/quick-add/list" : {
-      "post" : {
-        "operationId" : "quickAddRetailItemList",
-        "parameters" : [ {
-          "in" : "header",
-          "name" : "Idempotency-Key",
-          "required" : false,
-          "schema" : {
-            "type" : "string"
-          }
-        } ],
-        "requestBody" : {
-          "content" : {
-            "application/json" : {
-              "schema" : {
-                "$ref" : "#/components/schemas/RetailQuickAddListRequest"
-              }
-            }
-          },
-          "required" : true
-        },
-        "responses" : {
-          "201" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/RetailQuickAddList"
-                }
-              }
-            },
-            "description" : "One result per row, in the order sent"
-          }
-        },
-        "summary" : "Add many items: every row one Quick add at one branch, in one transaction under one Idempotency-Key; a refused row names its row_index and saves nothing of the list (issue #870, ADR-101); M",
         "tags" : [ "retail-stock" ]
       }
     },
@@ -47944,15 +47372,6 @@
               "type" : "string"
             },
             "type" : "array"
-          }
-        }, {
-          "description" : "Only the short lines of committed stock counts, the rows behind Stock health's Found missing (issue #863)",
-          "in" : "query",
-          "name" : "found_missing",
-          "required" : false,
-          "schema" : {
-            "default" : false,
-            "type" : "boolean"
           }
         }, {
           "in" : "query",

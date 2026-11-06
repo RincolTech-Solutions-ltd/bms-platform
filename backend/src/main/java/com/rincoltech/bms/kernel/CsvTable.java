@@ -14,6 +14,7 @@ import java.util.regex.Pattern;
 public final class CsvTable {
 
     private static final Pattern AMOUNT = Pattern.compile("(\\d{1,15})(?:\\.(\\d+))?");
+    private static final Pattern GROUPED = Pattern.compile("[1-9]\\d{0,2}(,\\d{3})+(\\.\\d+)?");
 
     private CsvTable() {}
 
@@ -68,10 +69,15 @@ public final class CsvTable {
     /**
      * A non-negative amount in major units, with or without thousands commas, as integer minor units for a currency with
      * {@code exponent} decimals (the same rule as the screens' parseMinor); a fraction is accepted only up to the
-     * exponent. Null when it is anything else.
+     * exponent. Null when it is anything else. A comma is taken only between groups of three digits: 12,500 is read, and 1,5
+     * or 12,50, a comma used as a decimal point, is refused, never read as 15 or 1250 (issue #870, the rule of #867).
      */
     public static Long amountMinor(String text, int exponent) {
-        String clean = text.strip().replace(",", "");
+        String strip = text.strip();
+        if (strip.indexOf(',') >= 0 && !GROUPED.matcher(strip).matches()) {
+            return null;
+        }
+        String clean = strip.replace(",", "");
         Matcher m = AMOUNT.matcher(clean);
         if (!m.matches()) {
             return null;

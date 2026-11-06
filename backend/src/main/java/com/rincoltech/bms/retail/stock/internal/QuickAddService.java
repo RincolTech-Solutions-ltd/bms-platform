@@ -11,8 +11,6 @@ import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue.NewItem;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue.ProductSnapshot;
-import com.rincoltech.bms.retail.stock.EntryDates;
-import com.rincoltech.bms.retail.stock.OfflineEntry;
 import com.rincoltech.bms.retail.stock.Quantities;
 import com.rincoltech.bms.retail.stock.QuickAddPurchase;
 import com.rincoltech.bms.retail.stock.RetailBooks;
@@ -22,8 +20,6 @@ import com.rincoltech.bms.retail.stock.RetailBranchContext;
 import com.rincoltech.bms.retail.stock.StockLedger;
 import com.rincoltech.bms.retail.stock.StockLedger.Movement;
 import com.rincoltech.bms.retail.stock.internal.StockApi.QuickAdd;
-import com.rincoltech.bms.retail.stock.internal.StockApi.QuickAddList;
-import com.rincoltech.bms.retail.stock.internal.StockApi.QuickAddListRequest;
 import com.rincoltech.bms.retail.stock.internal.StockApi.QuickAddRequest;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -54,8 +50,8 @@ class QuickAddService {
     static final String BUY = "retail.purchase.create";
     static final String SOURCE = "retail.quick_add";
     static final String NOTE = "Quick add";
-    static final String LIST_PATH = "/api/v1/retail/quick-add/list";
-    static final String LIST_SOURCE = "retail.quick_add_list";
+    /** Issue #870: the words on the movement and the journal entry of stock added by Import items. */
+    static final String IMPORT_NOTE = "Import items";
 
     private final RetailCatalogue catalogue;
     private final StockLedger ledger;
@@ -66,7 +62,6 @@ class QuickAddService {
     private final CurrentTenant tenant;
     private final BusinessClock clock;
     private final AuditLog audit;
-    private final EntryDates entryDates;
 
     QuickAddService(
             RetailCatalogue catalogue,
@@ -77,9 +72,7 @@ class QuickAddService {
             Idempotency idempotency,
             CurrentTenant tenant,
             BusinessClock clock,
-            AuditLog audit,
-            EntryDates entryDates) {
-        this.entryDates = entryDates;
+            AuditLog audit) {
         this.catalogue = catalogue;
         this.ledger = ledger;
         this.books = books;
@@ -93,65 +86,10 @@ class QuickAddService {
 
     @Transactional
     Outcome<QuickAdd> add(String idempotencyKey, QuickAddRequest r) {
-        return idempotency.once(idempotencyKey, "POST", PATH, r, QuickAdd.class, () -> addNow(r, today()));
+        return idempotency.once(idempotencyKey, "POST", PATH, r, QuickAdd.class, () -> addNow(r));
     }
 
-    // JUSTIFICATION-A3: issue #870 asks for one save of a whole list under one key; each row goes through addNow below.
-    /**
-     * Add many items (issue #870): every row is one Quick add at the list's branch, through {@link #addNow}, in one
-     * transaction under one key, so a replay adds nothing twice and a refused row saves nothing of the list. The branch is
-     * checked once, before any item is made; a list kept on the phone offline is dated the day it was made (ADR-067
-     * decision 13), as the other entries kept on the phone are.
-     */
-    @Transactional
-    Outcome<QuickAddList> addList(String idempotencyKey, QuickAddListRequest r) {
-        return idempotency.once(idempotencyKey, "POST", LIST_PATH, r.forKey(), QuickAddList.class, () -> addListNow(r));
-    }
-
-    private QuickAddList addListNow(QuickAddListRequest r) {
-        boolean stocked = r.rows().stream().anyMatch(row -> row.qty() != null);
-        UUID branch = stocked ? branches.resolveStocking(COUNT, r.branchId()) : null;
-        LocalDate day = OfflineEntry.day(
-                r.offline(),
-                today(),
-                clock.now(),
-                tenant.profile().timezone(),
-                branch == null ? List.of() : List.of(branch));
-        List<QuickAdd> done = new ArrayList<>();
-        for (int i = 0; i < r.rows().size(); i++) {
-            try {
-                done.add(addNow(r.rows().get(i).asQuickAdd(branch), day));
-            } catch (ApiException e) {
-                throw ofRow(e, i);
-            }
-        }
-        UUID id = UUID.randomUUID();
-        entryDates.auditOffline(r.offline(), day, LIST_SOURCE, id, branch);
-        int made = (int) done.stream().filter(QuickAdd::itemMade).count();
-        return new QuickAddList(id, branch, made, done.size() - made, done);
-    }
-
-    /**
-     * A refusal of row {@code i} names it: its fields as {@code rows[i].field} and the problem with {@code row_index}, so
-     * the screen shows it on that row. A refusal with no field (a name already in the list) is put on the row's name.
-     */
-    static ApiException ofRow(ApiException e, int i) {
-        Map<String, Object> extensions = new LinkedHashMap<>(e.extensions());
-        extensions.put("row_index", i);
-        String at = "rows[" + i + "].";
-        List<FieldProblem> errors = e.errors().isEmpty()
-                ? List.of(new FieldProblem(at + "description", e.code(), e.getMessage()))
-                : e.errors().stream()
-                        .map(f -> new FieldProblem(at + f.field(), f.code(), f.message()))
-                        .toList();
-        return new ApiException(e.status(), e.code(), e.title(), e.getMessage(), errors, extensions);
-    }
-
-    private LocalDate today() {
-        return clock.today(tenant.profile().timezone());
-    }
-
-    private QuickAdd addNow(QuickAddRequest r, LocalDate day) {
+    private QuickAdd addNow(QuickAddRequest r) {
         List<FieldProblem> problems = new ArrayList<>();
         if (r.productId() == null) {
             if (r.description() == null || r.description().isBlank()) {
@@ -235,7 +173,13 @@ class QuickAddService {
             BigDecimal before = ledger.lock(branch, product.id());
             total = Quantities.format(before.add(r.qty()));
             if (r.qty().signum() > 0) {
-                movementId = addStock(id, branch, product, r.qty(), day);
+                movementId = addStock(
+                        id,
+                        branch,
+                        product,
+                        r.qty(),
+                        clock.today(tenant.profile().timezone()),
+                        NOTE);
             }
         }
         return new QuickAdd(
@@ -257,19 +201,33 @@ class QuickAddService {
                 bought == null ? null : bought.totalMinor());
     }
 
+    /**
+     * Import items (issue #870, ADR-101 amendment of 6 Nov 2026): how many of an item there are now, added at the branch as Quick
+     * add adds it, one opening movement under the balance row's lock, dated {@code day} (today, or the day a list kept on the
+     * phone was made). The branch was checked by {@link ImportedStockAdapter#check} before any item was made.
+     */
+    void addOpening(UUID branch, UUID productId, BigDecimal qty, LocalDate day) {
+        ProductSnapshot product = catalogue
+                .find(productId)
+                .orElseThrow(() -> ApiException.validation(
+                        List.of(new FieldProblem("product_id", "unknown_product", "No such item."))));
+        ledger.lock(branch, product.id());
+        addStock(UUID.randomUUID(), branch, product, qty, day, IMPORT_NOTE);
+    }
+
     /** One opening movement at the branch's average and its entry against opening balance equity, as the import's opening stock. */
-    private UUID addStock(UUID id, UUID branch, ProductSnapshot product, BigDecimal qty, LocalDate today) {
+    private UUID addStock(UUID id, UUID branch, ProductSnapshot product, BigDecimal qty, LocalDate today, String from) {
         long cost = ledger.averageCost(branch, product.id());
         UUID movementId = ledger.record(
                         today,
-                        List.of(new Movement(branch, product.id(), "opening", qty, cost, SOURCE, id, null, null, NOTE)))
+                        List.of(new Movement(branch, product.id(), "opening", qty, cost, SOURCE, id, null, null, from)))
                 .getFirst();
         long value = Quantities.value(qty, cost);
         books.post(new Posting(
                 branch,
                 today,
-                "Quick add " + id.toString().substring(0, 8),
-                "Opening stock from Quick add",
+                from + " " + id.toString().substring(0, 8),
+                "Opening stock from " + from,
                 SOURCE,
                 id,
                 SOURCE + ":" + id,

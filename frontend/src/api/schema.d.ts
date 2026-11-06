@@ -726,108 +726,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/imports/issues/{issue_id}/ask-customer": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Mark an issue as a question for the customer, or no longer one */
-        put: operations["askCustomerAboutImportIssue"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/imports/issues/{issue_id}/resolve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Resolve one issue: edit, leave the row out, accept the suggestion, link, override a warning or map the value (FR-IMP-05) */
-        post: operations["resolveImportIssue"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/imports/runs/{run_id}/issues": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** The review queue of an import run, in commit order, open issues by default (FR-IMP-05) */
-        get: operations["listImportIssues"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/imports/runs/{run_id}/issues/bulk-resolve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Resolve every open issue of one code in the run, or in one of its files, the same way (FR-IMP-05) */
-        post: operations["bulkResolveImportIssues"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/imports/runs/{run_id}/questions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** The numbered questions for the customer, with file and line and no value of a row */
-        get: operations["listImportQuestions"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/imports/runs/{run_id}/questions.csv": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** The same questions as a CSV file to send to the customer; audited */
-        get: operations["exportImportQuestions"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/ledger/payment-methods": {
         parameters: {
             query?: never;
@@ -6238,7 +6136,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Import items from CSV for a new client: dry run first, then apply; administrators only (#146) */
+        /** Import items from CSV: dry run first, then apply (#146); with qty, how many there are now at branch_id, added as opening stock (retail.stocktake.commit there) under an Idempotency-Key (issue #870) */
         post: operations["importRetailProducts"];
         delete?: never;
         options?: never;
@@ -6709,23 +6607,6 @@ export interface paths {
         put?: never;
         /** Quick add: a new item (or one already in the list) and stock added at a branch as opening stock, in one transaction; the stock also needs retail.stocktake.commit there (issue #632, ADR-101); M */
         post: operations["quickAddRetailItem"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/retail/quick-add/list": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Add many items: every row one Quick add at one branch, in one transaction under one Idempotency-Key; a refused row names its row_index and saves nothing of the list (issue #870, ADR-101); M */
-        post: operations["quickAddRetailItemList"];
         delete?: never;
         options?: never;
         head?: never;
@@ -10343,125 +10224,6 @@ export interface components {
             /** @description answers: this app answered /version there; not_found: the name has no DNS record; no_answer: the name exists but nothing answered in time or the connection failed; wrong_answer: something answered, but not this app (http_status says what) */
             outcome?: string;
         };
-        ImportAskCustomerRequest: {
-            ask_customer: boolean;
-            /** Format: int32 */
-            version: number;
-        };
-        ImportBulkResolveOutcome: {
-            /** Format: uuid */
-            bulk_id?: string;
-            /** Format: int32 */
-            resolved?: number;
-            /** Format: int32 */
-            rows_validated?: number;
-        };
-        ImportBulkResolveRequest: {
-            /**
-             * Format: uuid
-             * @description One batch of the run, or every batch
-             */
-            batch_id?: string;
-            code: string;
-            note?: string;
-            /** @description edit_value, exclude_row, accept_suggestion, override or ask_customer */
-            resolution: string;
-            value?: string;
-        };
-        /** @description One issue of the review queue; its message never holds a value of a row */
-        ImportIssue: {
-            ask_customer?: boolean;
-            /** Format: uuid */
-            batch_id?: string;
-            code?: string;
-            /** @description The template's field, or null for the whole row */
-            field?: string;
-            /** Format: uuid */
-            id?: string;
-            /**
-             * Format: int32
-             * @description The line of the file
-             */
-            line?: number;
-            message?: string;
-            /** @description The kind of the resolution that resolved it */
-            resolution?: string;
-            /** Format: uuid */
-            resolution_id?: string;
-            /** Format: uuid */
-            row_id?: string;
-            /** @description info, warning or blocking */
-            severity?: string;
-            /** @description open or resolved */
-            status?: string;
-            /** @description The engine's suggestion, never personal: {"value": "1501"}, or {"review": "as_uploaded"} for a row that changed */
-            suggestion?: {
-                [key: string]: Record<string, never>;
-            };
-            /**
-             * Format: int32
-             * @description Name it when resolving; another resolver's version is version_conflict
-             */
-            version?: number;
-        };
-        ImportIssuePage: {
-            items?: components["schemas"]["ImportIssue"][];
-            next_cursor?: string;
-        };
-        /** @description One question for the customer, without any value of a row */
-        ImportQuestion: {
-            code?: string;
-            field?: string;
-            file?: string;
-            /** Format: int32 */
-            line?: number;
-            message?: string;
-            /** Format: int32 */
-            number?: number;
-        };
-        ImportQuestionList: {
-            items?: components["schemas"]["ImportQuestion"][];
-        };
-        ImportResolveOutcome: {
-            /** @description The issues of the row as they now are */
-            issues?: components["schemas"]["ImportIssue"][];
-            /**
-             * Format: int32
-             * @description The mapping version a map_value made
-             */
-            mapping_version?: number;
-            resolution?: string;
-            /** Format: uuid */
-            resolution_id?: string;
-            /**
-             * Format: int32
-             * @description Rows validated again
-             */
-            rows_validated?: number;
-        };
-        ImportResolveRequest: {
-            /**
-             * Format: uuid
-             * @description link_member: a record the business holds
-             */
-            link_member_id?: string;
-            /**
-             * Format: uuid
-             * @description link_row: another row of the run
-             */
-            link_row_id?: string;
-            /** @description Required for override and exclude_row */
-            note?: string;
-            /** @description edit_value, exclude_row, accept_suggestion, link_row, link_member, override or map_value */
-            resolution: string;
-            /** @description edit_value: the text in place of the cell (empty leaves the field empty); map_value: the value the cell stands for */
-            value?: string;
-            /**
-             * Format: int32
-             * @description The issue's version as read
-             */
-            version: number;
-        };
         ImportSmsOptOutsRequest: {
             /** @description Default true: report what would happen and change nothing */
             dry_run?: boolean;
@@ -10514,7 +10276,7 @@ export interface components {
         };
         InsightsColumn: {
             key?: string;
-            /** @description text, money, count, date, days, basis_points, or id: a record id (loan_id, member_id) for a link, not drawn as a column and left out of the CSV (issue #863) */
+            /** @description text, money, count, date, days or basis_points */
             kind?: string;
             label?: string;
         };
@@ -17261,13 +17023,37 @@ export interface components {
             /** Format: int32 */
             version?: number;
         };
+        /** @description A list kept on the phone offline: its stock is dated the day it was made, judged as every entry kept offline is (RetailOfflineEntry) */
+        RetailProductImportOffline: {
+            /**
+             * Format: date-time
+             * @description When the list was made on the phone
+             */
+            occurred_at: string;
+            /**
+             * Format: date-time
+             * @description The server's time when the phone was last online
+             */
+            online_as_of: string;
+        };
         RetailProductImportRequest: {
-            /** @description The CSV text: a header row, then one item per row. Columns code, description, category, unit, sell_price and optionally cost_price (only with retail.profit.read). Comma, semicolon or tab separated. */
+            /**
+             * Format: uuid
+             * @description Issue #870: where the qty of every row goes; defaults to the caller's one branch
+             */
+            branch_id?: string;
+            /** @description The CSV text: a header row, then one item per row. Columns code, description, category, unit, sell_price and optionally cost_price (only with retail.profit.read). Comma, semicolon or tab separated. Issue #870: optionally qty, how many there are now at branch_id, and stock_only (yes) to add qty to the item of that name and unit instead of a new item */
             csv: string;
+            offline?: components["schemas"]["RetailProductImportOffline"];
         };
         RetailProductImportResult: {
             /** Format: int32 */
             added?: number;
+            /**
+             * Format: uuid
+             * @description Issue #870: where the quantities go; null when no row has one
+             */
+            branch_id?: string;
             /** @description Categories that are new (would be created on a dry run, were created on an apply) */
             categories_created?: string[];
             dry_run?: boolean;
@@ -17278,17 +17064,26 @@ export interface components {
             rows_read?: number;
             /** Format: int32 */
             skipped?: number;
+            /**
+             * Format: int32
+             * @description Issue #870: rows whose qty goes to an item already in the list (outcome stock)
+             */
+            stock_added?: number;
             units_created?: string[];
         };
         RetailProductImportRow: {
             /** @description Empty on a dry run for a row whose code the category makes; the made code once applied (issue #493) */
             code?: string;
             description?: string;
+            /** @description Issue #870: the code of the item already in the list that a skipped or stock row names */
+            existing_code?: string;
             /** Format: int32 */
             line?: number;
             message?: string;
-            /** @description added, skipped (the code exists already or repeats in the file) or error */
+            /** @description added, stock (issue #870: qty added to the item already in the list), skipped (the code or the name exists already or repeats in the file) or error */
             outcome?: string;
+            /** @description Issue #870: the quantity the row adds at the branch; null when it adds none */
+            qty?: string;
         };
         RetailProductPage: {
             items?: components["schemas"]["RetailProduct"][];
@@ -17743,75 +17538,6 @@ export interface components {
             unit?: string;
             /** @description True when this add made the Piece unit */
             unit_made?: boolean;
-        };
-        /** @description Issue #870: the list saved, one result per row in the order sent */
-        RetailQuickAddList: {
-            /**
-             * Format: uuid
-             * @description Where the stock went; null when no row had a quantity
-             */
-            branch_id?: string;
-            /**
-             * Format: uuid
-             * @description The list's own id, also the source of its offline audit row
-             */
-            id?: string;
-            /**
-             * Format: int32
-             * @description How many rows made a new item
-             */
-            items_made?: number;
-            rows?: components["schemas"]["RetailQuickAdd"][];
-            /**
-             * Format: int32
-             * @description How many rows added stock to an item already in the list
-             */
-            stock_added?: number;
-        };
-        /** @description Issue #870: Add many items. Every row is one Quick add at branch_id, all in one transaction under one Idempotency-Key: a refused row names its row_index, its fields as rows[i].field, and nothing of the list is saved */
-        RetailQuickAddListRequest: {
-            /**
-             * Format: uuid
-             * @description Where the stock of every row goes; defaults to the caller's one branch
-             */
-            branch_id?: string;
-            offline?: components["schemas"]["RetailOfflineEntry"];
-            rows: components["schemas"]["RetailQuickAddListRow"][];
-        };
-        /** @description Issue #870: one row of Add many items, the fields of Quick add without packages or paid_from. With product_id, an item already in the list, only qty is added and the other item fields are ignored */
-        RetailQuickAddListRow: {
-            /**
-             * Format: uuid
-             * @description Left out: the item goes under General, made when the business has none
-             */
-            category_id?: string;
-            /**
-             * Format: int64
-             * @description Left out: 0, set by the first restock
-             */
-            cost_minor?: number;
-            /** @description The new item's name; required without product_id */
-            description?: string;
-            /**
-             * Format: uuid
-             * @description An item already in the list: add qty to its stock instead of a new item of that name
-             */
-            product_id?: string;
-            /**
-             * @description How many there are now at the list's branch, added as opening stock; more than 0 with product_id; left out, no stock is recorded for this row
-             * @example 12
-             */
-            qty?: string;
-            /**
-             * Format: int64
-             * @description Required without product_id
-             */
-            sell_minor?: number;
-            /**
-             * Format: uuid
-             * @description Left out: the shop's piece unit (Piece or pc), made when the business has none
-             */
-            unit_id?: string;
         };
         /** @description As RetailPackRequest: a size, or what it holds and how many */
         RetailQuickAddPack: {
@@ -23497,157 +23223,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SetupHelperStatus"];
-                };
-            };
-        };
-    };
-    askCustomerAboutImportIssue: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                issue_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ImportAskCustomerRequest"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ImportIssue"];
-                };
-            };
-        };
-    };
-    resolveImportIssue: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                issue_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ImportResolveRequest"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ImportResolveOutcome"];
-                };
-            };
-        };
-    };
-    listImportIssues: {
-        parameters: {
-            query?: {
-                status?: string;
-                code?: string;
-                batch_id?: string;
-                ask_customer?: boolean;
-                limit?: number;
-                cursor?: string;
-            };
-            header?: never;
-            path: {
-                run_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ImportIssuePage"];
-                };
-            };
-        };
-    };
-    bulkResolveImportIssues: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                run_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ImportBulkResolveRequest"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ImportBulkResolveOutcome"];
-                };
-            };
-        };
-    };
-    listImportQuestions: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                run_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ImportQuestionList"];
-                };
-            };
-        };
-    };
-    exportImportQuestions: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                run_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/csv": string;
                 };
             };
         };
@@ -32849,8 +32424,6 @@ export interface operations {
             query?: {
                 query?: string;
                 category_id?: string;
-                /** @description Only items in this unit: their own unit, or an active package of it (issue #863) */
-                unit_id?: string;
                 active?: boolean;
                 branch_id?: string;
                 limit?: number;
@@ -32952,7 +32525,9 @@ export interface operations {
                 /** @description Let the app make the codes (owner decision D45, issue #562): every row gets its category's next code and the file's code column is not read. Off by default: a row's code is kept and a blank one is made */
                 make_codes?: boolean;
             };
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -33916,32 +33491,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailQuickAdd"];
-                };
-            };
-        };
-    };
-    quickAddRetailItemList: {
-        parameters: {
-            query?: never;
-            header?: {
-                "Idempotency-Key"?: string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RetailQuickAddListRequest"];
-            };
-        };
-        responses: {
-            /** @description One result per row, in the order sent */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RetailQuickAddList"];
                 };
             };
         };
@@ -35692,8 +35241,6 @@ export interface operations {
                 to?: string;
                 /** @description Only these movement kinds, for example usage and damage (#145) */
                 kind?: string[];
-                /** @description Only the short lines of committed stock counts, the rows behind Stock health's Found missing (issue #863) */
-                found_missing?: boolean;
                 newest_first?: boolean;
                 limit?: number;
                 cursor?: string;
