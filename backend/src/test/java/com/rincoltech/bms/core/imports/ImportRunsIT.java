@@ -84,6 +84,8 @@ class ImportRunsIT extends IntegrationTest {
             }
             runs.transition(run.id(), "uploaded");
             runs.transition(run.id(), "in_review");
+            // Ready needs a stored dry run since #132.
+            runs.dryRun(run.id(), (r, b, s, c) -> Map.of(), operator);
             runs.transition(run.id(), "ready");
             return runs.recordPreImportDump(run.id(), "pre-import-fabricated.dump", Instant.now(), SHA);
         });
@@ -149,6 +151,8 @@ class ImportRunsIT extends IntegrationTest {
             assertCode(() -> runs.transition(run.id(), "parsing"), "invalid_status_transition");
             runs.transition(run.id(), "uploaded");
             runs.transition(run.id(), "in_review");
+            assertCode(() -> runs.transition(run.id(), "ready"), "dry_run_required");
+            runs.dryRun(run.id(), (r, b, s, c) -> Map.of(), operator);
             Run ready = runs.transition(run.id(), "ready");
             assertThat(ready.status()).isEqualTo("ready");
             assertCode(() -> runs.transition(run.id(), "committed"), "invalid_status_transition");
@@ -200,6 +204,7 @@ class ImportRunsIT extends IntegrationTest {
             Run r = runs.open(operator);
             runs.transition(r.id(), "uploaded");
             runs.transition(r.id(), "in_review");
+            runs.dryRun(r.id(), (x, b, s, c) -> Map.of(), operator);
             return runs.transition(r.id(), "ready");
         });
         as(t, () -> {

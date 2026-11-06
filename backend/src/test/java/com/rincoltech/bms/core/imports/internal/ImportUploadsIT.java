@@ -318,6 +318,8 @@ class ImportUploadsIT extends IntegrationTest {
         refused(() -> as(t, () -> runs.transition(runId, "ready")), "invalid_status_transition");
         Batch cancelled = as(t, () -> uploads.cancelBatch(failed.id()));
         assertThat(cancelled.status()).isEqualTo("cancelled");
+        // Ready needs a stored dry run since #132.
+        as(t, () -> runs.dryRun(runId, (r, b, s, c) -> Map.of(), operator));
         assertThat(as(t, () -> runs.transition(runId, "ready")).status()).isEqualTo("ready");
         refused(() -> upload(t, runId, "late.csv", TestFiles.csv("Code\nFAB-9\n"), null), "invalid_status_transition");
     }

@@ -1,8 +1,10 @@
 package com.rincoltech.bms.core.imports.internal;
 
 import com.rincoltech.bms.core.imports.BatchWriter;
+import com.rincoltech.bms.core.imports.ImportForecast;
 import com.rincoltech.bms.core.imports.ImportTemplate;
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -109,6 +111,58 @@ class FixtureShopTemplate implements ImportTemplate {
             between.run();
         }
         return "items".equals(entitySet) && keys.contains(EXISTING_ITEM) ? Set.of(EXISTING_ITEM) : Set.of();
+    }
+
+    /** The one branch the fixture's opening journals are posted to: the test business's head office. */
+    static final String BRANCH = "HQ";
+
+    // JUSTIFICATION-A3: issue #132 adds the forecast to the template contract; the fixture predicts by its own rules.
+    /**
+     * The fixture's predicted balances (issue #132), by rules made up for the test: a stock take ({@code adjustment}) puts
+     * its quantity on hand at the value it is paid at, and a sale to a named buyer is owed (a receivable). Each makes one
+     * opening journal of the head office, {@code inventory} and {@code trade_debtors}, debit and credit alike. The
+     * integration test's writer posts by the same rules, so the preview must equal the ledger after the commit.
+     */
+    @Override
+    public ImportForecast forecast() {
+        return new ImportForecast() {
+            BigDecimal qty = BigDecimal.ZERO;
+            long value;
+            long owed;
+            boolean stock;
+
+            @Override
+            public void row(String entitySet, Map<String, Object> values) {
+                if (!"sales".equals(entitySet)) {
+                    return;
+                }
+                long amount = (Long) values.get("amount");
+                if ("adjustment".equals(values.get("kind"))) {
+                    stock = true;
+                    qty = qty.add((BigDecimal) values.get("qty"));
+                    value = Math.addExact(value, amount);
+                } else if (values.get("customer") != null) {
+                    owed = Math.addExact(owed, amount);
+                }
+            }
+
+            @Override
+            public Balances balances() {
+                List<Journal> journals = new ArrayList<>();
+                if (value != 0) {
+                    journals.add(new Journal(BRANCH, "inventory", value, value));
+                }
+                if (owed != 0) {
+                    journals.add(new Journal(BRANCH, "trade_debtors", owed, owed));
+                }
+                return new Balances(
+                        stock ? List.of(new Stock(BRANCH, qty, value)) : List.of(),
+                        owed == 0 ? List.of() : List.of(new Amount(BRANCH, owed)),
+                        List.of(),
+                        List.of(),
+                        journals);
+            }
+        };
     }
 
     @Override
