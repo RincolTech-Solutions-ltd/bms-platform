@@ -18,6 +18,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.slf4j.Logger;
@@ -37,7 +38,7 @@ import tools.jackson.databind.ObjectMapper;
  * sent. Public by design: Resend calls it, with no session. It trusts nothing it has not checked. The body must carry a
  * Svix signature made with {@code BMS_RESEND_WEBHOOK_SECRET}, over the message id, its timestamp and the exact body, and
  * the timestamp must be within five minutes of now; anything else gets 401 and writes nothing. With the secret unset the
- * route answers 404.
+ * route answers 503 and logs one warning (issue #767): it never accepts an unsigned event.
  *
  * <p>A bounce ({@code email.bounced}), a complaint ({@code email.complained}) or a send Resend refused because the address
  * is on its suppression list ({@code email.suppressed}) becomes one row of the platform audit log
@@ -51,6 +52,11 @@ import tools.jackson.databind.ObjectMapper;
  * account, so the others (and any event with no tag, such as an email sent by SMTP or Resend's test event) are answered
  * 200 and dropped. A hard bounce, a complaint and a suppressed send also carry {@code recipient_hash}, the address's
  * keyed hash from {@link EmailSuppressions}, which stops later sends to it (ADR-117 decision 9); a soft bounce does not.
+ *
+ * <p>A bounce or a complaint also marks its own outbox row failed, with {@code last_error} {@code bounced} or
+ * {@code complained} (issue #767, migration V138): the definer function finds the row by the {@code outbox_id} and
+ * {@code tenant_id} tags together, so one business's event never touches another's row. The body is read as a
+ * {@link JsonNode}, a lenient type, because Resend adds fields the strict request mapping would refuse.
  */
 @RestController
 @RequestMapping("/api/v1/platform/webhooks")
@@ -77,6 +83,8 @@ class ResendWebhookController {
     private final String environment;
     private final org.springframework.jdbc.core.simple.JdbcClient jdbc;
     private final EmailSuppressions suppressions;
+    /** Set once the first call without a secret is logged, so Resend's retries never fill the log. */
+    private final AtomicBoolean unsetLogged = new AtomicBoolean();
 
     ResendWebhookController(
             PlatformAuditLog audit,
@@ -114,7 +122,16 @@ class ResendWebhookController {
     @Transactional
     ResponseEntity<Void> receive(HttpServletRequest request) throws IOException {
         if (secret.length == 0) {
-            throw ApiException.notFound();
+            // Never accepts an unsigned event. 503, not 404, so Resend keeps retrying until the operator sets the
+            // secret, and one warning in the log rather than one per retry (issue #767).
+            if (unsetLogged.compareAndSet(false, true)) {
+                log.warn("Resend webhook called but BMS_RESEND_WEBHOOK_SECRET is unset; answering 503 until it is set");
+            }
+            throw new ApiException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "webhook_not_configured",
+                    "Not configured",
+                    "This webhook has no signing secret on this host.");
         }
         byte[] raw;
         try (InputStream in = request.getInputStream()) {
@@ -185,7 +202,20 @@ class ResendWebhookController {
         details.values().removeIf(java.util.Objects::isNull);
         UUID tenant = uuidOrNullAsUuid(tags.get("tenant_id"));
         audit.record(action, null, tenant, details);
-        log.info("resend {} recorded: outbox={}", type, details.get("outbox_id"));
+        // JUSTIFICATION-A3: issue #767's one new step, the row itself marked failed (by id and business, from the tags).
+        UUID outboxId = uuidOrNullAsUuid(tags.get("outbox_id"));
+        String row = outboxId == null || action.equals(SUPPRESSED)
+                ? "none"
+                : jdbc.sql("SELECT notification_outbox_mark_undelivered(?, CAST(? AS uuid), ?, ?)")
+                        .params(
+                                outboxId,
+                                tenant,
+                                action.equals(BOUNCED) ? "bounced" : "complained",
+                                java.sql.Timestamp.from(clock.now()))
+                        .query(String.class)
+                        .single();
+        // The recipient's domain only, never the address.
+        log.info("resend {} recorded: outbox={} domain={} row={}", type, outboxId, details.get("recipient_domain"), row);
         return ResponseEntity.noContent().build();
     }
 
