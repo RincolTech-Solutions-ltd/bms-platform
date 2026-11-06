@@ -1352,7 +1352,9 @@ Added by `V141__import_review_queue.sql` (issue #131, FR-IMP-05, chapter 13 sect
   by #139.
 - **`import_issues`** gains `version integer NOT NULL DEFAULT 1` (optimistic concurrency), `ask_customer boolean NOT NULL
   DEFAULT false`, `suggested_value jsonb` (`{"value": ...}` or `{"review": "as_uploaded"}`, never personal) and `resolution_id`
-  (FK `(tenant_id, resolution_id)` to `import_issue_resolutions`). `bms_app` gets `UPDATE` on `status`, `version`,
+  (FK `(tenant_id, resolution_id)` to `import_issue_resolutions`, added `NOT VALID` like V139's batch key, and so is
+  `import_rows_excluded_fk` below: no earlier row has one, the validation scan is a query under forced row security that an
+  owner without BYPASSRLS cannot run, and every row written afterwards is checked). `bms_app` gets `UPDATE` on `status`, `version`,
   `ask_customer` and `resolution_id` only. `UNIQUE (batch_id, source_row_no, ordinal)` replaces `UNIQUE (batch_id, ordinal)`:
   the ordinal now counts within the row, so one row's issues are written again without renumbering the batch, in the same
   order. The trigger `import_issues_batch_kept` now refuses an update for a `committed` batch too.

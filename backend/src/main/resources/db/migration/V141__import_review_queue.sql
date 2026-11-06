@@ -82,8 +82,11 @@ ALTER TABLE import_issues
     -- {"value": "<text>"} for a value to put in the field, or {"review": "as_uploaded"} for a changed row; never personal.
     ADD COLUMN suggested_value jsonb   CHECK (suggested_value IS NULL OR jsonb_typeof(suggested_value) = 'object'),
     ADD COLUMN resolution_id   uuid,
+    -- NOT VALID, as V139's batch key: every issue stored before this migration has no resolution, and the scan validation
+    -- runs is a query under the forced row security of import_issues, which raises for an owner without BYPASSRLS and no
+    -- app.tenant_id bound (MigrationOrderIT migrates that way). Every row inserted or updated from now on is checked.
     ADD CONSTRAINT import_issues_resolution_fk
-        FOREIGN KEY (tenant_id, resolution_id) REFERENCES import_issue_resolutions (tenant_id, id);
+        FOREIGN KEY (tenant_id, resolution_id) REFERENCES import_issue_resolutions (tenant_id, id) NOT VALID;
 ALTER TABLE import_issues DROP CONSTRAINT import_issues_batch_id_ordinal_key;
 ALTER TABLE import_issues ADD CONSTRAINT import_issues_row_ordinal UNIQUE (batch_id, source_row_no, ordinal);
 GRANT UPDATE (status, version, ask_customer, resolution_id) ON import_issues TO bms_app;
@@ -94,8 +97,9 @@ ALTER TABLE import_rows
     ADD COLUMN linked_row_id    uuid,
     -- A record of the business the template's vertical holds; the core has no table to point at.
     ADD COLUMN linked_member_id uuid,
+    -- NOT VALID for the same reason: no row stored before this migration is excluded.
     ADD CONSTRAINT import_rows_excluded_fk
-        FOREIGN KEY (tenant_id, excluded_by) REFERENCES import_issue_resolutions (tenant_id, id);
+        FOREIGN KEY (tenant_id, excluded_by) REFERENCES import_issue_resolutions (tenant_id, id) NOT VALID;
 GRANT UPDATE (excluded_by, linked_row_id, linked_member_id) ON import_rows TO bms_app;
 
 -- No issue of a committed batch is written, changed or removed, by a validation, a resolution or a cascade from its row. The
