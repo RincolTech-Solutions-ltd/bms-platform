@@ -83,9 +83,9 @@ describe('Add many items on a laptop', () => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     await openLayout(page, 'layout/add-many.html', page.locator('#am-name-1'));
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
-    const name = await page.locator('#am-name-1').boundingBox();
-    const sell = await page.locator('#am-sell-1').boundingBox();
-    expect(Math.abs((sell?.y ?? 0) - (name?.y ?? 0)), 'name and selling price on one line').toBeLessThan(40);
+    // The cells start on one line; a label that wraps (the runner's fonts differ) may push its own box down, not the cell.
+    const top = (id: string) => page.evaluate((x) => document.getElementById(x)?.closest('.field')?.getBoundingClientRect().top ?? -1, id);
+    expect(Math.abs((await top('am-sell-1')) - (await top('am-name-1'))), 'name and selling price on one line').toBeLessThan(1);
     expect(await misfits(page)).toEqual([]);
     await page.close();
   });
