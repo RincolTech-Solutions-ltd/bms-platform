@@ -36,8 +36,9 @@ ALTER TABLE import_runs
     ADD COLUMN dry_run_by              uuid,
     ADD COLUMN dry_run_stamp           char(32)     CHECK (dry_run_stamp ~ '^[0-9a-f]{32}$'),
     ADD COLUMN dry_run_preview_matches boolean,
-    -- What the writer the dry run rehearsed is (BatchWriter.identity): a commit or resume with another one is refused.
-    ADD COLUMN dry_run_writer          varchar(300),
+    -- The writers the dry run rehearsed, one line per batch: the template and version, its class, the entity set and the
+    -- loader's identity. A commit or resume whose writers are not these is refused. Template code names, never data.
+    ADD COLUMN dry_run_writer          text,
     ADD CONSTRAINT import_runs_dry_run_whole
         CHECK ((dry_run_report IS NULL) = (dry_run_at IS NULL)
                AND (dry_run_report IS NULL) = (dry_run_by IS NULL)

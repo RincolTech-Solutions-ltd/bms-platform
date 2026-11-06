@@ -45,8 +45,10 @@ import tools.jackson.databind.ObjectMapper;
  * {@link ImportRuns} over {@code import_runs}, {@code import_batches} and {@code platform_import_settings} (migration V127).
  *
  * <p>The commit is a sequence of transactions, never one: the start (guards, then {@code ready} to {@code committing}),
- * one per batch, and the finish. A batch takes {@code pg_advisory_xact_lock} on the business's import key before it reads
- * its own status, so two resumes of one run, or a resume racing a commit, write each batch once. The kill switch and the
+ * one per batch, and the finish. A batch takes {@code pg_try_advisory_xact_lock} on the business's import key before it
+ * reads its own status, so two resumes of one run, or a resume racing a commit, write each batch once; a batch that finds
+ * the key taken (a dry run of the business) is answered with {@code IMPORT_IN_PROGRESS} at once, never after a wait (Lead
+ * ruling 5 on #869). The writer of each batch is its template's loader, which the service resolves. The kill switch and the
  * halt are read with a fresh snapshot each time (read committed), so an operator's stop is seen within 1,000 rows.
  *
  * <p>The commit loop itself has an owner (issue #779): a commit or a resume first takes {@code pg_try_advisory_lock}, a
@@ -177,7 +179,7 @@ class ImportRunService implements ImportRuns {
             }
             // Ready means a stored dry run of the run as it is now, which did not fail and matched the preview (#132).
             if (RunStates.READY.equals(status)) {
-                requireDryRun(runId, null);
+                requireDryRun(runId, false);
             }
             setStatus(runId, status);
             audit(runId, "core.import_run.status_changed", Map.of("status", run.status()), Map.of("status", status));
@@ -312,12 +314,12 @@ class ImportRunService implements ImportRuns {
     // ---------------------------------------------------------------------------------------------
 
     @Override
-    public CommitOutcome commit(UUID runId, BatchWriter writer) {
+    public CommitOutcome commit(UUID runId) {
         requireNoTransaction();
         try (LoopClaim claim = claimLoop()) {
             List<String> trading;
             try {
-                trading = tx.execute(s -> start(runId, writer));
+                trading = tx.execute(s -> start(runId));
             } catch (DuplicateKeyException e) {
                 // import_runs_one_committing: another run of this business is committing.
                 throw importInProgress();
@@ -330,7 +332,7 @@ class ImportRunService implements ImportRuns {
                         "The tenant already has live transactions (" + String.join(", ", trading)
                                 + "); an import needs the trading override.");
             }
-            return writeBatches(runId, writer, claim);
+            return writeBatches(runId, claim);
         }
     }
 
@@ -338,7 +340,7 @@ class ImportRunService implements ImportRuns {
      * The guards and the move to {@code committing}, in one transaction. Returns the areas that trade when the guard
      * refuses, so the refusal's audit row commits before the caller throws; empty when the run moved on.
      */
-    private List<String> start(UUID runId, BatchWriter writer) {
+    private List<String> start(UUID runId) {
         Run run = find(runId, true);
         if (RunStates.COMMITTING.equals(run.status())) {
             throw importInProgress();
@@ -349,8 +351,8 @@ class ImportRunService implements ImportRuns {
         }
         requireCommitPossible(run);
         // The run cannot change once ready, so this holds; checked again so no path commits without its dry run (#132),
-        // and only with the writer the dry run rehearsed (review of #869).
-        requireDryRun(runId, writer);
+        // and only with the writers the dry run rehearsed (Lead ruling 4 on #869).
+        requireDryRun(runId, true);
         List<String> trading = probes.stream()
                 .filter(LiveRecordProbe::hasLiveRecords)
                 .map(LiveRecordProbe::area)
@@ -376,7 +378,7 @@ class ImportRunService implements ImportRuns {
     }
 
     @Override
-    public CommitOutcome resume(UUID runId, BatchWriter writer) {
+    public CommitOutcome resume(UUID runId) {
         requireNoTransaction();
         // A live commit loop owns the business's loop lock, inside a batch and between two: going on now would clear
         // the operator's halt under it, and the halt would be lost (reviews of #736, issue #779).
@@ -388,9 +390,9 @@ class ImportRunService implements ImportRuns {
                             + RunStates.words(run.status()) + ".");
                 }
                 requireCommitPossible(run);
-                // The run's own commits make its dry run's stamp differ now, so only the writer is checked again: a
-                // resume goes on with the writer the dry run rehearsed (review of #869).
-                requireSameWriter(runId, writer);
+                // The run's own commits make its dry run's stamp differ now, so only the writers are checked again: a
+                // resume goes on with the writers the dry run rehearsed for the batches left (Lead ruling 4 on #869).
+                requireSameWriters(runId);
                 // The trading guard is not asked again: it was passed when the run started, and the batches this run
                 // already committed are the business's records now.
                 jdbc.sql(
@@ -399,7 +401,7 @@ class ImportRunService implements ImportRuns {
                         .update();
                 audit(runId, "core.import_run.resumed", Map.of(), Map.of("halt_requested", false));
             });
-            return writeBatches(runId, writer, claim);
+            return writeBatches(runId, claim);
         }
     }
 
@@ -440,38 +442,62 @@ class ImportRunService implements ImportRuns {
 
     private String stamp(UUID runId) {
         return jdbc.sql(STAMP)
-                .params(codeVersion, runId, runId, runId, runId, runId)
+                .params(codeVersion + "\n" + writersIdentity(runId), runId, runId, runId, runId, runId)
                 .query(String.class)
                 .single();
     }
 
-    @Override
-    public DryRun dryRun(UUID runId, BatchWriter writer, UUID by) {
-        requireNoTransaction();
-        if (writer == null || by == null) {
-            throw new IllegalArgumentException("a dry run needs the writer and who runs it");
+    /**
+     * The identity of the writers the commit would resolve for the run's batches (Lead ruling 4 on #869), part of the stamp:
+     * a template or loader changed since the dry run makes it stop counting. A run with a batch read without a mapping has
+     * none; its dry run is refused, so it never has a stamp to compare.
+     */
+    private String writersIdentity(UUID runId) {
+        try {
+            return preview.writers(runId).identity();
+        } catch (ApiException e) {
+            return "no writers: " + e.code();
         }
-        String[] inputs = new String[1];
+    }
+
+    @Override
+    public DryRun dryRun(UUID runId, UUID by) {
+        requireNoTransaction();
+        if (by == null) {
+            throw new IllegalArgumentException("a dry run needs who runs it");
+        }
+        String[] inputs = new String[2];
         List<CommitReport> parts = new ArrayList<>();
         String[] failure = new String[1];
-        String identity = writer.identity();
-        // The business's commit loop is held for the whole dry run, as a commit holds it (review of #869). A commit or
-        // resume of the business meanwhile is refused at once with IMPORT_IN_PROGRESS, and so is this dry run while one
-        // runs: neither ever waits on the other's locks until a statement timeout.
+        // The business's commit loop is held for the whole dry run, as a commit holds it, and each batch takes the
+        // business's import key with pg_try_advisory_xact_lock (Lead ruling 5 on #869). A commit or resume of the
+        // business meanwhile is answered at once with IMPORT_IN_PROGRESS, and so is this dry run while one runs:
+        // neither ever waits on the other until a statement timeout.
         try (LoopClaim claim = claimLoop()) {
             tx.executeWithoutResult(outer -> {
                 // Rolled back whatever happens inside: the dry run writes nothing (spec section 3.6).
                 outer.setRollbackOnly();
                 requireDryRunPossible(find(runId, false));
+                // The writers the commit resolves, never a caller's (Lead ruling 4 on #869). They are read before any
+                // batch, with the run's personal values, so a failure here is the dry run's, never a batch's.
+                PreviewService.Writers writers = preview.writers(runId);
                 inputs[0] = stamp(runId);
-                // Read before any batch, so a failure here is the dry run's, never reported as a batch's.
+                inputs[1] = writers.identity();
                 PreviewService.RunPrivacy privacy = preview.privacy(runId);
                 for (PendingBatch batch : pending(runId)) {
                     try {
-                        CommitReport part = writeBatch(runId, batch, writer, true, privacy);
+                        CommitReport part = writeBatch(runId, batch, writers.of(batch.id()), true, privacy);
                         if (part != null) {
                             parts.add(part);
                         }
+                    } catch (ApiException e) {
+                        if ("IMPORT_IN_PROGRESS".equals(e.code())) {
+                            // The business's import key is taken: answered at once, nothing stored (Lead ruling 5).
+                            throw e;
+                        }
+                        failure[0] = "batch " + batch.seq() + " failed ("
+                                + e.getClass().getSimpleName() + ")";
+                        break;
                     } catch (RuntimeException e) {
                         // As a real run, the first batch that fails stops it; the report names the batch and the kind
                         // of failure, never the message, which may quote a row. The outer transaction is rolled back.
@@ -504,7 +530,7 @@ class ImportRunService implements ImportRuns {
                                    version = version + 1, updated_at = now()
                              WHERE id = ?
                             """)
-                    .params(mapper.writeValueAsString(report), by, inputs[0], matches, cut(identity), runId)
+                    .params(mapper.writeValueAsString(report), by, inputs[0], matches, inputs[1], runId)
                     .update();
             return storedDryRun(runId).orElseThrow();
         });
@@ -567,33 +593,37 @@ class ImportRunService implements ImportRuns {
                 .optional();
     }
 
-    /** A writer's identity as the column holds it: at most 300 characters. */
-    private static String cut(String identity) {
-        String s = identity == null ? "-" : identity;
-        return s.length() > 300 ? s.substring(0, 300) : s;
-    }
-
-    /** Refuses a writer other than the one the run's dry run rehearsed (review of #869). */
-    private void requireSameWriter(UUID runId, BatchWriter writer) {
+    /**
+     * Refuses a run whose writers are not those its dry run rehearsed (Lead ruling 4 on #869): every batch left to write
+     * must be written by the template, version, class, entity set and loader the dry run wrote it with. Only the batches
+     * left are compared, so a resume after some batches committed is checked too.
+     */
+    private void requireSameWriters(UUID runId) {
         String rehearsed = jdbc.sql("SELECT dry_run_writer FROM import_runs WHERE id = ?")
                 .param(runId)
                 .query(String.class)
                 .optional()
                 .orElse(null);
-        if (rehearsed == null || !rehearsed.equals(cut(writer.identity()))) {
+        List<String> lines = rehearsed == null ? List.of() : List.of(rehearsed.split("\n"));
+        String now = preview.writers(runId).identity();
+        boolean same = rehearsed != null && (now.isEmpty() || lines.containsAll(List.of(now.split("\n"))));
+        if (!same) {
             throw new ApiException(
                     HttpStatus.CONFLICT,
                     "dry_run_writer_differs",
                     "Not the rehearsed writer",
-                    "This import's dry run rehearsed another writer; run the dry run with the one that commits.");
+                    "A template or loader of this import changed since its dry run; run the dry run again.");
         }
     }
 
     /**
      * Refuses a run that may not be made ready or committed: no dry run that counts, a failed one, one the preview did not
-     * match, or, with a writer, one that rehearsed another writer.
+     * match, or, at the commit, one whose writers are not those the dry run rehearsed.
      */
-    private void requireDryRun(UUID runId, BatchWriter writer) {
+    private void requireDryRun(UUID runId, boolean writers) {
+        if (writers) {
+            requireSameWriters(runId);
+        }
         DryRun dry = storedDryRun(runId).orElse(null);
         if (dry == null || !dry.current()) {
             throw new ApiException(
@@ -616,9 +646,6 @@ class ImportRunService implements ImportRuns {
                     "preview_differs",
                     "Preview differs",
                     "The balances of the dry run differ from the preview's; the import is not ready.");
-        }
-        if (writer != null) {
-            requireSameWriter(runId, writer);
         }
     }
 
@@ -799,9 +826,11 @@ class ImportRunService implements ImportRuns {
         return restored ? reason : "claim_connection_lost";
     }
 
-    private CommitOutcome writeBatches(UUID runId, BatchWriter writer, LoopClaim claim) {
+    private CommitOutcome writeBatches(UUID runId, LoopClaim claim) {
         List<PendingBatch> pending = tx.execute(s -> pending(runId));
-        // The run's personal values, read once for every batch's report (review of #869).
+        // The writers the service resolves from the batches' templates (Lead ruling 4 on #869), and the run's personal
+        // values, read once for every batch's report (review of #869).
+        PreviewService.Writers writers = tx.execute(s -> preview.writers(runId));
         PreviewService.RunPrivacy privacy = tx.execute(s -> preview.privacy(runId));
         for (PendingBatch batch : pending) {
             // Without the claim a resume may already own the business: write nothing more, leave the run resumable.
@@ -816,7 +845,7 @@ class ImportRunService implements ImportRuns {
                 return CommitOutcome.HALTED;
             }
             try {
-                tx.executeWithoutResult(s -> writeBatch(runId, batch, writer, false, privacy));
+                tx.executeWithoutResult(s -> writeBatch(runId, batch, writers.of(batch.id()), false, privacy));
             } catch (Halted e) {
                 tx.executeWithoutResult(s -> audit(
                         runId,
@@ -872,7 +901,17 @@ class ImportRunService implements ImportRuns {
      */
     private CommitReport writeBatch(
             UUID runId, PendingBatch batch, BatchWriter writer, boolean dryRun, PreviewService.RunPrivacy privacy) {
-        jdbc.sql("SELECT pg_advisory_xact_lock(" + LOCK_KEY + ")").query().singleRow();
+        // Never a wait (Lead ruling 5 on #869). A dry run holds the key to its end, so a commit that waited would fail
+        // at the statement timeout as a failed batch; whoever finds the key taken is answered at once instead.
+        if (!jdbc.sql("SELECT pg_try_advisory_xact_lock(" + LOCK_KEY + ")")
+                .query(Boolean.class)
+                .single()) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "IMPORT_IN_PROGRESS",
+                    "Import in progress",
+                    "Another import is being written for this business; try again when it ends.");
+        }
         Map<String, Object> row = jdbc.sql(
                         "SELECT status, source_filename, row_count FROM import_batches WHERE id = ? FOR UPDATE")
                 .param(batch.id())

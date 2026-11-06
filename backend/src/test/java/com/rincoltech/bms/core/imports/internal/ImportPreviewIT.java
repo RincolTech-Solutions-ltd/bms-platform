@@ -55,6 +55,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -178,15 +179,43 @@ class ImportPreviewIT extends IntegrationTest {
         return new Run(runId, batches);
     }
 
-    /** A run of the business in review with one batch that holds no row. */
+    /** A run of the business in review with one batch that holds no row, bound to the fixture mapping's item list. */
     UUID emptyRun(TestDatabase.Fixture f) {
-        return as(f, () -> {
-            UUID run = runs.open(operator).id();
-            runs.addBatch(run, 1);
-            runs.transition(run, "uploaded");
-            runs.transition(run, "in_review");
-            return run;
+        UUID mapping = as(
+                f,
+                () -> mappings.latest("fab-shop")
+                        .orElseGet(() -> mappings.save("fab-shop", ImportCatalogueTest.mapping(), operator, null))
+                        .id());
+        UUID run = as(f, () -> {
+            UUID id = runs.open(operator).id();
+            runs.addBatch(id, 1);
+            return id;
         });
+        TestDatabase.owner()
+                .sql("""
+                        UPDATE import_batches SET mapping_id = ?, mapping_source = 'item_list', template_key = ?,
+                               template_version = 1
+                         WHERE run_id = ?
+                        """)
+                .params(mapping, FixtureShopTemplate.KEY, run)
+                .update();
+        as(f, () -> runs.transition(run, "uploaded"));
+        as(f, () -> runs.transition(run, "in_review"));
+        return run;
+    }
+
+    /**
+     * The run, after setting the writer the fixture template's loader runs (Lead ruling 4 on #869): the commit and the dry
+     * run resolve every batch's writer from its template, so a test's writer reaches them only that way.
+     */
+    static UUID scripted(UUID runId, BatchWriter writer) {
+        FixtureShopTemplate.SCRIPT = writer;
+        return runId;
+    }
+
+    @AfterEach
+    void unscript() {
+        FixtureShopTemplate.SCRIPT = null;
     }
 
     /** The rows of a batch the commit would write, with their lines and typed values. */
@@ -483,7 +512,7 @@ class ImportPreviewIT extends IntegrationTest {
         BatchWriter writer = writer(t, 0);
         Map<String, Object> before = traces(t);
 
-        DryRun dry = as(t, () -> runs.dryRun(run.runId(), writer, operator));
+        DryRun dry = as(t, () -> runs.dryRun(scripted(run.runId(), writer), operator));
 
         // Every table's rows, every sequence and the business's files are as they were, the audit log and the ledger
         // included; only the run row's columns change.
@@ -511,7 +540,7 @@ class ImportPreviewIT extends IntegrationTest {
         // The real run on the same input, with the same writer.
         as(t, () -> runs.transition(run.runId(), "ready"));
         as(t, () -> runs.recordPreImportDump(run.runId(), "pre-import-fabricated.dump", Instant.now(), SHA));
-        assertThat(as(t, () -> runs.commit(run.runId(), writer))).isEqualTo(CommitOutcome.COMMITTED);
+        assertThat(as(t, () -> runs.commit(run.runId()))).isEqualTo(CommitOutcome.COMMITTED);
         CommitReport real = as(t, () -> runs.commitReport(run.runId()));
 
         assertThat(real.mode()).isEqualTo(CommitReport.COMMIT);
@@ -618,7 +647,7 @@ class ImportPreviewIT extends IntegrationTest {
             return counts;
         };
 
-        DryRun dry = as(t, () -> runs.dryRun(run.runId(), careless, operator));
+        DryRun dry = as(t, () -> runs.dryRun(scripted(run.runId(), careless), operator));
 
         String text = dry.report().render();
         String stored = TestDatabase.owner()
@@ -651,7 +680,7 @@ class ImportPreviewIT extends IntegrationTest {
     void aStoredDryRunStopsCountingOnceAResolutionAMappingABatchOrAnotherRunsCommitChanges() throws IOException {
         Run run = validated(t);
         BatchWriter writer = writer(t, 0);
-        as(t, () -> runs.dryRun(run.runId(), writer, operator));
+        as(t, () -> runs.dryRun(scripted(run.runId(), writer), operator));
         assertThat(current(run.runId())).isTrue();
 
         // A resolution: an override of the warning on line 4 of the item list.
@@ -667,7 +696,7 @@ class ImportPreviewIT extends IntegrationTest {
                         twin.id(), new Resolution("override", twin.version(), null, null, null, note), operator));
         assertThat(current(run.runId())).isFalse();
         assertCode(() -> as(t, () -> runs.transition(run.runId(), "ready")), "dry_run_required");
-        as(t, () -> runs.dryRun(run.runId(), writer, operator));
+        as(t, () -> runs.dryRun(scripted(run.runId(), writer), operator));
         assertThat(current(run.runId())).isTrue();
 
         // A mapping version: a value map from the review moves the run's batches to version 2.
@@ -679,17 +708,17 @@ class ImportPreviewIT extends IntegrationTest {
         Resolution map = new Resolution("map_value", returned.version(), "adjustment", null, null, null);
         as(t, () -> review.resolve(returned.id(), map, operator));
         assertThat(current(run.runId())).isFalse();
-        as(t, () -> runs.dryRun(run.runId(), writer, operator));
+        as(t, () -> runs.dryRun(scripted(run.runId(), writer), operator));
         assertThat(current(run.runId())).isTrue();
 
         // Another run's commit into the business: the business's records are not those the dry run saw.
         UUID second = emptyRun(t);
-        as(t, () -> runs.dryRun(second, NOTHING, operator));
+        as(t, () -> runs.dryRun(scripted(second, NOTHING), operator));
         as(t, () -> runs.transition(second, "ready"));
         as(t, () -> runs.recordPreImportDump(second, "pre-import-fabricated.dump", Instant.now(), SHA));
-        assertThat(as(t, () -> runs.commit(second, NOTHING))).isEqualTo(CommitOutcome.COMMITTED);
+        assertThat(as(t, () -> runs.commit(second))).isEqualTo(CommitOutcome.COMMITTED);
         assertThat(current(run.runId())).isFalse();
-        as(t, () -> runs.dryRun(run.runId(), writer, operator));
+        as(t, () -> runs.dryRun(scripted(run.runId(), writer), operator));
         assertThat(current(run.runId())).isTrue();
 
         // A batch: the buyer book cancelled.
@@ -698,79 +727,114 @@ class ImportPreviewIT extends IntegrationTest {
         assertCode(() -> as(t, () -> runs.transition(run.runId(), "ready")), "dry_run_required");
 
         // A dry run of the run as it is now counts again, and the run may be made ready.
-        as(t, () -> runs.dryRun(run.runId(), writer, operator));
+        as(t, () -> runs.dryRun(scripted(run.runId(), writer), operator));
         assertThat(as(t, () -> runs.transition(run.runId(), "ready")).status()).isEqualTo("ready");
     }
 
+    // JUSTIFICATION-A3: the Lead's ruling 4 on #869: the writers are the templates', and a change of them is refused.
     @Test
-    void aRunCommitsOnlyWithTheWriterItsDryRunRehearsed() throws IOException {
+    void theWritersAreTheTemplatesAndARunWhoseWritersChangedIsNotCommitted() throws IOException {
         Run run = validated(t);
-        BatchWriter writer = writer(t, 0);
-        // The same code under another name: what the commit is given is not what was rehearsed.
-        BatchWriter rehearsed = new BatchWriter() {
-            @Override
-            public Map<String, Object> write(UUID runId, UUID batchId, int seq, Checkpoint checkpoint) {
-                return writer.write(runId, batchId, seq, checkpoint);
-            }
-
-            @Override
-            public String identity() {
-                return "fabricated rehearsal writer";
-            }
-        };
-        DryRun dry = as(t, () -> runs.dryRun(run.runId(), rehearsed, operator));
-        assertThat(dry.writer()).isEqualTo("fabricated rehearsal writer");
+        DryRun dry = as(t, () -> runs.dryRun(scripted(run.runId(), writer(t, 0)), operator));
+        // A line per batch: its number, the template and version, the template's class, the entity set, the loader.
+        String loader = FixtureShopTemplate.class.getName() + "$$Lambda";
+        assertThat(dry.writer().split("\n"))
+                .containsExactly(
+                        "1 fixture_shop_v1 " + FixtureShopTemplate.class.getName() + " items " + loader,
+                        "2 fixture_shop_v1 " + FixtureShopTemplate.class.getName() + " customers " + loader,
+                        "3 fixture_shop_v1 " + FixtureShopTemplate.class.getName() + " sales " + loader);
         as(t, () -> runs.transition(run.runId(), "ready"));
         as(t, () -> runs.recordPreImportDump(run.runId(), "pre-import-fabricated.dump", Instant.now(), SHA));
+        // As if the dry run had rehearsed another template's loader: the commit refuses before it writes anything.
+        TestDatabase.owner()
+                .sql("UPDATE import_runs SET dry_run_writer = replace(dry_run_writer, ' sales ', ' fabricated_set ')"
+                        + " WHERE id = ?")
+                .param(run.runId())
+                .update();
         Map<String, Object> before = traces(t);
 
-        assertCode(() -> as(t, () -> runs.commit(run.runId(), writer)), "dry_run_writer_differs");
+        assertCode(() -> as(t, () -> runs.commit(run.runId())), "dry_run_writer_differs");
 
         assertThat(as(t, () -> runs.get(run.runId())).status()).isEqualTo("ready");
         assertThat(traces(t)).isEqualTo(before);
-        assertThat(as(t, () -> runs.commit(run.runId(), rehearsed))).isEqualTo(CommitOutcome.COMMITTED);
-        // The default identity is the writer's class without the JDK's per-process lambda suffix.
-        assertThat(writer.identity()).isEqualTo(ImportPreviewIT.class.getName() + "$$Lambda");
+        // A caller cannot pass a writer at all; a test's reaches the commit only through a test-only template.
+        assertThat(ImportRuns.class.getMethods())
+                .filteredOn(m -> List.of("commit", "resume", "dryRun").contains(m.getName()))
+                .allSatisfy(m -> assertThat(m.getParameterTypes()).doesNotContain(BatchWriter.class));
     }
 
+    // JUSTIFICATION-A3: the Lead's ruling 5 on #869: a dry run and a commit are answered at once, never kept waiting.
     @Test
     void aDryRunAndACommitOfTheBusinessNeverWaitOnEachOther() throws Exception {
         UUID ready = emptyRun(t);
-        as(t, () -> runs.dryRun(ready, NOTHING, operator));
+        as(t, () -> runs.dryRun(scripted(ready, NOTHING), operator));
         as(t, () -> runs.transition(ready, "ready"));
         as(t, () -> runs.recordPreImportDump(ready, "pre-import-fabricated.dump", Instant.now(), SHA));
         UUID reviewed = emptyRun(t);
-        CountDownLatch inside = new CountDownLatch(1);
-        CountDownLatch release = new CountDownLatch(1);
-        BatchWriter held = (runId, batchId, seq, checkpoint) -> {
-            inside.countDown();
-            try {
-                release.await(20, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-            return Map.of();
-        };
         ExecutorService pool = Executors.newSingleThreadExecutor();
         try {
-            Future<DryRun> dry = pool.submit(() -> as(t, () -> runs.dryRun(reviewed, held, operator)));
-            assertThat(inside.await(20, TimeUnit.SECONDS)).isTrue();
+            // A batch of the business is being written: the dry run finds the import key taken and is answered at once.
+            CountDownLatch holding = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            Future<?> holder = pool.submit(() -> as(
+                    t,
+                    () -> new TransactionTemplate(transactionManager).execute(s -> {
+                        jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended('core.imports:'"
+                                        + " || current_setting('app.tenant_id'), 0))")
+                                .query()
+                                .singleRow();
+                        holding.countDown();
+                        try {
+                            release.await(20, TimeUnit.SECONDS);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                        return null;
+                    })));
+            assertThat(holding.await(20, TimeUnit.SECONDS)).isTrue();
             long started = System.nanoTime();
             try {
-                // Refused at once, not after a lock wait: the dry run holds the business's commit loop.
-                assertCode(() -> as(t, () -> runs.commit(ready, NOTHING)), "IMPORT_IN_PROGRESS");
-                assertCode(() -> as(t, () -> runs.dryRun(ready, NOTHING, operator)), "IMPORT_IN_PROGRESS");
+                assertCode(() -> as(t, () -> runs.dryRun(reviewed, operator)), "IMPORT_IN_PROGRESS");
             } finally {
                 release.countDown();
             }
             assertThat(TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - started))
                     .isLessThan(10);
+            holder.get(60, TimeUnit.SECONDS);
+            assertThat(as(t, () -> runs.dryRunReport(reviewed)))
+                    .as("nothing stored")
+                    .isEmpty();
+
+            // A dry run is running: a commit and another dry run of the business are answered at once.
+            CountDownLatch inside = new CountDownLatch(1);
+            CountDownLatch done = new CountDownLatch(1);
+            FixtureShopTemplate.SCRIPT = (runId, batchId, seq, checkpoint) -> {
+                inside.countDown();
+                try {
+                    done.await(20, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return Map.of();
+            };
+            Future<DryRun> dry = pool.submit(() -> as(t, () -> runs.dryRun(reviewed, operator)));
+            assertThat(inside.await(20, TimeUnit.SECONDS)).isTrue();
+            long again = System.nanoTime();
+            try {
+                assertCode(() -> as(t, () -> runs.commit(ready)), "IMPORT_IN_PROGRESS");
+                assertCode(() -> as(t, () -> runs.dryRun(ready, operator)), "IMPORT_IN_PROGRESS");
+            } finally {
+                done.countDown();
+            }
+            assertThat(TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - again))
+                    .isLessThan(10);
             assertThat(dry.get(60, TimeUnit.SECONDS).current()).isTrue();
         } finally {
             pool.shutdownNow();
         }
+        FixtureShopTemplate.SCRIPT = NOTHING;
         assertThat(as(t, () -> runs.get(ready)).status()).isEqualTo("ready");
-        assertThat(as(t, () -> runs.commit(ready, NOTHING))).isEqualTo(CommitOutcome.COMMITTED);
+        assertThat(as(t, () -> runs.commit(ready))).isEqualTo(CommitOutcome.COMMITTED);
     }
 
     @Test
@@ -785,7 +849,7 @@ class ImportPreviewIT extends IntegrationTest {
         };
         Map<String, Object> before = traces(t);
 
-        DryRun dry = as(t, () -> runs.dryRun(run.runId(), failing, operator));
+        DryRun dry = as(t, () -> runs.dryRun(scripted(run.runId(), failing), operator));
 
         assertThat(traces(t)).isEqualTo(before);
         assertThat(dry.report().failure()).isEqualTo("batch 3 failed (IllegalStateException)");
@@ -798,7 +862,7 @@ class ImportPreviewIT extends IntegrationTest {
     void aDryRunThatDiffersFromThePreviewKeepsTheRunFromBeingReady() throws IOException {
         Run run = validated(t);
 
-        DryRun dry = as(t, () -> runs.dryRun(run.runId(), writer(t, 1), operator));
+        DryRun dry = as(t, () -> runs.dryRun(scripted(run.runId(), writer(t, 1)), operator));
 
         assertThat(dry.previewMatches()).isFalse();
         assertCode(() -> as(t, () -> runs.transition(run.runId(), "ready")), "preview_differs");
@@ -807,7 +871,7 @@ class ImportPreviewIT extends IntegrationTest {
     @Test
     void aDryRunIsRefusedOutsideReviewAndWhileAFileIsNotRead() {
         UUID draft = as(t, () -> runs.open(operator).id());
-        assertCode(() -> as(t, () -> runs.dryRun(draft, NOTHING, operator)), "run_not_open");
+        assertCode(() -> as(t, () -> runs.dryRun(draft, operator)), "run_not_open");
         UUID failed = as(t, () -> runs.open(operator).id());
         byte[] unread = TestFiles.csv("Name\nFAB\n");
         as(
@@ -821,7 +885,7 @@ class ImportPreviewIT extends IntegrationTest {
                                 operator,
                                 new ImportUploads.ParseOptions(null, Set.of("code"), Set.of()))));
         as(t, () -> runs.transition(failed, "in_review"));
-        assertCode(() -> as(t, () -> runs.dryRun(failed, NOTHING, operator)), "batch_not_parsed");
+        assertCode(() -> as(t, () -> runs.dryRun(failed, operator)), "batch_not_parsed");
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -832,14 +896,14 @@ class ImportPreviewIT extends IntegrationTest {
     void anotherBusinessCanNeitherPreviewNorDryRunNorReadTheStoredReports() throws IOException {
         Run run = validated(t);
         BatchWriter writer = writer(t, 0);
-        as(t, () -> runs.dryRun(run.runId(), writer, operator));
+        as(t, () -> runs.dryRun(scripted(run.runId(), writer), operator));
         as(t, () -> runs.transition(run.runId(), "ready"));
         as(t, () -> runs.recordPreImportDump(run.runId(), "pre-import-fabricated.dump", Instant.now(), SHA));
-        as(t, () -> runs.commit(run.runId(), writer));
+        as(t, () -> runs.commit(run.runId()));
 
         as(other, () -> {
             assertCode(() -> previews.preview(run.runId()), "not_found");
-            assertCode(() -> runs.dryRun(run.runId(), NOTHING, operator), "not_found");
+            assertCode(() -> runs.dryRun(run.runId(), operator), "not_found");
             assertCode(() -> runs.dryRunReport(run.runId()), "not_found");
             assertCode(() -> runs.commitReport(run.runId()), "not_found");
             return null;

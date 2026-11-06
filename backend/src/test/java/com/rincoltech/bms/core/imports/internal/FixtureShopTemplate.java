@@ -214,7 +214,16 @@ class FixtureShopTemplate implements ImportTemplate {
 
     @Override
     public BatchWriter loader(String entitySet) {
-        // The commit of #133 runs it; this fixture writes nothing.
-        return (runId, batchId, seq, checkpoint) -> Map.of("entity_set", entitySet, "written", 0);
+        // The commit and the dry run resolve it (Lead ruling 4 on #869). It writes nothing unless a test gives it the
+        // writer to run: the only way a test's writer reaches the commit, through a template, as the commit requires.
+        return (runId, batchId, seq, checkpoint) -> {
+            BatchWriter script = SCRIPT;
+            return script == null
+                    ? Map.of("entity_set", entitySet, "written", 0)
+                    : script.write(runId, batchId, seq, checkpoint);
+        };
     }
+
+    /** What a test has the fixture's loader do for every batch, or null for nothing; reset after each test. */
+    static volatile BatchWriter SCRIPT;
 }

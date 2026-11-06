@@ -1,5 +1,6 @@
 package com.rincoltech.bms.core.imports.internal;
 
+import com.rincoltech.bms.core.imports.BatchWriter;
 import com.rincoltech.bms.core.imports.ImportForecast;
 import com.rincoltech.bms.core.imports.ImportMappings;
 import com.rincoltech.bms.core.imports.ImportPreview;
@@ -165,6 +166,75 @@ class PreviewService implements ImportPreview {
                 records,
                 outcomes,
                 forecast.balances());
+    }
+
+    // JUSTIFICATION-A3: the Lead's ruling 4 on #869: the service resolves the writer from the run's templates.
+    /**
+     * The writers of a run (Lead ruling on #869): for each batch the commit writes, the loader of its template for the
+     * entity set its mapping source names, and their identity, one line per batch in order: its number, the template and
+     * version, the template's class, the entity set and the loader's {@link BatchWriter#identity()}. A caller never passes
+     * a writer, so the dry run rehearses exactly the code the commit runs.
+     */
+    record Writers(Map<UUID, BatchWriter> byBatch, String identity) {
+
+        BatchWriter of(UUID batchId) {
+            BatchWriter writer = byBatch.get(batchId);
+            if (writer == null) {
+                throw new IllegalStateException("no writer resolved for a batch of the run");
+            }
+            return writer;
+        }
+    }
+
+    /** The writers of the run's pending and parsed batches, inside the caller's transaction. */
+    Writers writers(UUID runId) {
+        List<BatchRow> batches = jdbc.sql("""
+                        SELECT id, seq, source_filename, mapping_id, mapping_source, template_key, template_version
+                          FROM import_batches
+                         WHERE run_id = ? AND status IN ('pending', 'parsed')
+                         ORDER BY seq
+                        """)
+                .param(runId)
+                .query((rs, n) -> new BatchRow(
+                        rs.getObject("id", UUID.class),
+                        rs.getInt("seq"),
+                        rs.getString("source_filename"),
+                        rs.getObject("mapping_id", UUID.class),
+                        rs.getString("mapping_source"),
+                        rs.getString("template_key"),
+                        (Integer) rs.getObject("template_version")))
+                .list();
+        Map<UUID, BatchWriter> byBatch = new LinkedHashMap<>();
+        Map<UUID, Map<String, Object>> documents = new HashMap<>();
+        StringBuilder identity = new StringBuilder();
+        for (BatchRow b : batches) {
+            if (b.mappingId() == null || b.templateKey() == null) {
+                throw new ApiException(
+                        HttpStatus.UNPROCESSABLE_CONTENT,
+                        "BATCH_HAS_NO_MAPPING",
+                        "Batch read without a mapping",
+                        "A file of this import was read without a mapping, so no template writes it; read it again"
+                                + " with one.");
+            }
+            ImportTemplate template = templates.require(b.templateKey(), b.templateVersion());
+            String set = entitySet(b, documents);
+            if (set == null) {
+                throw new IllegalStateException("a batch's mapping source names no entity set of its template");
+            }
+            BatchWriter loader = template.loader(set);
+            byBatch.put(b.id(), loader);
+            identity.append(b.seq())
+                    .append(' ')
+                    .append(template.id())
+                    .append(' ')
+                    .append(template.getClass().getName())
+                    .append(' ')
+                    .append(set)
+                    .append(' ')
+                    .append(loader.identity())
+                    .append('\n');
+        }
+        return new Writers(byBatch, identity.toString());
     }
 
     /** The one template the batches were read with, or null when none was read with a mapping. */

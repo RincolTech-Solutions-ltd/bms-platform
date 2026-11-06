@@ -143,19 +143,6 @@ public final class ImportReport {
         sink.checksum(checksum);
     }
 
-    /**
-     * This report in the framework's shape, for a run of the command itself; {@code ledger} gives an entry's debit and
-     * credit totals by its number.
-     */
-    public CommitReport toCommitReport(Function<String, long[]> ledger) {
-        CommitReport.Builder builder = new CommitReport.Builder(null);
-        into(builder, ledger);
-        if (failure != null) {
-            builder.fail(failure);
-        }
-        return builder.build(dryRun ? CommitReport.DRY_RUN : CommitReport.COMMIT);
-    }
-
     public String render() {
         StringBuilder out = new StringBuilder();
         out.append("import-retail report\n");

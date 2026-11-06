@@ -49,6 +49,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -289,9 +290,10 @@ public class RetailImporter {
      * This command's real path as the writer of one batch of the import framework (issue #132), until the retail template
      * of #135 gives each file its own batch: it imports the whole export directory in the batch's transaction (each file's
      * transaction joins it), for the business the framework bound, and tells the batch's report what this command's report
-     * holds. So the framework's dry run of a run is this path rolled back, and its report equals a real run's
-     * ({@link ImportReport#toCommitReport()}). A file that fails throws, so the batch, or the dry run, stops there. The
-     * checkpoint's kill switch is not read between rows: the command never read it either.
+     * holds, and the stock per branch the books hold. So the framework's dry run of a run is this path rolled back, and its
+     * report equals a real run's ({@link #toCommitReport(String, ImportReport)}). A file that fails throws, so the batch,
+     * or the dry run, stops there. The checkpoint's kill switch is not read between rows: the command never read it
+     * either. A template's loader for retail (#135) is this writer; until then a test-only template stands in.
      */
     public BatchWriter exportWriter(Path dir, LocalDate firstLiveDate) {
         // JUSTIFICATION-A3: the review of #869 asks for the export's content in the writer's identity and the ledger's
@@ -306,6 +308,7 @@ public class RetailImporter {
                     throw new IllegalStateException("the retail export stopped at a file");
                 }
                 report.into(checkpoint, RetailImporter.this::ledgerTotals);
+                branchStock(checkpoint);
                 return Map.of();
             }
 
@@ -326,7 +329,45 @@ public class RetailImporter {
      */
     public CommitReport toCommitReport(String tenantSlug, ImportReport report) {
         return tenants.callAsTenant(
-                tenantSlug, "retail", () -> transactions.execute(s -> report.toCommitReport(this::ledgerTotals)));
+                tenantSlug,
+                "retail",
+                () -> transactions.execute(s -> {
+                    CommitReport.Builder builder = new CommitReport.Builder(null);
+                    report.into(builder, this::ledgerTotals);
+                    branchStock(builder);
+                    if (report.failed()) {
+                        builder.fail("the retail export stopped at a file");
+                    }
+                    return builder.build(CommitReport.COMMIT);
+                }));
+    }
+
+    // JUSTIFICATION-A3: the Lead's ruling 2 on #869: the stock per branch in the retail report, read from the books.
+    /**
+     * Tells the report the stock of every branch as the books hold it now (Lead ruling 2 on #869): the quantity on hand,
+     * summed over the branch's products from the stock ledger, and the value the inventory account holds for the branch.
+     * In a dry run that is what the import wrote, read before the rollback; after a real run, what it committed.
+     */
+    private void branchStock(CommitReport.Sink sink) {
+        Map<UUID, String> codes = new HashMap<>();
+        branches.all().forEach(b -> codes.put(b.id(), b.code().toUpperCase(Locale.ROOT)));
+        Map<String, BigDecimal> qty = new TreeMap<>();
+        stock.positions().forEach(p -> qty.merge(codes.getOrDefault(p.branchId(), "?"), p.balance(), BigDecimal::add));
+        Map<String, Long> value = new TreeMap<>();
+        jdbc.sql("""
+                        SELECT e.branch_id, coalesce(sum(l.debit - l.credit), 0) AS value
+                          FROM journal_lines l JOIN journal_entries e ON e.id = l.entry_id
+                          JOIN gl_accounts a ON a.id = l.account_id
+                         WHERE a.system_key = 'inventory'
+                         GROUP BY e.branch_id
+                        """)
+                .query((rs, n) -> value.merge(
+                        codes.getOrDefault(rs.getObject("branch_id", UUID.class), "?"), rs.getLong("value"), Long::sum))
+                .list();
+        Set<String> all = new TreeSet<>(qty.keySet());
+        all.addAll(value.keySet());
+        all.forEach(code ->
+                sink.stock(code, qty.getOrDefault(code, BigDecimal.ZERO).setScale(3), value.getOrDefault(code, 0L)));
     }
 
     /** An entry's debit and credit totals by its number, from its lines, in the caller's transaction. */

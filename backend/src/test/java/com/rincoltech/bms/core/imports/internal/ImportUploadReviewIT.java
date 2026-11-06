@@ -13,7 +13,6 @@ import com.rincoltech.bms.core.imports.ImportUploads.Upload;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.TenantContext;
 import java.io.ByteArrayInputStream;
-import java.util.Map;
 import java.util.UUID;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
@@ -113,10 +112,13 @@ class ImportUploadReviewIT extends IntegrationTest {
         UUID runId = as(() -> runs.open(operator).id());
         Batch batch = upload(runId, "fabricated.csv", CSV);
         as(() -> runs.transition(runId, "in_review"));
-        // Ready needs a stored dry run since #132.
-        as(() -> runs.dryRun(runId, (r, b, s, c) -> Map.of(), operator));
 
-        seams.afterFetch = () -> runs.transition(runId, "ready");
+        // Ready needs a dry run since #132, which a file read without a mapping cannot have (no template writes it).
+        // The run is moved on by the owner, as a second operator's ready would land, and the parse must still see it.
+        seams.afterFetch = () -> TestDatabase.owner()
+                .sql("UPDATE import_runs SET status = 'ready', ready_at = now() WHERE id = ?")
+                .param(runId)
+                .update();
         assertThatThrownBy(() -> as(() -> uploads.parse(batch.id(), null)))
                 .isInstanceOfSatisfying(
                         ApiException.class, e -> assertThat(e.code()).isEqualTo("invalid_status_transition"));

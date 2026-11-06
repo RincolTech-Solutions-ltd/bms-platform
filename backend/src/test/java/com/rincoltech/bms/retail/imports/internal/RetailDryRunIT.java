@@ -7,26 +7,38 @@ import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.core.documents.internal.StoredObjects;
 import com.rincoltech.bms.core.imports.CommitReport;
+import com.rincoltech.bms.core.imports.ImportForecast;
+import com.rincoltech.bms.core.imports.ImportMappings;
 import com.rincoltech.bms.core.imports.ImportRuns;
 import com.rincoltech.bms.core.imports.ImportRuns.DryRun;
+import com.rincoltech.bms.core.imports.ImportUploads;
+import com.rincoltech.bms.core.imports.ImportUploads.Upload;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.TenantContext;
+import com.rincoltech.bms.retail.stock.StockLedger;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.Supplier;
 import org.assertj.core.groups.Tuple;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -48,6 +60,18 @@ class RetailDryRunIT extends IntegrationTest {
     ImportRuns runs;
 
     @Autowired
+    ImportMappings mappings;
+
+    @Autowired
+    ImportUploads uploads;
+
+    @Autowired
+    StockLedger stock;
+
+    @Autowired
+    PlatformTransactionManager transactionManager;
+
+    @Autowired
     ApplicationContext context;
 
     TestDatabase.Fixture t;
@@ -64,19 +88,38 @@ class RetailDryRunIT extends IntegrationTest {
         return TenantContext.callAs(f.tenantId(), work);
     }
 
-    /** A run in review with one batch, the export, until #135 gives each file its own batch. */
+    @AfterEach
+    void sample() {
+        RetailExportTestTemplate.DIR = RetailImportIT.SAMPLE;
+    }
+
+    /**
+     * A run in review with one batch, a sheet naming the export, read with a mapping of the test-only template whose loader
+     * is the export's writer (until #135 gives each file its own batch). The commit and the dry run resolve the writer from
+     * that template (Lead ruling 4 on #869).
+     */
     UUID inReview(TestDatabase.Fixture f) {
+        byte[] sheet = "Export\nfabricated export\n".getBytes(StandardCharsets.UTF_8);
         return as(f, () -> {
+            UUID mapping = mappings.latest("retail-export")
+                    .orElseGet(() -> mappings.save("retail-export", RetailExportTestTemplate.mapping(), operator, null))
+                    .id();
             UUID run = runs.open(operator).id();
-            runs.addBatch(run, 1);
-            runs.transition(run, "uploaded");
+            uploads.upload(
+                    run,
+                    new Upload(
+                            "fab-export.csv",
+                            new ByteArrayInputStream(sheet),
+                            sheet.length,
+                            operator,
+                            mappings.parseOptions(mapping, "export")));
             runs.transition(run, "in_review");
             return run;
         });
     }
 
     DryRun dryRun(UUID run) {
-        return as(t, () -> runs.dryRun(run, importer.exportWriter(RetailImportIT.SAMPLE, null), operator));
+        return as(t, () -> runs.dryRun(run, operator));
     }
 
     @Test
@@ -126,6 +169,61 @@ class RetailDryRunIT extends IntegrationTest {
                 .isTrue();
         assertThat(committed.render().replace("committed, one transaction per batch", "x"))
                 .isEqualTo(report.render().replace("dry run, every write rolled back", "x"));
+        stockAndJournalsAreTheBooks(report);
+    }
+
+    // JUSTIFICATION-A3: the Lead's ruling 2 on #869: stock per branch and each journal checked against the books.
+    /**
+     * Lead ruling 2 on #869: the dry run's stock per branch is the stock after the real run, on every branch the export has
+     * (three), read from the stock ledger and the inventory account, not from a report; and each journal's debit and
+     * credit are what its lines in the ledger hold, balanced.
+     */
+    void stockAndJournalsAreTheBooks(CommitReport report) {
+        Map<UUID, String> codes = new HashMap<>();
+        TestDatabase.owner()
+                .sql("SELECT id, code FROM branches WHERE tenant_id = ?")
+                .param(t.tenantId())
+                .query((rs, n) -> codes.put(rs.getObject("id", UUID.class), rs.getString("code")))
+                .list();
+        Map<String, BigDecimal> onHand = new TreeMap<>();
+        as(
+                t,
+                () -> new TransactionTemplate(transactionManager).execute(s -> {
+                    stock.positions().forEach(p -> onHand.merge(codes.get(p.branchId()), p.balance(), BigDecimal::add));
+                    return null;
+                }));
+        assertThat(report.stock()).hasSizeGreaterThanOrEqualTo(2);
+        for (ImportForecast.Stock s : report.stock()) {
+            assertThat(onHand.getOrDefault(s.branch(), BigDecimal.ZERO))
+                    .as("stock on hand at %s", s.branch())
+                    .isEqualByComparingTo(s.qty());
+            assertThat(TestDatabase.owner()
+                            .sql("""
+                                    SELECT coalesce(sum(l.debit - l.credit), 0)
+                                      FROM journal_lines l JOIN journal_entries e ON e.id = l.entry_id
+                                      JOIN branches b ON b.id = e.branch_id JOIN gl_accounts a ON a.id = l.account_id
+                                     WHERE l.tenant_id = ? AND a.system_key = 'inventory' AND b.code = ?
+                                    """)
+                            .params(t.tenantId(), s.branch())
+                            .query(Long.class)
+                            .single())
+                    .as("inventory at %s", s.branch())
+                    .isEqualTo(s.valueMinor());
+        }
+        for (CommitReport.Journal j : report.journals()) {
+            Map<String, Object> lines = TestDatabase.owner()
+                    .sql("""
+                            SELECT sum(l.debit) AS debit, sum(l.credit) AS credit
+                              FROM journal_entries e JOIN journal_lines l ON l.entry_id = e.id
+                             WHERE e.tenant_id = ? AND e.entry_no = ?
+                            """)
+                    .params(t.tenantId(), j.entryNo())
+                    .query()
+                    .singleRow();
+            assertThat(((Number) lines.get("debit")).longValue()).isEqualTo(j.debitMinor());
+            assertThat(((Number) lines.get("credit")).longValue()).isEqualTo(j.creditMinor());
+            assertThat(j.debitMinor()).isEqualTo(j.creditMinor());
+        }
     }
 
     // JUSTIFICATION-A3: the review of #869 asks that a changed export is not the export rehearsed; a test case.
@@ -142,12 +240,15 @@ class RetailDryRunIT extends IntegrationTest {
                 .as("the same files")
                 .isEqualTo(sample);
         UUID run = inReview(t);
-        assertThat(dryRun(run).writer()).isEqualTo(sample);
+        RetailExportTestTemplate.DIR = copy;
+        assertThat(dryRun(run).writer()).endsWith(" export " + sample + "\n");
+        assertThat(as(t, () -> runs.dryRunReport(run)).orElseThrow().current()).isTrue();
 
-        // A file changed after the dry run: the writer is not the one rehearsed.
+        // A file changed after the dry run: the writer is not the one rehearsed, so the dry run no longer counts.
         Path balances = copy.resolve("balances.jsonl");
         Files.writeString(balances, Files.readString(balances) + "\n");
         assertThat(importer.exportWriter(copy, null).identity()).isNotEqualTo(sample);
+        assertThat(as(t, () -> runs.dryRunReport(run)).orElseThrow().current()).isFalse();
         String laterStart = importer.exportWriter(RetailImportIT.SAMPLE, LocalDate.of(2026, 10, 1))
                 .identity();
         assertThat(laterStart).as("another first live day").isNotEqualTo(sample);
@@ -179,9 +280,7 @@ class RetailDryRunIT extends IntegrationTest {
         dryRun(run);
 
         as(other, () -> {
-            for (Runnable call : List.<Runnable>of(
-                    () -> runs.dryRunReport(run),
-                    () -> runs.dryRun(run, importer.exportWriter(RetailImportIT.SAMPLE, null), operator))) {
+            for (Runnable call : List.<Runnable>of(() -> runs.dryRunReport(run), () -> runs.dryRun(run, operator))) {
                 try {
                     call.run();
                     throw new AssertionError("another business reached the run");
