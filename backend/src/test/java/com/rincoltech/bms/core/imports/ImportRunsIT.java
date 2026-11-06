@@ -607,13 +607,15 @@ class ImportRunsIT extends IntegrationTest {
 
     @Test
     void aTradingBusinessIsRefusedWithoutTheOverrideAndAllowedWithItBothAudited() {
+        // The business starts trading after the run's dry run: a dry run into a trading business needs the approved
+        // override itself (ImportPreviewIT), so the commit's own guard is what this test reaches.
+        Run run = readyRun(1);
         as(
                 t,
                 () -> new TransactionTemplate(transactionManager).execute(s -> {
                     postJournal("lending");
                     return null;
                 }));
-        Run run = readyRun(1);
         as(t, () -> {
             assertCode(() -> runs.commit(script(run.id(), NOTHING)), "TENANT_TRADING");
             return null;

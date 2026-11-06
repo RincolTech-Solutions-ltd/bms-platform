@@ -15,6 +15,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -30,6 +31,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.info.BuildProperties;
+import org.springframework.boot.info.GitProperties;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
@@ -105,8 +107,16 @@ class ImportRunService implements ImportRuns {
     private final ObjectMapper mapper;
     private final PreviewService preview;
 
-    /** The application's version and commit: a dry run of another build no longer counts (review of #869). */
+    private final PlatformTransactionManager transactions;
+
+    /**
+     * The application's build and commit: a dry run of another build no longer counts, and a run rehearsed on one build
+     * neither starts nor resumes on another (reviews of #869). Null when the server knows neither; it then refuses both.
+     */
     private final String codeVersion;
+
+    /** How long a dry run into a business that trades, under the approved override, may hold its rows (review of #869). */
+    private volatile Duration tradingDryRunLimit;
 
     ImportRunService(
             JdbcClient jdbc,
@@ -118,17 +128,50 @@ class ImportRunService implements ImportRuns {
             ObjectMapper mapper,
             PreviewService preview,
             ObjectProvider<BuildProperties> build,
-            @Value("${bms.git-sha:}") String gitSha) {
+            ObjectProvider<GitProperties> git,
+            @Value("${bms.git-sha:}") String gitSha,
+            @Value("${bms.imports.dry-run-limit-while-trading:60s}") Duration tradingDryRunLimit) {
         this.jdbc = jdbc;
         this.dataSource = dataSource;
+        this.transactions = transactions;
         this.tx = new TransactionTemplate(transactions);
         this.audit = audit;
         this.platformAudit = platformAudit;
         this.probes = List.copyOf(probes);
         this.mapper = mapper;
         this.preview = preview;
-        BuildProperties info = build.getIfAvailable();
-        this.codeVersion = (info == null ? "unknown" : info.getVersion() + "@" + info.getTime()) + "|" + gitSha;
+        this.codeVersion = codeVersion(build.getIfAvailable(), git.getIfAvailable(), gitSha);
+        this.tradingDryRunLimit = tradingDryRunLimit;
+    }
+
+    /**
+     * The build's version and time and the commit's SHA (the image's, else the build's {@code git.properties}); null when
+     * none of them is known, so a server that cannot tell its build apart never takes another build's dry run for its own.
+     */
+    static String codeVersion(BuildProperties build, GitProperties git, String imageGitSha) {
+        String sha = imageGitSha != null && !imageGitSha.isBlank()
+                ? imageGitSha.strip()
+                : git == null ? null : git.getCommitId();
+        if (build == null && sha == null) {
+            return null;
+        }
+        return (build == null ? "-" : build.getVersion() + "@" + build.getTime()) + "|" + (sha == null ? "-" : sha);
+    }
+
+    /** For a test of the time limit only. */
+    void tradingDryRunLimit(Duration limit) {
+        this.tradingDryRunLimit = limit;
+    }
+
+    private void requireKnownBuild() {
+        if (codeVersion == null) {
+            throw new ApiException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "build_unknown",
+                    "Build unknown",
+                    "This server cannot tell which build of the import code it runs, so it neither dry runs nor commits"
+                            + " an import.");
+        }
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -316,6 +359,7 @@ class ImportRunService implements ImportRuns {
     @Override
     public CommitOutcome commit(UUID runId) {
         requireNoTransaction();
+        requireKnownBuild();
         try (LoopClaim claim = claimLoop()) {
             List<String> trading;
             try {
@@ -353,11 +397,7 @@ class ImportRunService implements ImportRuns {
         // The run cannot change once ready, so this holds; checked again so no path commits without its dry run (#132),
         // and only with the writers the dry run rehearsed (Lead ruling 4 on #869).
         requireDryRun(runId, true);
-        List<String> trading = probes.stream()
-                .filter(LiveRecordProbe::hasLiveRecords)
-                .map(LiveRecordProbe::area)
-                .sorted()
-                .toList();
+        List<String> trading = tradingAreas();
         if (!trading.isEmpty() && !run.tradingOverrideApproved()) {
             audit(
                     runId,
@@ -377,9 +417,19 @@ class ImportRunService implements ImportRuns {
         return List.of();
     }
 
+    /** The areas in which the business already trades, by every {@link LiveRecordProbe}; empty when it does not. */
+    private List<String> tradingAreas() {
+        return probes.stream()
+                .filter(LiveRecordProbe::hasLiveRecords)
+                .map(LiveRecordProbe::area)
+                .sorted()
+                .toList();
+    }
+
     @Override
     public CommitOutcome resume(UUID runId) {
         requireNoTransaction();
+        requireKnownBuild();
         // A live commit loop owns the business's loop lock, inside a batch and between two: going on now would clear
         // the operator's halt under it, and the halt would be lost (reviews of #736, issue #779).
         try (LoopClaim claim = claimLoop()) {
@@ -390,8 +440,9 @@ class ImportRunService implements ImportRuns {
                             + RunStates.words(run.status()) + ".");
                 }
                 requireCommitPossible(run);
-                // The run's own commits make its dry run's stamp differ now, so only the writers are checked again: a
-                // resume goes on with the writers the dry run rehearsed for the batches left (Lead ruling 4 on #869).
+                // The run's own commits make its dry run's stamp differ now, so the build and the writers are checked
+                // again: a resume goes on only on the build, and with the writers, the dry run rehearsed for the
+                // batches left (Lead ruling 4 and the review of d8d1e5b on #869).
                 requireSameWriters(runId);
                 // The trading guard is not asked again: it was passed when the run started, and the batches this run
                 // already committed are the business's records now.
@@ -442,7 +493,7 @@ class ImportRunService implements ImportRuns {
 
     private String stamp(UUID runId) {
         return jdbc.sql(STAMP)
-                .params(codeVersion + "\n" + writersIdentity(runId), runId, runId, runId, runId, runId)
+                .params(rehearsal(writersIdentity(runId)), runId, runId, runId, runId, runId)
                 .query(String.class)
                 .single();
     }
@@ -452,6 +503,11 @@ class ImportRunService implements ImportRuns {
      * a template or loader changed since the dry run makes it stop counting. A run with a batch read without a mapping has
      * none; its dry run is refused, so it never has a stamp to compare.
      */
+    /** What a dry run rehearses: a first line naming the build, then the writers' lines, one per batch. */
+    private String rehearsal(String writers) {
+        return "build " + codeVersion + "\n" + writers;
+    }
+
     private String writersIdentity(UUID runId) {
         try {
             return preview.writers(runId).identity();
@@ -466,6 +522,7 @@ class ImportRunService implements ImportRuns {
         if (by == null) {
             throw new IllegalArgumentException("a dry run needs who runs it");
         }
+        requireKnownBuild();
         String[] inputs = new String[2];
         List<CommitReport> parts = new ArrayList<>();
         String[] failure = new String[1];
@@ -474,7 +531,32 @@ class ImportRunService implements ImportRuns {
         // business meanwhile is answered at once with IMPORT_IN_PROGRESS, and so is this dry run while one runs:
         // neither ever waits on the other until a statement timeout.
         try (LoopClaim claim = claimLoop()) {
-            tx.executeWithoutResult(outer -> {
+            // The trading guard of the commit, asked before the dry run holds any row (review of d8d1e5b on #869): the
+            // writers' postings lock the business's ledger and stock rows until the outer rollback, so a business that
+            // trades is dry run only under the approved override, and then within a time limit, past which every
+            // statement of the dry run is refused and its staff's postings wait no longer.
+            boolean trading = Boolean.TRUE.equals(tx.execute(s -> {
+                Run run = find(runId, false);
+                requireDryRunPossible(run);
+                List<String> areas = tradingAreas();
+                if (!areas.isEmpty() && !run.tradingOverrideApproved()) {
+                    // As the commit's start refuses it, but with nothing audited: the dry run writes nothing.
+                    throw new ApiException(
+                            HttpStatus.CONFLICT,
+                            "TENANT_TRADING",
+                            "Business already trades",
+                            "The tenant already has live transactions (" + String.join(", ", areas)
+                                    + "); a dry run of an import into it needs the approved trading override.");
+                }
+                return !areas.isEmpty();
+            }));
+            TransactionTemplate outerTx = new TransactionTemplate(transactions);
+            long limitSeconds = Math.max(1, tradingDryRunLimit.toSeconds());
+            if (trading) {
+                outerTx.setTimeout(Math.toIntExact(limitSeconds));
+            }
+            long deadline = System.nanoTime() + Duration.ofSeconds(limitSeconds).toNanos();
+            outerTx.executeWithoutResult(outer -> {
                 // Rolled back whatever happens inside: the dry run writes nothing (spec section 3.6).
                 outer.setRollbackOnly();
                 requireDryRunPossible(find(runId, false));
@@ -482,7 +564,7 @@ class ImportRunService implements ImportRuns {
                 // batch, with the run's personal values, so a failure here is the dry run's, never a batch's.
                 PreviewService.Writers writers = preview.writers(runId);
                 inputs[0] = stamp(runId);
-                inputs[1] = writers.identity();
+                inputs[1] = rehearsal(writers.identity());
                 PreviewService.RunPrivacy privacy = preview.privacy(runId);
                 for (PendingBatch batch : pending(runId)) {
                     try {
@@ -501,8 +583,11 @@ class ImportRunService implements ImportRuns {
                     } catch (RuntimeException e) {
                         // As a real run, the first batch that fails stops it; the report names the batch and the kind
                         // of failure, never the message, which may quote a row. The outer transaction is rolled back.
-                        failure[0] = "batch " + batch.seq() + " failed ("
-                                + e.getClass().getSimpleName() + ")";
+                        failure[0] = trading && System.nanoTime() - deadline >= 0
+                                ? "batch " + batch.seq() + " stopped at the time limit of a dry run into a trading"
+                                        + " business (" + limitSeconds + "s)"
+                                : "batch " + batch.seq() + " failed ("
+                                        + e.getClass().getSimpleName() + ")";
                         break;
                     }
                 }
@@ -594,9 +679,10 @@ class ImportRunService implements ImportRuns {
     }
 
     /**
-     * Refuses a run whose writers are not those its dry run rehearsed (Lead ruling 4 on #869): every batch left to write
-     * must be written by the template, version, class, entity set and loader the dry run wrote it with. Only the batches
-     * left are compared, so a resume after some batches committed is checked too.
+     * Refuses a run whose writers are not those its dry run rehearsed (Lead ruling 4 on #869): the build must be the one
+     * the dry run ran on, and every batch left to write must be written by the template, version, class, entity set and
+     * loader the dry run wrote it with. Only the batches left are compared, so a resume after some batches committed is
+     * checked too (review of d8d1e5b: a loader's class name alone does not tell two builds apart).
      */
     private void requireSameWriters(UUID runId) {
         String rehearsed = jdbc.sql("SELECT dry_run_writer FROM import_runs WHERE id = ?")
@@ -605,14 +691,17 @@ class ImportRunService implements ImportRuns {
                 .optional()
                 .orElse(null);
         List<String> lines = rehearsed == null ? List.of() : List.of(rehearsed.split("\n"));
-        String now = preview.writers(runId).identity();
-        boolean same = rehearsed != null && (now.isEmpty() || lines.containsAll(List.of(now.split("\n"))));
+        List<String> now = List.of(rehearsal(preview.writers(runId).identity()).split("\n"));
+        boolean same = !lines.isEmpty()
+                && lines.getFirst().equals(now.getFirst())
+                && lines.containsAll(now.subList(1, now.size()));
         if (!same) {
             throw new ApiException(
                     HttpStatus.CONFLICT,
                     "dry_run_writer_differs",
                     "Not the rehearsed writer",
-                    "A template or loader of this import changed since its dry run; run the dry run again.");
+                    "The build, a template or a loader of this import changed since its dry run; run the dry run again"
+                            + " on this build, or, once it commits, resume it only on the build it was rehearsed on.");
         }
     }
 
@@ -672,8 +761,8 @@ class ImportRunService implements ImportRuns {
 
     /**
      * Whether the preview's predicted balances are the dry run's (review of #869): stock quantity and value, receivables,
-     * loan principal, loans and principal by arrears bucket, and each journal's debit and credit, all per branch, summed
-     * per key, in any order, a zero the same as none.
+     * loan principal, loans and principal by arrears bucket, all per branch and summed per key, and each journal's branch,
+     * kind, debit and credit, journal by journal; in any order, a zero the same as none.
      */
     static boolean sameBalances(ImportForecast.Balances predicted, ImportForecast.Balances written) {
         return figures(predicted).equals(figures(written));
@@ -692,11 +781,14 @@ class ImportRunService implements ImportRuns {
             sum(sums, key + "|loans", BigDecimal.valueOf(a.loans()));
             sum(sums, key + "|principal", BigDecimal.valueOf(a.principalMinor()));
         });
-        b.journals().forEach(j -> {
-            String key = "journal|" + j.branch() + "|" + j.kind();
-            sum(sums, key + "|debit", BigDecimal.valueOf(j.debitMinor()));
-            sum(sums, key + "|credit", BigDecimal.valueOf(j.creditMinor()));
-        });
+        // Each journal on its own, never summed: two of 500 are not one of 1000 (review of d8d1e5b). Equal journals are
+        // counted, so the comparison is of the two lists in any order; a journal of zeros is the same as none.
+        b.journals().stream()
+                .filter(j -> j.debitMinor() != 0 || j.creditMinor() != 0)
+                .forEach(j -> sum(
+                        sums,
+                        "journal|" + j.branch() + "|" + j.kind() + "|" + j.debitMinor() + "|" + j.creditMinor(),
+                        BigDecimal.ONE));
         Map<String, String> out = new TreeMap<>();
         sums.forEach((key, value) -> {
             if (value.signum() != 0) {

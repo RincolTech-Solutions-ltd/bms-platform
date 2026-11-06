@@ -302,7 +302,15 @@ public class RetailImporter {
             @Override
             public Map<String, Object> write(UUID runId, UUID batchId, int seq, Checkpoint checkpoint) {
                 ImportReport report = new ImportReport("", dir.toString(), false);
-                importAll(readExport(dir), report, firstLiveDate);
+                // The export read is the export identified (review of d8d1e5b): a file changed while it was read stops
+                // the batch. The window between the commit's check of the identity and this read closes with #135,
+                // whose staged files the run's stamp holds.
+                String identified = exportSha256(dir);
+                Map<String, ExportFile> export = readExport(dir);
+                if (!identified.equals(exportSha256(dir))) {
+                    throw new IllegalStateException("the retail export changed while it was read");
+                }
+                importAll(export, report, firstLiveDate);
                 if (report.failed()) {
                     // The cause is in the command's own report; it may quote a row, so it is not the message.
                     throw new IllegalStateException("the retail export stopped at a file");
@@ -315,10 +323,15 @@ public class RetailImporter {
             /**
              * The export's own content is part of what this writer is (review of #869): the SHA-256 of every file it
              * reads, so a dry run of one export never stands for a commit of files changed since, and the first live day.
+             * With none given, the command takes the business's today, so the identity names that day (review of
+             * d8d1e5b): a dry run on one day does not stand for a commit on the next, whose journals are dated otherwise.
              */
             @Override
             public String identity() {
-                return "retail.import-retail export sha256:" + exportSha256(dir) + " first-live:" + firstLiveDate;
+                LocalDate firstLive = firstLiveDate != null
+                        ? firstLiveDate
+                        : clock.today(currentTenant.profile().timezone());
+                return "retail.import-retail export sha256:" + exportSha256(dir) + " first-live:" + firstLive;
             }
         };
     }
@@ -366,8 +379,13 @@ public class RetailImporter {
                 .list();
         Set<String> all = new TreeSet<>(qty.keySet());
         all.addAll(value.keySet());
-        all.forEach(code ->
-                sink.stock(code, qty.getOrDefault(code, BigDecimal.ZERO).setScale(3), value.getOrDefault(code, 0L)));
+        all.forEach(code -> sink.stock(
+                code, atLeastThreePlaces(qty.getOrDefault(code, BigDecimal.ZERO)), value.getOrDefault(code, 0L)));
+    }
+
+    /** Three places as the command prints a quantity, more when the books hold more: never rounded (review of d8d1e5b). */
+    static BigDecimal atLeastThreePlaces(BigDecimal qty) {
+        return qty.setScale(Math.max(3, qty.scale()));
     }
 
     /** An entry's debit and credit totals by its number, from its lines, in the caller's transaction. */

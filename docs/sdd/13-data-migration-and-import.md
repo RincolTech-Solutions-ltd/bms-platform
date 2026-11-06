@@ -1077,7 +1077,7 @@ commit only through test-only templates (`FixtureShopTemplate`, `ScriptedTemplat
   status and entry number, a balance's branch or bucket, a note, the checksum) is screened against the personal values of
   every staged row of the run, every batch and every line, read once before the first batch: the cells a mapping feeds into
   a personal field and those fields' typed values, of four characters or more as the validation's rule, found anywhere in
-  the text, and their digits, seven or more, found among the text's digits. One that holds one is kept as
+  the text in any case, and their digits, seven or more, found among the text's digits. One that holds one is kept as
   `CommitReport.HIDDEN`. A failure names the batch and the kind of failure (`batch 3 failed (IllegalStateException)`), never
   the message, which may quote a row. Each batch's part is stored in `import_batches.report` in its commit transaction, so
   `ImportRuns.commitReport(run)` is the committed batches' parts in order, resumed or not.
@@ -1087,7 +1087,13 @@ commit only through test-only templates (`FixtureShopTemplate`, `ScriptedTemplat
   `pg_try_advisory_xact_lock`, never a wait (Lead ruling 5 on #869): a commit or resume of the business while a dry run
   runs, a dry run while a commit runs, and a batch that finds the key taken are all answered at once with 409
   `IMPORT_IN_PROGRESS` ("another import is being written for this business"), so a dry run never makes a commit fail at
-  a statement timeout. One outer transaction, marked rollback-only first, resolves the writers as the commit does and
+  a statement timeout. A server that cannot tell its build apart (no `build-info.properties`, no commit SHA) refuses the
+  dry run, the commit and a resume with 503 `build_unknown`. The commit's trading guard is asked before any row is held:
+  the writers' postings lock the business's ledger and stock rows until the rollback, so a business that already trades is
+  dry run only under the approved trading override (409 `TENANT_TRADING` otherwise, with nothing audited), and then within
+  `bms.imports.dry-run-limit-while-trading` (60 seconds), the outer transaction's timeout: past it every statement of the
+  dry run is refused, it fails as `batch N stopped at the time limit of a dry run into a trading business`, and the staff's
+  postings wait no longer. One outer transaction, marked rollback-only first, resolves the writers as the commit does and
   runs the commit's own batch code for every batch in order: the import key, the batch taken `FOR UPDATE`, the writer, the
   batch's move to `committed` with its counts and report part. The kill switch and the halt, which guard writes, do not
   stop it. The first batch that throws stops it, as in a real run, and the failure is recorded. Then the transaction is
@@ -1097,14 +1103,18 @@ commit only through test-only templates (`FixtureShopTemplate`, `ScriptedTemplat
   stored (409 `run_changed`); otherwise the report, the time, who ran it, the stamp, the writers' identity and whether the
   preview's balances equal the dry run's are stored on the run. The balances compare per branch and kind, summed, in any
   order, a zero the same as none: stock quantity and value, receivables, loan principal, loans and principal per arrears
-  bucket, and each journal's debit and credit. It writes no audit row, so that every table's row count is unchanged; the
+  bucket; and the journals journal by journal (branch, kind, debit and credit), never summed, so two of 500 are not one of
+  1,000. It writes no audit row, so that every table's row count is unchanged; the
   run row itself records who ran it and when. The log line carries the run id and counts only.
-- **The writers it rehearsed.** The dry run stores, one line per batch, the batch's number, its template and version,
-  the template's class, the entity set and the loader's `BatchWriter.identity()` (by default its class without the JDK's
-  per-process lambda suffix; the retail export's writer adds the SHA-256 of every export file and the first live day). The
-  same text, with the application's version and commit, is part of the stamp, so a template, version, loader or deploy
-  changed since the dry run makes it stop counting. The commit's start, and a resume for the batches it has left, refuse
-  writers that are not those lines (409 `dry_run_writer_differs`), so a run never commits code its dry run did not run.
+- **The writers it rehearsed.** The dry run stores a first line naming the build (its version, build time and commit
+  SHA), then, one line per batch, the batch's number, its template and version, the template's class, the entity set and
+  the loader's `BatchWriter.identity()` (by default its class without the JDK's per-process lambda suffix; the retail
+  export's writer adds the SHA-256 of every export file and the first live day, the business's today when none is given).
+  The same text is part of the stamp, so a template, version, loader or deploy changed since the dry run makes it stop
+  counting. The commit's start, and a resume for the batches it has left, refuse another build or writers that are not
+  those lines (409 `dry_run_writer_differs`), so a run never commits code its dry run did not run: a loader's class name
+  alone does not tell two builds apart. A run part committed when a new build is deployed resumes only on the build it
+  was rehearsed on; otherwise it is restored from its pre-import dump (section 13.14).
 - **When it counts.** `ImportRuns.dryRunReport(run)` answers the stored dry run and whether it still counts: its stamp is
   the run's stamp now. The stamp is an MD5 over the application's version and commit (another build of the templates' code),
   the cutover moment and policy, every batch's status, file, mapping version, parse and row count, every issue's status,
@@ -1112,7 +1122,8 @@ commit only through test-only templates (`FixtureShopTemplate`, `ScriptedTemplat
   of the business committed, each part with a marker for NULL. So a new resolution, a new mapping version (a `map_value`
   moves the batches to it), a new upload, a parse, a cancel, a new validation (which gives every issue found again its next
   version), a deploy or another run's commit into the business makes it stop counting. Records the business makes by
-  trading are not in the stamp: the trading tenant guard refuses the commit into a business that trades (1/16). The stamp
+  trading are not in the stamp: the trading tenant guard refuses the dry run and the commit into a business that trades
+  unless the override is approved (1/16). The stamp
   reads every staged row of the run each time it is taken (the dry run, `ready`, the commit's start, a read of the report);
   its cost at the row limit is measured by the big file test of #137.
   `ready` needs a stored dry run that counts
@@ -1124,13 +1135,15 @@ commit only through test-only templates (`FixtureShopTemplate`, `ScriptedTemplat
   directory as one batch in the batch's transaction (each file's transaction joins it) and tells the checkpoint what the
   command's report holds (`ImportReport.into`, each opening journal's debit and credit read from its entry's lines) and the
   stock of every branch as the books hold it (the quantity on hand from the stock ledger, the value from the inventory
-  account); `RetailImporter.toCommitReport` gives a run of the command the same report, so the framework's dry run of such
+  account, at three places or more, never rounded). A file changed while the export is read stops the batch; the window
+  between the commit's check of the writer and that read closes with #135, whose staged files the stamp holds.
+  `RetailImporter.toCommitReport` gives a run of the command the same report, so the framework's dry run of such
   a run is the command's real path rolled back. Without a retail forecast its preview predicts nothing, so such a run is
   not made `ready` (`preview_differs`) until #135 gives it one. Loan principal and arrears buckets belong to the lending
   template, whose preview #136 proves against the loan book.
 - **Proven by** `ImportPreviewIT` (the golden files' rows by outcome and records by type, and an exclusion moving a row; the
   fixture forecast's balances on two branches, worked out by hand; the comparison sums per branch and kind and tells a
-  different quantity, bucket, branch or an unbalanced journal; a dry run leaves every table's row count, every sequence and
+  different quantity, bucket, branch, an unbalanced journal or one journal split in two; a dry run leaves every table's row count, every sequence and
   the business's stored files as they were, the audit log and the ledger included; its report equals the real commit's on
   the same input with the same writer; the books after the commit, read from the ledger per branch and the stock ledger
   (stock quantity and value, receivables, loan principal, arrears aged from the entries' days, each journal's debit and
@@ -1139,7 +1152,9 @@ commit only through test-only templates (`FixtureShopTemplate`, `ScriptedTemplat
   buyer's number kept; a stored dry run stops counting after an override, a `map_value`, another run's commit into the
   business and a cancelled batch, and `ready` is refused until a new one; the writers are the templates', one line per
   batch, no method of `ImportRuns` takes a writer, and a run whose writers changed since its dry run is refused and left
-  untouched; a dry run that finds the business's import key taken is answered at once and stores nothing, and a commit
+  untouched; a run rehearsed on another build does not resume, and a server with no build identity is none; a trading
+  business is not dry run without the approved override, nothing audited, and under it a dry run past its time limit is
+  stopped and stored as failed; a name in capitals is hidden too; a dry run that finds the business's import key taken is answered at once and stores nothing, and a commit
   and a dry run of the business while a dry run runs are answered at once; a failed dry run is stored, leaves no trace
   and refuses `ready`; a dry run that differs from the preview refuses `ready`; the refusals outside review and with a
   refused file; another business can neither preview, dry run nor read either stored report, and reads none of

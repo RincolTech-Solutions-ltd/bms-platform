@@ -20,6 +20,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -363,7 +364,8 @@ class PreviewService implements ImportPreview {
         private int longestDigits;
 
         void add(String value) {
-            String s = value.strip();
+            // In any case: a note that writes a name in capitals names it too (review of d8d1e5b).
+            String s = value.strip().toLowerCase(Locale.ROOT);
             if (s.length() < SHORTEST_PERSONAL) {
                 return;
             }
@@ -379,11 +381,12 @@ class PreviewService implements ImportPreview {
             }
         }
 
-        /** Whether the text holds a personal value, as written or by its digits ({@code 700000101} in a phone). */
-        boolean holds(String text) {
-            if (text == null || text.isEmpty()) {
+        /** Whether the text holds a personal value, in any case or by its digits ({@code 700000101} in a phone). */
+        boolean holds(String written) {
+            if (written == null || written.isEmpty()) {
                 return false;
             }
+            String text = written.toLowerCase(Locale.ROOT);
             for (int i = 0; i < text.length() && !values.isEmpty(); i++) {
                 for (int len = shortest; len <= longest && i + len <= text.length(); len++) {
                     if (values.contains(text.substring(i, i + len))) {

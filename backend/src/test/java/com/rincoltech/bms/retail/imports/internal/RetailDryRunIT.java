@@ -235,8 +235,9 @@ class RetailDryRunIT extends IntegrationTest {
                 Files.copy(file, copy.resolve(name));
             }
         }
-        String sample = importer.exportWriter(RetailImportIT.SAMPLE, null).identity();
-        assertThat(importer.exportWriter(copy, null).identity())
+        String sample =
+                as(t, () -> importer.exportWriter(RetailImportIT.SAMPLE, null).identity());
+        assertThat(as(t, () -> importer.exportWriter(copy, null).identity()))
                 .as("the same files")
                 .isEqualTo(sample);
         UUID run = inReview(t);
@@ -247,11 +248,21 @@ class RetailDryRunIT extends IntegrationTest {
         // A file changed after the dry run: the writer is not the one rehearsed, so the dry run no longer counts.
         Path balances = copy.resolve("balances.jsonl");
         Files.writeString(balances, Files.readString(balances) + "\n");
-        assertThat(importer.exportWriter(copy, null).identity()).isNotEqualTo(sample);
+        assertThat(as(t, () -> importer.exportWriter(copy, null).identity())).isNotEqualTo(sample);
         assertThat(as(t, () -> runs.dryRunReport(run)).orElseThrow().current()).isFalse();
-        String laterStart = importer.exportWriter(RetailImportIT.SAMPLE, LocalDate.of(2026, 10, 1))
-                .identity();
-        assertThat(laterStart).as("another first live day").isNotEqualTo(sample);
+        // No first live day given is the business's today, named as that day: a commit another day is another writer.
+        LocalDate today = LocalDate.parse(sample.substring(sample.indexOf(" first-live:") + " first-live:".length()));
+        Path sampleDir = RetailImportIT.SAMPLE;
+        assertThat(as(t, () -> importer.exportWriter(sampleDir, today).identity()))
+                .isEqualTo(sample);
+        LocalDate tomorrow = today.plusDays(1);
+        assertThat(as(t, () -> importer.exportWriter(sampleDir, tomorrow).identity()))
+                .as("another first live day")
+                .isNotEqualTo(sample);
+        assertThat(RetailImporter.atLeastThreePlaces(new BigDecimal("1.23456")))
+                .as("a quantity of more places is never rounded")
+                .isEqualTo(new BigDecimal("1.23456"));
+        assertThat(RetailImporter.atLeastThreePlaces(new BigDecimal("2"))).isEqualTo(new BigDecimal("2.000"));
     }
 
     @Test

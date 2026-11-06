@@ -57,7 +57,10 @@ public interface ImportRuns {
      */
     CommitOutcome commit(UUID runId);
 
-    /** Continues a {@code committing} run from its first uncommitted batch, after a halt, a failure or a restart. */
+    /**
+     * Continues a {@code committing} run from its first uncommitted batch, after a halt, a failure or a restart, only on
+     * the build and with the writers its dry run rehearsed (409 {@code dry_run_writer_differs}).
+     */
     CommitOutcome resume(UUID runId);
 
     // JUSTIFICATION-A3: issue #132 adds the dry run and the stored reports to the run's API, new methods beside commit.
@@ -73,8 +76,11 @@ public interface ImportRuns {
      * report says which batch failed and the kind of failure. Refused with 409 {@code run_not_open} for a run in another
      * state, 409 {@code batch_not_parsed} while a file of the run is stored and not read or was refused, 422
      * {@code BATCH_HAS_NO_MAPPING} for a batch read without a mapping, and 409 {@code run_changed} when a batch, issue or
-     * resolution of the run changed while it ran (nothing is stored). Takes its own transactions; none may be open around
-     * it.
+     * resolution of the run changed while it ran (nothing is stored). Into a business that already trades it is 409
+     * {@code TENANT_TRADING} without the approved override, and under it bounded by
+     * {@code bms.imports.dry-run-limit-while-trading}, since its writes hold the business's rows until the rollback. A
+     * server with no build identity refuses it, the commit and a resume with 503 {@code build_unknown}. Takes its own
+     * transactions; none may be open around it.
      */
     DryRun dryRun(UUID runId, UUID by);
 

@@ -2,6 +2,7 @@ package com.rincoltech.bms.core.imports.internal;
 
 import static com.rincoltech.bms.core.imports.internal.ImportValidationIT.assertCode;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.entry;
 
 import com.rincoltech.bms.IntegrationTest;
@@ -34,18 +35,23 @@ import com.rincoltech.bms.kernel.TenantContext;
 import com.rincoltech.bms.retail.RetailTestSupport;
 import com.rincoltech.bms.retail.stock.StockLedger;
 import com.rincoltech.bms.retail.stock.StockLedger.HistoricalMovement;
+import com.rincoltech.bms.testsupport.Api;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.sql.Date;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Properties;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
@@ -59,6 +65,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.info.BuildProperties;
+import org.springframework.boot.info.GitProperties;
 import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.context.ApplicationContext;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -99,6 +107,9 @@ class ImportPreviewIT extends IntegrationTest {
 
     @Autowired
     ImportRuns runs;
+
+    @Autowired
+    ImportRunService service;
 
     @Autowired
     ImportValidation validation;
@@ -453,7 +464,7 @@ class ImportPreviewIT extends IntegrationTest {
     }
 
     @Test
-    void theBalancesCompareSummedPerBranchAndKindAndAnyDifferenceCounts() {
+    void theBalancesComparePerBranchAndKindEachJournalOnItsOwnAndAnyDifferenceCounts() {
         ImportForecast.Balances shuffled = new ImportForecast.Balances(
                 List.of(
                         new ImportForecast.Stock("HQ", new BigDecimal("1.000"), 400),
@@ -493,7 +504,18 @@ class ImportPreviewIT extends IntegrationTest {
                         new ImportForecast.Journal("HQ", "inventory", 1_000, 999),
                         GOLDEN.journals().get(1),
                         GOLDEN.journals().get(2)));
-        for (ImportForecast.Balances differs : List.of(otherQty, otherBucket, otherBranch, unbalanced)) {
+        // Each journal on its own (review of d8d1e5b): two of 500 are not the one of 1,000.
+        ImportForecast.Balances split = new ImportForecast.Balances(
+                GOLDEN.stock(),
+                GOLDEN.receivables(),
+                GOLDEN.loanPrincipal(),
+                GOLDEN.arrears(),
+                List.of(
+                        new ImportForecast.Journal("HQ", "inventory", 500, 500),
+                        new ImportForecast.Journal("HQ", "inventory", 500, 500),
+                        GOLDEN.journals().get(1),
+                        GOLDEN.journals().get(2)));
+        for (ImportForecast.Balances differs : List.of(otherQty, otherBucket, otherBranch, unbalanced, split)) {
             assertThat(ImportRunService.sameBalances(GOLDEN, differs))
                     .as("%s", differs)
                     .isFalse();
@@ -520,9 +542,10 @@ class ImportPreviewIT extends IntegrationTest {
         assertThat(dry.current()).isTrue();
         assertThat(dry.previewMatches()).isTrue();
         assertThat(dry.by()).isEqualTo(operator);
-        // The writers are the run's template loaders, one line per batch, never the script a test hands them.
+        // The build, then the writers: the template loaders, one line per batch, never the script a test hands them.
         String template = FixtureShopTemplate.class.getName();
-        assertThat(dry.writer().lines())
+        assertThat(dry.writer().lines().findFirst().orElseThrow()).startsWith("build ");
+        assertThat(dry.writer().lines().skip(1))
                 .containsExactly(
                         "1 fixture_shop_v1 " + template + " items " + template + "$$Lambda",
                         "2 fixture_shop_v1 " + template + " customers " + template + "$$Lambda",
@@ -645,6 +668,7 @@ class ImportPreviewIT extends IntegrationTest {
                 checkpoint.anomaly(3, "line 3 is like the buyer of line 4, Fabricated Buyer Beta");
                 checkpoint.counts("Fabricated Buyer Delta.csv", 1, 1, 0, 0);
                 checkpoint.note("buyers checked: 6");
+                checkpoint.note("DUPLICATE OF FABRICATED BUYER ZETA");
             }
             if (seq == 3) {
                 checkpoint.anomaly(2, "sold to Fabricated Buyer Epsilon");
@@ -676,6 +700,8 @@ class ImportPreviewIT extends IntegrationTest {
                         new CommitReport.Anomaly("fab-other.csv", 0, CommitReport.HIDDEN),
                         new CommitReport.Anomaly("fab-till-roll.csv", 2, CommitReport.HIDDEN));
         assertThat(report.notes()).contains(CommitReport.HIDDEN, "buyers checked: 6");
+        // In any case (review of d8d1e5b): a name in capitals is the name.
+        assertThat(text.toUpperCase(Locale.ROOT)).doesNotContain("FABRICATED BUYER ZETA");
         assertThat(report.sources()).extracting(CommitReport.Source::name).contains(CommitReport.HIDDEN);
         assertThat(report.checksum()).isEqualTo(CommitReport.HIDDEN);
         assertThat(text).contains("fab-buyers.csv:3: buyer B-001 is new");
@@ -742,9 +768,11 @@ class ImportPreviewIT extends IntegrationTest {
     void theWritersAreTheTemplatesAndARunWhoseWritersChangedIsNotCommitted() throws IOException {
         Run run = validated(t);
         DryRun dry = as(t, () -> runs.dryRun(scripted(run.runId(), writer(t, 0)), operator));
-        // A line per batch: its number, the template and version, the template's class, the entity set, the loader.
+        // The build, then a line per batch: its number, the template and version, the template's class, the entity set,
+        // the loader.
         String loader = FixtureShopTemplate.class.getName() + "$$Lambda";
-        assertThat(dry.writer().split("\n"))
+        assertThat(dry.writer().split("\n")[0]).startsWith("build ").doesNotContain("build null");
+        assertThat(Arrays.copyOfRange(dry.writer().split("\n"), 1, 4))
                 .containsExactly(
                         "1 fixture_shop_v1 " + FixtureShopTemplate.class.getName() + " items " + loader,
                         "2 fixture_shop_v1 " + FixtureShopTemplate.class.getName() + " customers " + loader,
@@ -767,6 +795,114 @@ class ImportPreviewIT extends IntegrationTest {
         assertThat(ImportRuns.class.getMethods())
                 .filteredOn(m -> List.of("commit", "resume", "dryRun").contains(m.getName()))
                 .allSatisfy(m -> assertThat(m.getParameterTypes()).doesNotContain(BatchWriter.class));
+    }
+
+    // JUSTIFICATION-A3: the review of d8d1e5b on #869: the build is what a dry run rehearsed, at a resume too.
+    @Test
+    void aRunRehearsedOnOneBuildDoesNotResumeOnAnotherAndAnUnknownBuildIsNoBuild() {
+        UUID run = emptyRun(t);
+        as(t, () -> runs.dryRun(scripted(run, NOTHING), operator));
+        as(t, () -> runs.transition(run, "ready"));
+        as(t, () -> runs.recordPreImportDump(run, "pre-import-fabricated.dump", Instant.now(), SHA));
+        // The commit stops at its only batch, so the run is committing with that batch left to write.
+        BatchWriter failing = (r, b, s, c) -> {
+            throw new IllegalStateException("a fabricated failure");
+        };
+        assertThatThrownBy(() -> as(t, () -> runs.commit(scripted(run, failing))))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(as(t, () -> runs.get(run)).status()).isEqualTo("committing");
+        String rehearsed = TestDatabase.owner()
+                .sql("SELECT dry_run_writer FROM import_runs WHERE id = ?")
+                .param(run)
+                .query(String.class)
+                .single();
+        // As if the dry run had run on another build of the same classes and loaders: the resume refuses to go on.
+        TestDatabase.owner()
+                .sql("UPDATE import_runs SET dry_run_writer = ? WHERE id = ?")
+                .params("build another-fabricated-build" + rehearsed.substring(rehearsed.indexOf('\n')), run)
+                .update();
+        assertCode(() -> as(t, () -> runs.resume(scripted(run, NOTHING))), "dry_run_writer_differs");
+        assertThat(as(t, () -> runs.get(run)).status()).isEqualTo("committing");
+
+        TestDatabase.owner()
+                .sql("UPDATE import_runs SET dry_run_writer = ? WHERE id = ?")
+                .params(rehearsed, run)
+                .update();
+        assertThat(as(t, () -> runs.resume(scripted(run, NOTHING)))).isEqualTo(CommitOutcome.COMMITTED);
+
+        // A server that knows neither its build nor its commit has no build to tell apart, so it refuses both.
+        assertThat(ImportRunService.codeVersion(null, null, "")).isNull();
+        assertThat(ImportRunService.codeVersion(null, null, " ")).isNull();
+        Properties build = new Properties();
+        build.setProperty("version", "0.0.1-fabricated");
+        build.setProperty("time", "2026-10-01T00:00:00Z");
+        assertThat(ImportRunService.codeVersion(new BuildProperties(build), null, ""))
+                .startsWith("0.0.1-fabricated@")
+                .endsWith("|-");
+        Properties git = new Properties();
+        git.setProperty("commit.id", "f".repeat(40));
+        assertThat(ImportRunService.codeVersion(null, new GitProperties(git), ""))
+                .isEqualTo("-|" + "f".repeat(40));
+        assertThat(ImportRunService.codeVersion(null, new GitProperties(git), "fab1234"))
+                .isEqualTo("-|fab1234");
+    }
+
+    // JUSTIFICATION-A3: the review of d8d1e5b on #869: a dry run holds the business's rows, so the guard and a limit.
+    @Test
+    void aDryRunIntoATradingBusinessNeedsTheApprovedOverrideAndStopsAtItsTimeLimit() {
+        UUID run = emptyRun(t);
+        as(
+                t,
+                () -> new TransactionTemplate(transactionManager)
+                        .execute(s -> ledger.post(new EntryRequest(
+                                t.headOffice(),
+                                DAY,
+                                "IMP-TEST",
+                                null,
+                                "lending",
+                                "test_import",
+                                UUID.randomUUID(),
+                                null,
+                                List.of(
+                                        Line.debit(t.account("loans_receivable"), Money.of(100_000, "UGX")),
+                                        Line.credit(t.account("opening_balance_equity"), Money.of(100_000, "UGX")))))));
+        Map<String, Object> before = traces(t);
+
+        assertCode(() -> as(t, () -> runs.dryRun(scripted(run, NOTHING), operator)), "TENANT_TRADING");
+
+        assertThat(traces(t))
+                .as("refused before any row is held, with nothing audited")
+                .isEqualTo(before);
+        assertThat(as(t, () -> runs.dryRunReport(run))).isEmpty();
+
+        UUID maker = Api.platformUser(Api.email("dry-run-maker"));
+        UUID checker = Api.platformUser(Api.email("dry-run-checker"));
+        as(t, () -> {
+            runs.allowTradingTenant(run, maker, "Top-up import of a fabricated tab");
+            return runs.approveTradingTenant(run, checker);
+        });
+        // Under the override, a dry run past its limit is stopped: every statement after it is refused.
+        BatchWriter slow = (r, b, s, c) -> {
+            try {
+                Thread.sleep(1_500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(e);
+            }
+            jdbc.sql("SELECT 1").query(Integer.class).single();
+            return Map.of();
+        };
+        service.tradingDryRunLimit(Duration.ofSeconds(1));
+        try {
+            DryRun stopped = as(t, () -> runs.dryRun(scripted(run, slow), operator));
+            assertThat(stopped.report().failure())
+                    .isEqualTo("batch 1 stopped at the time limit of a dry run into a trading business (1s)");
+        } finally {
+            service.tradingDryRunLimit(Duration.ofSeconds(60));
+        }
+        DryRun dry = as(t, () -> runs.dryRun(scripted(run, NOTHING), operator));
+        assertThat(dry.report().failure()).isNull();
+        assertThat(dry.current()).isTrue();
     }
 
     // JUSTIFICATION-A3: the Lead's ruling 5 on #869: a dry run and a commit are answered at once, never kept waiting.
