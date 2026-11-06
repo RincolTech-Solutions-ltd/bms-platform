@@ -75,11 +75,17 @@ final class RowValidator {
     private static final Pattern SAFE_NUMBER = Pattern.compile("^[+-]?\\d{1,15}(\\.\\d{1,6})?$");
     private static final Pattern SAFE_CODE = Pattern.compile("^[A-Z][A-Z_]{1,39}$");
 
+    /** What a message shows instead of a rule's parameter that is not a number, code or name, or holds a personal value. */
+    static final String HIDDEN = "(hidden)";
+
+    /** The longest message, the size of {@code import_issues.message}. */
+    static final int MAX_MESSAGE = 500;
+
     /** The longest file name a message shows. */
     static final int MAX_FILE_NAME = 100;
 
     /** Commas, or spaces, only as separators of groups of three digits: {@code 12,500}, {@code 1 234 567.5}. */
-    private static final Pattern GROUPED = Pattern.compile("^[+-]?\\d{1,3}(,\\d{3})+(\\.\\d+)?$");
+    private static final Pattern GROUPED = Pattern.compile("^[+-]?[1-9]\\d{0,2}(,\\d{3})+(\\.\\d+)?$");
 
     private static final Pattern NUMBER = Pattern.compile("^[+-]?\\d+(\\.\\d+)?$");
     private static final Pattern SPACES = Pattern.compile("[\\s\\u00A0\\u2007\\u202F]");
@@ -225,31 +231,15 @@ final class RowValidator {
             }
         }
         Map<String, Object> values = Collections.unmodifiableMap(new LinkedHashMap<>(t.values));
-        // A rule's parameters are checked against the row's personal values, original and normalised (review of #867).
-        // JUSTIFICATION-A3: the reviewer's item 6; the keys were already whitelisted, the values were not.
-        Set<String> personal = new HashSet<>();
-        for (Field f : p.set.fields()) {
-            if (f.isPersonal()) {
-                if (t.texts.get(f.name()) != null) {
-                    personal.add(t.texts.get(f.name()).strip());
-                }
-                if (t.values.get(f.name()) instanceof String s) {
-                    personal.add(s);
-                }
-            }
-        }
+        // A rule's parameter values: only numbers, codes and the template's names, never a personal value of the row.
+        // One that is not is shown as HIDDEN rather than stopping the run on ordinary data (second review of #867).
+        // JUSTIFICATION-A3: the Lead's ruling 6 and the second review's item 3.
+        List<String> personal = personalValues(p, t);
         for (RowCheck check : template.rowChecks(p.set.key())) {
             for (RowFinding finding : check.check(values)) {
-                for (String v : finding.params().values()) {
-                    if (v == null || !safeParam(v)) {
-                        throw new IllegalStateException("a row check gave " + finding.code()
-                                + " a parameter that is not a number, code or name");
-                    }
-                    if (personal.stream().anyMatch(s -> !s.isEmpty() && v.contains(s))) {
-                        throw new IllegalStateException("a row check put a personal value into " + finding.code());
-                    }
-                }
-                t.add(finding.code(), finding.field(), finding.params(), null);
+                Map<String, String> params = new LinkedHashMap<>();
+                finding.params().forEach((k, v) -> params.put(k, safeParam(v) && !holds(v, personal) ? v : HIDDEN));
+                t.add(finding.code(), finding.field(), params, null);
             }
         }
         List<Finding> findings = new ArrayList<>(t.pending.size());
@@ -305,14 +295,57 @@ final class RowValidator {
         }
         values.put("file", shortName(file));
         values.put("line", String.valueOf(line));
-        String message = c.message();
-        for (String placeholder : TemplateRegistry.placeholders(c.message())) {
-            String v = values.get(placeholder);
-            if (v != null) {
-                message = message.replace("{" + placeholder + "}", v);
+        // One pass over the template only, so a placeholder inside a file name is never filled (second review of #867),
+        // and never more than the 500 characters import_issues.message holds. JUSTIFICATION-A3: its items 2 to 4.
+        StringBuilder message = new StringBuilder();
+        Matcher m = TemplateRegistry.PLACEHOLDER.matcher(c.message());
+        while (m.find()) {
+            String v = values.get(m.group(1));
+            m.appendReplacement(message, Matcher.quoteReplacement(v == null ? m.group() : v));
+        }
+        m.appendTail(message);
+        return new Finding(f.code(), severity, f.field(), cap(message.toString()), f.original());
+    }
+
+    /** A message cut to {@value #MAX_MESSAGE} characters, ending in three dots when cut. */
+    static String cap(String message) {
+        if (message.codePointCount(0, message.length()) <= MAX_MESSAGE) {
+            return message;
+        }
+        return message.substring(0, message.offsetByCodePoints(0, MAX_MESSAGE - 3)) + "...";
+    }
+
+    /** The personal values of a row worth looking for: as written and normalised, of four characters or more. */
+    private static List<String> personalValues(Plan p, Typed t) {
+        List<String> out = new ArrayList<>();
+        for (Field f : p.set.fields()) {
+            if (f.isPersonal()) {
+                for (Object v : new Object[] {t.texts.get(f.name()), t.values.get(f.name())}) {
+                    if (v instanceof String s && s.strip().length() >= 4) {
+                        out.add(s.strip());
+                    }
+                }
             }
         }
-        return new Finding(f.code(), severity, f.field(), message, f.original());
+        return out;
+    }
+
+    /**
+     * Whether a parameter value holds one of the row's personal values, as text or, for a phone or NIN written another way,
+     * by its digits ({@code 700000101} in {@code +256700000101}).
+     */
+    static boolean holds(String v, List<String> personal) {
+        String digits = v.replaceAll("\\D", "");
+        for (String s : personal) {
+            String sDigits = s.replaceAll("\\D", "");
+            if (v.contains(s)
+                    || (digits.length() >= 7
+                            && sDigits.length() >= 7
+                            && (sDigits.contains(digits) || digits.contains(sDigits)))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String other(Location first, Location here) {

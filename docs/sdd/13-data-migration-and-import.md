@@ -887,8 +887,9 @@ operator's tooling calls the services, as it calls the upload and the commit.
   issue; the normaliser, which is the shared form function (section 13.6): the field's own `Normaliser` for text, codes and
   references (`collapse_spaces`, `upper`, `RetailCatalogue.normaliseCode` for retail codes under the vertical's own name),
   `PhoneNumbers.normaliseUganda` for a `phone` and `NationalIds.normaliseNin` for a `nin`, each change an `info`
-  `VALUE_NORMALISED` with the original; group separators in a number are taken only between groups of three digits
-  (`12,500`, `12 500`; `12,50` and `1,5` are `TYPE_INVALID`, never 1250 or 15) and their removal is a `VALUE_NORMALISED`
+  `VALUE_NORMALISED` with the original; group separators in a number are taken only between groups of three digits after a
+  first group that does not start with 0 (`12,500`, `12 500`; `12,50`, `1,5` and `0,250` are `TYPE_INVALID`, never 1250, 15
+  or 250) and their removal is a `VALUE_NORMALISED`
   of the rule `thousands_separator`; the type (`TYPE_INVALID`, `MONEY_FRACTION` for a fraction of a shilling,
   `QTY_PRECISION` beyond three places, `TEXT_TOO_LONG`; dates and moments read as ISO under every convention and day first
   or month first under the mapping's, a moment in the mapping's zone); a hidden character inside a key or a reference
@@ -900,7 +901,8 @@ operator's tooling calls the services, as it calls the upload and the commit.
   repeated in the entity set within the run (`NIN_DUPLICATE`; a NIN the business already holds is matched by the
   template's linking step, section 13.9, with #136); then the template's cross-field rules (`rowChecks`), whose parameters
   may only be a number, a code in capitals or a name of the template's entity sets and fields, and never a personal value
-  of the row (the engine refuses anything else). A row whose kept cells are all empty is
+  of the row (of four characters or more, as written, normalised or by its digits); anything else is shown as `(hidden)`,
+  so a rule never leaks a value and ordinary data never stops the run. A row whose kept cells are all empty is
   `BLANK_ROW` and nothing else.
 - **The template contract grows.** A `Field` may be `personalData()` (never interpolated; a `phone` or `nin` always is), the
   set's key (`asKey()`, at most one, a `text`, which a `ref` to the set names) and have a `range(min, max)` (money and qty).
@@ -914,13 +916,13 @@ operator's tooling calls the services, as it calls the upload and the commit.
   reference and duplicates, then the cross-field rules). The same rows, template and mapping version give the same issues,
   messages and values every time.
 - **A run that changes while it is checked.** A validation refuses to start while a file of the run is stored and not
-  yet read (409 `batch_not_parsed`). Pass 1 records each batch's stamp (status, mapping version, parse time, row count);
-  each batch is written only if its stamp is unchanged under its lock, and the validation finishes, in one transaction
-  that holds the run `FOR UPDATE` as an upload does, only if every batch of the run still has the stamp pass 1 saw (none
-  added, read again with a new mapping version, cancelled or committed); otherwise 409 `batch_changed`, and the run stays
-  where it was. A second validation that finishes later finds the run already in review.
-- **Where the results are.** Each parsed batch is written in one transaction that holds the run `FOR SHARE` and the batch
-  `FOR UPDATE` (the parse's order) and checks again that the run is open and the batch unchanged: the batch's issues are
+  yet read (409 `batch_not_parsed`). Pass 1 records each batch's stamp (status, mapping version, parse time, row count).
+  Pass 2 and the end run in one transaction that holds the run `FOR UPDATE`, as an upload does, so no file of the run is
+  added, read again or cancelled meanwhile (the parse and the cancel take the run `FOR SHARE`). It writes only if every
+  batch of the run still has the stamp pass 1 saw; otherwise 409 `batch_changed`, nothing of the run is written, and the
+  run stays where it was, so no batch ever keeps issues built from another batch's old content. A second validation that
+  finishes later finds the run already in review.
+- **Where the results are.** In that transaction, for each parsed batch: the batch's issues are
   deleted and written again in `import_issues` (code, severity, field, line, message, the original cell text, `open` or
   `resolved` for `info`), and each row's `normalised` and `source_ref` are set; `raw` is never changed (a column grant). A
   committed batch is read for its keys and references and never written; the triggers `import_issues_batch_kept` and
@@ -930,8 +932,10 @@ operator's tooling calls the services, as it calls the upload and the commit.
   business and its batch (the foreign key `(tenant_id, batch_id, row_id)`). An `uploaded` run
   moves to `in_review`. Audited as `core.import_run.validated` with counts by code; the log line carries the run id and the
   counts by code only.
-- **Messages.** Built from the code's template with the field name, the batch's file name (at most 100 characters, the
-  middle elided, so a message naming two files fits its 500), line numbers and the rule; never a cell's text. Section 13.7 sets the rules of the catalogue; the golden run proves them.
+- **Messages.** Built from the code's template, in one pass over the template (a placeholder written inside a file name
+  is never filled), with the field name, the batch's file name (at most 100 characters, the middle elided), line numbers
+  and the rule; never a cell's text. A template is at most 200 characters (the registry refuses a longer one), and a
+  message is cut to the 500 its column holds. Section 13.7 sets the rules of the catalogue; the golden run proves them.
 - **Not in this step.** The row rules a mapping switches on (the sub-header rows, totals row and placeholder rows of
   section 13.5) are not applied yet: a totals row is checked as a data row. `ROW_CHANGED_SINCE_REVIEW` (#131) and
   `CHANGED_SINCE_IMPORT` (#133) are pending the steps that hold a row's reviewed and imported content.

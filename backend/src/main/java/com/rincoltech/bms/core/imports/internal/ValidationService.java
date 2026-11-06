@@ -41,9 +41,9 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * {@link ImportValidation} over {@code import_rows} and {@code import_issues} (migration V140). It reads a run's batches in
- * commit order, 1,000 rows at a time, through {@link RowValidator} in two passes, and writes each parsed batch's results in
- * one transaction that holds the run {@code FOR SHARE} and the batch {@code FOR UPDATE} (the order of the parse), checking
- * again that the run is open and the batch still parsed. A committed batch is read for its codes and references and never
+ * commit order, 1,000 rows at a time, through {@link RowValidator} in two passes, and writes every parsed batch's results
+ * in one transaction that holds the run {@code FOR UPDATE}, after checking that the run is open and every batch is as pass
+ * 1 read it, so either all of the run's results are written from one consistent view or none. A committed batch is read for its codes and references and never
  * written; the triggers of V140 refuse it as well. Every query runs under the business's row-level security, so only its
  * own rows are read. Logs and the audit row carry ids and counts by code only, never a cell, a name or a file name.
  */
@@ -92,7 +92,7 @@ class ValidationService implements ImportValidation {
 
     /**
      * One batch of the run as the service reads it. {@link #stamp} is what a new parse, a new mapping version, a cancel or a
-     * commit changes: the validation refuses to write a batch, or to finish, when it no longer matches pass 1 (review of
+     * commit changes: the validation writes nothing when any batch no longer matches pass 1 (review of
      * #867). JUSTIFICATION-A3: the stamp and its re-check are the reviewer's must-fix 1.
      */
     private record BatchRow(
@@ -203,7 +203,7 @@ class ValidationService implements ImportValidation {
                     "The files of this import were read with mappings of different templates; a run keeps one.");
         }
         if (batches.isEmpty()) {
-            finish(runId, seen, null, List.of());
+            finish(runId, seen, null, List.of(), List.of(), null);
             return new RunReport(runId, null, 0, List.of());
         }
         ImportTemplate template = templates.require(
@@ -227,28 +227,27 @@ class ValidationService implements ImportValidation {
         // The codes references name that no row of the run holds: does the business hold them?
         readOnly.executeWithoutResult(s -> engine.missingReferences()
                 .forEach((set, keys) -> engine.addExisting(set, template.existingKeys(set, keys))));
-        // Pass 2: each parsed batch checked and written in a transaction of its own.
-        List<BatchReport> reports = new ArrayList<>();
-        for (int i = 0; i < ordered.size(); i++) {
-            BatchRow b = ordered.get(i);
-            if ("parsed".equals(b.status())) {
-                reports.add(write(runId, b, inputs.get(i), engine));
-            }
-        }
-        finish(runId, seen, template.id(), reports);
+        List<BatchReport> reports = finish(runId, seen, template.id(), ordered, inputs, engine);
         return new RunReport(runId, template.key(), template.version(), reports);
     }
 
     /**
-     * The end of a validation, in one transaction that holds the run {@code FOR UPDATE}, as an upload does: every batch
-     * must still be as pass 1 saw it (none added, read again, cancelled or committed meanwhile), or 409
-     * {@code batch_changed}; then an {@code uploaded} run moves to {@code in_review} (the run's own transition joins this
-     * transaction, so a second validation that finishes later finds it in review), and the validation is audited.
+     * Pass 2 and the end of a validation, in one transaction that holds the run {@code FOR UPDATE}, as an upload does, so no
+     * file of the run is added, read again or cancelled while it runs (the parse and the cancel take the run
+     * {@code FOR SHARE}). Every batch must still be as pass 1 saw it, or 409 {@code batch_changed} and nothing is written
+     * (second review of #867: a batch written before another changed kept issues built from the old index). Then each
+     * parsed batch's issues and typed values are replaced, an {@code uploaded} run moves to {@code in_review} (the run's own
+     * transition joins this transaction, so a second validation that finishes later finds it in review), and the
+     * validation is audited.
      */
-    private void finish(UUID runId, Map<UUID, String> seen, String templateId, List<BatchReport> reports) {
-        Map<String, Integer> byCode = new TreeMap<>();
-        reports.forEach(r -> r.byCode().forEach((code, n) -> byCode.merge(code, n, Integer::sum)));
-        tx.executeWithoutResult(s -> {
+    private List<BatchReport> finish(
+            UUID runId,
+            Map<UUID, String> seen,
+            String templateId,
+            List<BatchRow> ordered,
+            List<BatchInput> inputs,
+            RowValidator engine) {
+        List<BatchReport> reports = tx.execute(s -> {
             String status = jdbc.sql("SELECT status FROM import_runs WHERE id = ? FOR UPDATE")
                     .param(runId)
                     .query(String.class)
@@ -257,16 +256,28 @@ class ValidationService implements ImportValidation {
             if (!stamps(batches(runId)).equals(seen)) {
                 throw changed();
             }
+            List<BatchReport> out = new ArrayList<>();
+            for (int i = 0; i < ordered.size(); i++) {
+                if ("parsed".equals(ordered.get(i).status())) {
+                    out.add(write(ordered.get(i), inputs.get(i), engine));
+                }
+            }
             if (RunStates.UPLOADED.equals(status)) {
                 runs.transition(runId, RunStates.IN_REVIEW);
             }
+            Map<String, Integer> byCode = new TreeMap<>();
+            out.forEach(r -> r.byCode().forEach((code, n) -> byCode.merge(code, n, Integer::sum)));
             Map<String, Object> after = new LinkedHashMap<>();
             after.put("template", templateId == null ? "none" : templateId);
-            after.put("batches", reports.size());
+            after.put("batches", out.size());
             after.put("issues_by_code", byCode);
             audit.record(AuditLog.Entry.created("core.import_run.validated", "import_run", runId, null, after));
+            return out;
         });
+        Map<String, Integer> byCode = new TreeMap<>();
+        reports.forEach(r -> r.byCode().forEach((code, n) -> byCode.merge(code, n, Integer::sum)));
         log.info("import run {} validated: {} batches, issues by code {}", runId, reports.size(), byCode);
+        return reports;
     }
 
     /** The batches in commit order: the template's entity sets, then the batch's own order. */
@@ -291,66 +302,43 @@ class ValidationService implements ImportValidation {
                 .toList();
     }
 
-    /** Pass 2 of one parsed batch: its rows' typed values and references, and its issues, replaced in one transaction. */
-    private BatchReport write(UUID runId, BatchRow b, BatchInput input, RowValidator engine) {
-        return tx.execute(s -> {
-            String runStatus = jdbc.sql("SELECT status FROM import_runs WHERE id = ? FOR SHARE")
-                    .param(runId)
-                    .query(String.class)
-                    .single();
-            requireOpen(runStatus);
-            // The batch as pass 1 read it: same status, mapping version, parse and row count (review of #867).
-            jdbc.sql("SELECT id FROM import_batches WHERE id = ? FOR UPDATE")
-                    .param(b.id())
-                    .query(UUID.class)
-                    .optional()
-                    .orElseThrow(ValidationService::changed);
-            BatchRow now = batches(runId).stream()
-                    .filter(r -> r.id().equals(b.id()))
-                    .findFirst()
-                    .orElseThrow(ValidationService::changed);
-            if (!now.stamp().equals(b.stamp())) {
-                throw changed();
+    /** Pass 2 of one parsed batch, inside {@link #finish}: its rows' typed values and references, and its issues, replaced. */
+    private BatchReport write(BatchRow b, BatchInput input, RowValidator engine) {
+        jdbc.sql("DELETE FROM import_issues WHERE batch_id = ?").param(b.id()).update();
+        Map<String, Integer> bySeverity = new TreeMap<>();
+        Map<String, Integer> byCode = new TreeMap<>();
+        int[] ordinal = {0};
+        int[] rows = {0};
+        List<Object[]> updates = new ArrayList<>();
+        List<Object[]> issues = new ArrayList<>();
+        readRowsHere(b.id(), row -> {
+            RowResult result = engine.validate(input, row);
+            rows[0]++;
+            updates.add(new Object[] {JSON.writeValueAsString(result.normalised()), result.sourceRef(), row.rowId()});
+            for (Finding f : result.findings()) {
+                ordinal[0]++;
+                bySeverity.merge(f.severity(), 1, Integer::sum);
+                byCode.merge(f.code(), 1, Integer::sum);
+                issues.add(new Object[] {
+                    UUID.randomUUID(),
+                    b.id(),
+                    row.rowId(),
+                    row.line(),
+                    ordinal[0],
+                    f.code(),
+                    f.severity(),
+                    f.field(),
+                    f.message(),
+                    f.original() == null ? null : JSON.writeValueAsString(f.original()),
+                    "info".equals(f.severity()) ? "resolved" : "open"
+                });
             }
-            jdbc.sql("DELETE FROM import_issues WHERE batch_id = ?")
-                    .param(b.id())
-                    .update();
-            Map<String, Integer> bySeverity = new TreeMap<>();
-            Map<String, Integer> byCode = new TreeMap<>();
-            int[] ordinal = {0};
-            int[] rows = {0};
-            List<Object[]> updates = new ArrayList<>();
-            List<Object[]> issues = new ArrayList<>();
-            readRowsHere(b.id(), row -> {
-                RowResult result = engine.validate(input, row);
-                rows[0]++;
-                updates.add(
-                        new Object[] {JSON.writeValueAsString(result.normalised()), result.sourceRef(), row.rowId()});
-                for (Finding f : result.findings()) {
-                    ordinal[0]++;
-                    bySeverity.merge(f.severity(), 1, Integer::sum);
-                    byCode.merge(f.code(), 1, Integer::sum);
-                    issues.add(new Object[] {
-                        UUID.randomUUID(),
-                        b.id(),
-                        row.rowId(),
-                        row.line(),
-                        ordinal[0],
-                        f.code(),
-                        f.severity(),
-                        f.field(),
-                        f.message(),
-                        f.original() == null ? null : JSON.writeValueAsString(f.original()),
-                        "info".equals(f.severity()) ? "resolved" : "open"
-                    });
-                }
-                if (updates.size() >= RowValidator.CHUNK) {
-                    flush(updates, issues);
-                }
-            });
-            flush(updates, issues);
-            return new BatchReport(b.id(), b.seq(), rows[0], bySeverity, byCode);
+            if (updates.size() >= RowValidator.CHUNK) {
+                flush(updates, issues);
+            }
         });
+        flush(updates, issues);
+        return new BatchReport(b.id(), b.seq(), rows[0], bySeverity, byCode);
     }
 
     private void flush(List<Object[]> updates, List<Object[]> issues) {

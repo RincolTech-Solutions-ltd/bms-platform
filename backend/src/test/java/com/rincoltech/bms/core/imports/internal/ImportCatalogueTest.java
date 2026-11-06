@@ -273,6 +273,10 @@ class ImportCatalogueTest {
         assertRefused(withCode("Line {line} belongs to {name}."), "interpolates the personal field {name}");
         assertRefused(withCode("Line {line} reads {value}."), "interpolates {value}");
         assertRefused(withCode("Phone {phone} on line {line}."), "interpolates the personal field {phone}");
+        assertRefused(withCode("Line {line} " + "is wrong ".repeat(30)), "has a message over 200 characters");
+        assertThat(catalogue())
+                .allSatisfy(
+                        c -> assertThat(c.message()).hasSizeLessThanOrEqualTo(TemplateRegistry.MAX_MESSAGE_TEMPLATE));
     }
 
     @Test
@@ -335,6 +339,19 @@ class ImportCatalogueTest {
 
         assertThat(findings).extracting(RowValidator.Finding::code).contains("DUPLICATE_SOURCE_REF", "CODE_DUPLICATE");
         assertThat(findings).allSatisfy(f -> assertThat(f.message().length()).isLessThanOrEqualTo(500));
+
+        // A file named with placeholders is shown as named: one pass over the template fills nothing inside it.
+        String braces = "{other}".repeat(14);
+        BatchInput third = new BatchInput(UUID.randomUUID(), braces, mapping, "item_list");
+        engine.index(third, row);
+        List<RowValidator.Finding> named = engine.validate(third, row).findings();
+        assertThat(named)
+                .filteredOn(f -> f.code().equals("CODE_DUPLICATE"))
+                .singleElement()
+                .satisfies(f -> assertThat(f.message())
+                        .startsWith("code on " + braces + " line 2 is the same as line 2 of a-")
+                        .hasSizeLessThanOrEqualTo(500));
+        assertThat(RowValidator.cap("x".repeat(600))).hasSize(500).endsWith("...");
     }
 
     /**
@@ -343,33 +360,49 @@ class ImportCatalogueTest {
      */
     @Test
     void aRowCheckThatPutsAPersonalValueIntoAMessageIsRefused() {
-        assertThatThrownBy(() -> customerWithCheck("Fabricated Buyer Alpha", values -> (String) values.get("name")))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("not a number, code or name");
-        // A name written in capitals looks like a code; it is still the row's personal value.
-        assertThatThrownBy(() -> customerWithCheck("FABRICATED", values -> (String) values.get("name")))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("personal value");
-        assertThat(customerWithCheck("Fabricated Buyer Alpha", values -> "name"))
+        // Not a number, code or name: shown as hidden, never as written.
+        assertThat(customerWithCheck("Fabricated Buyer Alpha", "0700000101", values -> (String) values.get("name")))
                 .extracting(RowValidator.Finding::message)
-                .contains("name on fab-buyers.csv line 3 must be above zero for a sale.");
+                .containsExactly("(hidden) on fab-buyers.csv line 3 must be above zero for a sale.");
+        // A name written in capitals looks like a code; it is still the row's personal value.
+        assertThat(customerWithCheck("FABRICATED", "0700000101", values -> (String) values.get("name")))
+                .extracting(RowValidator.Finding::message)
+                .containsExactly("(hidden) on fab-buyers.csv line 3 must be above zero for a sale.");
+        // A phone written in another form, by its digits.
+        assertThat(customerWithCheck("Fabricated Buyer Alpha", "0700000101", values -> "700000101"))
+                .extracting(RowValidator.Finding::message)
+                .containsExactly("(hidden) on fab-buyers.csv line 3 must be above zero for a sale.");
+        // Ordinary data never stops the run: a placeholder phone of one character is not looked for (second review).
+        assertThat(customerWithCheck("Fabricated Buyer Alpha", "0", values -> "100"))
+                .extracting(RowValidator.Finding::message)
+                .containsExactly("100 on fab-buyers.csv line 3 must be above zero for a sale.");
+        assertThat(customerWithCheck("Fabricated Buyer Alpha", "0700000101", values -> "joined_on"))
+                .extracting(RowValidator.Finding::message)
+                .containsExactly("joined_on on fab-buyers.csv line 3 must be above zero for a sale.");
         RowValidator engine = new RowValidator(new FixtureShopTemplate(), catalogue(), null);
         assertThat(engine.safeParam("12500")).isTrue();
         assertThat(engine.safeParam("SALE_QTY")).isTrue();
         assertThat(engine.safeParam("joined_on")).isTrue();
         assertThat(engine.safeParam("0700000101x")).isFalse();
         assertThat(engine.safeParam("Fabricated")).isFalse();
+        assertThat(RowValidator.holds("CM00000000000A", List.of("cm 0000 0000 000A")))
+                .isTrue();
+        assertThat(RowValidator.holds("12500", List.of("0700000101"))).isFalse();
+        assertThat(RowValidator.holds("256700000101", List.of("0700000101"))).isTrue();
     }
 
-    /** One customer row through a template whose customers rule gives the placeholder {@code range} the value given. */
+    /**
+     * One customer row through a template whose customers rule names, as its field, the value the function gives: the
+     * placeholder {@code field} is the engine's, so the rule's value reaches the message only through the check under test.
+     */
     private static List<RowValidator.Finding> customerWithCheck(
-            String name, Function<Map<String, Object>, String> param) {
+            String name, String phone, Function<Map<String, Object>, String> param) {
         ImportTemplate leaky = new FixtureShopTemplate() {
             @Override
             public List<RowCheck> rowChecks(String entitySet) {
                 return "customers".equals(entitySet)
                         ? List.of(values -> List.of(new RowFinding(
-                                "FIXTURE_SALE_QTY_NOT_POSITIVE", "name", Map.of("range", param.apply(values)))))
+                                "FIXTURE_SALE_QTY_NOT_POSITIVE", null, Map.of("field", param.apply(values)))))
                         : List.of();
             }
         };
@@ -378,9 +411,14 @@ class ImportCatalogueTest {
         SourceRow row = new SourceRow(
                 UUID.randomUUID(),
                 3,
-                Map.of("Fab Buyer No", new RawCell("B-001", "text"), "Fab Buyer", new RawCell(name, "text")));
+                Map.of(
+                        "Fab Buyer No", new RawCell("B-001", "text"),
+                        "Fab Buyer", new RawCell(name, "text"),
+                        "Fab Mobile", new RawCell(phone, "text")));
         engine.index(batch, row);
-        return engine.validate(batch, row).findings();
+        return engine.validate(batch, row).findings().stream()
+                .filter(f -> f.code().equals("FIXTURE_SALE_QTY_NOT_POSITIVE"))
+                .toList();
     }
 
     @Test
@@ -397,6 +435,10 @@ class ImportCatalogueTest {
         assertThat(RowValidator.decimal("12,50")).isNull();
         assertThat(RowValidator.decimal("1,5")).isNull();
         assertThat(RowValidator.decimal("1,2345")).isNull();
+        // A comma as a decimal point after a zero: never 250 from a quarter (second review of #867).
+        assertThat(RowValidator.decimal("0,250")).isNull();
+        assertThat(RowValidator.decimal("00,500")).isNull();
+        assertThat(RowValidator.decimal("-0,5")).isNull();
         assertThat(RowValidator.grouped("12,500")).isTrue();
         assertThat(RowValidator.grouped(" 12500 ")).isFalse();
         assertThat(RowValidator.dateTime("day_first", "30/06/2026", false)).hasToString("2026-06-30T00:00");
@@ -426,7 +468,10 @@ class ImportCatalogueTest {
             boolean names = statement.contains("\"" + code + "\"")
                     || Pattern.compile("\\." + code + "\\b").matcher(statement).find();
             boolean asserts = statement.contains("assert") || statement.contains("refused(");
-            if (names && asserts) {
+            // A negative assertion (doesNotContain, isNotEqualTo, noneMatch) is no evidence (second review of #867).
+            boolean negative =
+                    statement.contains("doesNot") || statement.contains("isNot") || statement.contains("none");
+            if (names && asserts && !negative) {
                 return true;
             }
         }
@@ -444,15 +489,19 @@ class ImportCatalogueTest {
         assertThat(PENDING)
                 .containsEntry("ROW_CHANGED_SINCE_REVIEW", "#131")
                 .containsEntry("CHANGED_SINCE_IMPORT", "#133");
+        // Every main file, Java, SQL or other, by the code as a word; the catalogue itself may name it once only, so a
+        // constant or a second use there counts too (second review of #867).
+        Path catalogue = Path.of("src/main/java/com/rincoltech/bms/core/imports/ImportTemplates.java");
         List<String> producers = new ArrayList<>();
-        try (Stream<Path> files = Files.walk(Path.of("src/main/java"))) {
-            for (Path file : files.filter(f -> f.toString().endsWith(".java")).toList()) {
-                if (file.getFileName().toString().equals("ImportTemplates.java")) {
-                    continue;
-                }
-                String source = Files.readString(file);
+        try (Stream<Path> files = Files.walk(Path.of("src/main"))) {
+            for (Path file : files.filter(Files::isRegularFile).toList()) {
+                String source = Files.readString(file, StandardCharsets.ISO_8859_1);
                 PENDING.forEach((code, issue) -> {
-                    if (source.contains("\"" + code + "\"")) {
+                    long uses = Pattern.compile("\\b" + code + "\\b")
+                            .matcher(source)
+                            .results()
+                            .count();
+                    if (uses > (file.equals(catalogue) ? 1 : 0)) {
                         producers.add(code + " (" + issue + ") in " + file);
                     }
                 });

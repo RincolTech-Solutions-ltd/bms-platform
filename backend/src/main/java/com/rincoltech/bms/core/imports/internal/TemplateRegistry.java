@@ -36,6 +36,9 @@ class TemplateRegistry implements ImportTemplates {
     static final Pattern CODE = Pattern.compile("^[A-Z][A-Z0-9_]{1,59}$");
     static final Pattern PLACEHOLDER = Pattern.compile("\\{([A-Za-z0-9_]+)}");
 
+    /** The longest message template, so a message filled with two file names stays inside its 500 (review of #867). */
+    static final int MAX_MESSAGE_TEMPLATE = 200;
+
     private final Map<String, ImportTemplate> templates = new LinkedHashMap<>();
 
     @Autowired
@@ -157,6 +160,9 @@ class TemplateRegistry implements ImportTemplates {
             require(!shared.contains(c.code()), where + "code " + c.code() + " is a shared code");
             require(own.add(c.code()), where + "code " + c.code() + " is declared twice");
             require(!c.message().isBlank(), where + "code " + c.code() + " has no message");
+            require(
+                    c.message().length() <= MAX_MESSAGE_TEMPLATE,
+                    where + "code " + c.code() + " has a message over " + MAX_MESSAGE_TEMPLATE + " characters");
             // JUSTIFICATION-A3: the personal-placeholder check of #130 sits with the registry's start-up checks.
             for (String p : placeholders(c.message())) {
                 require(

@@ -286,6 +286,32 @@ class ImportValidationIT extends IntegrationTest {
         assertThat(as(t, () -> runs.get(run.runId()).status())).isEqualTo("uploaded");
         assertThat(as(t, () -> validation.issues(tillRoll))).isEmpty();
 
+        // An earlier batch given a new mapping version, same parse time and row count: nothing of the run is written,
+        // not even the batches before or after it whose own stamp did not move (second review of #867).
+        UUID buyers = run.batches().get("fab-buyers.csv").id();
+        Mapping v2 = as(t, () -> mappings.save("fab-shop", ImportCatalogueTest.mapping(), operator, "a new version"));
+        FixtureShopTemplate.BETWEEN_PASSES = () -> TestDatabase.owner()
+                .sql("UPDATE import_batches SET mapping_id = ? WHERE id = ?")
+                .params(v2.id(), buyers)
+                .update();
+        try {
+            assertCode(() -> as(t, () -> validation.validate(run.runId())), "batch_changed");
+        } finally {
+            FixtureShopTemplate.BETWEEN_PASSES = null;
+        }
+        run.batches()
+                .values()
+                .forEach(b -> assertThat(as(t, () -> validation.issues(b.id())))
+                        .as(b.fileName())
+                        .isEmpty());
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM import_rows r JOIN import_batches b ON b.id = r.batch_id"
+                                + " WHERE b.run_id = ? AND r.normalised IS NOT NULL")
+                        .param(run.runId())
+                        .query(Long.class)
+                        .single())
+                .isZero();
+
         TestDatabase.owner()
                 .sql("UPDATE import_batches SET status = 'uploaded' WHERE id = ?")
                 .param(tillRoll)
