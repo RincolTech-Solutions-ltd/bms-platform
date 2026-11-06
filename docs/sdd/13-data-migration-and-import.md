@@ -499,7 +499,7 @@ Commit failure rolls back everything; the batch stays `ready` and shows the erro
 
 As built for every template (#133, section 13.14.1 7/16): the commit is per run, one transaction per batch in the
 template's dependency order, after the `import_commit` approval and with a verified pre-import dump; the register batch
-stays one transaction. Opening journals post one per branch per kind through `post_entry` against
+stays one transaction. Opening journals post one per batch, branch and kind through `post_entry` against
 `opening_balance_equity` and are registered in `import_refs` in the same transaction; a failed batch rolls back alone and
 the run, still `committing`, resumes from it. No SMS, task or approval request is made inside a batch (a trigger refuses
 it). The lending template of #136 builds steps 1 to 7 above as its loader.
@@ -1246,7 +1246,12 @@ path, `ImportRuns.commit(run)` and `resume(run)`; the dry run runs the same batc
   raises no approval; such a writer fails its batch. An event published in a batch's transaction carries the `imported`
   marker (`ImportedRecords`, `PushNotice.imported`), and its listeners skip it, so a stock change an import makes raises
   no low-stock notice (V76) through `event_publication` either. At the end of each batch, a journal posted in it that is
-  not a registered opening journal fails the batch (Lead ruling 6 on #872).
+  not a registered opening journal fails the batch (Lead ruling 6 on #872). An opening journal is one by what the ledger
+  holds, not by what its writer says (review of 8e570b0): the framework's own (`core.imports`, `opening_balance`, with a
+  line on `opening_balance_equity`, registered by `Checkpoint.openingJournal`), or one of the `import-retail` command's
+  (module `retail`, source types `retail.import_opening`, `retail.cash_opening`, `retail.advance_opening` and
+  `retail.advance_repayment_opening`, registered by `Checkpoint.registerOpeningJournal`) until #135 moves retail onto
+  `openingJournal`. `Checkpoint.register` takes no journal, and `registerOpeningJournal` refuses any other entry.
 - **Kill and resume.** `CommitSeams.afterBatch` is a test hook only: a test bean ends the loop after batch k as a killed
   process would. The run stays `committing`, the batches before stay committed with their references, and the resume
   reaches the state of an uninterrupted run.

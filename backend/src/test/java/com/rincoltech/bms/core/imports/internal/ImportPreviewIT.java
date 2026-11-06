@@ -351,7 +351,8 @@ class ImportPreviewIT extends IntegrationTest {
                         "IMP-OPEN",
                         "Opening balance from the fabricated import",
                         "retail",
-                        "test_import",
+                        // The import-retail command's opening journal, the kind a writer of its own may post.
+                        "retail.import_opening",
                         null,
                         null,
                         List.of(
@@ -377,8 +378,7 @@ class ImportPreviewIT extends IntegrationTest {
                 .param(entryNo)
                 .query(UUID.class)
                 .single();
-        checkpoint.register(
-                ImportRefs.sourceRef("test-opening", kind, "entry:" + entryNo, "0"), "ledger.journal_entry", entry);
+        checkpoint.registerOpeningJournal(ImportRefs.sourceRef("test-opening", kind, "entry:" + entryNo, "0"), entry);
         checkpoint.journal(branch, kind, totals[0], totals[1], "posted", entryNo);
     }
 
@@ -951,9 +951,19 @@ class ImportPreviewIT extends IntegrationTest {
         } finally {
             service.tradingDryRunLimit(Duration.ofSeconds(60));
         }
-        DryRun dry = as(t, () -> runs.dryRun(scripted(run, NOTHING), operator));
+        // Inside the trading dry run's batch, the commit's 10 minute statement limit is not set (Lead ruling 4 and the
+        // review of 8e570b0 on #872): the dry run's own limit is the one that holds, and it still stops a slow batch.
+        List<String> timeouts = new ArrayList<>();
+        BatchWriter reads = (r, b, s, c) -> {
+            timeouts.add(jdbc.sql("SELECT current_setting('statement_timeout')")
+                    .query(String.class)
+                    .single());
+            return Map.of();
+        };
+        DryRun dry = as(t, () -> runs.dryRun(scripted(run, reads), operator));
         assertThat(dry.report().failure()).isNull();
         assertThat(dry.current()).isTrue();
+        assertThat(timeouts).isNotEmpty().doesNotContain("10min");
     }
 
     // JUSTIFICATION-A3: the Lead's ruling 5 on #869: a dry run and a commit are answered at once, never kept waiting.

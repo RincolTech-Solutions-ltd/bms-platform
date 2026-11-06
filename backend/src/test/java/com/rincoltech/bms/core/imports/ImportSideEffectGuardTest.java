@@ -60,6 +60,60 @@ class ImportSideEffectGuardTest {
                 .isEmpty();
     }
 
+    /**
+     * The event listeners, each reviewed (review of 8e570b0 on #872): one that may run inside an import batch skips an
+     * imported record. {@code PushNotices} returns at once for {@code PushNotice.imported()}; the approval amounts listener
+     * answers a change of the business's approval settings, which no import makes.
+     */
+    private static final Set<String> LISTENERS = Set.of("PushNotices.java", "ApprovalAmountsListener.java");
+
+    /** A row a new transaction would write past the import's setting, which {@code SET LOCAL} does not carry into it. */
+    private static final Pattern GUARDED_WRITE =
+            Pattern.compile("INSERT INTO (notification_outbox|sms_deliveries|approval_requests|scheduled_tasks)\\b");
+
+    /**
+     * The SMS channel's new transaction records only the channel's mode; its delivery row is written by the outbox
+     * worker's send, never inside an import batch.
+     */
+    private static final Set<String> NEW_TRANSACTION_REVIEWED = Set.of("SmsOutboxChannel.java");
+
+    // JUSTIFICATION-A3: the review of 8e570b0 on #872 (should-fix 2): listeners and new transactions, both guarded.
+    @Test
+    void everyEventListenerIsReviewedForImportedRecords() throws IOException {
+        List<String> found = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(MAIN)) {
+            for (Path file : files.filter(f -> f.toString().endsWith(".java")).toList()) {
+                if (!LISTENERS.contains(file.getFileName().toString())
+                        && Files.readString(file).contains("@EventListener")) {
+                    found.add(file.toString());
+                }
+            }
+        }
+
+        assertThat(found)
+                .as("a new listener may run inside an import batch: have it skip an imported record, then list it")
+                .isEmpty();
+    }
+
+    @Test
+    void noNewTransactionWritesWhatAnImportBatchRefuses() throws IOException {
+        List<String> found = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(MAIN)) {
+            for (Path file : files.filter(f -> f.toString().endsWith(".java")).toList()) {
+                String text = Files.readString(file);
+                if (!NEW_TRANSACTION_REVIEWED.contains(file.getFileName().toString())
+                        && text.contains("REQUIRES_NEW")
+                        && GUARDED_WRITE.matcher(text).find()) {
+                    found.add(file.toString());
+                }
+            }
+        }
+
+        assertThat(found)
+                .as("a new transaction escapes app.import_commit: a message or task written in it is not refused")
+                .isEmpty();
+    }
+
     @Test
     void noEventPublicationIsPersistedForLater() throws IOException {
         String pom = Files.readString(Path.of("pom.xml"));

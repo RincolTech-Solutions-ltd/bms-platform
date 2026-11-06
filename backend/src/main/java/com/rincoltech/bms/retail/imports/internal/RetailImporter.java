@@ -335,9 +335,8 @@ public class RetailImporter {
                                 + " 'retail.advance_repayment_opening')")
                         .query((rs, n) -> Map.entry(rs.getObject("id", UUID.class), rs.getString("source_type")))
                         .list()
-                        .forEach(e -> checkpoint.register(
+                        .forEach(e -> checkpoint.registerOpeningJournal(
                                 ImportRefs.sourceRef("retail-export", e.getValue(), "entry:" + e.getKey(), "0"),
-                                "ledger.journal_entry",
                                 e.getKey()));
             }
 

@@ -170,7 +170,7 @@ public final class ImportRefs {
     }
 
     /**
-     * An opening balance to post (spec section 3.7): one journal per branch per kind, through {@code post_entry}, against
+     * An opening balance to post (spec section 3.7): one journal per batch, branch and kind, through {@code post_entry}, against
      * {@code opening_balance_equity}. {@code accountKey} is the account's system key; {@code debit} true for an asset the
      * business holds (inventory, receivables, loans receivable: debit the account, credit equity), false for what it owes
      * (member credits: debit equity, credit the account). {@code branchCode} is what the report names the branch by.

@@ -142,13 +142,12 @@ class ImportRunsIT extends IntegrationTest {
     }
 
     /**
-     * Posts the batch's balanced journal, the visible effect of a batch, and registers it as the batch's opening journal:
-     * since issue #133 a batch posts no journal it does not register (Lead ruling 6 on #872).
+     * Posts the batch's balanced journal, the visible effect of a batch, as the batch's opening journal: since issue #133
+     * a batch posts no journal but its opening journals (Lead ruling 6 and the review of 8e570b0 on #872).
      */
     void postJournal(UUID batchId, BatchWriter.Checkpoint checkpoint) {
-        UUID entry = postJournal("lending");
-        checkpoint.register(
-                ImportRefs.sourceRef("test-journal", null, "batch:" + batchId, "0"), "ledger.journal_entry", entry);
+        checkpoint.openingJournal(
+                new ImportRefs.Opening(t.headOffice(), null, "test_batch", DAY, "loans_receivable", true, 100_000));
     }
 
     /** Posts one balanced journal for the business. */
@@ -435,6 +434,76 @@ class ImportRunsIT extends IntegrationTest {
         assertThat(as(t, () -> runs.resume(script(run.id(), writer)))).isEqualTo(CommitOutcome.COMMITTED);
         assertThat(journals()).isEqualTo(1);
         assertThat(as(t, () -> runs.get(run.id())).status()).isEqualTo("committed");
+    }
+
+    // JUSTIFICATION-A3: the review of 8e570b0 on #872 (must-fix 1): each journal a batch may not post, shown refused.
+    @Test
+    void aBatchThatPostsAnyJournalButARegisteredOpeningJournalFailsAndRollsBack() {
+        Run run = readyRun(1);
+        // A disbursement-like journal (debit loans, credit cash), left unregistered: the end-of-batch check refuses it.
+        BatchWriter unregistered = (runId, batchId, seq, checkpoint) -> {
+            postJournal("lending");
+            return Map.of();
+        };
+        assertThatThrownBy(() -> as(t, () -> runs.commit(script(run.id(), unregistered))))
+                .hasStackTraceContaining("not registered opening journals");
+        // The same journal registered as a record: register takes no journal.
+        BatchWriter asRecord = (runId, batchId, seq, checkpoint) -> {
+            checkpoint.register(
+                    ImportRefs.sourceRef("test-journal", null, "batch:" + batchId, "0"),
+                    "ledger.journal_entry",
+                    postJournal("lending"));
+            return Map.of();
+        };
+        assertThatThrownBy(() -> as(t, () -> runs.resume(script(run.id(), asRecord))))
+                .hasStackTraceContaining("registered only as an opening journal");
+        // The same journal registered as an opening journal: it is not one by what the ledger holds.
+        BatchWriter selfAttested = (runId, batchId, seq, checkpoint) -> {
+            checkpoint.registerOpeningJournal(
+                    ImportRefs.sourceRef("test-journal", null, "batch:" + batchId, "0"), postJournal("lending"));
+            return Map.of();
+        };
+        assertThatThrownBy(() -> as(t, () -> runs.resume(script(run.id(), selfAttested))))
+                .hasStackTraceContaining("only an opening journal");
+        // A journal named as the framework's opening journal but with no line on opening balance equity.
+        BatchWriter misnamed = (runId, batchId, seq, checkpoint) -> {
+            UUID entry = ledger.post(new EntryRequest(
+                            t.headOffice(),
+                            DAY,
+                            "IMP-TEST",
+                            null,
+                            "core.imports",
+                            "opening_balance",
+                            UUID.randomUUID(),
+                            null,
+                            List.of(
+                                    Line.debit(t.account("loans_receivable"), Money.of(100_000, "UGX")),
+                                    Line.credit(t.account("cash_on_hand"), Money.of(100_000, "UGX")))))
+                    .entryId();
+            checkpoint.registerOpeningJournal(
+                    ImportRefs.sourceRef("test-journal", null, "batch:" + batchId, "0"), entry);
+            return Map.of();
+        };
+        assertThatThrownBy(() -> as(t, () -> runs.resume(script(run.id(), misnamed))))
+                .hasStackTraceContaining("only an opening journal");
+        // Every refused batch rolled back whole: no journal, no reference, the batch still to write.
+        assertThat(journals()).isZero();
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM import_refs WHERE tenant_id = ?")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isZero();
+        assertThat(batchStatus(run.id(), 1)).isEqualTo("pending");
+        assertThat(audits("core.import_run.batch_failed")).isEqualTo(4);
+
+        // The batch's own opening journal goes through.
+        BatchWriter opening = (runId, batchId, seq, checkpoint) -> {
+            postJournal(batchId, checkpoint);
+            return Map.of();
+        };
+        assertThat(as(t, () -> runs.resume(script(run.id(), opening)))).isEqualTo(CommitOutcome.COMMITTED);
+        assertThat(journals()).isEqualTo(1);
     }
 
     @Test

@@ -50,9 +50,15 @@ public interface LedgerPosting {
     /**
      * The entries of the bound tenant posted in the current transaction (issue #133): those whose {@code created_at}, the
      * database's default, is this transaction's start. An import batch reads it at its end to refuse a journal that is not
-     * one of its registered opening journals.
+     * one of its registered opening journals, by what the entry is, not by what its writer says it is.
      */
-    List<UUID> postedInThisTransaction();
+    List<TransactionEntry> postedInThisTransaction();
+
+    /**
+     * An entry posted in the current transaction: its source, and whether a line of it is on the business's
+     * {@code opening_balance_equity} account.
+     */
+    record TransactionEntry(UUID entryId, String sourceModule, String sourceType, boolean againstOpeningEquity) {}
 
     record ReversalRequest(UUID entryId, LocalDate entryDate, String reference, String memo, String idempotencyKey) {}
 

@@ -7,6 +7,7 @@ import com.rincoltech.bms.core.ledger.LedgerAccounts;
 import com.rincoltech.bms.core.ledger.LedgerPosting;
 import com.rincoltech.bms.core.ledger.LedgerPosting.EntryRequest;
 import com.rincoltech.bms.core.ledger.LedgerPosting.Line;
+import com.rincoltech.bms.core.ledger.LedgerPosting.TransactionEntry;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.Money;
 import java.util.ArrayList;
@@ -132,9 +133,17 @@ class RefService {
     /**
      * Registers a record a writer created, in the caller's transaction. A key already held with another content hash is
      * refused ({@code CHANGED_SINCE_IMPORT}); the same record registered twice for one reference is refused by the
-     * table's unique key. A row may create several records of one type (a loan's collateral items), each registered.
+     * table's unique key. A row may create several records of one type (a loan's collateral items), each registered. A
+     * journal is not taken here: only {@link #openingJournal} and {@link #registerOpeningJournal} register one.
      */
     void register(UUID runId, UUID batchId, String sourceRef, String targetType, UUID targetId) {
+        if (JOURNAL.equals(targetType)) {
+            throw new IllegalArgumentException("a journal is registered only as an opening journal");
+        }
+        insert(runId, batchId, sourceRef, targetType, targetId);
+    }
+
+    private void insert(UUID runId, UUID batchId, String sourceRef, String targetType, UUID targetId) {
         String key = ImportRefs.keyOf(sourceRef);
         boolean other = jdbc.sql("SELECT EXISTS (SELECT 1 FROM import_refs WHERE source_key = ? AND source_ref <> ?)")
                 .params(key, sourceRef)
@@ -157,9 +166,9 @@ class RefService {
 
     /**
      * Posts one opening journal of the run (spec section 3.7) through {@code post_entry} against
-     * {@code opening_balance_equity} and registers it in {@code import_refs} in the caller's transaction: once per run,
-     * branch and kind. Its reference is the framework function's, of the file {@code opening}, the kind as the tab, the run
-     * and branch as the row, and the hash of the account, side and amount.
+     * {@code opening_balance_equity} and registers it in {@code import_refs} in the caller's transaction: once per batch,
+     * branch and kind. Its reference is the framework function's, of the file {@code opening}, the kind as the tab, the
+     * run, batch and branch as the row, and the hash of the account, side, amount and date.
      */
     Posted openingJournal(UUID runId, UUID batchId, Opening o) {
         if (o.amountMinor() == 0) {
@@ -205,7 +214,7 @@ class RefService {
                 MODULE,
                 "opening_balance",
                 runId,
-                // At most 100 characters (journal_entries.idempotency_key): the hash of the run, branch and kind.
+                // At most 100 characters (journal_entries.idempotency_key): a hash of run, batch, branch and kind.
                 "import-opening:"
                         + ImportRefs.contentHash(Map.of(
                                 "run",
@@ -217,31 +226,66 @@ class RefService {
                                 "kind",
                                 o.kind())),
                 lines));
-        register(runId, batchId, ref, JOURNAL, entry.entryId());
+        insert(runId, batchId, ref, JOURNAL, entry.entryId());
         LedgerPosting.Totals totals = ledger.totals(entry.entryId());
         return new Posted("posted", totals.debitMinor(), totals.creditMinor(), entry.entryNo());
     }
 
     // JUSTIFICATION-A3: the Lead's ruling 6 on #872, the end-of-batch check of the journals a batch posted.
     /**
-     * Refuses a batch that posted a journal other than a registered opening journal (Lead ruling 6 on #872): every entry
-     * the transaction posted must be registered in {@code import_refs} as {@code ledger.journal_entry}, so an import posts
-     * no journal but its opening journals. The batch then fails and rolls back whole.
+     * Refuses a batch that posted a journal other than a registered opening journal (Lead ruling 6 and the review of
+     * 8e570b0 on #872). Every entry the transaction posted must be registered in {@code import_refs} as
+     * {@code ledger.journal_entry}, and must be an opening journal by what the ledger holds, not by what its writer says:
+     * the framework's own ({@code core.imports}, {@code opening_balance}, with a line on {@code opening_balance_equity}),
+     * or one of the {@code import-retail} command's opening journals ({@link #RETAIL_OPENINGS}), until #135 moves retail
+     * onto {@code openingJournal}. The batch then fails and rolls back whole.
      */
     void requireOnlyOpeningJournals() {
-        List<UUID> posted = ledger.postedInThisTransaction();
+        List<TransactionEntry> posted = ledger.postedInThisTransaction();
         if (posted.isEmpty()) {
             return;
         }
-        long registered = jdbc.sql("SELECT count(DISTINCT target_id) FROM import_refs"
-                        + " WHERE target_type = ? AND target_id = ANY(?)")
-                .params(JOURNAL, posted.toArray(UUID[]::new))
-                .query(Long.class)
-                .single();
-        if (registered != posted.size()) {
-            throw new IllegalStateException("an import batch posted " + (posted.size() - registered)
-                    + " journal(s) that are not registered opening journals");
+        UUID[] ids = posted.stream().map(TransactionEntry::entryId).toArray(UUID[]::new);
+        List<UUID> held = jdbc.sql("SELECT target_id FROM import_refs WHERE target_type = ? AND target_id = ANY(?)")
+                .params(JOURNAL, ids)
+                .query(UUID.class)
+                .list();
+        Set<UUID> registered = new HashSet<>(held);
+        long refused = posted.stream()
+                .filter(e -> !registered.contains(e.entryId()) || !isOpeningJournal(e))
+                .count();
+        if (refused > 0) {
+            throw new IllegalStateException(
+                    "an import batch posted " + refused + " journal(s) that are not registered opening journals");
         }
+    }
+
+    /** The {@code import-retail} command's opening journals: module {@code retail}, by source type. */
+    static final Set<String> RETAIL_OPENINGS = Set.of(
+            "retail.import_opening",
+            "retail.cash_opening",
+            "retail.advance_opening",
+            "retail.advance_repayment_opening");
+
+    static boolean isOpeningJournal(TransactionEntry e) {
+        if (MODULE.equals(e.sourceModule())) {
+            return "opening_balance".equals(e.sourceType()) && e.againstOpeningEquity();
+        }
+        return "retail".equals(e.sourceModule()) && RETAIL_OPENINGS.contains(e.sourceType());
+    }
+
+    /**
+     * Registers a journal a writer posted itself as the batch's opening journal: only one this transaction posted that is
+     * an opening journal by what the ledger holds ({@link #isOpeningJournal}). A writer cannot register any other journal,
+     * and {@link #register} takes no journal at all.
+     */
+    void registerOpeningJournal(UUID runId, UUID batchId, String sourceRef, UUID entryId) {
+        boolean opening = ledger.postedInThisTransaction().stream()
+                .anyMatch(e -> e.entryId().equals(entryId) && isOpeningJournal(e));
+        if (!opening) {
+            throw new IllegalStateException("only an opening journal posted in this batch is registered as one");
+        }
+        insert(runId, batchId, sourceRef, JOURNAL, entryId);
     }
 
     static ApiException changedSinceImport(int line) {

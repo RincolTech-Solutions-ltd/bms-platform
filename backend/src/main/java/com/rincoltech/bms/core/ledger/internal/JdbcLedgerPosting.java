@@ -58,9 +58,15 @@ class JdbcLedgerPosting implements LedgerPosting {
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
-    public List<UUID> postedInThisTransaction() {
-        return jdbc.sql("SELECT id FROM journal_entries WHERE created_at = now()")
-                .query(UUID.class)
+    public List<TransactionEntry> postedInThisTransaction() {
+        return jdbc.sql("""
+                        SELECT e.id, e.source_module, e.source_type,
+                               EXISTS (SELECT 1 FROM journal_lines l JOIN gl_accounts a ON a.id = l.account_id
+                                        WHERE l.entry_id = e.id AND a.system_key = 'opening_balance_equity')
+                          FROM journal_entries e WHERE e.created_at = now()
+                        """)
+                .query((rs, n) -> new TransactionEntry(
+                        rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3), rs.getBoolean(4)))
                 .list();
     }
 

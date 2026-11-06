@@ -430,8 +430,8 @@ class ImportRunService implements ImportRuns {
                     HttpStatus.CONFLICT,
                     first.missingCode(),
                     "Decision missing",
-                    "The source has credit sales or loans without their payments; record the "
-                            + first.key().replace('_', ' ') + " decision the customer confirmed first.");
+                    "Rows of this import need the " + first.key().replace('_', ' ')
+                            + " decision; record the option the customer confirmed first.");
         }
     }
 
@@ -1458,6 +1458,11 @@ class ImportRunService implements ImportRuns {
         @Override
         public void register(String sourceRef, String targetType, UUID targetId) {
             refs.register(runId, batchId, sourceRef, targetType, targetId);
+        }
+
+        @Override
+        public void registerOpeningJournal(String sourceRef, UUID entryId) {
+            refs.registerOpeningJournal(runId, batchId, sourceRef, entryId);
         }
 
         @Override
