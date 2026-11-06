@@ -153,7 +153,8 @@ const retailStockRoute = retailScreen('/stock', 'Stock', textParams('item', 'bra
 // The item page (issue #813): one item's stock in each shop and every movement of it with the balance after each.
 const retailItemPageRoute = retailScreen('/items/$productId', 'Item').lazy(() => import('../areas/staff/retail/item-page').then((m) => m.Route));
 // Quick add (issue #632): `name` is what Sell's search typed before it found nothing, so the form starts with it.
-const retailQuickAddRoute = retailScreen('/quick-add', 'Quick add', textParams('name')).lazy(() => import('../areas/staff/retail/quick-add').then((m) => m.Route));// Count it now (issue #700): `item` is the item just added, put on the sheet ready to type, and `from` the screen it came from.
+const retailQuickAddRoute = retailScreen('/quick-add', 'Quick add', textParams('name')).lazy(() => import('../areas/staff/retail/quick-add').then((m) => m.Route));
+// Count it now (issue #700): `item` is the item just added, put on the sheet ready to type, and `from` the screen it came from.
 const retailStocktakeRoute = retailScreen('/stocktake', WORDS.countStock, textParams('item', 'from', 'finish')).lazy(() => import('../areas/staff/retail/stocktake').then((m) => m.Route));
 const retailTransferRoute = retailScreen('/transfer', 'Move stock').lazy(() => import('../areas/staff/retail/transfer').then((m) => m.Route));
 const retailTransfersRoute = retailScreen('/transfers', 'Stock moves').lazy(() => import('../areas/staff/retail/transfers').then((m) => m.Route));
