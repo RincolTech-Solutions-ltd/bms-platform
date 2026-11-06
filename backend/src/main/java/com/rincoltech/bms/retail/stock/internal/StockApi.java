@@ -3,6 +3,7 @@ package com.rincoltech.bms.retail.stock.internal;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue.NewPack;
+import com.rincoltech.bms.retail.stock.OfflineEntry;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Digits;
@@ -363,6 +364,106 @@ final class StockApi {
 
             @Schema(description = "What left the cash or mobile money account; absent when not paid for")
             Long paidMinor) {}
+
+    // JUSTIFICATION-A3: issue #870 asks for one request per list; its body, row and answer are new contract types.
+    /** The most rows one list takes (issue #870). */
+    static final int MAX_LIST_ROWS = 200;
+
+    @Schema(
+            name = "RetailQuickAddListRow",
+            description =
+                    "Issue #870: one row of Add many items, the fields of Quick add without packages or paid_from. With"
+                            + " product_id, an item already in the list, only qty is added and the other item fields are"
+                            + " ignored")
+    record QuickAddListRow(
+            @Schema(
+                    description =
+                            "An item already in the list: add qty to its stock instead of a new item of that name")
+            UUID productId,
+
+            @Size(max = 300) @Schema(description = "The new item's name; required without product_id")
+            String description,
+
+            @Schema(description = "Left out: the item goes under General, made when the business has none")
+            UUID categoryId,
+
+            @Schema(description = "Left out: the shop's piece unit (Piece or pc), made when the business has none")
+            UUID unitId,
+
+            @PositiveOrZero @Max(RetailCatalogue.MAX_AMOUNT_MINOR) @Schema(description = "Required without product_id")
+            Long sellMinor,
+
+            @PositiveOrZero
+            @Max(RetailCatalogue.MAX_AMOUNT_MINOR)
+            @Schema(description = "Left out: 0, set by the first restock")
+            Long costMinor,
+
+            @PositiveOrZero
+            @Digits(integer = 11, fraction = 3)
+            @Schema(
+                    type = "string",
+                    example = "12",
+                    description =
+                            "How many there are now at the list's branch, added as opening stock; more than 0 with"
+                                    + " product_id; left out, no stock is recorded for this row")
+            BigDecimal qty) {
+
+        /** The row as one Quick add at the list's branch, through the same rules. */
+        QuickAddRequest asQuickAdd(UUID branchId) {
+            return new QuickAddRequest(
+                    productId,
+                    description,
+                    categoryId,
+                    unitId,
+                    sellMinor,
+                    costMinor,
+                    qty,
+                    qty == null ? null : branchId,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null);
+        }
+    }
+
+    @Schema(
+            name = "RetailQuickAddListRequest",
+            description =
+                    "Issue #870: Add many items. Every row is one Quick add at branch_id, all in one transaction under"
+                            + " one Idempotency-Key: a refused row names its row_index, its fields as rows[i].field, and"
+                            + " nothing of the list is saved")
+    record QuickAddListRequest(
+            @Schema(description = "Where the stock of every row goes; defaults to the caller's one branch")
+            UUID branchId,
+
+            @NotEmpty @Size(max = MAX_LIST_ROWS) List<@Valid @NotNull QuickAddListRow> rows,
+
+            @Valid OfflineEntry offline) {
+
+        /** What the Idempotency-Key covers: the list without its offline block (ADR-067 decision 13). */
+        QuickAddListRequest forKey() {
+            return new QuickAddListRequest(branchId, rows, null);
+        }
+    }
+
+    @Schema(
+            name = "RetailQuickAddList",
+            description = "Issue #870: the list saved, one result per row in the order sent")
+    record QuickAddList(
+            @Schema(description = "The list's own id, also the source of its offline audit row")
+            UUID id,
+
+            @Schema(description = "Where the stock went; null when no row had a quantity")
+            UUID branchId,
+
+            @Schema(description = "How many rows made a new item")
+            int itemsMade,
+
+            @Schema(description = "How many rows added stock to an item already in the list")
+            int stockAdded,
+
+            List<QuickAdd> rows) {}
 
     @Schema(
             name = "RetailStockCorrectionRequest",

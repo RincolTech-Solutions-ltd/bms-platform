@@ -9,6 +9,8 @@ import com.rincoltech.bms.retail.stock.internal.StockApi.CorrectionRequest;
 import com.rincoltech.bms.retail.stock.internal.StockApi.MovementPage;
 import com.rincoltech.bms.retail.stock.internal.StockApi.OpenStocktake;
 import com.rincoltech.bms.retail.stock.internal.StockApi.QuickAdd;
+import com.rincoltech.bms.retail.stock.internal.StockApi.QuickAddList;
+import com.rincoltech.bms.retail.stock.internal.StockApi.QuickAddListRequest;
 import com.rincoltech.bms.retail.stock.internal.StockApi.QuickAddRequest;
 import com.rincoltech.bms.retail.stock.internal.StockApi.StockPage;
 import com.rincoltech.bms.retail.stock.internal.StockApi.Stocktake;
@@ -244,6 +246,32 @@ class StockController {
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody QuickAddRequest request) {
         Outcome<QuickAdd> outcome = quickAdd.add(idempotencyKey, request);
+        ResponseEntity.BodyBuilder response = ResponseEntity.status(HttpStatus.CREATED);
+        if (outcome.replayed()) {
+            response.header("Idempotent-Replayed", "true");
+        }
+        return response.body(outcome.body());
+    }
+
+    // JUSTIFICATION-A3: issue #870 asks for one request per list; the handler only passes it to Quick add's service.
+    @PostMapping("/quick-add/list")
+    @RequiresPermission("retail.catalogue.manage")
+    @Operation(
+            summary =
+                    "Add many items: every row one Quick add at one branch, in one transaction under one Idempotency-Key;"
+                            + " a refused row names its row_index and saves nothing of the list (issue #870, ADR-101); M",
+            operationId = "quickAddRetailItemList")
+    @ApiResponse(
+            responseCode = "201",
+            description = "One result per row, in the order sent",
+            content =
+                    @Content(
+                            mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = QuickAddList.class)))
+    ResponseEntity<QuickAddList> quickAddList(
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody QuickAddListRequest request) {
+        Outcome<QuickAddList> outcome = quickAdd.addList(idempotencyKey, request);
         ResponseEntity.BodyBuilder response = ResponseEntity.status(HttpStatus.CREATED);
         if (outcome.replayed()) {
             response.header("Idempotent-Replayed", "true");
