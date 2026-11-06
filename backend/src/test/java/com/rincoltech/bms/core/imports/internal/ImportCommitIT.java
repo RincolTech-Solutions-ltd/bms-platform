@@ -837,8 +837,8 @@ class ImportCommitIT extends IntegrationTest {
             outbox.enqueue(new Outbox.Message(
                     Outbox.EMAIL,
                     "fabricated.reader@example.invalid",
-                    "core.fabricated_notice",
-                    Map.of(),
+                    "onboarding.verify_email",
+                    Map.of("reference", "AP-1", "link", "https://example.test/x"),
                     "fabricated-import-notice:" + runId));
             return Map.of();
         };
@@ -906,7 +906,7 @@ class ImportCommitIT extends IntegrationTest {
                                                 UUID.randomUUID(),
                                                 UUID.randomUUID())
                                         .update())))
-                .hasMessageContaining("row-level security");
+                .hasStackTraceContaining("row-level security");
         assertThat(TestDatabase.owner()
                         .sql("SELECT relrowsecurity AND relforcerowsecurity FROM pg_class"
                                 + " WHERE relname = 'import_refs'")

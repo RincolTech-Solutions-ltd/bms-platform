@@ -944,7 +944,7 @@ class ImportRunService implements ImportRuns {
             // A batch committed before V142 stored no part; no run was committed then (no writer existed).
             jdbc.sql("""
                             SELECT report::text FROM import_batches
-                             WHERE run_id = ? AND status = 'committed' AND report IS NOT NULL ORDER BY seq
+                             WHERE run_id = ? AND status = 'committed' AND report IS NOT NULL ORDER BY committed_at, seq
                             """)
                     .param(runId)
                     .query(String.class)
