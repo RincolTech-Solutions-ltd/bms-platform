@@ -57,7 +57,7 @@ public interface ImportMappings {
 
     /**
      * A parsed batch against the mapping version it recorded and the headers its parse found. A batch parsed without a
-     * mapping has one problem, {@code SOURCE_UNKNOWN}.
+     * mapping has one problem, {@code BATCH_HAS_NO_MAPPING}; a batch not parsed, or failed, is 409 {@code batch_not_parsed}.
      */
     Validation validateBatch(UUID batchId);
 

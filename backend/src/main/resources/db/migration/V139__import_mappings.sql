@@ -81,7 +81,8 @@ BEGIN
     IF (session_user = 'bms_owner' AND coalesce(current_setting('bms.allow_mutation', true), '') = 'on') OR bms_erasing(to_jsonb(OLD)) THEN
         RETURN NEW;
     END IF;
-    IF OLD.status = 'committed'
+    -- NEW.status too, so one UPDATE cannot commit the batch and move its mapping at once (review of #866).
+    IF (OLD.status = 'committed' OR NEW.status = 'committed')
        AND (NEW.mapping_id IS DISTINCT FROM OLD.mapping_id
             OR NEW.mapping_source IS DISTINCT FROM OLD.mapping_source
             OR NEW.template_key IS DISTINCT FROM OLD.template_key

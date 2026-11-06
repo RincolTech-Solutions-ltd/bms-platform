@@ -805,7 +805,11 @@ the quarantined upload (#128) and, since #129, the canonical templates and versi
 mappings (`ImportMappings`: save a version, read versions, check a document, validate against a batch's headers). Because
 #129 adds no route, `docs/api/openapi.json` and `frontend/src/api/schema.d.ts` are unchanged. The refusals those routes will
 answer are fixed now: 422 `mapping_invalid` (every problem in `errors`, each with its JSON Pointer and catalogue code), 422
-`TEMPLATE_UNKNOWN`, 422 `SOURCE_UNKNOWN`, 409 `mapping_version_conflict`, 409 `batch_not_parsed`.
+`TEMPLATE_UNKNOWN`, 422 `SOURCE_UNKNOWN`, 409 `mapping_version_conflict`, 409 `batch_not_parsed`. The casing follows the
+convention of #127 and #128: a code that is also an issue code of the onboarding catalogue (spec section 3.4.1:
+`IMPORT_IN_PROGRESS`, `TENANT_TRADING`, `FILE_TYPE_UNSUPPORTED`, `UPLOAD_DISK_LOW`, and now `TEMPLATE_UNKNOWN` and
+`SOURCE_UNKNOWN`) is written in capitals, so a screen shows the same code in a refusal and in a report; every other code is
+lower case, as elsewhere in the API.
 
 ### 7.11.10 Payments
 

@@ -132,6 +132,10 @@ public interface ImportTemplates {
             new IssueCode("ZONE_UNKNOWN", Severity.BLOCKING, "The time zone {value} is not a known zone."),
             new IssueCode("SOURCE_UNKNOWN", Severity.REFUSED, "The mapping has no source {source}."),
             new IssueCode(
+                    "BATCH_HAS_NO_MAPPING",
+                    Severity.REFUSED,
+                    "The file was read without a mapping; read it again with one before checking its columns."),
+            new IssueCode(
                     "REQUIRED_COLUMN_MISSING",
                     Severity.BLOCKING,
                     "Column {column}, which feeds the required {field}, is not in the file of source {source}."));

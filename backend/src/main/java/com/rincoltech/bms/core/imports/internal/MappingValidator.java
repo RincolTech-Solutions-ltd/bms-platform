@@ -38,8 +38,8 @@ final class MappingValidator {
 
     /**
      * The problems of a document on its own. {@code templates} finds a registered template by key and version; a document
-     * whose template is not found has the one problem {@code TEMPLATE_UNKNOWN}, and one that breaks the schema only its
-     * {@code MAPPING_INVALID} problems, since the later checks read its shape.
+     * whose template is not found has the one problem {@code TEMPLATE_UNKNOWN}. Otherwise every {@code MAPPING_INVALID}
+     * problem of the schema, then the checks a schema cannot make, on every part the schema accepted.
      */
     static List<Problem> check(
             Map<String, Object> document, BiFunction<String, Integer, Optional<ImportTemplate>> templates) {
@@ -63,22 +63,31 @@ final class MappingValidator {
             return out;
         }
         ImportTemplate template = found.get();
+        List<String> wrong = new ArrayList<>();
         for (SchemaCheck.Violation violation : SchemaCheck.check(TemplateSchema.of(template), document)) {
             out.add(schemaProblem(violation.pointer(), violation.reason()));
+            wrong.add(violation.pointer());
         }
-        if (!out.isEmpty()) {
-            return out;
-        }
-        String zone = (String) document.get("time_zone");
-        try {
-            ZoneId.of(zone);
-        } catch (DateTimeException e) {
-            out.add(problem("ZONE_UNKNOWN", null, null, null, "/time_zone", Map.of("value", zone)));
+        // The later checks read a part's shape, so they run on every part the schema accepted (review of #866): one bad
+        // currency does not hide a source's missing required field.
+        if (!touched(wrong, "/time_zone") && document.get("time_zone") instanceof String zone) {
+            try {
+                ZoneId.of(zone);
+            } catch (DateTimeException e) {
+                out.add(problem("ZONE_UNKNOWN", null, null, null, "/time_zone", Map.of("value", zone)));
+            }
         }
         for (Map.Entry<String, Map<String, Object>> source : sources(document).entrySet()) {
-            checkSource(template, source.getKey(), source.getValue(), out);
+            if (!touched(wrong, "/sources/" + SchemaCheck.escape(source.getKey()))) {
+                checkSource(template, source.getKey(), source.getValue(), out);
+            }
         }
         return out;
+    }
+
+    /** Whether a violation is at {@code pointer} or inside it. */
+    private static boolean touched(List<String> pointers, String pointer) {
+        return pointers.stream().anyMatch(p -> p.equals(pointer) || p.startsWith(pointer + "/"));
     }
 
     /**

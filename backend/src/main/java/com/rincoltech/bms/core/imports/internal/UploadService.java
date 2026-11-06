@@ -2,6 +2,7 @@ package com.rincoltech.bms.core.imports.internal;
 
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.documents.QuarantineStorage;
+import com.rincoltech.bms.core.imports.ImportMappings;
 import com.rincoltech.bms.core.imports.ImportUploads;
 import com.rincoltech.bms.core.imports.internal.QuarantineWriter.FileType;
 import com.rincoltech.bms.core.imports.internal.SourceParser.StagedRow;
@@ -79,6 +80,7 @@ class UploadService implements ImportUploads {
     private final UploadSettings.Properties settings;
     private final UploadSettings.ImportKey importKey;
     private final ObjectMapper mapper;
+    private final ImportMappings mappings;
 
     private final Seams seams;
 
@@ -105,8 +107,10 @@ class UploadService implements ImportUploads {
             UploadSettings.Properties settings,
             UploadSettings.ImportKey importKey,
             ObjectMapper mapper,
+            ImportMappings mappings,
             ObjectProvider<Seams> seams) {
         this.seams = seams.getIfAvailable(() -> new Seams() {});
+        this.mappings = mappings;
         this.jdbc = jdbc;
         this.batchJdbc = new JdbcTemplate(dataSource);
         this.tx = new TransactionTemplate(transactions);
@@ -134,6 +138,10 @@ class UploadService implements ImportUploads {
     private Batch store(UUID runId, Upload upload, InputStream content) {
         requireNoTransaction();
         UUID tenantId = TenantContext.require();
+        if (upload.options() != null && upload.options().mappingId() != null) {
+            // An unknown source or another business's mapping is refused before the file is stored.
+            mappings.parseOptions(upload.options().mappingId(), upload.options().mappingSource());
+        }
         long maxBytes = settings.maxFileSize().toBytes();
         FileType type = FileType.fromName(upload.fileName());
         if (type == null) {
@@ -252,8 +260,13 @@ class UploadService implements ImportUploads {
     public Batch parse(UUID batchId, ParseOptions options) {
         requireNoTransaction();
         UUID tenantId = TenantContext.require();
+        ParseOptions given = options == null ? ParseOptions.DEFAULT : options;
+        // A batch that records a mapping is parsed with that mapping's own options for the source, never the caller's
+        // (review of #866): the sheet, header row and required and ignored columns all come from the stored version, a
+        // source the mapping lacks is SOURCE_UNKNOWN and another business's mapping is not found.
+        ParseOptions opts =
+                given.mappingId() == null ? given : mappings.parseOptions(given.mappingId(), given.mappingSource());
         byte[] platformKey = platformKey();
-        ParseOptions opts = options == null ? ParseOptions.DEFAULT : options;
         Held held = tx.execute(s -> {
             Held h = held(batchId, true);
             requireOpen(run(h.runId(), false).status());
@@ -440,7 +453,8 @@ class UploadService implements ImportUploads {
                     .update();
             jdbc.sql("""
                             UPDATE import_batches SET status = 'failed', failure_code = ?, failure_reason = ?, failed_at = now(),
-                                   row_count = 0
+                                   row_count = 0, mapping_id = NULL, mapping_source = NULL, template_key = NULL,
+                                   template_version = NULL, source_headers = NULL
                              WHERE id = ?
                             """).params(code, truncate(reason, 300), held.id()).update();
             audit.record(new AuditLog.Entry(

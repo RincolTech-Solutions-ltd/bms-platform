@@ -145,6 +145,10 @@ final class SourceParser {
 
         @Override
         public void header(int headerRowNo, List<String> names) {
+            // The names are stored in import_batches.source_headers, which cannot hold a NUL (review of #866).
+            if (names.stream().anyMatch(n -> n.indexOf('\0') >= 0)) {
+                throw Parsing.unreadable("The header row holds a NUL character.");
+            }
             headers.addAll(names);
         }
 

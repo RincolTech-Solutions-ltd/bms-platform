@@ -163,6 +163,7 @@ Every issue has:
 | `SOURCE_REF_COLUMN_UNKNOWN` | blocking | The reference column {column} of source {source} is not a column the mapping keeps. (#129) |
 | `ZONE_UNKNOWN` | blocking | The time zone {value} is not a known zone. (#129) |
 | `SOURCE_UNKNOWN` | request refused | The mapping has no source {source}. (#129) |
+| `BATCH_HAS_NO_MAPPING` | request refused | The file was read without a mapping; read it again with one before checking its columns. (#129) |
 | `REQUIRED_COLUMN_MISSING` | blocking | Column {column}, which feeds the required {field}, is not in the file of source {source}. (#129) |
 
 The shared codes of this table are `ImportTemplates.SHARED_CODES` in `core.imports` (#129); the retail

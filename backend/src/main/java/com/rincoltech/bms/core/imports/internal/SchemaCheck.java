@@ -95,7 +95,7 @@ final class SchemaCheck {
                 out.add(new Violation(at, "must be at most " + max + " characters"));
             }
             if (schema.get("pattern") instanceof String p
-                    && !Pattern.compile(p).matcher(s).find()) {
+                    && !Pattern.compile(strictEnd(p)).matcher(s).find()) {
                 out.add(new Violation(at, "is not in the expected form"));
             }
         }
@@ -253,6 +253,17 @@ final class SchemaCheck {
             case Number x -> BigDecimal.valueOf(x.longValue());
             default -> throw new IllegalArgumentException("not a number");
         };
+    }
+
+    /**
+     * A JSON Schema pattern follows ECMA-262, where a final {@code $} is the end of the text; Java's {@code $} also matches
+     * before a final line break, so {@code "UGX\n"} would pass {@code ^[A-Z]{3}$} (review of #866). A final {@code $} is read
+     * as {@code \z}.
+     */
+    static String strictEnd(String pattern) {
+        return pattern.endsWith("$") && !pattern.endsWith("\\$")
+                ? pattern.substring(0, pattern.length() - 1) + "\\z"
+                : pattern;
     }
 
     private static String listed(List<?> constants) {

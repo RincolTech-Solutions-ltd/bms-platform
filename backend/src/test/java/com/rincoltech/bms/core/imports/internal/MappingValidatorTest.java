@@ -190,6 +190,27 @@ class MappingValidatorTest {
     }
 
     @Test
+    void aSchemaProblemDoesNotHideTheProblemsOfTheSourcesTheSchemaAccepted() {
+        // JUSTIFICATION-A3: a new test case for the review of #866 (nice-to-have 4 and 5), no new mechanism.
+        Map<String, Object> mapping = fixture("fixture_shop_v1.mapping.json");
+        mapping.put("currency", "UGX\n");
+        columns(mapping, "till_roll").remove("Fab When");
+        source(mapping, "item_list").put("header_row", "first");
+        columns(mapping, "item_list").remove("Fab Item Label");
+
+        List<Problem> problems = check(mapping);
+
+        assertThat(problems)
+                .extracting(Problem::code, Problem::pointer, Problem::field)
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.groups.Tuple.tuple("MAPPING_INVALID", "/currency", null),
+                        org.assertj.core.groups.Tuple.tuple("MAPPING_INVALID", "/sources/item_list/header_row", null),
+                        org.assertj.core.groups.Tuple.tuple("REQUIRED_FIELD_UNMAPPED", null, "sold_at"));
+        assertThat(SchemaCheck.strictEnd("^[A-Z]{3}$")).isEqualTo("^[A-Z]{3}\\z");
+        assertThat(SchemaCheck.strictEnd("^a\\$")).isEqualTo("^a\\$");
+    }
+
+    @Test
     void aDocumentForATemplateNotRegisteredHasOneProblem() {
         Map<String, Object> mapping = fixture("fixture_shop_v1.mapping.json");
         mapping.put("template_version", 2);

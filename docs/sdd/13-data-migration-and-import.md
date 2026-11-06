@@ -812,7 +812,9 @@ operator's tooling calls the services, as it calls the upload and the commit.
   source label to value; an enum map's values must be the enum's); optional `row_rules`; and `source_ref`
   (`{"rule": "row_hash"}`, the tab, row number and content hash, or `{"rule": "column", "column": ...}`).
 - **The validator.** First the schema (`MAPPING_INVALID`, one per violation, with its JSON Pointer and never a value; a
-  template not registered is `TEMPLATE_UNKNOWN` alone), then what a schema cannot say: a required field no column feeds
+  template not registered is `TEMPLATE_UNKNOWN` alone; a pattern's final `$` is the end of the text, as in ECMA-262, so a
+  trailing line break never passes), then, on every part the schema accepted (a bad currency does not hide a source's
+  missing field), what a schema cannot say: a required field no column feeds
   (`REQUIRED_FIELD_UNMAPPED`), one field fed by two columns (`FIELD_MAPPED_TWICE`), a column written twice ignoring case and
   spaces (`COLUMN_DUPLICATE`), a value or enum map for a field no column feeds (`MAP_FIELD_UNMAPPED`), a `source_ref` column
   the source does not keep (`SOURCE_REF_COLUMN_UNKNOWN`), an unknown zone (`ZONE_UNKNOWN`). Against a file's headers,
@@ -830,9 +832,14 @@ operator's tooling calls the services, as it calls the upload and the commit.
   blank or lacks one of them is `HEADER_NOT_FOUND`), the columns it ignores (never stored) and the mapping itself. The parse
   writes `mapping_id`, `mapping_source`, `template_key`, `template_version` and `source_headers` (every header name the parse
   found, ignored ones included, and any column a row holds beyond the header) on the batch; a mapping of another business
-  is `not_found`. A new mapping version is a new row, so a batch keeps reading the version it was parsed with; a parse is
-  refused once the run is ready, and once a batch is committed the trigger `import_batches_mapping_kept` refuses any change
-  to those five columns, for every role, the removal and purge of a closed business aside (V102's `bms_erasing`).
+  is `not_found`. When options name a mapping, the upload and the parse use that mapping's own options for the source and
+  nothing else the caller passed, so a batch never records a mapping it was not parsed with; a source the mapping lacks is
+  `SOURCE_UNKNOWN` before the file is stored. A header name holding a NUL is `FILE_UNREADABLE`. A parse that fails clears the
+  five columns, so a failed batch never shows an earlier version's headers (`validateBatch` on it is 409
+  `batch_not_parsed`; on a batch read without a mapping it reports `BATCH_HAS_NO_MAPPING`). A new mapping version is a new
+  row, so a batch keeps reading the version it was parsed with; a parse is refused once the run is ready, and the trigger
+  `import_batches_mapping_kept` refuses any change to those five columns in an update that leaves or makes the batch
+  `committed`, for every role, the removal and purge of a closed business aside (V102's `bms_erasing`).
 - **Fixtures.** `fixtures/imports/` holds the fabricated mappings the tests read (`fixture_shop_v1.mapping.json`, valid;
   `fixture_shop_v1.invalid.mapping.json`; a header row). Real mappings are never committed (spec section 4.2).
 - **Proven by** `MappingValidatorTest` (the registry's checks, the schema and its narrowing, every validator code, one

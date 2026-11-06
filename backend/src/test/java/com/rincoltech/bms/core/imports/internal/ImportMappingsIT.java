@@ -206,7 +206,68 @@ class ImportMappingsIT extends IntegrationTest {
         assertThat(plain.mappingId()).isNull();
         assertThat(as(t, () -> mappings.validateBatch(batch.id())).problems())
                 .extracting(Problem::code)
-                .containsExactly("SOURCE_UNKNOWN");
+                .containsExactly("BATCH_HAS_NO_MAPPING");
+    }
+
+    // JUSTIFICATION-A3: two new test cases for the review of #866 (must-fix 1, nice-to-have 2 and 3), no new mechanism.
+    @Test
+    void aBatchIsParsedWithItsMappingsOwnOptionsNeverTheCallers() {
+        Mapping v1 = as(t, () -> mappings.save("fab-shop", fixture("fixture_shop_v1.mapping.json"), operator, null));
+        UUID runId = as(t, () -> runs.open(operator).id());
+
+        // The caller names the mapping but none of its options (review of #866): the ignored column is not stored.
+        Batch batch = upload(runId, new ParseOptions(null, Set.of(), Set.of(), 0, v1.id(), "item_list"));
+
+        assertThat(batch.mappingId()).isEqualTo(v1.id());
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM import_rows WHERE batch_id = ? AND raw -> 'Fab Shelf Note' IS NOT NULL")
+                        .param(batch.id())
+                        .query(Long.class)
+                        .single())
+                .isZero();
+        // A source the mapping lacks is refused before anything is stored.
+        long before = batches(runId);
+        assertCode(
+                () -> upload(runId, new ParseOptions(null, Set.of(), Set.of(), 0, v1.id(), "bogus")), "SOURCE_UNKNOWN");
+        assertThat(batches(runId)).isEqualTo(before);
+    }
+
+    @Test
+    void aFailedReparseForgetsTheMappingAndOneUpdateCannotCommitAndMoveIt() {
+        Mapping v1 = as(t, () -> mappings.save("fab-shop", fixture("fixture_shop_v1.mapping.json"), operator, null));
+        Map<String, Object> fixedRow = fixture("fixture_shop_v1.mapping.json");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> items =
+                (Map<String, Object>) ((Map<String, Object>) fixedRow.get("sources")).get("item_list");
+        // Row 2 of the file is a data row, so it lacks the required headers: HEADER_NOT_FOUND.
+        items.put("header_row", 2);
+        Mapping v2 = as(t, () -> mappings.save("fab-shop", fixedRow, operator, null));
+        UUID runId = as(t, () -> runs.open(operator).id());
+        Batch batch = upload(runId, as(t, () -> mappings.parseOptions(v1.id(), "item_list")));
+
+        assertThatThrownBy(() -> TestDatabase.owner()
+                        .sql("UPDATE import_batches SET status = 'committed', committed_at = now(), mapping_id = NULL,"
+                                + " mapping_source = NULL, template_key = NULL, template_version = NULL WHERE id = ?")
+                        .param(batch.id())
+                        .update())
+                .hasStackTraceContaining("the mapping of a committed import batch never changes");
+
+        Batch failed = as(t, () -> uploads.parse(batch.id(), mappings.parseOptions(v2.id(), "item_list")));
+
+        assertThat(failed.status()).isEqualTo("failed");
+        assertThat(failed.failureCode()).isEqualTo("HEADER_NOT_FOUND");
+        assertThat(failed.mappingId()).isNull();
+        assertThat(failed.headers()).isEmpty();
+        assertCode(() -> as(t, () -> mappings.validateBatch(batch.id())), "batch_not_parsed");
+    }
+
+    long batches(UUID runId) {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM import_batches WHERE run_id = ?")
+                .param(runId)
+                .query(Long.class)
+                .single();
     }
 
     @Test
