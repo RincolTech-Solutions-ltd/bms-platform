@@ -156,7 +156,7 @@ public interface ImportTemplate {
         }
     }
 
-    // JUSTIFICATION-A3: issue #130 extends the template contract itself (personal and key fields, ranges, row checks, tenant keys).
+    // JUSTIFICATION-A3: issue #130 extends the template contract itself (personal and key fields, ranges, checks).
     /**
      * One target field of an entity set (issue #130 adds the last four). {@code personal}: the field holds personal data (a
      * name, a contact), so no message may interpolate it; a {@code phone} or {@code nin} field is personal whatever the

@@ -92,11 +92,10 @@ class FixtureShopTemplate implements ImportTemplate {
         if (!"sales".equals(entitySet)) {
             return List.of();
         }
-        return List.of(values -> "sale".equals(values.get("kind"))
-                        && values.get("qty") instanceof BigDecimal qty
-                        && qty.signum() <= 0
-                ? List.of(new RowFinding("FIXTURE_SALE_QTY_NOT_POSITIVE", "qty", Map.of()))
-                : List.of());
+        return List.of(values ->
+                "sale".equals(values.get("kind")) && values.get("qty") instanceof BigDecimal qty && qty.signum() <= 0
+                        ? List.of(new RowFinding("FIXTURE_SALE_QTY_NOT_POSITIVE", "qty", Map.of()))
+                        : List.of());
     }
 
     /** The business already holds the item {@code FAB-900} (in compare form), as a vertical's own table would answer. */

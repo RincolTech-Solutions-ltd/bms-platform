@@ -117,26 +117,20 @@ class ImportValidationIT extends IntegrationTest {
 
     /** What the validation stored that a re-run must reproduce: values, references, originals, statuses. */
     List<String> stored(UUID runId) {
-        List<String> out = new ArrayList<>(TestDatabase.owner()
-                .sql("""
+        List<String> out = new ArrayList<>(
+                TestDatabase.owner().sql("""
                         SELECT b.seq || '|' || r.source_row_no || '|' || coalesce(r.source_ref, '-') || '|'
                                || coalesce(r.normalised::text, '-')
                           FROM import_rows r JOIN import_batches b ON b.id = r.batch_id
                          WHERE b.run_id = ? ORDER BY b.seq, r.source_row_no
-                        """)
-                .param(runId)
-                .query(String.class)
-                .list());
-        out.addAll(TestDatabase.owner()
-                .sql("""
+                        """).param(runId).query(String.class).list());
+        out.addAll(
+                TestDatabase.owner().sql("""
                         SELECT b.seq || '|' || i.ordinal || '|' || i.code || '|' || coalesce(i.original_value::text, '-')
                                || '|' || i.status
                           FROM import_issues i JOIN import_batches b ON b.id = i.batch_id
                          WHERE b.run_id = ? ORDER BY b.seq, i.ordinal
-                        """)
-                .param(runId)
-                .query(String.class)
-                .list());
+                        """).param(runId).query(String.class).list());
         return out;
     }
 
@@ -147,11 +141,10 @@ class ImportValidationIT extends IntegrationTest {
 
         RunReport result = as(t, () -> validation.validate(run.runId()));
 
-        List<String> expected = Files.readAllLines(
-                        GoldenRun.DIR.resolve("expected-issues.txt"), StandardCharsets.UTF_8)
-                .stream()
-                .filter(l -> !l.isBlank())
-                .toList();
+        List<String> expected =
+                Files.readAllLines(GoldenRun.DIR.resolve("expected-issues.txt"), StandardCharsets.UTF_8).stream()
+                        .filter(l -> !l.isBlank())
+                        .toList();
         assertThat(report(run)).containsExactlyElementsOf(expected);
         assertThat(result.templateKey()).isEqualTo(FixtureShopTemplate.KEY);
         assertThat(result.batches()).hasSize(3);
@@ -212,13 +205,14 @@ class ImportValidationIT extends IntegrationTest {
                 .sql("UPDATE import_batches SET status = 'committed', committed_at = now() WHERE id = ?")
                 .param(items)
                 .update();
-        List<String> before = stored(run.runId()).stream()
-                .filter(s -> s.startsWith("1|"))
-                .toList();
+        List<String> before =
+                stored(run.runId()).stream().filter(s -> s.startsWith("1|")).toList();
 
         RunReport again = as(t, () -> validation.validate(run.runId()));
 
-        assertThat(again.batches()).extracting(ImportValidation.BatchReport::batchId).doesNotContain(items);
+        assertThat(again.batches())
+                .extracting(ImportValidation.BatchReport::batchId)
+                .doesNotContain(items);
         assertThat(stored(run.runId()).stream().filter(s -> s.startsWith("1|")).toList())
                 .isEqualTo(before);
         // The till roll still finds the items of the committed batch: only the unknown codes are unknown.
@@ -241,9 +235,10 @@ class ImportValidationIT extends IntegrationTest {
         // The other business holds the item the till roll names but this business does not.
         Mapping mapping = as(other, () -> mappings.save("fab-shop", ImportCatalogueTest.mapping(), operator, null));
         UUID otherRun = as(other, () -> runs.open(operator).id());
-        byte[] csv = ("Fab Item Code,Fab Item Label,Fab Pack,Fab Asking Price,Fab Line Type,Fab In Use,Fab Shelf Note\r\n"
-                        + "FAB-999,Fabricated Other Item,pcs,100,Goods,yes,\r\n")
-                .getBytes(StandardCharsets.UTF_8);
+        byte[] csv =
+                ("Fab Item Code,Fab Item Label,Fab Pack,Fab Asking Price,Fab Line Type,Fab In Use,Fab Shelf Note\r\n"
+                                + "FAB-999,Fabricated Other Item,pcs,100,Goods,yes,\r\n")
+                        .getBytes(StandardCharsets.UTF_8);
         as(
                 other,
                 () -> uploads.upload(
@@ -258,9 +253,9 @@ class ImportValidationIT extends IntegrationTest {
 
         as(t, () -> validation.validate(run.runId()));
 
-        assertThat(report(run)).contains(
-                "fab-till-roll.csv|5|item|REF_UNKNOWN|blocking|item on fab-till-roll.csv line 5 names a record of items"
-                        + " that is not in the import or the tenant.");
+        assertThat(report(run))
+                .contains("fab-till-roll.csv|5|item|REF_UNKNOWN|blocking|item on fab-till-roll.csv line 5 names a"
+                        + " record of items that is not in the import or the tenant.");
         UUID batch = run.batches().get("fab-item-list.csv").id();
         assertCode(() -> as(other, () -> validation.validate(run.runId())), "not_found");
         assertCode(() -> as(other, () -> validation.issues(batch)), "not_found");
@@ -285,7 +280,8 @@ class ImportValidationIT extends IntegrationTest {
 
     static void assertCode(Runnable call, String code) {
         assertThatThrownBy(call::run)
-                .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.code()).isEqualTo(code));
+                .isInstanceOfSatisfying(
+                        ApiException.class, e -> assertThat(e.code()).isEqualTo(code));
     }
 
     /** One statement as bms_app bound to the business, in its own transaction. */

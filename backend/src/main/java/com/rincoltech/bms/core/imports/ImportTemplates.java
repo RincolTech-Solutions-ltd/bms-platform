@@ -144,8 +144,8 @@ public interface ImportTemplates {
                     Severity.BLOCKING,
                     "Column {column}, which feeds the required {field}, is not in the file of source {source}."),
             // The validation codes (issue #130): what the engine reports on a row besides the shared row codes above.
-            // CODE_DUPLICATE and CODE_CONTROL_CHAR were planned as retail codes; the engine finds them for the key field of
-            // any template, so they are shared. JUSTIFICATION-A3: the catalogue is data; #130 adds its codes here.
+            // CODE_DUPLICATE and CODE_CONTROL_CHAR were planned as retail codes; the engine finds them for the key
+            // field of any template, so they are shared. JUSTIFICATION-A3: the catalogue is data; #130 adds its codes.
             new IssueCode(
                     "VALUE_NORMALISED",
                     Severity.INFO,

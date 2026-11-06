@@ -92,7 +92,13 @@ class ValidationService implements ImportValidation {
 
     /** One batch of the run as the service reads it. */
     private record BatchRow(
-            UUID id, int seq, String status, String file, UUID mappingId, String source, String templateKey,
+            UUID id,
+            int seq,
+            String status,
+            String file,
+            UUID mappingId,
+            String source,
+            String templateKey,
             Integer templateVersion) {}
 
     @Override
@@ -134,10 +140,14 @@ class ValidationService implements ImportValidation {
                     "Batch read without a mapping",
                     "A file was read without a mapping; read it again with one before checking its rows.");
         }
-        // A committed batch stored before #129 has no mapping: its records are the business's now, and the template answers
-        // for them through existingKeys.
+        // A committed batch stored before #129 has no mapping: its records are the business's now, and the template
+        // answers for them through existingKeys.
         batches = batches.stream().filter(b -> b.mappingId() != null).toList();
-        if (batches.stream().map(b -> b.templateKey() + "_v" + b.templateVersion()).distinct().count() > 1) {
+        if (batches.stream()
+                        .map(b -> b.templateKey() + "_v" + b.templateVersion())
+                        .distinct()
+                        .count()
+                > 1) {
             throw new ApiException(
                     HttpStatus.CONFLICT,
                     "templates_differ",
@@ -147,15 +157,18 @@ class ValidationService implements ImportValidation {
         if (batches.isEmpty()) {
             return new RunReport(runId, null, 0, List.of());
         }
-        ImportTemplate template =
-                templates.require(batches.getFirst().templateKey(), batches.getFirst().templateVersion());
-        RowValidator engine = new RowValidator(
-                template, templates.catalogue(template.key(), template.version()), run.cutoverAt());
+        ImportTemplate template = templates.require(
+                batches.getFirst().templateKey(), batches.getFirst().templateVersion());
+        RowValidator engine =
+                new RowValidator(template, templates.catalogue(template.key(), template.version()), run.cutoverAt());
         Map<UUID, Map<String, Object>> documents = new LinkedHashMap<>();
         List<BatchInput> inputs = new ArrayList<>();
         List<BatchRow> ordered = commitOrder(template, batches, documents);
         for (BatchRow b : ordered) {
-            inputs.add(new BatchInput(b.id(), b.file() == null ? "batch " + b.seq() : b.file(), documents.get(b.mappingId()),
+            inputs.add(new BatchInput(
+                    b.id(),
+                    b.file() == null ? "batch " + b.seq() : b.file(),
+                    documents.get(b.mappingId()),
                     b.source()));
         }
         // Pass 1: what the run holds.
@@ -182,8 +195,8 @@ class ValidationService implements ImportValidation {
         after.put("template", template.id());
         after.put("batches", reports.size());
         after.put("issues_by_code", byCode);
-        tx.executeWithoutResult(
-                s -> audit.record(AuditLog.Entry.created("core.import_run.validated", "import_run", runId, null, after)));
+        tx.executeWithoutResult(s ->
+                audit.record(AuditLog.Entry.created("core.import_run.validated", "import_run", runId, null, after)));
         log.info("import run {} validated: {} batches, issues by code {}", runId, reports.size(), byCode);
         return new RunReport(runId, template.key(), template.version(), reports);
     }
@@ -194,8 +207,8 @@ class ValidationService implements ImportValidation {
         List<String> sets = template.entitySets().stream().map(EntitySet::key).toList();
         Map<UUID, Integer> rank = new LinkedHashMap<>();
         for (BatchRow b : batches) {
-            Map<String, Object> document =
-                    documents.computeIfAbsent(b.mappingId(), id -> mappings.get(id).document());
+            Map<String, Object> document = documents.computeIfAbsent(
+                    b.mappingId(), id -> mappings.get(id).document());
             Map<String, Object> source = MappingValidator.sources(document).get(b.source());
             Object set = source == null ? null : source.get("entity_set");
             int at = sets.indexOf(set);
@@ -205,7 +218,8 @@ class ValidationService implements ImportValidation {
             rank.put(b.id(), at);
         }
         return batches.stream()
-                .sorted(Comparator.comparingInt((BatchRow b) -> rank.get(b.id())).thenComparingInt(BatchRow::seq))
+                .sorted(Comparator.comparingInt((BatchRow b) -> rank.get(b.id()))
+                        .thenComparingInt(BatchRow::seq))
                 .toList();
     }
 
@@ -228,7 +242,9 @@ class ValidationService implements ImportValidation {
                         "Invalid status transition",
                         "A file of this import changed while it was checked; check it again.");
             }
-            jdbc.sql("DELETE FROM import_issues WHERE batch_id = ?").param(b.id()).update();
+            jdbc.sql("DELETE FROM import_issues WHERE batch_id = ?")
+                    .param(b.id())
+                    .update();
             Map<String, Integer> bySeverity = new TreeMap<>();
             Map<String, Integer> byCode = new TreeMap<>();
             int[] ordinal = {0};
@@ -238,7 +254,8 @@ class ValidationService implements ImportValidation {
             readRowsHere(b.id(), row -> {
                 RowResult result = engine.validate(input, row);
                 rows[0]++;
-                updates.add(new Object[] {JSON.writeValueAsString(result.normalised()), result.sourceRef(), row.rowId()});
+                updates.add(
+                        new Object[] {JSON.writeValueAsString(result.normalised()), result.sourceRef(), row.rowId()});
                 for (Finding f : result.findings()) {
                     ordinal[0]++;
                     bySeverity.merge(f.severity(), 1, Integer::sum);
@@ -324,8 +341,12 @@ class ValidationService implements ImportValidation {
 
     private static Map<String, RawCell> cells(String raw) {
         Map<String, RawCell> out = new LinkedHashMap<>();
-        JSON.readValue(raw, RAW).forEach((header, cell) -> out.put(
-                header, new RawCell(cell == null ? null : cell.get("value"), cell == null ? null : (String) cell.get("type"))));
+        JSON.readValue(raw, RAW)
+                .forEach((header, cell) -> out.put(
+                        header,
+                        new RawCell(
+                                cell == null ? null : cell.get("value"),
+                                cell == null ? null : (String) cell.get("type"))));
         return out;
     }
 

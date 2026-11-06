@@ -66,8 +66,8 @@ final class GoldenRun {
 
     /** One issue as the golden report writes it. */
     static String line(String file, int line, Finding f) {
-        return file + "|" + line + "|" + (f.field() == null ? "-" : f.field()) + "|" + f.code() + "|" + f.severity() + "|"
-                + f.message();
+        return file + "|" + line + "|" + (f.field() == null ? "-" : f.field()) + "|" + f.code() + "|" + f.severity()
+                + "|" + f.message();
     }
 
     /** The report of one run: a line per issue, in the engine's order, and each row's typed values and reference. */
@@ -75,7 +75,9 @@ final class GoldenRun {
 
     static Report run(ImportTemplate template, Map<String, Object> mapping) {
         RowValidator engine = new RowValidator(
-                template, new TemplateRegistry(List.of(template)).catalogue(template.key(), template.version()), CUTOVER);
+                template,
+                new TemplateRegistry(List.of(template)).catalogue(template.key(), template.version()),
+                CUTOVER);
         Map<BatchInput, List<SourceRow>> batches = new LinkedHashMap<>();
         for (GoldenFile g : FILES) {
             BatchInput batch = new BatchInput(
@@ -121,8 +123,8 @@ final class GoldenRun {
                     raw.put(header.get(c), new RawCell(cells.get(c), "text"));
                 }
             }
-            out.add(new SourceRow(UUID.nameUUIDFromBytes((g.file() + ":" + (i + 1)).getBytes(StandardCharsets.UTF_8)),
-                    i + 1, raw));
+            out.add(new SourceRow(
+                    UUID.nameUUIDFromBytes((g.file() + ":" + (i + 1)).getBytes(StandardCharsets.UTF_8)), i + 1, raw));
         }
         return out;
     }

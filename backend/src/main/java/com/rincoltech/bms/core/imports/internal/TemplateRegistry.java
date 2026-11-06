@@ -146,9 +146,7 @@ class TemplateRegistry implements ImportTemplates {
             before.add(set.key());
         }
         Set<String> personal = new HashSet<>();
-        sets.forEach(s -> s.fields().stream()
-                .filter(Field::isPersonal)
-                .forEach(f -> personal.add(f.name())));
+        sets.forEach(s -> s.fields().stream().filter(Field::isPersonal).forEach(f -> personal.add(f.name())));
         Set<String> shared = new HashSet<>();
         SHARED_CODES.forEach(c -> shared.add(c.code()));
         Set<String> own = new HashSet<>();
@@ -159,15 +157,14 @@ class TemplateRegistry implements ImportTemplates {
             require(!shared.contains(c.code()), where + "code " + c.code() + " is a shared code");
             require(own.add(c.code()), where + "code " + c.code() + " is declared twice");
             require(!c.message().isBlank(), where + "code " + c.code() + " has no message");
-            // JUSTIFICATION-A3: the personal-placeholder check of #130 belongs with the registry's other start-up checks.
+            // JUSTIFICATION-A3: the personal-placeholder check of #130 sits with the registry's start-up checks.
             for (String p : placeholders(c.message())) {
                 require(
                         !personal.contains(p),
                         where + "code " + c.code() + " interpolates the personal field {" + p + "}");
                 require(
                         MESSAGE_PLACEHOLDERS.contains(p),
-                        where + "code " + c.code() + " interpolates {" + p + "}, which is not a placeholder a message may"
-                                + " hold");
+                        where + "code " + c.code() + " interpolates {" + p + "}, not a placeholder a message may hold");
             }
         }
     }

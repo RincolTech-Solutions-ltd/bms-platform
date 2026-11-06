@@ -271,9 +271,7 @@ final class RowValidator {
     }
 
     private static String other(Location first, Location here) {
-        return first.file().equals(here.file())
-                ? String.valueOf(first.line())
-                : first.line() + " of " + first.file();
+        return first.file().equals(here.file()) ? String.valueOf(first.line()) : first.line() + " of " + first.file();
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -357,14 +355,23 @@ final class RowValidator {
             return null;
         }
         if (!n.equals(mapped)) {
-            t.add("VALUE_NORMALISED", f.name(), Map.of("normaliser", rule.normaliser().name()), original);
+            t.add(
+                    "VALUE_NORMALISED",
+                    f.name(),
+                    Map.of("normaliser", rule.normaliser().name()),
+                    original);
         }
         return n;
     }
 
     /** A phone or a NIN through the form's own function: refused is {@code TYPE_INVALID}, changed is noted. */
     private static Object form(
-            Field f, Function<String, Optional<String>> function, String rule, String mapped, String original, Typed t) {
+            Field f,
+            Function<String, Optional<String>> function,
+            String rule,
+            String mapped,
+            String original,
+            Typed t) {
         Optional<String> n = function.apply(mapped);
         if (n.isEmpty()) {
             t.add("TYPE_INVALID", f.name(), Map.of("type", f.type().spec()), original);
@@ -498,14 +505,16 @@ final class RowValidator {
             return "col:" + p.sourceKey + ":" + (s.length() > MAX_REF_TEXT ? "sha256:" + sha256(s) : s);
         }
         StringBuilder canonical = new StringBuilder();
-        new TreeMap<>(cells).forEach((header, cell) -> canonical
-                .append(header)
-                .append('\u001f')
-                .append(cell.type())
-                .append('\u001f')
-                .append(text(cell))
-                .append('\u001e'));
-        return "row:" + p.sourceKey + ":" + line + ":" + sha256(canonical.toString()).substring(0, 16);
+        new TreeMap<>(cells)
+                .forEach((header, cell) -> canonical
+                        .append(header)
+                        .append('\u001f')
+                        .append(cell.type())
+                        .append('\u001f')
+                        .append(text(cell))
+                        .append('\u001e'));
+        return "row:" + p.sourceKey + ":" + line + ":"
+                + sha256(canonical.toString()).substring(0, 16);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -658,7 +667,8 @@ final class RowValidator {
 
         Plan(BatchInput batch) {
             this.sourceKey = batch.sourceKey();
-            Map<String, Object> source = MappingValidator.sources(batch.mapping()).get(sourceKey);
+            Map<String, Object> source =
+                    MappingValidator.sources(batch.mapping()).get(sourceKey);
             if (source == null) {
                 throw new IllegalStateException("the batch's source is not in its mapping");
             }

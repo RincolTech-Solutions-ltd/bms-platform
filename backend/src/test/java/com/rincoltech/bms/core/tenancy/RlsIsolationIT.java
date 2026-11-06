@@ -1226,7 +1226,9 @@ public class RlsIsolationIT {
                                                    field, message, status)
                         VALUES (?, ?, ?, ?, 2, 1, 'REQUIRED_MISSING', 'blocking', 'code',
                                 'code is empty on fab-items.csv line 2.', 'open')
-                        """).params(UUID.randomUUID(), t.tenantId(), importBatch, importRow).update();
+                        """)
+                .params(UUID.randomUUID(), t.tenantId(), importBatch, importRow)
+                .update();
     }
 
     /**

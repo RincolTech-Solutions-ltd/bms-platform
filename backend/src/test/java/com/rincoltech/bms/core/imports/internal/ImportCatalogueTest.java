@@ -98,10 +98,10 @@ class ImportCatalogueTest {
 
     @Test
     void theGoldenRunGivesExactlyTheExpectedIssues() throws IOException {
-        List<String> expected = Files.readAllLines(FIXTURES.resolve("golden/expected-issues.txt"), StandardCharsets.UTF_8)
-                .stream()
-                .filter(l -> !l.isBlank())
-                .toList();
+        List<String> expected =
+                Files.readAllLines(FIXTURES.resolve("golden/expected-issues.txt"), StandardCharsets.UTF_8).stream()
+                        .filter(l -> !l.isBlank())
+                        .toList();
 
         GoldenRun.Report report = GoldenRun.run(new FixtureShopTemplate(), mapping());
 
@@ -125,7 +125,9 @@ class ImportCatalogueTest {
         for (int i = 0; i < report.issues().size(); i++) {
             String issue = report.issues().get(i);
             if (issue.contains("|VALUE_NORMALISED|")) {
-                originals.put(issue.substring(0, issue.indexOf("|VALUE_NORMALISED|")), report.originals().get(i));
+                originals.put(
+                        issue.substring(0, issue.indexOf("|VALUE_NORMALISED|")),
+                        report.originals().get(i));
             }
         }
 
@@ -205,7 +207,9 @@ class ImportCatalogueTest {
             current.put(c.code(), c.severity().key() + (c.retired() ? " retired" : ""));
         }
 
-        assertThat(current).as("the catalogue against fixtures/imports/issue-codes.txt").isEqualTo(pinned);
+        assertThat(current)
+                .as("the catalogue against fixtures/imports/issue-codes.txt")
+                .isEqualTo(pinned);
         assertThat(ImportTemplates.SHARED_CODES).extracting(IssueCode::code).doesNotHaveDuplicates();
     }
 
@@ -213,9 +217,8 @@ class ImportCatalogueTest {
     void noMessageTemplateInterpolatesAPersonalFieldOrAValue() {
         ImportTemplate template = new FixtureShopTemplate();
         Set<String> personal = new LinkedHashSet<>();
-        template.entitySets().forEach(s -> s.fields().stream()
-                .filter(Field::isPersonal)
-                .forEach(f -> personal.add(f.name())));
+        template.entitySets()
+                .forEach(s -> s.fields().stream().filter(Field::isPersonal).forEach(f -> personal.add(f.name())));
         assertThat(personal).contains("name", "phone", "nin");
 
         for (IssueCode c : catalogue()) {
@@ -258,7 +261,8 @@ class ImportCatalogueTest {
 
     @Test
     void aRetiredCodeOrACodeOutsideTheCatalogueIsNeverReported() {
-        assertThatThrownBy(() -> runWithCheck(values -> List.of(new RowFinding("FIXTURE_ITEM_UNNAMED", null, Map.of()))))
+        assertThatThrownBy(
+                        () -> runWithCheck(values -> List.of(new RowFinding("FIXTURE_ITEM_UNNAMED", null, Map.of()))))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("retired");
         assertThatThrownBy(() -> runWithCheck(values -> List.of(new RowFinding("NO_SUCH_CODE", null, Map.of()))))
@@ -280,9 +284,11 @@ class ImportCatalogueTest {
         assertThat(RowValidator.decimal("12,500")).isEqualByComparingTo("12500");
         assertThat(RowValidator.decimal("1.5e3")).isNull();
         assertThat(RowValidator.dateTime("day_first", "30/06/2026", false)).hasToString("2026-06-30T00:00");
-        assertThat(RowValidator.dateTime("month_first", "06/30/2026 14:05", true)).hasToString("2026-06-30T14:05");
+        assertThat(RowValidator.dateTime("month_first", "06/30/2026 14:05", true))
+                .hasToString("2026-06-30T14:05");
         assertThat(RowValidator.dateTime("iso", "30/06/2026", false)).isNull();
-        assertThat(RowValidator.dateTime("day_first", "2026-06-30 14:05", false)).isNull();
+        assertThat(RowValidator.dateTime("day_first", "2026-06-30 14:05", false))
+                .isNull();
     }
 
     // ---------------------------------------------------------------------------------------------
