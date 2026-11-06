@@ -1890,7 +1890,9 @@ class MigrationOrderIT {
                                         // V131 (the owner's earlier date, #811).
                                         + " 'retail.entry.backdate',"
                                         // V132 (where an entry is made, #826): the owner's read of the distances.
-                                        + " 'retail.entry_location.read')")
+                                        + " 'retail.entry_location.read',"
+                                        // V144 (the sign-off of an import's reconciliation, #134).
+                                        + " 'core.imports.sign_off')")
                         .query(Long.class)
                         .single())
                 .as("no permission is added")

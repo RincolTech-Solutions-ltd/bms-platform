@@ -33,7 +33,8 @@ import org.springframework.web.bind.annotation.RestController;
  * making the reconciliation again needs {@code core.imports.manage}. Every route works on the business of the host only
  * (row-level security): a run of another business is 404. No answer holds a value of a row: codes, counts and amounts.
  */
-@RestController
+// Named: core.payments has a ReconciliationController of its own.
+@RestController("importReconciliationController")
 @RequestMapping(path = "/api/v1/imports", produces = MediaType.APPLICATION_JSON_VALUE)
 @Tag(name = "imports")
 class ReconciliationController {

@@ -1,0 +1,163 @@
+// @vitest-environment jsdom
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Me } from '../../../api/client';
+import type { Reconciliation, SignOffRequest, SignOffRun } from '../../../api/imports';
+import { businessToday } from '../../../api/retail';
+import { mockMe } from '../../../api/retail-mock';
+import { router as appRouter } from '../../../app/router';
+import { StaffContext } from '../context';
+
+// Imports to sign off (issue #134, spec sections 3.9 and 3.10): the tenant admin opens an import, reads each section, ticks
+// every one, types their name and today's date and signs; nothing is sent until all of that is done; a reconciliation with a
+// difference that is not explained shows why and offers no form; without core.imports.sign_off the page says so. Every name,
+// file and figure is fabricated.
+
+const RUN = 'run-1';
+
+const recon = (signable: boolean): Reconciliation => ({
+  id: 'rec-1',
+  run_id: RUN,
+  version: 1,
+  generated_at: '2026-10-01T08:00:00Z',
+  as_at: '2026-10-01',
+  sha256: 'a'.repeat(64),
+  signable,
+  signed: undefined,
+  sections: [
+    {
+      key: 'counts',
+      title: 'Rows and records',
+      facts: [{ label: 'fab-till-roll.csv: rows read', value: '10' }],
+      checks: [
+        { key: 'batch 3', label: 'Rows of fab-till-roll.csv', unit: 'rows', source: '9', system: '3', difference: '6', itemised: '6', unitemised: '0', ties: true },
+      ],
+      items: [{ check: 'batch 3', file: 'fab-till-roll.csv', line: 9, reason: 'excluded', detail: 'left out in the review (TYPE_INVALID)', amount: '1' }],
+    },
+    {
+      key: 'stock_value',
+      title: 'Stock value per branch',
+      facts: [],
+      checks: [
+        {
+          key: 'HQ',
+          label: 'Stock value at HQ',
+          unit: 'minor',
+          source: '1000',
+          system: signable ? '1000' : '1001',
+          difference: signable ? '0' : '-1',
+          itemised: '0',
+          unitemised: signable ? '0' : '-1',
+          ties: signable,
+        },
+      ],
+      items: [],
+    },
+  ],
+});
+
+let runs: SignOffRun[] = [];
+let view: Reconciliation = recon(true);
+const sent: SignOffRequest[] = [];
+
+vi.mock('../../../api/imports', async (original) => ({
+  ...(await original<typeof import('../../../api/imports')>()),
+  signOffRuns: () => Promise.resolve(runs),
+  reconciliationOf: () => Promise.resolve(view),
+  signOff: (_run: string, body: SignOffRequest) => {
+    sent.push(body);
+    view = { ...view, signed: { signed_at: '2026-10-02T09:00:00Z', signed_by: 'u-1', signed_name: body.name, signed_on: body.date, sections: body.sections } };
+    return Promise.resolve(view);
+  },
+}));
+
+const { ImportsSignOff } = await import('./page');
+
+const pause = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+const admin = { ...mockMe('admin'), permissions: [...(mockMe('admin').permissions ?? []), 'core.imports.sign_off'], tenant_currency: 'UGX', tenant_timezone: 'Africa/Kampala' } as Me;
+
+function show(me: Me) {
+  const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff/setup/imports'] }) });
+  render(
+    <RouterContextProvider router={router}>
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <StaffContext.Provider value={{ me, branch: null }}>
+          <ImportsSignOff />
+        </StaffContext.Provider>
+      </QueryClientProvider>
+    </RouterContextProvider>,
+  );
+}
+
+beforeEach(() => {
+  runs = [{ run_id: RUN, status: 'committed', committed_at: '2026-10-01T07:00:00Z', version: 1, signable: true }];
+  view = recon(true);
+  sent.length = 0;
+});
+
+afterEach(() => cleanup());
+
+describe('imports to sign off', () => {
+  it('signs only once every section is ticked and the name and today are typed', async () => {
+    show(admin);
+    fireEvent.click(await screen.findByRole('button', { name: /Imported on 1 Oct 2026/ }));
+    expect(await screen.findByRole('heading', { name: 'Rows and records' })).toBeTruthy();
+    // Your sheet and In BMS: money through the one formatter.
+    expect(screen.getAllByText('UGX 1,000', { selector: 'dd' })).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign the reconciliation' }));
+    expect(sent).toHaveLength(0);
+    expect(screen.getByText(/Still to tick: Rows and records, Stock value per branch/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /rows and records/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /stock value per branch/ }));
+    fireEvent.change(screen.getByLabelText(/Your name/), { target: { value: '  Fabricated Signer  ' } });
+    fireEvent.change(screen.getByLabelText(/Today's date/), { target: { value: '2001-01-01' } });
+    // The button holds a press for a moment after the last one (BusyButton), as a person's second tap would wait.
+    await pause();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign the reconciliation' }));
+    expect(await screen.findByText(/Type today's date/, { selector: 'p' })).toBeTruthy();
+    expect(sent).toHaveLength(0);
+
+    const today = businessToday(new Date(), 'Africa/Kampala');
+    fireEvent.change(screen.getByLabelText(/Today's date/), { target: { value: today } });
+    await pause();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign the reconciliation' }));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]).toEqual({ reconciliation_id: 'rec-1', sha256: 'a'.repeat(64), sections: ['counts', 'stock_value'], name: 'Fabricated Signer', date: today });
+    expect(await screen.findByText(/Signed by Fabricated Signer/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Sign the reconciliation' })).toBeNull();
+  });
+
+  it('shows a difference that is not explained and offers no way to sign', async () => {
+    view = recon(false);
+    runs = [{ ...runs[0], signable: false }];
+    show(admin);
+    expect(await screen.findByText('A difference is not explained')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Imported on/ }));
+    expect(await screen.findByText(/One difference is not explained, so this cannot be signed yet/)).toBeTruthy();
+    expect(screen.getByText(/\(not explained\)/)).toBeTruthy();
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Sign the reconciliation' })).toBeNull();
+  });
+
+  it('lists the explained differences in plain words, by file and line', async () => {
+    show(admin);
+    fireEvent.click(await screen.findByRole('button', { name: /Imported on/ }));
+    expect(await screen.findByText(/Left out: fab-till-roll.csv, line 9, left out in the review \(TYPE_INVALID\), 1/)).toBeTruthy();
+  });
+
+  it('says so to someone without the sign-off permission', async () => {
+    show({ ...mockMe('admin'), permissions: ['core.imports.manage'] } as Me);
+    expect(await screen.findByText(/You do not have access to the imports to sign off/)).toBeTruthy();
+  });
+
+  it('says so in one line when nothing waits', async () => {
+    runs = [];
+    show(admin);
+    expect(await screen.findByText('No import is waiting for your sign-off.')).toBeTruthy();
+  });
+});

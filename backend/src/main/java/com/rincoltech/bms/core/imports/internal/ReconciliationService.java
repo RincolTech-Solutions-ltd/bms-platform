@@ -62,7 +62,8 @@ import tools.jackson.databind.json.JsonMapper;
  * the template's {@link ImportBooks}. The commit's stored report is never read, so the reconciliation does not depend on
  * what a writer said it did.
  */
-@Service
+// Named: core.payments has a ReconciliationService of its own.
+@Service("importReconciliationService")
 class ReconciliationService implements ImportReconciliation {
 
     private static final Logger log = LoggerFactory.getLogger(ReconciliationService.class);
