@@ -273,10 +273,10 @@ class ImportMappingsIT extends IntegrationTest {
         assertCode(() -> as(other, () -> mappings.parseOptions(mine.id(), "item_list")), "not_found");
         assertThat(as(other, () -> mappings.latest("fab-shop"))).isEmpty();
         assertThat(as(other, () -> mappings.versions("fab-shop"))).isEmpty();
-        assertThat(asApp(
-                        other.tenantId(),
-                        c -> count(c, "SELECT count(*) FROM import_mappings WHERE tenant_id = ?", t.tenantId())))
-                .isZero();
+        long seenByOther = asApp(
+                other.tenantId(),
+                c -> count(c, "SELECT count(*) FROM import_mappings WHERE tenant_id = ?", t.tenantId()));
+        assertThat(seenByOther).isZero();
         // Bound to the other business, a row for this one is refused by the policy's WITH CHECK.
         assertThatThrownBy(() -> asApp(other.tenantId(), c -> execute(c, """
                         INSERT INTO import_mappings (id, tenant_id, name, version, template_key, template_version, document,

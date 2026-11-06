@@ -84,6 +84,8 @@ class MappingService implements ImportMappings {
         refuseIfProblems(problems);
         String templateKey = (String) doc.get("template");
         int templateVersion = ((Number) doc.get("template_version")).intValue();
+        // Stored as a whole number, so 1.0 and 1 are the same version and match the row's CHECK.
+        doc.put("template_version", templateVersion);
         String json = mapper.writeValueAsString(doc);
         UUID id = UUID.randomUUID();
         try {
