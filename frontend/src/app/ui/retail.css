@@ -1846,9 +1846,10 @@ td.num.qty-packs {
   font-weight: 600;
 }
 
+/* Two cells to a line while each has 9rem; with large text one, so the words under a field wrap inside it. */
 .am-cells {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
   gap: var(--space-2) var(--space-3);
 }
 

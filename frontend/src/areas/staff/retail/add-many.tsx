@@ -310,7 +310,7 @@ export function AddManyForm() {
       <Problem error={refusal} />
       <ActionBar testId="am-save-bar">
         <p className="hint am-count" data-tour="add-many-save" data-testid="am-count">
-          <span className="num">{ready}</span> ready{filled > ready ? <>, <span className="num">{filled - ready}</span> need a look</> : ''}
+          <span className="num">{ready}</span> ready{filled > ready ? <>, <span className="num">{filled - ready}</span> {filled - ready === 1 ? 'needs' : 'need'} a look</> : ''}
         </p>
         <BusyButton busy={save.isPending} type="submit" className="rt-primary">{SAVE}</BusyButton>
       </ActionBar>
