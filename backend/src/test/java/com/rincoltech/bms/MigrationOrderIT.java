@@ -3297,26 +3297,29 @@ class MigrationOrderIT {
             assertThat(owner.sql(state).param(row).query(String.class).single()).isEqualTo("sent/");
             JdbcClient app = JdbcClient.create(
                     new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_app", TestDatabase.APP_PASSWORD));
-            String mark = "SELECT notification_outbox_mark_undelivered(?, CAST(? AS uuid), ?, now())";
-            assertThat(app.sql(mark).params(row, null, "bounced").query(String.class).single())
-                    .as("a platform row of that id does not exist")
-                    .isEqualTo("unknown_id");
-            assertThat(app.sql(mark).params(row, tenant, "bounced").query(String.class).single())
-                    .isEqualTo("marked");
+            // A null tenant looks for a platform row of that id, and there is none.
+            assertThat(mark(app, row, null, "bounced")).isEqualTo("unknown_id");
+            assertThat(mark(app, row, tenant, "bounced")).isEqualTo("marked");
             assertThat(owner.sql(state).param(row).query(String.class).single()).isEqualTo("failed/bounced");
-            assertThat(app.sql(mark).params(row, tenant, "bounced").query(String.class).single())
-                    .isEqualTo("repeated");
-            assertThat(app.sql(mark).params(row, tenant, "complained").query(String.class).single())
-                    .isEqualTo("not_sent");
-            try (var connection = java.sql.DriverManager.getConnection(
-                            postgres.getJdbcUrl(), "bms_app", TestDatabase.APP_PASSWORD);
-                    var statement = connection.createStatement()) {
+            assertThat(mark(app, row, tenant, "bounced")).isEqualTo("repeated");
+            assertThat(mark(app, row, tenant, "complained")).isEqualTo("not_sent");
+            String url = postgres.getJdbcUrl();
+            try (Connection bound = DriverManager.getConnection(url, "bms_app", TestDatabase.APP_PASSWORD)) {
+                Statement statement = bound.createStatement();
                 statement.execute("SELECT set_config('app.tenant_id', '" + tenant + "', false)");
-                assertThatThrownBy(() -> statement.execute("SELECT notification_outbox_mark_undelivered('" + row
-                                + "', '" + tenant + "', 'bounced', now())"))
+                String call = "SELECT notification_outbox_mark_undelivered('%s', '%s', 'bounced', now())";
+                assertThatThrownBy(() -> statement.execute(call.formatted(row, tenant)))
                         .hasMessageContaining("platform only");
             }
         }
+    }
+
+    /** V138's function run by the application role, as the Resend webhook runs it. */
+    private static String mark(JdbcClient app, UUID row, UUID tenant, String reason) {
+        return app.sql("SELECT notification_outbox_mark_undelivered(?, CAST(? AS uuid), ?, now())")
+                .params(row, tenant, reason)
+                .query(String.class)
+                .single();
     }
 
     private static PostgreSQLContainer database() {

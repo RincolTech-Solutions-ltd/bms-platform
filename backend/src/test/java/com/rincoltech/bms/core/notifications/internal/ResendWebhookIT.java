@@ -419,7 +419,9 @@ class ResendWebhookIT extends IntegrationTest {
 
         assertThat(deliverFor("email.bounced", firstRow, first.tenantId(), to)).isEqualTo(204);
         assertThat(state(firstRow)).isEqualTo("failed/bounced");
-        assertThat(state(secondRow)).as("the other business's row to the same address").isEqualTo("sent/");
+        assertThat(state(secondRow))
+                .as("the other business's row to the same address")
+                .isEqualTo("sent/");
 
         // Tags that name the first business with the second business's row id: the row is not found, nothing moves.
         assertThat(deliverFor("email.bounced", secondRow, first.tenantId(), to)).isEqualTo(204);
@@ -466,10 +468,12 @@ class ResendWebhookIT extends IntegrationTest {
         ResendWebhookController off = new ResendWebhookController(null, null, null, null, null, "", "");
         for (int i = 0; i < 3; i++) {
             MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/platform/webhooks/resend");
-            request.setContent(event("email.bounced", UUID.randomUUID(), UUID.randomUUID())
-                    .getBytes(StandardCharsets.UTF_8));
+            request.setContent(
+                    event("email.bounced", UUID.randomUUID(), UUID.randomUUID()).getBytes(StandardCharsets.UTF_8));
             assertThatThrownBy(() -> off.receive(request))
-                    .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.status().value()).isEqualTo(503));
+                    .isInstanceOfSatisfying(
+                            ApiException.class,
+                            e -> assertThat(e.status().value()).isEqualTo(503));
         }
         assertThat(output.getAll().split("BMS_RESEND_WEBHOOK_SECRET is unset", -1))
                 .as("one warning, not one per retry")
