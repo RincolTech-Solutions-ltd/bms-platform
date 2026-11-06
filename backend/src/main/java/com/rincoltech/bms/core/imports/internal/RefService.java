@@ -131,8 +131,8 @@ class RefService {
 
     /**
      * Registers a record a writer created, in the caller's transaction. A key already held with another content hash is
-     * refused ({@code CHANGED_SINCE_IMPORT}); the same reference and target type registered twice is refused by the
-     * table's unique key, so a record is never registered, nor written, twice.
+     * refused ({@code CHANGED_SINCE_IMPORT}); the same record registered twice for one reference is refused by the
+     * table's unique key. A row may create several records of one type (a loan's collateral items), each registered.
      */
     void register(UUID runId, UUID batchId, String sourceRef, String targetType, UUID targetId) {
         String key = ImportRefs.keyOf(sourceRef);
@@ -170,8 +170,13 @@ class RefService {
         content.put("debit", o.debit());
         content.put("amount", o.amountMinor());
         content.put("date", o.entryDate().toString());
+        // One per batch (review of f3be0a6 on #872): two batches of a run that both hold a branch's stock post a
+        // journal each, never one that collides with the other's.
         String ref = ImportRefs.sourceRef(
-                "opening", o.kind(), "run:" + runId + ":branch:" + o.branchId(), ImportRefs.contentHash(content));
+                "opening",
+                o.kind(),
+                "run:" + runId + ":batch:" + batchId + ":branch:" + o.branchId(),
+                ImportRefs.contentHash(content));
         UUID posted = jdbc.sql("SELECT target_id FROM import_refs WHERE source_ref = ? AND target_type = ?")
                 .params(ref, JOURNAL)
                 .query(UUID.class)
@@ -203,7 +208,14 @@ class RefService {
                 // At most 100 characters (journal_entries.idempotency_key): the hash of the run, branch and kind.
                 "import-opening:"
                         + ImportRefs.contentHash(Map.of(
-                                "run", runId.toString(), "branch", o.branchId().toString(), "kind", o.kind())),
+                                "run",
+                                runId.toString(),
+                                "batch",
+                                batchId.toString(),
+                                "branch",
+                                o.branchId().toString(),
+                                "kind",
+                                o.kind())),
                 lines));
         register(runId, batchId, ref, JOURNAL, entry.entryId());
         LedgerPosting.Totals totals = ledger.totals(entry.entryId());

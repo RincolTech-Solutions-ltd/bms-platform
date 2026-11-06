@@ -82,9 +82,11 @@ public interface BatchWriter {
 
         /**
          * Posts one opening journal (spec section 3.7) through {@code post_entry} against {@code opening_balance_equity},
-         * registers it in {@code import_refs} in the same transaction, once per run, branch and kind, and tells the report
-         * its totals as the ledger's lines hold them. A zero amount posts nothing. Returns what happened: {@code posted},
-         * {@code already posted} (a resume after the batch that posted it) or {@code nothing to post}.
+         * registers it in {@code import_refs} in the same transaction, once per batch, branch and kind (two batches that
+         * hold a branch's stock post a journal each, and a template's forecast predicts one per batch), and tells the
+         * report its totals as the ledger's lines hold them. A zero amount posts nothing. Returns what happened:
+         * {@code posted}, {@code already posted} (the batch posted it before in this transaction) or
+         * {@code nothing to post}.
          */
         String openingJournal(ImportRefs.Opening opening);
 

@@ -34,6 +34,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -52,7 +53,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * The commit of issue #133 (spec sections 3.7, 3.8 and 10.2, FR-IMP-07, ADR-027 decisions 4 and 7) on real PostgreSQL as
@@ -237,7 +241,7 @@ class ImportCommitIT extends IntegrationTest {
     List<Integer> committedOrder(UUID runId) {
         return TestDatabase.owner()
                 .sql("SELECT seq FROM import_batches WHERE run_id = ? AND status = 'committed'"
-                        + " ORDER BY committed_at, seq")
+                        + " ORDER BY commit_seq")
                 .param(runId)
                 .query(Integer.class)
                 .list();
@@ -448,6 +452,9 @@ class ImportCommitIT extends IntegrationTest {
     void aRunCommitsItsBatchesInDependencyOrderOncePerBatchWithBalancedOpeningJournalsOnly() {
         UUID run = fullRun(t);
         ready(t, run, Policy.OPEN_FROM_LIST);
+        // The dry run keeps its own time limits: the commit's statement timeout is not set in it.
+        assertThat(settings).containsEntry("app.import_commit", "on");
+        assertThat(settings.get("statement_timeout")).isNotEqualTo("10min");
 
         assertThat(as(t, () -> runs.commit(run))).isEqualTo(CommitOutcome.COMMITTED);
 
@@ -822,6 +829,117 @@ class ImportCommitIT extends IntegrationTest {
                 .isEqualTo("line:4");
         assertThat(ImportRefs.sourceKey("x".repeat(400), null, "line:1")).startsWith("sha256:");
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // The review of f3be0a6 on #872.
+    // JUSTIFICATION-A3: the reviewer's must-fix 1 and 2 and items 7 and 11, each proven by a test of its own.
+    // ---------------------------------------------------------------------------------------------
+
+    /** A second till roll of the same lines, other content: cash sales only, so it posts no journal of its own. */
+    static final String TILL_TWO =
+            "Fab Item Code,Fab Buyer No,Fab When,Fab Count,Fab Paid,Fab Entry Type,Fab Cashier\r\n"
+                    + "FAB-102,,17/09/2026 10:30,1,800,Sold,\r\n"
+                    + "FAB-103,,17/09/2026 10:40,1,1200,Sold,\r\n";
+
+    @Test
+    void twoFilesOfAPositionKeyedSourceNeverShareTheirKeysAndOneNameTwiceIsRefused() {
+        // Two till rolls in one run, each with a line 2 and a line 3: keyed by their own file, they never collide.
+        UUID run = fullRun(t);
+        upload(t, run, "fab-till-roll-week-2.csv", "till_roll", TILL_TWO);
+        as(t, () -> validation.validate(run));
+        ready(t, run, Policy.OPEN_FROM_LIST);
+        assertThat(as(t, () -> runs.commit(run))).isEqualTo(CommitOutcome.COMMITTED);
+        assertThat(state(t)).containsEntry("refs test.cash_sale", 3L).containsEntry("refs test.credit_sale", 2L);
+        assertThat(count(
+                        "SELECT count(DISTINCT source_key) FROM import_refs WHERE tenant_id = ? AND source_key LIKE"
+                                + " 'fab-till-roll%|line:2'",
+                        t.tenantId()))
+                .isEqualTo(2);
+
+        // Next week's roll in a new run: other lines, another file, nothing reported as changed since its import.
+        UUID next = as(t, () -> runs.open(operator).id());
+        Batch week3 = upload(t, next, "fab-till-roll-week-3.csv", "till_roll", TILL_TWO);
+        as(t, () -> validation.validate(next));
+        assertThat(as(t, () -> validation.issues(week3.id())))
+                .extracting(ImportValidation.Issue::code)
+                .doesNotContain("CHANGED_SINCE_IMPORT");
+
+        // Two files of the source under one name in one run cannot be told apart: refused before anything is written.
+        UUID twice = as(t, () -> runs.open(operator).id());
+        upload(t, twice, "fab-till-roll.csv", "till_roll", TILL);
+        upload(t, twice, "fab-till-roll.csv", "till_roll", TILL_TWO);
+        assertCode(() -> as(t, () -> validation.validate(twice)), "file_name_repeated");
+    }
+
+    @Test
+    void twoBatchesThatHoldOneBranchsStockPostAnOpeningJournalEach() {
+        UUID run = fullRun(t);
+        List<UUID> batches = TestDatabase.owner()
+                .sql("SELECT id FROM import_batches WHERE run_id = ? ORDER BY seq")
+                .param(run)
+                .query(UUID.class)
+                .list();
+        List<String> statuses = as(
+                t,
+                () -> new TransactionTemplate(transactionManager).execute(s -> {
+                    s.setRollbackOnly();
+                    ImportRefs.Opening stock =
+                            new ImportRefs.Opening(t.headOffice(), HQ, "inventory", DAY, "inventory", true, 700);
+                    List<String> out = new ArrayList<>();
+                    out.add(refs.openingJournal(run, batches.get(0), stock).status());
+                    out.add(refs.openingJournal(run, batches.get(1), stock).status());
+                    out.add(refs.openingJournal(run, batches.get(0), stock).status());
+                    out.add(String.valueOf(
+                            jdbc.sql("SELECT count(*) FROM import_refs WHERE target_type = 'ledger.journal_entry'")
+                                    .query(Long.class)
+                                    .single()));
+                    return out;
+                }));
+        // A journal each; the first batch's again is the one it posted, never a refusal that would stop the run.
+        assertThat(statuses).containsExactly("posted", "posted", "already posted", "2");
+    }
+
+    @Test
+    void aDecisionChangedAfterTheDryRunMakesItStopCounting() {
+        UUID run = fullRun(t);
+        FixtureShopTemplate.SCRIPT = writer(t);
+        as(t, () -> runs.recordPolicy(run, Policy.RECEIVABLE, decision(Policy.TREAT_AS_SETTLED)));
+        as(t, () -> runs.dryRun(run, operator));
+        assertThat(as(t, () -> runs.dryRunReport(run)).orElseThrow().current()).isTrue();
+
+        as(t, () -> runs.recordPolicy(run, Policy.RECEIVABLE, decision(Policy.OPEN_FROM_LIST)));
+
+        assertThat(as(t, () -> runs.dryRunReport(run)).orElseThrow().current()).isFalse();
+        assertCode(() -> as(t, () -> runs.transition(run, "ready")), "dry_run_required");
+    }
+
+    @Test
+    void aRowHashesAlikeAsTheValidationTypesItAndAsTheCommitReadsItBack() {
+        // The values the validation gives a row of every kind (RowValidator: dates and instants as text) and the same
+        // values written as JSON and read back as the commit reads them.
+        Map<String, Object> typed = new LinkedHashMap<>();
+        typed.put("item", "FAB-101");
+        typed.put("sold_at", Instant.parse("2026-09-15T07:30:00Z").toString());
+        typed.put("joined_on", LocalDate.of(2025, 1, 15).toString());
+        typed.put("qty", new BigDecimal("1.500"));
+        typed.put("amount", 7000L);
+        typed.put("active", Boolean.TRUE);
+        typed.put("customer", null);
+        JsonMapper json = JsonMapper.builder()
+                .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                .build();
+        String stored = TestDatabase.owner()
+                .sql("SELECT CAST(? AS jsonb)::text")
+                .param(json.writeValueAsString(typed))
+                .query(String.class)
+                .single();
+        Map<String, Object> readBack = json.readValue(stored, new TypeReference<>() {});
+
+        assertThat(ImportRefs.contentHash(readBack)).isEqualTo(ImportRefs.contentHash(typed));
+    }
+
+    @Autowired
+    RefService refs;
 
     // ---------------------------------------------------------------------------------------------
     // No side effects, and isolation.

@@ -223,7 +223,7 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
         bms.api.investments -> bms.db "Reads and writes investment products, investments, schedule items and transactions"
         bms.api.lendingSeed -> bms.api.investments "Opens, funds, accrues and pays out fabricated investments through InvestmentServicing"
         bms.api.imports     -> bms.api.loans "Invokes the registered lending import template (registry, no code dependency)"
-        bms.api.imports     -> bms.api.ledger "Posts the opening journals of a commit through post_entry against opening_balance_equity, one per run, branch and kind, and reads their totals back (#133)"
+        bms.api.imports     -> bms.api.ledger "Posts the opening journals of a commit through post_entry against opening_balance_equity, one per batch, branch and kind, and reads their totals back (#133)"
         bms.api.imports     -> bms.api.approvals "Raises the import_commit request a different user approves; the approval marks the run approved and executes no batch (#133)"
         bms.api.imports     -> bms.api.tenancy "Reads the head office, the branch of the import_commit request (#133)"
         bms.api.imports     -> bms.api.documents "Stores, streams back and deletes the encrypted quarantined files of a run (QuarantineStorage, #128)"

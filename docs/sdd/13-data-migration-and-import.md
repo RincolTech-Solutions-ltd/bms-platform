@@ -1221,7 +1221,8 @@ path, `ImportRuns.commit(run)` and `resume(run)`; the dry run runs the same batc
   `CHANGED_SINCE_IMPORT`: the validation reports it on the row, blocking, so the commit never reaches it, and the commit
   refuses the batch if one reaches it all the same; the change is made in the app (spec section 10.1). The preview leaves
   out rows already imported with the same content, so a re-run's preview predicts only what is new.
-- **Opening balances.** `Checkpoint.openingJournal(ImportRefs.Opening)` posts one journal per run, branch and kind through
+- **Opening balances.** `Checkpoint.openingJournal(ImportRefs.Opening)` posts one journal per batch, branch and kind (two batches
+  that hold one branch's stock post one each, and the template's forecast predicts one per batch) through
   `post_entry` (`LedgerPosting`), against `opening_balance_equity` (debit the account for what the business holds,
   credit it for what it owes), source `core.imports`, `opening_balance`, and registers it in `import_refs` in the same
   transaction, so it is never posted twice; the report reads its totals back through `LedgerPosting.totals`. A zero is

@@ -1,7 +1,7 @@
 -- V143: customer data onboarding 7/16, the commit (issue #133, ADR-027 decisions 4 and 7, spec
 -- docs/specs/customer-data-onboarding.md sections 3.7, 3.8 and 10.2, FR-IMP-07, SDD chapter 13 sections 13.10 and 13.14).
--- Directly after V142. Expand only, safe on a populated database: new nullable columns and named CHECKs on import_runs, one
--- new table, one trigger function and four triggers. Import runs are not yet reachable from a screen, so import_runs holds
+-- Directly after V142. Expand only, safe on a populated database: new nullable columns and named CHECKs on import_runs, the
+-- commit order of import_batches, one new table, one trigger function and four triggers. Import runs are not yet reachable from a screen, so import_runs holds
 -- few rows on every server; its new CHECKs are validated by a scan of those rows.
 --
 -- `import_runs` gains:
@@ -63,6 +63,12 @@ ALTER TABLE import_runs
         CHECK ((pre_import_dump_verified_at IS NULL) = (pre_import_dump_entries IS NULL)
                AND (pre_import_dump_verified_at IS NULL OR pre_import_dump_file IS NOT NULL));
 
+-- The order a run's batches committed in, 1, 2, ...: the run's report lists its parts in that order, which is the template's
+-- dependency order and not the upload order `seq` (review of f3be0a6 on #872). NULL until the batch commits.
+ALTER TABLE import_batches
+    ADD COLUMN commit_seq integer CHECK (commit_seq > 0),
+    ADD CONSTRAINT import_batches_commit_seq_once UNIQUE (run_id, commit_seq);
+
 CREATE TABLE import_refs (
     id          uuid         NOT NULL PRIMARY KEY,
     tenant_id   uuid         NOT NULL REFERENCES tenants (id),
@@ -78,7 +84,8 @@ CREATE TABLE import_refs (
     target_id   uuid         NOT NULL,
     CONSTRAINT import_refs_ref_of_key CHECK (left(source_ref, length(source_key) + 1) = source_key || '#'
                                              AND length(source_ref) > length(source_key) + 1),
-    UNIQUE (tenant_id, source_ref, target_type),
+    -- One row of a source may create several records of one type (a loan's collateral items): each is registered once.
+    UNIQUE (tenant_id, source_ref, target_type, target_id),
     FOREIGN KEY (tenant_id, run_id) REFERENCES import_runs (tenant_id, id),
     FOREIGN KEY (tenant_id, batch_id) REFERENCES import_batches (tenant_id, id)
 );

@@ -944,7 +944,7 @@ class ImportRunService implements ImportRuns {
             // A batch committed before V142 stored no part; no run was committed then (no writer existed).
             jdbc.sql("""
                             SELECT report::text FROM import_batches
-                             WHERE run_id = ? AND status = 'committed' AND report IS NOT NULL ORDER BY committed_at, seq
+                             WHERE run_id = ? AND status = 'committed' AND report IS NOT NULL ORDER BY commit_seq, seq
                             """)
                     .param(runId)
                     .query(String.class)
@@ -1334,10 +1334,13 @@ class ImportRunService implements ImportRuns {
         if (!dryRun) {
             stopIfRequested(runId);
         }
-        // Each statement of the batch has at most 10 minutes (spec section 3.7, issue #133), and nothing the batch
-        // writes may send a message, start a task or raise an approval: V143's triggers refuse it while
-        // app.import_commit is on. Both end with the batch's transaction (with the dry run's outer one in a dry run).
-        jdbc.sql("SET LOCAL statement_timeout = '10min'").update();
+        // Each statement of a committed batch has at most 10 minutes (spec section 3.7, issue #133). A dry run keeps
+        // its own limits, which it applies as the outer transaction's timeout (review of f3be0a6 on #872), so the
+        // setting is left alone there. In both, nothing the batch writes may send a message, start a task or raise
+        // an approval: V143's triggers refuse it while app.import_commit is on, until the transaction ends.
+        if (!dryRun) {
+            jdbc.sql("SET LOCAL statement_timeout = '10min'").update();
+        }
         jdbc.sql("SET LOCAL app.import_commit = 'on'").update();
         String file = row.get("source_filename") == null
                 ? "batch " + batch.seq()
@@ -1348,12 +1351,15 @@ class ImportRunService implements ImportRuns {
         CommitReport part = checkpoint.part(counts, (Integer) row.get("row_count"));
         jdbc.sql("""
                         UPDATE import_batches SET status = 'committed', committed_at = now(), counts = CAST(? AS jsonb),
-                               report = CAST(? AS jsonb)
+                               report = CAST(? AS jsonb),
+                               commit_seq = (SELECT coalesce(max(c.commit_seq), 0) + 1 FROM import_batches c
+                                              WHERE c.run_id = ?)
                          WHERE id = ?
                         """)
                 .params(
                         mapper.writeValueAsString(counts == null ? Map.of() : counts),
                         mapper.writeValueAsString(part),
+                        runId,
                         batch.id())
                 .update();
         return part;

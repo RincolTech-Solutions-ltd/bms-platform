@@ -298,6 +298,10 @@ class ValidationService implements ImportValidation {
         Map<UUID, Map<String, Object>> documents = new LinkedHashMap<>();
         List<BatchInput> inputs = new ArrayList<>();
         List<BatchRow> ordered = commitOrder(template, batches, documents);
+        // Two files of one position-keyed source under one name are refused here already (review of f3be0a6 on #872).
+        PreviewService.requireDistinctFiles(ordered.stream()
+                .map(b -> PreviewService.sourceOf(documents.get(b.mappingId()), b.source(), null, b.file()))
+                .toList());
         for (BatchRow b : ordered) {
             inputs.add(new BatchInput(
                     b.id(),
@@ -468,7 +472,7 @@ class ValidationService implements ImportValidation {
         }
         // The keys of this source file and tab the business already imported (issue #133): a row whose key is held with
         // another content hash is CHANGED_SINCE_IMPORT, blocking, so it is never written twice (spec section 10.1).
-        PreviewService.BatchSource from = PreviewService.sourceOf(input.mapping(), input.sourceKey(), null);
+        PreviewService.BatchSource from = PreviewService.sourceOf(input.mapping(), input.sourceKey(), null, b.file());
         Map<String, Set<String>> imported = refs.imported(from.file(), from.tab());
         Map<String, Integer> bySeverity = new TreeMap<>();
         Map<String, Integer> byCode = new TreeMap<>();

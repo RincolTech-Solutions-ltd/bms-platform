@@ -156,7 +156,11 @@ class PreviewService implements ImportPreview {
                         .filter(e -> e.key().equals(set))
                         .findFirst()
                         .orElseThrow();
-                feed(forecast, b.id(), entities, sourceOf(documents.get(b.mappingId()), b.source(), entities));
+                feed(
+                        forecast,
+                        b.id(),
+                        entities,
+                        sourceOf(documents.get(b.mappingId()), b.source(), entities, b.file()));
             }
         }
         return new Preview(
@@ -202,7 +206,7 @@ class PreviewService implements ImportPreview {
      * set it writes, the mapping source's key, and the file and tab the mapping names (the source's key when it names no
      * file).
      */
-    record BatchSource(EntitySet set, String source, String file, String tab) {}
+    record BatchSource(EntitySet set, String source, String file, String tab, boolean byPosition) {}
 
     /** The writers of the run's pending and parsed batches, inside the caller's transaction. */
     Writers writers(UUID runId) {
@@ -265,6 +269,8 @@ class PreviewService implements ImportPreview {
                         .thenComparingInt(BatchRow::seq))
                 .map(BatchRow::id)
                 .toList();
+        // Two files of one position-keyed source under one name would share their keys: refused before any is written.
+        requireDistinctFiles(sources.values());
         return new Writers(byBatch, identity.toString(), order, sources);
     }
 
@@ -274,15 +280,52 @@ class PreviewService implements ImportPreview {
                 .filter(e -> e.key().equals(set))
                 .findFirst()
                 .orElseThrow();
-        return sourceOf(document, b.source(), entities);
+        return sourceOf(document, b.source(), entities, b.file());
     }
 
-    /** The file and tab a mapping source names: the commit's and the validation's one reading of them. */
-    static BatchSource sourceOf(Map<String, Object> document, String sourceKey, EntitySet set) {
+    // JUSTIFICATION-A3: the review of f3be0a6 on #872 (must-fix 1): a position-keyed source is keyed by its own file.
+    /**
+     * The file and tab of a batch's rows: the commit's, the preview's and the validation's one reading of them. A source
+     * whose rows are known by a reference column is the mapping's file (or the source's key), so a code is the same record
+     * whatever the upload is called. A source whose rows are known by their position ({@code row_hash}) is the uploaded
+     * file itself (review of f3be0a6 on #872): its line 7 is another row in another file, so two till rolls of one run, or
+     * this month's and next month's, never share a key; a run holding two files of such a source under one name is
+     * refused ({@link #requireDistinctFiles}).
+     */
+    static BatchSource sourceOf(Map<String, Object> document, String sourceKey, EntitySet set, String uploadedFile) {
         Map<String, Object> source = MappingValidator.sources(document).get(sourceKey);
-        String file = source != null && source.get("file") instanceof String f && !f.isBlank() ? f : sourceKey;
+        String mapped = source != null && source.get("file") instanceof String f && !f.isBlank() ? f : sourceKey;
+        // A batch added without a file holds no row, so it has no line to key.
+        boolean position = byPosition(source) && uploadedFile != null && !uploadedFile.isBlank();
+        String file = position ? RowValidator.shortName(uploadedFile.strip()) : mapped;
         String tab = source != null && source.get("sheet") instanceof String s && !s.isBlank() ? s : null;
-        return new BatchSource(set, sourceKey, file, tab);
+        return new BatchSource(set, sourceKey, file, tab, position);
+    }
+
+    /** Whether a mapping source knows its rows by position: the rule {@code row_hash}, or no reference column. */
+    static boolean byPosition(Map<String, Object> source) {
+        return source == null
+                || !(source.get("source_ref") instanceof Map<?, ?> ref)
+                || !"column".equals(ref.get("rule"));
+    }
+
+    /**
+     * Refuses a run with two files of one position-keyed source under one name (review of f3be0a6 on #872): their rows
+     * would share their {@code source_ref} keys, and the second to commit would find the first's rows as changed. 409
+     * {@code file_name_repeated}; the operator renames one and uploads it again.
+     */
+    static void requireDistinctFiles(java.util.Collection<BatchSource> sources) {
+        Set<String> seen = new HashSet<>();
+        for (BatchSource s : sources) {
+            if (s != null && s.byPosition() && !seen.add(s.source() + "\u001f" + s.file() + "\u001f" + s.tab())) {
+                throw new ApiException(
+                        HttpStatus.CONFLICT,
+                        "file_name_repeated",
+                        "File name repeated",
+                        "Two files of this import for source " + s.source() + " have the same name, so their lines"
+                                + " cannot be told apart; give one another name and upload it again.");
+            }
+        }
     }
 
     // ---------------------------------------------------------------------------------------------

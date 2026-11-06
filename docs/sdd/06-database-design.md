@@ -1394,12 +1394,14 @@ expand only:
   together and only with a dump recorded (`import_runs_dump_verified_whole`). The policy decisions stay in `policy jsonb`
   (V127), keyed by decision: `option`, `confirmed_on`, `confirmation` (a reference, never a personal value), `recorded_by`,
   and for an option that needs the dev lead's exception `exception_by` and `follow_up_on`.
+- **`import_batches`** gains `commit_seq integer` (1, 2, ... in the order the run's batches committed, unique per run with
+  `import_batches_commit_seq_once`), so the run's report lists its parts in commit order, the template's dependency order.
 - **`import_refs`** (RLS forced, `SELECT, INSERT`, append-only by `reject_mutation`, the generalisation of
   `retail_import_refs`): one row per record a commit created, `id`, `tenant_id`, `created_at`, `run_id`, `batch_id` (FKs
   `(tenant_id, run_id)` and `(tenant_id, batch_id)`), `source_key varchar(330)` (the source file, tab and row),
   `source_ref varchar(400)` (the key, `#`, the hash of the row's mapped content; the CHECK `import_refs_ref_of_key`),
   `target_type varchar(60)` (a code such as `retail.product` or `ledger.journal_entry`) and `target_id`. Unique
-  `(tenant_id, source_ref, target_type)`; plain indexes `import_refs_by_key (tenant_id, source_key text_pattern_ops)` (a
+  `(tenant_id, source_ref, target_type, target_id)` (a row may create several records of one type, each once); plain indexes `import_refs_by_key (tenant_id, source_key text_pattern_ops)` (a
   key, and the keys of one file and tab by prefix) and `import_refs_by_target (tenant_id, target_id)`. No personal value:
   a reference holds a file and tab name from the mapping, a line number or a reference code, and a hash.
 - **`bms_refuse_during_import_commit()`**, a `BEFORE INSERT` trigger on `notification_outbox`, `sms_deliveries`,

@@ -260,7 +260,7 @@ approval marks the run approved at its version, and a change after it needs a ne
 recorded check (`pg_restore --list` entries and the SHA-256 again); the batches in the template's dependency order with a
 10 minute statement timeout each; `import_refs` with `ImportRefs.sourceRef`, the one function of file, tab, row and
 content hash, and `CHANGED_SINCE_IMPORT` reported by the validation; the opening journals through the checkpoint, one per
-run, branch and kind; and triggers that refuse an outbox row, an SMS delivery, a scheduled task or an approval request
+batch, branch and kind (the register batch of a lending run is one batch, so one per branch); and triggers that refuse an outbox row, an SMS delivery, a scheduled task or an approval request
 inside an import batch. The preview leaves out rows already imported with the same content.
 
 ### 3.8 The receivable decision
