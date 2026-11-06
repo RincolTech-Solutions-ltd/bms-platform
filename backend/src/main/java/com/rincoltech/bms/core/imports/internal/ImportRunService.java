@@ -471,8 +471,15 @@ class ImportRunService implements ImportRuns {
                                    commit_approved_version = NULL
                              WHERE id = ?
                             """).params(maker, runId).update();
-            Approvals.Outcome outcome = approvals.request(new Approvals.ActionRequest(
-                    ImportCommitAction.TYPE, branch, runId, run.version(), null, null, payload));
+            // The rule is read once and passed (ADR-091); import_commit is not switchable, so it always waits.
+            Approvals.Rule rule = approvals.rule(ImportCommitAction.TYPE);
+            Approvals.Outcome outcome = approvals.request(
+                    new Approvals.ActionRequest(
+                            ImportCommitAction.TYPE, branch, runId, run.version(), null, null, payload),
+                    rule);
+            if (outcome.executed()) {
+                throw new IllegalStateException("import_commit ran without a checker");
+            }
             audit(
                     runId,
                     "core.import_run.commit_requested",
