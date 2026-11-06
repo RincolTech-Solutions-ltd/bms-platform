@@ -42,12 +42,16 @@ templates per vertical and versioned mappings per customer sheet (section 13.14,
 | Normalise | Each field normalised (13.6); issues raised (13.7) | |
 | Link | Borrowers deduplicated and matched to existing members; next of kin linked to borrowers (13.9) | `in_review` |
 | Review | People resolve issues (FR-IMP-05) | `in_review` |
-| Preview | System computes what commit will create (FR-IMP-06) | `ready` when no unresolved blocking or warning issue remains |
+| Preview | System computes what commit will create from the staged rows alone, writing nothing (FR-IMP-06): rows by outcome per batch (to write, excluded, blank, blocked), records by type, and the template's predicted balances (stock quantity and value per branch, receivables, loan principal outstanding and arrears buckets, each opening journal with its debit and credit totals) | |
+| Dry run | The commit's own code with the same writer, inside one outer transaction that is rolled back (ADR-027 decision 5); its report (per batch read, written, existing, skipped; anomalies with file and line; opening journals; balances checksum) is stored on the run with a stamp of the run's inputs, and compared with the preview's opening journals | `ready` when no unresolved blocking or warning issue remains and a stored dry run counts (no batch, mapping version or resolution changed after it), did not fail and matched the preview |
 | Commit | Approval request `import_commit`; on approval, one transaction creates everything (13.10) | `committed` |
 | Reconcile | Reconciliation report stored as a document (FR-IMP-08) | `committed` |
 
 A batch can be `cancelled` at any status before `committed`. Parsing failure of the
 whole file (unreadable, header not found) sets `failed` with a reason and creates no rows.
+
+Since #127 the states above belong to the run that owns the batches (section 13.14): the preview and the dry run work on a
+run `in_review`, and the run, not the batch, becomes `ready`. As built for the preview and the dry run: section 13.14.1, 6/16.
 
 ## 13.4 Tables
 
@@ -664,7 +668,8 @@ retail command. ADR-027 makes the framework the one pipeline for every tenant's 
   file and line, never a personal value. The engine that applies them is built (#130, section
   13.14.1 4/16).
 - **Dry run and commit.** The dry run is the commit in one outer transaction that is rolled back,
-  with the same report as `import-retail`. Commit is maker-checker (`import_commit`), one
+  with the same report as `import-retail`; it is stored on the run, stops counting once a batch, mapping version or
+  resolution of the run changes, and a run is `ready` only with one that counts (built in #132, section 13.14.1 6/16). Commit is maker-checker (`import_commit`), one
   transaction per batch in dependency order; the register batch of this chapter stays one
   transaction (13.10). Every created record and every opening journal is registered in
   `import_refs` by `source_ref` in the same transaction (the generalisation of `retail_import_refs`),
@@ -1042,3 +1047,70 @@ template's catalogue and severities, nothing per template.
   pending list, produced by `ImportReviewIT#aChangedRowComesBackToTheQueueAndAnUnchangedRowKeepsItsResolution`),
   `RlsIsolationIT` (forced RLS and append-only on `import_issue_resolutions`), `MigrationOrderIT` (V141 keeps every issue),
   `PermissionMatrixIT` and `RoutePermissionIT` (each route refuses a caller without `core.imports.manage`).
+
+**6/16, the preview and the dry run (#132, migration `V142`, FR-IMP-06, ADR-027 decision 5, spec section 3.6).**
+`core.imports` gains the public API `ImportPreview`, the report shape `CommitReport`, the template SPI `ImportForecast`
+(`ImportTemplate.forecast()`, none by default), and on `ImportRuns` the dry run and the stored reports. No route yet: the
+operator's screens are #141, so the operator's tooling calls them, as it calls the commit. The maker-checker commit that
+wires the templates' loaders is #133; this step builds the report and the rolled-back outer transaction, and the commit and
+the dry run take the writer as a parameter, the seam #133 fills.
+
+- **The preview** (`ImportPreview.preview(run)`, read-only, writes nothing). For every `pending` or `parsed` batch of the
+  run, in commit order (the template's entity sets, then `seq`), each row's outcome, decided in this order: `excluded` (left
+  out by the review), `blank` (`BLANK_ROW`), `blocked` (an open blocking issue), else `write`. An open warning does not hold a
+  row back. Records by type are the rows to write per entity set. The template's forecast is given every row to write, in
+  that order, 1,000 at a time, with its typed values (as a `RowCheck` sees them), and answers the predicted balances per
+  branch code: stock quantity and value, receivables, loan principal outstanding, loans by arrears bucket, and each opening
+  journal with its debit and credit totals. A run whose batches name two template versions is 409 `templates_differ`.
+- **The report** (`CommitReport`, the same for a dry run and a real run): per source the rows `read`, `written`,
+  `existing`, `skipped` (a batch, or each file of a batch that holds several, as the retail export does); the anomalies
+  with file and line; the opening journals (branch, kind, debit and credit totals, status, entry number); notes; the balances
+  checksum; and the failure. `render()` prints it as plain text in the form `import-retail` prints. A writer tells it what
+  it did through its `BatchWriter.Checkpoint`, now a `CommitReport.Sink` (`counts`, `anomaly`, `journal`, `note`,
+  `checksum`); without per file counts, a batch is one line from the map its writer returns, `read` defaulting to its
+  row count. An anomaly on a line of the batch's own file that holds a personal value of that row (the cells its mapping
+  feeds into a personal field, and those fields' typed values, matched as the validation's rules are, by text or by
+  digits) is kept as `CommitReport.HIDDEN`. A failure names the batch and the kind of failure (`batch 3 failed
+  (IllegalStateException)`), never the message, which may quote a row. Each batch's part is stored in
+  `import_batches.report` in its commit transaction, so `ImportRuns.commitReport(run)` is the committed batches' parts in
+  order, resumed or not.
+- **The dry run** (`ImportRuns.dryRun(run, writer, by)`, a run `in_review` only, 409 `run_not_open`; 409 `batch_not_parsed`
+  while a file is not read or was refused). One outer transaction, marked rollback-only first, runs the commit's own batch
+  code for every batch in order with the same writer: the advisory lock on the business's import key, the batch taken
+  `FOR UPDATE`, the writer, the batch's move to `committed` with its counts and report part. The kill switch and the halt,
+  which guard writes, do not stop it. The first batch that throws stops it, as in a real run, and the failure is recorded.
+  Then the transaction is rolled back, so no business, ledger or audit row is left; a writer must not open a transaction of
+  its own. In a second transaction, holding the run `FOR UPDATE`, the stamp of the run's inputs is taken again: if a batch,
+  issue, resolution, the cutover moment or a policy decision changed while the dry run ran, nothing is stored (409
+  `run_changed`); otherwise the report, the time, who ran it, the stamp and whether the preview's opening journals (those
+  not zero, compared by branch, kind, debit and credit) equal the dry run's are stored on the run. It writes no audit row,
+  so that every table's row count is unchanged; the run row itself records who ran it and when. The log line carries the
+  run id and counts only.
+- **When it counts.** `ImportRuns.dryRunReport(run)` answers the stored dry run and whether it still counts: its stamp is
+  the run's stamp now. The stamp is an MD5 over the cutover moment and policy, every batch's status, file, mapping version,
+  parse and row count, every issue's status, version and resolution, every resolution and every staged row's review columns
+  and typed values, so a new resolution, a new mapping version (a `map_value` moves the batches to it), a new upload, a
+  parse, a cancel or a new validation (which gives every issue found again its next version) makes it stop counting.
+  `ready` needs a stored dry run that counts
+  (409 `dry_run_required`), did not fail (409 `dry_run_failed`) and matched the preview (409 `preview_differs`), and the
+  commit's start checks the same again. A `ready` run cannot change, so the dry run it was made ready with is the one
+  that counts at the commit.
+- **The retail export.** Until the retail template of #135, `import-retail` stays the retail path and its own logic is the
+  writer: `RetailImporter.exportWriter(dir, firstLiveDate)` imports the whole export directory as one batch in the batch's
+  transaction (each file's transaction joins it) and tells the checkpoint what the command's report holds
+  (`ImportReport.into`, also `toCommitReport()` for a run of the command), so the framework's dry run of such a run is the
+  command's real path rolled back. Without a retail forecast its preview predicts no journal, so such a run is not made
+  `ready` (`preview_differs`) until #135 gives it one.
+- **Proven by** `ImportPreviewIT` (the golden files' rows by outcome and records by type, and an exclusion moving a row; the
+  fixture forecast's balances; a dry run leaves every table's row count unchanged, the audit log and the ledger included;
+  its report equals the real commit's on the same input with the same writer, and the books after the commit equal the
+  preview's predicted stock value, receivables and journal totals; the report and the stored report hold none of the
+  fixture's personal values, a buyer's number kept and a buyer's name hidden; a stored dry run stops counting after an
+  override, a `map_value` and a cancelled batch, and `ready` is refused until a new one; a failed dry run is stored, writes
+  nothing and refuses `ready`; a dry run that differs from the preview refuses `ready`; the refusals outside review and with a
+  refused file; another business can neither preview, dry run nor read the stored report, and reads none of it as `bms_app`
+  under forced RLS), `RetailDryRunIT` (the framework's dry run over `fixtures/retail/import-sample/` writes nothing, every
+  table counted, and equals a real `import-retail` run's report, the golden counts and opening journals included; it names no
+  buyer; another business cannot reach it), `ImportRunsIT`, `ImportMappingsIT`, `ImportUploadsIT` and
+  `ImportUploadReviewIT` (a run made ready through a dry run, and `dry_run_required` without one), and `MigrationOrderIT`
+  (V142 keeps every run and batch, and the CHECK keeps the dry run columns whole).
