@@ -993,7 +993,8 @@ template's catalogue and severities, nothing per template.
   customer's records, spec section 4.2) with cell text (422 `nothing_to_map`): the text becomes a label of the field's value
   map (its enum map for an enum) in a new version of the batch's mapping, saved through `ImportMappings.save` (validated,
   audited `core.import_mapping.saved`, append-only as #129), which must be the newest version of its name (409
-  `mapping_not_latest`). Every parsed batch of the run read with the old version records the new one, and exactly the rows of
+  `mapping_not_latest`). A label the mapping already maps to another value, in any spelling the parse compares alike, is 409
+  `label_already_mapped`, never replaced. Every parsed batch of the run read with the old version records the new one, and exactly the rows of
   that source whose field reads the label, as stored or as edited, are validated again. The resolution records both versions,
   the label and the value.
 - **Concurrency.** A change takes the run `FOR UPDATE` (as a validation's write does) and then the issue `FOR UPDATE`, and
@@ -1004,6 +1005,10 @@ template's catalogue and severities, nothing per template.
   `row_key` (the row's reference without the content hash: `col:<source>:<value>` for a reference column, `row:<source>:<line>`
   for `row_hash`) and `raw_sha256` (the SHA-256 of the cells as stored), with its code and field, among every resolution of the
   run. So it carries across a new validation, a new parse and a new upload of the file into the run (the old batch cancelled).
+  A line repeated verbatim has its twin's identity and cells, so a resolution also records its `occurrence`, the n-th row of
+  that identity and those cells in the run's order (batch, then line): a decision on one copy never reaches the other, and
+  a link names the exact copy it points at (review of #868). A row left out is not indexed by pass 1, so it is no other
+  row's duplicate and no reference reaches it.
   Both passes read the edits in force in place of their fields' cells, so duplicates and references see them; an issue is
   resolved by the resolution in force for its code and field, or by the row's exclusion; `ask_customer` is kept the same way.
   A row whose identity had a deciding resolution on other cells and none on its own cells gets `ROW_CHANGED_SINCE_REVIEW`
@@ -1016,7 +1021,9 @@ template's catalogue and severities, nothing per template.
 - **Questions for the customer.** `PUT /imports/issues/{issue_id}/ask-customer` marks an issue (an `ask_customer` resolution
   row, which decides nothing about the row); `GET /imports/runs/{run_id}/questions` and `.../questions.csv` give the open
   ones, numbered in batch then line order, with file (cut to 100 characters), line, field, code and message, never a cell's
-  value or a note; audited `core.import_run.questions_exported` with the count.
+  value or a note; the CSV, the file sent to the customer, is audited `core.import_run.questions_exported` with the count.
+  A resolution is made only on an issue of a parsed batch (409 `batch_not_parsed`, `batch_committed`), and a bulk resolution
+  that names a batch not of its run is 404.
 - **Not in this step.** `reclassify` and the row classes of 13.5; the raw values and the resolution history for a holder of
   `core.imports.view_raw` (the permission is not catalogued yet) come with the operator screens of #141.
 - **Proven by** `ImportReviewIT` (every kind writes one resolution row with who, when, before, after and note and one audit
@@ -1026,7 +1033,8 @@ template's catalogue and severities, nothing per template.
   version 2, moves the run's batches to it and validates exactly the one row it reaches, every other issue keeping its id,
   version and status; two resolvers at once, the second gets `version_conflict`, and so does a second edit of an issue an
   edit replaced; after a new upload a changed row comes back with `ROW_CHANGED_SINCE_REVIEW` and an unchanged one keeps its
-  exclusion; the questions, as JSON and CSV, are numbered with file and line and hold no personal value; another business
+  exclusion; of two lines repeated verbatim, excluding one leaves the other open and no longer its duplicate through a full
+  validation; the questions, as JSON and CSV, are numbered with file and line and hold no personal value; another business
   reaches none of the routes; an unknown property is refused), `ImportCatalogueTest` (`ROW_CHANGED_SINCE_REVIEW` leaves the
   pending list, produced by `ImportReviewIT#aChangedRowComesBackToTheQueueAndAnUnchangedRowKeepsItsResolution`),
   `RlsIsolationIT` (forced RLS and append-only on `import_issue_resolutions`), `MigrationOrderIT` (V141 keeps every issue),

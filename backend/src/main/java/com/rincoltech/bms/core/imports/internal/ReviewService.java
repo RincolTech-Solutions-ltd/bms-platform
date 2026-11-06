@@ -18,6 +18,7 @@ import com.rincoltech.bms.kernel.Versions;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -282,6 +283,7 @@ class ReviewService implements ImportReview {
                     resolution.note(),
                     by,
                     null,
+                    null,
                     null);
             int rows = applied.revalidate() ? validation.revalidate(t.runId(), applied.rows()) : 0;
             List<Issue> now = jdbc.sql("SELECT " + ValidationService.ISSUE_COLUMNS + """
@@ -330,7 +332,40 @@ class ReviewService implements ImportReview {
                     "File already imported",
                     "This file is imported; its issues are kept as they were.");
         }
+        // Only a file read and checked is reviewed, as a bulk resolution only takes those (review of #868, item 2).
+        if (!"parsed".equals(t.batchStatus())) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "batch_not_parsed",
+                    "File not read",
+                    "This file is not read and checked now; read it again and check the import before resolving.");
+        }
         return t;
+    }
+
+    /**
+     * The occurrence of each row of the run that repeats another verbatim: the n-th row (from 2) with the same identity
+     * and the same cells, in the run's order (batch, then line), as the validation counts them in its first pass. A row
+     * not in the map is the first of its kind. The identity is made from the stored {@code source_ref}, as
+     * {@link RowValidator#rowKeyOf} makes it. JUSTIFICATION-A3: the review's must-fix 1 needs each copy's occurrence.
+     */
+    private Map<UUID, Integer> occurrences(UUID runId) {
+        Map<UUID, Integer> out = new HashMap<>();
+        jdbc.sql("""
+                        SELECT id, occurrence FROM (
+                            SELECT r.id, row_number() OVER (
+                                       PARTITION BY CASE WHEN r.source_ref LIKE 'col:%' THEN r.source_ref
+                                                         ELSE 'row:' || b.mapping_source || ':' || r.source_row_no END,
+                                                    encode(sha256(convert_to(r.raw::text, 'UTF8')), 'hex')
+                                       ORDER BY b.seq, r.source_row_no) AS occurrence
+                              FROM import_rows r JOIN import_batches b ON b.id = r.batch_id
+                             WHERE b.run_id = ? AND b.status IN ('parsed', 'committed') AND b.mapping_id IS NOT NULL
+                        ) copies WHERE occurrence > 1
+                        """)
+                .param(runId)
+                .query((rs, n) -> out.put(rs.getObject("id", UUID.class), rs.getInt("occurrence")))
+                .list();
+        return out;
     }
 
     /** 409 {@code version_conflict} for an issue a resolution was made on and a validation then replaced; else 404. */
@@ -382,7 +417,7 @@ class ReviewService implements ImportReview {
 
     /**
      * Checks one resolution against its issue, writes its row and its audit row, and applies what changes no value. A bulk
-     * resolution passes the run's review, read once; one resolution passes null.
+     * resolution passes the run's review and its rows' occurrences, read once; one resolution passes null for both.
      */
     private Applied apply(
             Target t,
@@ -393,7 +428,10 @@ class ReviewService implements ImportReview {
             String note,
             UUID by,
             UUID bulkId,
-            ReviewState review) {
+            ReviewState review,
+            Map<UUID, Integer> copies) {
+        Map<UUID, Integer> occurrences = copies == null ? occurrences(t.runId()) : copies;
+        int occurrence = occurrences.getOrDefault(t.rowId(), 1);
         String cleanNote = note == null || note.isBlank() ? null : note.strip();
         if (cleanNote != null && cleanNote.length() > MAX_NOTE) {
             throw ApiException.validation(
@@ -411,7 +449,7 @@ class ReviewService implements ImportReview {
                     throw ApiException.validation(List.of(
                             new FieldProblem("value", "too_long", "At most " + MAX_VALUE + " characters, as a cell.")));
                 }
-                before = valueMap(currentText(t, review));
+                before = valueMap(currentText(t, review, occurrence));
                 after = valueMap(value == null || value.isBlank() ? null : value);
                 revalidate = true;
             }
@@ -420,7 +458,7 @@ class ReviewService implements ImportReview {
                     throw ApiException.rule("no_suggestion", "This issue has no suggested value to accept.");
                 }
                 if (t.suggestion().containsKey("value")) {
-                    before = valueMap(currentText(t, review));
+                    before = valueMap(currentText(t, review, occurrence));
                     after = valueMap(String.valueOf(t.suggestion().get("value")));
                 } else {
                     after.putAll(t.suggestion());
@@ -444,12 +482,14 @@ class ReviewService implements ImportReview {
                     throw linkUnknown();
                 }
                 Map<String, Object> other = jdbc.sql("""
-                                SELECT r.id, r.source_ref, r.source_row_no, b.mapping_source
+                                SELECT r.id, r.source_ref, r.source_row_no, b.mapping_source,
+                                       encode(sha256(convert_to(r.raw::text, 'UTF8')), 'hex') AS sha
                                   FROM import_rows r JOIN import_batches b ON b.id = r.batch_id
                                  WHERE r.id = ? AND b.run_id = ? AND b.status = 'parsed'
                                 """)
                         .params(linkRowId, t.runId())
                         .query((rs, n) -> {
+                            // The exact copy linked to, so a link never moves to a twin (review of #868, item 6).
                             Map<String, Object> m = new LinkedHashMap<>();
                             m.put(
                                     "row_key",
@@ -457,6 +497,8 @@ class ReviewService implements ImportReview {
                                             rs.getString("source_ref"),
                                             rs.getString("mapping_source"),
                                             rs.getInt("source_row_no")));
+                            m.put("sha", rs.getString("sha"));
+                            m.put("occurrence", occurrences.getOrDefault(linkRowId, 1));
                             m.put("row_id", linkRowId.toString());
                             return m;
                         })
@@ -472,7 +514,7 @@ class ReviewService implements ImportReview {
                 after.put("member_id", linkMemberId.toString());
             }
             case "map_value" -> {
-                MapResult mapped = mapValue(t, value, by);
+                MapResult mapped = mapValue(t, value, by, occurrences);
                 before = Map.of("mapping_version", mapped.from());
                 after.put("mapping_version", mapped.to());
                 after.put("label", t.original());
@@ -487,9 +529,9 @@ class ReviewService implements ImportReview {
         UUID id = UUID.randomUUID();
         jdbc.sql("""
                         INSERT INTO import_issue_resolutions (id, tenant_id, run_id, batch_id, issue_id, row_key, raw_sha256,
-                                                              source_row_no, code, field, resolution, before_value,
-                                                              after_value, note, resolved_by, bulk_id)
-                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb),
+                                                              occurrence, source_row_no, code, field, resolution,
+                                                              before_value, after_value, note, resolved_by, bulk_id)
+                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb),
                                 CAST(? AS jsonb), ?, ?, ?)
                         """)
                 .params(
@@ -499,6 +541,7 @@ class ReviewService implements ImportReview {
                         t.id(),
                         t.rowKey(),
                         t.sha(),
+                        occurrence,
                         t.line(),
                         t.code(),
                         t.field(),
@@ -596,9 +639,9 @@ class ReviewService implements ImportReview {
     }
 
     /** The field's text as the row now reads it: the edit in force (in {@code review}, read now when null), or the cell. */
-    private String currentText(Target t, ReviewState review) {
+    private String currentText(Target t, ReviewState review, int occurrence) {
         ReviewState.Row decided =
-                (review == null ? ReviewState.load(jdbc, t.runId()) : review).row(t.rowKey(), t.sha());
+                (review == null ? ReviewState.load(jdbc, t.runId()) : review).row(t.rowKey(), t.sha(), occurrence);
         if (decided.edits().containsKey(t.field())) {
             return decided.edits().get(t.field());
         }
@@ -669,7 +712,7 @@ class ReviewService implements ImportReview {
      * a customer's records, spec section 4.2), an issue with no cell text, and a batch whose mapping is no longer the newest
      * version of its name.
      */
-    private MapResult mapValue(Target t, String value, UUID by) {
+    private MapResult mapValue(Target t, String value, UUID by, Map<UUID, Integer> occurrences) {
         requireField(t);
         Field field = fieldOf(t);
         if (field.isPersonal()) {
@@ -702,7 +745,19 @@ class ReviewService implements ImportReview {
         @SuppressWarnings("unchecked")
         Map<String, Object> labels =
                 (Map<String, Object>) byField.computeIfAbsent(t.field(), k -> new LinkedHashMap<>());
-        // One label per spelling the parse compares alike: a map written for another spelling of it gives way.
+        // A label the mapping already maps, in any spelling the parse compares alike, is the operator's earlier word: a
+        // different value is refused, never silently replaced (review of #868, item 7).
+        labels.forEach((l, v) -> {
+            if (Parsing.key(l).equals(Parsing.key(t.original()))
+                    && !value.strip().equals(String.valueOf(v))) {
+                throw new ApiException(
+                        HttpStatus.CONFLICT,
+                        "label_already_mapped",
+                        "Value already mapped",
+                        "The mapping already maps this value of " + t.field()
+                                + " to something else; change the mapping itself to change it.");
+            }
+        });
         labels.keySet().removeIf(l -> Parsing.key(l).equals(Parsing.key(t.original())));
         labels.put(t.original().strip(), value.strip());
         Mapping saved = mappings.save(
@@ -725,7 +780,8 @@ class ReviewService implements ImportReview {
                 .query((rs, n) -> {
                     String key =
                             RowValidator.rowKeyOf(rs.getString("source_ref"), t.source(), rs.getInt("source_row_no"));
-                    ReviewState.Row decided = review.row(key, rs.getString("sha"));
+                    ReviewState.Row decided = review.row(
+                            key, rs.getString("sha"), occurrences.getOrDefault(rs.getObject("id", UUID.class), 1));
                     String text = decided.edits().containsKey(t.field())
                             ? decided.edits().get(t.field())
                             : cellText(source, ValidationService.cells(rs.getString("raw")), t.field());
@@ -758,6 +814,15 @@ class ReviewService implements ImportReview {
         requireBy(by);
         return tx.execute(s -> {
             lockRun(runId);
+            // A batch not of this run is a mistake, never a quiet "nothing resolved" (review of #868, item 3).
+            if (bulk.batchId() != null
+                    && jdbc.sql("SELECT count(*) FROM import_batches WHERE id = ? AND run_id = ?")
+                                    .params(bulk.batchId(), runId)
+                                    .query(Long.class)
+                                    .single()
+                            == 0) {
+                throw ApiException.notFound();
+            }
             List<Target> targets = jdbc.sql(TARGET + """
                              WHERE b.run_id = ? AND i.code = ? AND i.status = 'open' AND b.status = 'parsed'
                                AND (CAST(? AS uuid) IS NULL OR i.batch_id = ?)
@@ -769,6 +834,7 @@ class ReviewService implements ImportReview {
                     .list();
             UUID bulkId = UUID.randomUUID();
             ReviewState review = ReviewState.load(jdbc, runId);
+            Map<UUID, Integer> copies = occurrences(runId);
             Set<UUID> revalidate = new LinkedHashSet<>();
             Set<UUID> excluded = new LinkedHashSet<>();
             int resolved = 0;
@@ -778,7 +844,7 @@ class ReviewService implements ImportReview {
                     continue;
                 }
                 String value = "ask_customer".equals(kind) ? "true" : bulk.value();
-                Applied applied = apply(t, kind, value, null, null, bulk.note(), by, bulkId, review);
+                Applied applied = apply(t, kind, value, null, null, bulk.note(), by, bulkId, review, copies);
                 resolved++;
                 if (applied.revalidate()) {
                     revalidate.addAll(applied.rows());
@@ -806,7 +872,7 @@ class ReviewService implements ImportReview {
         return tx.execute(s -> {
             Target t = locked(issueId, version);
             requireOpenIssue(t);
-            apply(t, "ask_customer", String.valueOf(ask), null, null, null, by, null, null);
+            apply(t, "ask_customer", String.valueOf(ask), null, null, null, by, null, null, null);
             return jdbc.sql("SELECT " + ValidationService.ISSUE_COLUMNS + """
                               FROM import_issues i LEFT JOIN import_issue_resolutions r ON r.id = i.resolution_id
                              WHERE i.id = ?
@@ -818,7 +884,7 @@ class ReviewService implements ImportReview {
     }
 
     @Override
-    public List<Question> questions(UUID runId) {
+    public List<Question> questions(UUID runId, boolean export) {
         TenantContext.require();
         return tx.execute(s -> {
             runExists(runId);
@@ -841,8 +907,15 @@ class ReviewService implements ImportReview {
                                 rs.getString("message")));
                     })
                     .list();
-            audit.record(AuditLog.Entry.created(
-                    "core.import_run.questions_exported", "import_run", runId, null, Map.of("questions", out.size())));
+            // Only the file sent to the customer is audited, not a list read on a screen (review of #868, item 10).
+            if (export) {
+                audit.record(AuditLog.Entry.created(
+                        "core.import_run.questions_exported",
+                        "import_run",
+                        runId,
+                        null,
+                        Map.of("questions", out.size())));
+            }
             return out;
         });
     }

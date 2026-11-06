@@ -29,7 +29,14 @@ final class ReviewState {
 
     /** One resolution as stored. {@code after} is its after value as plain maps, or empty. */
     record Made(
-            UUID id, String rowKey, String sha, String code, String field, String kind, Map<String, Object> after) {}
+            UUID id,
+            String rowKey,
+            String sha,
+            int occurrence,
+            String code,
+            String field,
+            String kind,
+            Map<String, Object> after) {}
 
     /**
      * What the review decided for one row with its current cells: the edits by field (the text in place of the cell, or
@@ -70,7 +77,8 @@ final class ReviewState {
         Map<String, List<Made>> byRow = new HashMap<>();
         long[] last = {0};
         jdbc.sql("""
-                        SELECT id, seq, row_key, raw_sha256, code, field, resolution, after_value::text AS after_value
+                        SELECT id, seq, row_key, raw_sha256, occurrence, code, field, resolution,
+                               after_value::text AS after_value
                           FROM import_issue_resolutions WHERE run_id = ? ORDER BY seq
                         """)
                 .param(runId)
@@ -80,6 +88,7 @@ final class ReviewState {
                             rs.getObject("id", UUID.class),
                             rs.getString("row_key"),
                             rs.getString("raw_sha256"),
+                            rs.getInt("occurrence"),
                             rs.getString("code"),
                             rs.getString("field"),
                             rs.getString("resolution"),
@@ -106,18 +115,23 @@ final class ReviewState {
                 .single();
     }
 
-    /** What the review decided for the row of this identity with these cells, without asking whether it changed. */
-    Row row(String rowKey, String sha) {
-        return row(rowKey, sha, null);
+    /**
+     * What the review decided for the row of this identity with these cells, the {@code occurrence}-th such row of the run,
+     * without asking whether it changed.
+     */
+    Row row(String rowKey, String sha, int occurrence) {
+        return row(rowKey, sha, occurrence, null);
     }
 
     /**
      * The same, and whether the row changed since it was reviewed: a deciding resolution of its identity was made on cells
      * that no row of the run with that identity has now ({@code present}: the SHA-256 of each such row's cells), and none on
      * its own. So two rows of one reference with different cells (a duplicate the queue resolves on one of them) never mark
-     * each other changed; only cells that are gone from the run do.
+     * each other changed; only cells that are gone from the run do. A resolution applies only to the copy it was made on:
+     * a line repeated verbatim has the same identity and cells as its twin, and is told apart by its occurrence (review of
+     * #868, must-fix 1).
      */
-    Row row(String rowKey, String sha, Set<String> present) {
+    Row row(String rowKey, String sha, int occurrence, Set<String> present) {
         List<Made> all = byRow.get(rowKey);
         if (all == null) {
             return Row.NONE;
@@ -131,10 +145,11 @@ final class ReviewState {
         boolean reviewedHere = false;
         boolean reviewedElsewhere = false;
         for (Made m : all) {
-            boolean here = m.sha().equals(sha);
+            boolean sameCells = m.sha().equals(sha);
+            boolean here = sameCells && m.occurrence() == occurrence;
             if (DECIDING.contains(m.kind())) {
                 reviewedHere |= here;
-                reviewedElsewhere |= !here && present != null && !present.contains(m.sha());
+                reviewedElsewhere |= !sameCells && present != null && !present.contains(m.sha());
             }
             if (!here) {
                 continue;
@@ -150,7 +165,10 @@ final class ReviewState {
                 }
                 case "exclude_row" -> excludedBy = m.id();
                 case "link_row" -> {
-                    linkedRow = String.valueOf(m.after().get("row_key"));
+                    linkedRow = copy(
+                            String.valueOf(m.after().get("row_key")),
+                            String.valueOf(m.after().get("sha")),
+                            ((Number) m.after().get("occurrence")).intValue());
                     resolvedBy.put(key(m.code(), m.field()), m.id());
                 }
                 case "link_member" -> {
@@ -169,6 +187,11 @@ final class ReviewState {
         }
         return new Row(
                 edits, excludedBy, linkedRow, linkedMember, resolvedBy, asked, reviewedElsewhere && !reviewedHere);
+    }
+
+    /** One copy of a row in the run: its identity, its cells and which of the rows with both it is. */
+    static String copy(String rowKey, String sha, int occurrence) {
+        return rowKey + "|" + sha + "|" + occurrence;
     }
 
     static String key(String code, String field) {

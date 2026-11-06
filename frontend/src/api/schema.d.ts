@@ -801,7 +801,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The numbered questions for the customer, with file and line and no value of a row; audited */
+        /** The numbered questions for the customer, with file and line and no value of a row */
         get: operations["listImportQuestions"];
         put?: never;
         post?: never;

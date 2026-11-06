@@ -9,8 +9,8 @@
 -- reject_mutation trigger for every role). It names the issue it was made on but holds no foreign key to it: a validation
 -- replaces a batch's issues, and a new parse or a cancel removes a batch's rows, while the resolution stays. It is found
 -- again by the row it was made on, by `row_key` (the row's reference without its content hash: the source and the column
--- value, or the source and the line) and `raw_sha256` (the SHA-256 of the row's cells as stored), with the code and field of
--- the issue. A validation applies the resolutions of a row whose cells are identical, and reports a row whose cells changed
+-- value, or the source and the line), `raw_sha256` (the SHA-256 of the row's cells as stored) and `occurrence` (which copy,
+-- when lines repeat verbatim), with the code and field of the issue. A validation applies the resolutions of a row whose cells are identical, and reports a row whose cells changed
 -- since it was resolved as ROW_CHANGED_SINCE_REVIEW (spec section 10.1).
 --
 -- `import_issues` gains `version` (optimistic concurrency: a second resolver of the same version gets version_conflict),
@@ -52,6 +52,9 @@ CREATE TABLE import_issue_resolutions (
     issue_id      uuid          NOT NULL,
     row_key       varchar(400)  NOT NULL,
     raw_sha256    char(64)      NOT NULL CHECK (raw_sha256 ~ '^[0-9a-f]{64}$'),
+    -- Which copy it was made on when the run holds the same identity with the same cells more than once (a line repeated
+    -- verbatim): the n-th such row in the run's order (batch, then line), so a decision on one copy never reaches another.
+    occurrence    integer       NOT NULL DEFAULT 1 CHECK (occurrence > 0),
     source_row_no integer       NOT NULL CHECK (source_row_no > 0),
     code          text          NOT NULL CHECK (code ~ '^[A-Z][A-Z0-9_]{1,59}$'),
     field         text          CHECK (field ~ '^[a-z][a-z0-9_]{0,39}$'),

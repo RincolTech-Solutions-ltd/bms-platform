@@ -248,11 +248,12 @@ class ReviewController {
     @GetMapping("/runs/{run_id}/questions")
     @RequiresPermission("core.imports.manage")
     @Operation(
-            summary = "The numbered questions for the customer, with file and line and no value of a row; audited",
+            summary = "The numbered questions for the customer, with file and line and no value of a row",
             operationId = "listImportQuestions")
     QuestionList questions(@PathVariable("run_id") UUID runId) {
-        return new QuestionList(
-                review.questions(runId).stream().map(QuestionResponse::of).toList());
+        return new QuestionList(review.questions(runId, false).stream()
+                .map(QuestionResponse::of)
+                .toList());
     }
 
     @GetMapping(path = "/runs/{run_id}/questions.csv", produces = "text/csv")
@@ -262,7 +263,7 @@ class ReviewController {
             operationId = "exportImportQuestions")
     ResponseEntity<String> questionsCsv(@PathVariable("run_id") UUID runId) {
         StringBuilder csv = new StringBuilder("number,file,line,field,code,question\n");
-        for (Question q : review.questions(runId)) {
+        for (Question q : review.questions(runId, true)) {
             csv.append(q.number())
                     .append(',')
                     .append(cell(q.file()))

@@ -1220,23 +1220,29 @@ public class RlsIsolationIT {
                         INSERT INTO import_rows (id, tenant_id, batch_id, source_row_no, raw)
                         VALUES (?, ?, ?, 2, '{"Item": {"value": "Fabricated item", "type": "text"}}')
                         """).params(importRow, t.tenantId(), importBatch).update();
-        // The validation (migration V140, #130): one issue of the staged row, its message without a value.
-        owner.sql("""
-                        INSERT INTO import_issues (id, tenant_id, batch_id, row_id, source_row_no, ordinal, code, severity,
-                                                   field, message, status)
-                        VALUES (?, ?, ?, ?, 2, 1, 'REQUIRED_MISSING', 'blocking', 'code',
-                                'code is empty on fab-items.csv line 2.', 'open')
-                        """)
-                .params(UUID.randomUUID(), t.tenantId(), importBatch, importRow)
-                .update();
-        // The review queue (migration V141, #131): one resolution of that issue, its note fabricated.
+        // The review queue (migration V141, #131): one exclusion of the staged row, its note fabricated. The issue and
+        // the row point at it, so the purge of a closed business (BusinessClosureIT) meets both foreign keys to it.
+        UUID importIssue = UUID.randomUUID();
+        UUID importResolution = UUID.randomUUID();
         owner.sql("""
                         INSERT INTO import_issue_resolutions (id, tenant_id, run_id, batch_id, issue_id, row_key, raw_sha256,
                                                               source_row_no, code, field, resolution, note, resolved_by)
                         VALUES (?, ?, ?, ?, ?, 'row:item_list:2', repeat('a', 64), 2, 'REQUIRED_MISSING', 'code',
                                 'exclude_row', 'Fabricated reason', ?)
                         """)
-                .params(UUID.randomUUID(), t.tenantId(), importRun, importBatch, UUID.randomUUID(), user)
+                .params(importResolution, t.tenantId(), importRun, importBatch, importIssue, user)
+                .update();
+        owner.sql("UPDATE import_rows SET excluded_by = ? WHERE id = ?")
+                .params(importResolution, importRow)
+                .update();
+        // The validation (migration V140, #130): one issue of the staged row, its message without a value.
+        owner.sql("""
+                        INSERT INTO import_issues (id, tenant_id, batch_id, row_id, source_row_no, ordinal, code, severity,
+                                                   field, message, status, resolution_id)
+                        VALUES (?, ?, ?, ?, 2, 1, 'REQUIRED_MISSING', 'blocking', 'code',
+                                'code is empty on fab-items.csv line 2.', 'resolved', ?)
+                        """)
+                .params(importIssue, t.tenantId(), importBatch, importRow, importResolution)
                 .update();
     }
 

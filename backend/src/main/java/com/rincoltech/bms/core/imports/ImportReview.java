@@ -49,10 +49,10 @@ public interface ImportReview {
 
     /**
      * The open questions for the customer: every open issue of the run marked {@code ask_customer}, numbered in commit
-     * order, each with its file, line, field and message, and never a value of a row or an operator's note. Audited as
-     * {@code core.import_run.questions_exported} with the count.
+     * order, each with its file, line, field and message, and never a value of a row or an operator's note. With
+     * {@code export} (the file sent to the customer) audited as {@code core.import_run.questions_exported} with the count.
      */
-    List<Question> questions(UUID runId);
+    List<Question> questions(UUID runId, boolean export);
 
     /**
      * @param status {@code open} (the default), {@code resolved} or {@code all}

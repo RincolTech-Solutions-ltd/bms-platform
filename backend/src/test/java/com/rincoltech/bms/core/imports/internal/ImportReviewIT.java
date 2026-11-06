@@ -172,6 +172,15 @@ class ImportReviewIT extends IntegrationTest {
                 t, () -> review.resolve(i.id(), new Resolution(kind, i.version(), value, null, null, note), operator));
     }
 
+    /** The SHA-256 of a staged row's cells, as a resolution records it. */
+    static String shaOf(UUID rowId) {
+        return TestDatabase.owner()
+                .sql("SELECT encode(sha256(convert_to(raw::text, 'UTF8')), 'hex') FROM import_rows WHERE id = ?")
+                .param(rowId)
+                .query(String.class)
+                .single();
+    }
+
     long count(String sql, Object... params) {
         return TestDatabase.owner().sql(sql).params(params).query(Long.class).single();
     }
@@ -278,8 +287,9 @@ class ImportReviewIT extends IntegrationTest {
                                 + " \"1501\"}|-",
                         "edit_value|TYPE_INVALID|phone|5|true|true|{\"value\": \"12345\"}|{\"value\": \"" + TYPED_PHONE
                                 + "\"}|-",
-                        "link_row|REF_UNKNOWN|item|5|true|true|-|{\"row_id\": \"" + itemRow + "\", \"row_key\":"
-                                + " \"col:item_list:FAB -001\"}|Same fabricated item");
+                        "link_row|REF_UNKNOWN|item|5|true|true|-|{\"sha\": \"" + shaOf(itemRow) + "\", \"row_id\": \""
+                                + itemRow + "\", \"row_key\": \"col:item_list:FAB -001\", \"occurrence\": 1}|Same"
+                                + " fabricated item");
         assertThat(count(
                         "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'core.import_issue.resolved'",
                         t.tenantId()))
@@ -581,6 +591,54 @@ class ImportReviewIT extends IntegrationTest {
         assertThat(issue(again, 4, "CODE_DUPLICATE").status()).isEqualTo("open");
     }
 
+    /**
+     * A line repeated verbatim has the same reference and the same cells as its twin: a decision on one copy stays on that
+     * copy through a full validation, and the copy left out is no longer the other's duplicate (review of #868, must-fix 1
+     * and item 5). JUSTIFICATION-A3: the test the review's must-fix 1 asks for.
+     */
+    @Test
+    void anExclusionOfOneOfTwoIdenticalLinesNeverReachesTheOther() throws IOException {
+        String twins = new String(golden(ITEMS), StandardCharsets.UTF_8)
+                .replace("FAB-008,Fabricated Tray,pcs,800,Goods,yes,", "FAB-008,Fabricated Tray,pcs,800.50,Goods,yes,")
+                .replace(
+                        "FAB-008,Fabricated Tray Copy,pcs,800,Goods,yes,",
+                        "FAB-008,Fabricated Tray,pcs,800.50,Goods,yes,");
+        Mapping mapping = as(t, () -> mappings.save("fab-shop", ImportCatalogueTest.mapping(), operator, null));
+        UUID runId = as(t, () -> runs.open(operator).id());
+        Batch items = upload(t, runId, ITEMS, twins.getBytes(StandardCharsets.UTF_8), mapping.id(), "item_list");
+        as(t, () -> validation.validate(runId));
+        assertThat(onLine(items, 9)).extracting(Issue::code).containsExactly("MONEY_FRACTION");
+        assertThat(onLine(items, 10))
+                .extracting(Issue::code)
+                .containsExactly("MONEY_FRACTION", "DUPLICATE_SOURCE_REF", "CODE_DUPLICATE");
+
+        resolve(issue(items, 9, "MONEY_FRACTION"), "exclude_row", null, "The fabricated line is entered twice");
+        as(t, () -> validation.validate(runId));
+
+        // The first copy is left out; the second keeps its own issue open and is nobody's duplicate any more.
+        assertThat(onLine(items, 9))
+                .allMatch(i -> "resolved".equals(i.status()) && "exclude_row".equals(i.resolution()));
+        assertThat(onLine(items, 10)).extracting(Issue::code).containsExactly("MONEY_FRACTION");
+        assertThat(issue(items, 10, "MONEY_FRACTION").status()).isEqualTo("open");
+        assertThat(count("SELECT count(*) FROM import_rows WHERE batch_id = ? AND excluded_by IS NOT NULL", items.id()))
+                .isEqualTo(1);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT occurrence FROM import_issue_resolutions WHERE run_id = ?")
+                        .param(runId)
+                        .query(Integer.class)
+                        .single())
+                .isEqualTo(1);
+        // A bulk resolution names a batch of its own run only.
+        assertCode(
+                () -> as(
+                        t,
+                        () -> review.resolveAll(
+                                runId,
+                                new Bulk("MONEY_FRACTION", UUID.randomUUID(), "override", null, "Fabricated"),
+                                operator)),
+                "not_found");
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Acceptance criterion 6: the questions for the customer hold no personal value.
     // ---------------------------------------------------------------------------------------------
@@ -636,10 +694,11 @@ class ImportReviewIT extends IntegrationTest {
             assertThat(list.getBody().toString()).as("questions").doesNotContain(value);
             assertThat(csv.getBody()).as("questions as CSV").doesNotContain(value);
         }
+        // Only the file sent to the customer is audited, not the list read on a screen (review of #868, item 10).
         assertThat(count(
                         "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'core.import_run.questions_exported'",
                         t.tenantId()))
-                .isEqualTo(2);
+                .isEqualTo(1);
         // The queue filters on the questions too.
         ResponseEntity<JsonNode> queue =
                 send(t, HttpMethod.GET, "/api/v1/imports/runs/" + run.runId() + "/issues?ask_customer=true", null);
