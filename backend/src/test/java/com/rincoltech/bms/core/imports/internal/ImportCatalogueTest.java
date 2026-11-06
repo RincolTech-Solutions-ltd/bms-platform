@@ -183,6 +183,9 @@ class ImportCatalogueTest {
         for (String issue : report.issues()) {
             String message = issue.substring(issue.lastIndexOf('|') + 1);
             assertThat(message).doesNotContain("{").doesNotContain("}");
+            // A rule that gives a placeholder an unsafe or personal value is a programming error the template's golden run
+            // catches here; at run time it is shown as hidden, never a 500 (Lead ruling 3 on the second review of #867).
+            assertThat(message).doesNotContain(RowValidator.HIDDEN);
             for (String personal : GoldenRun.PERSONAL) {
                 assertThat(message).as("a personal value in a message").doesNotContain(personal);
             }

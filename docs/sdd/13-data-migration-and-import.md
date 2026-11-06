@@ -902,7 +902,8 @@ operator's tooling calls the services, as it calls the upload and the commit.
   template's linking step, section 13.9, with #136); then the template's cross-field rules (`rowChecks`), whose parameters
   may only be a number, a code in capitals or a name of the template's entity sets and fields, and never a personal value
   of the row (of four characters or more, as written, normalised or by its digits); anything else is shown as `(hidden)`,
-  so a rule never leaks a value and ordinary data never stops the run. A row whose kept cells are all empty is
+  so a rule never leaks a value and ordinary data never stops the run. A rule that does it is a programming error the
+  template's golden run catches: its test fails on any message that shows `(hidden)`. A row whose kept cells are all empty is
   `BLANK_ROW` and nothing else.
 - **The template contract grows.** A `Field` may be `personalData()` (never interpolated; a `phone` or `nin` always is), the
   set's key (`asKey()`, at most one, a `text`, which a `ref` to the set names) and have a `range(min, max)` (money and qty).
