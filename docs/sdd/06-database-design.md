@@ -1374,8 +1374,8 @@ only, no new table, index or grant (`bms_app` already has `SELECT, INSERT, UPDAT
   version, the cutover moment and policy, every batch's status, file, mapping version, parse and row count, every issue's
   status and version, every resolution, every staged row's review columns and typed values, and the business's last
   committed import batch), `dry_run_preview_matches boolean` (whether the preview's balances, every kind per branch, equalled
-  the dry run's) and `dry_run_writer varchar(300)` (the identity of the writer it rehearsed; a commit or resume with another
-  is refused). The CHECK `import_runs_dry_run_whole` keeps the six all set or all NULL. A stored dry run counts while the
+  the dry run's) and `dry_run_writer text` (the writers it rehearsed, one line per batch: number, template and version, the
+  template's class, entity set and loader; a commit or resume whose writers differ is refused). The CHECK `import_runs_dry_run_whole` keeps the six all set or all NULL. A stored dry run counts while the
   stamp of the run now equals its stamp; `ready` needs one that counts, did not fail and matched the preview. It holds no
   personal value: any text of it that names a personal value of the run's staged rows is stored as hidden.
 - **`import_batches`** gains `report jsonb` (an object: the batch's part of the run's report, written in the batch's commit

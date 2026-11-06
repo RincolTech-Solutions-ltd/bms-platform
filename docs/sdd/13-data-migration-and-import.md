@@ -1051,9 +1051,12 @@ template's catalogue and severities, nothing per template.
 **6/16, the preview and the dry run (#132, migration `V142`, FR-IMP-06, ADR-027 decision 5, spec section 3.6).**
 `core.imports` gains the public API `ImportPreview`, the report shape `CommitReport`, the template SPI `ImportForecast`
 (`ImportTemplate.forecast()`, none by default), and on `ImportRuns` the dry run and the stored reports. No route yet: the
-operator's screens are #141, so the operator's tooling calls them, as it calls the commit. The maker-checker commit that
-wires the templates' loaders is #133; this step builds the report and the rolled-back outer transaction, and the commit and
-the dry run take the writer as a parameter, the seam #133 fills.
+operator's screens are #141, so the operator's tooling calls them, as it calls the commit. This step builds the report and
+the rolled-back outer transaction; the maker-checker request and the templates' real loaders are #133 to #136. Since the
+Lead's ruling on #869 the service resolves every batch's writer itself, its template's `loader(entitySet)` for the entity
+set its mapping source names: `commit(run)`, `resume(run)` and `dryRun(run, by)` take no writer, so no caller can commit
+code the dry run did not run. A batch read without a mapping has no writer (422 `BATCH_HAS_NO_MAPPING`). Tests reach the
+commit only through test-only templates (`FixtureShopTemplate`, `ScriptedTemplate`, `RetailExportTestTemplate`).
 
 - **The preview** (`ImportPreview.preview(run)`, read-only, writes nothing). For every `pending` or `parsed` batch of the
   run, in commit order (the template's entity sets, then `seq`), each row's outcome, decided in this order: `excluded` (left
@@ -1078,26 +1081,30 @@ the dry run take the writer as a parameter, the seam #133 fills.
   `CommitReport.HIDDEN`. A failure names the batch and the kind of failure (`batch 3 failed (IllegalStateException)`), never
   the message, which may quote a row. Each batch's part is stored in `import_batches.report` in its commit transaction, so
   `ImportRuns.commitReport(run)` is the committed batches' parts in order, resumed or not.
-- **The dry run** (`ImportRuns.dryRun(run, writer, by)`, a run `in_review` only, 409 `run_not_open`; 409 `batch_not_parsed`
+- **The dry run** (`ImportRuns.dryRun(run, by)`, a run `in_review` only, 409 `run_not_open`; 409 `batch_not_parsed`
   while a file is not read or was refused). It first takes the business's commit loop, the session lock a commit holds
-  (#779), and keeps it to the end: a commit or resume of the business meanwhile is refused at once with
-  `IMPORT_IN_PROGRESS`, and so is a dry run while a commit loop runs, so neither waits on the other's locks until a
-  statement timeout. One outer transaction, marked rollback-only first, runs the commit's own batch code for every batch in
-  order with the same writer: the advisory lock on the business's import key, the batch taken `FOR UPDATE`, the writer, the
+  (#779), and keeps it to the end, and every batch, of a dry run or a commit, takes the business's import key with
+  `pg_try_advisory_xact_lock`, never a wait (Lead ruling 5 on #869): a commit or resume of the business while a dry run
+  runs, a dry run while a commit runs, and a batch that finds the key taken are all answered at once with 409
+  `IMPORT_IN_PROGRESS` ("another import is being written for this business"), so a dry run never makes a commit fail at
+  a statement timeout. One outer transaction, marked rollback-only first, resolves the writers as the commit does and
+  runs the commit's own batch code for every batch in order: the import key, the batch taken `FOR UPDATE`, the writer, the
   batch's move to `committed` with its counts and report part. The kill switch and the halt, which guard writes, do not
   stop it. The first batch that throws stops it, as in a real run, and the failure is recorded. Then the transaction is
   rolled back, so no row, no sequence value and no file is left (a writer must not open a transaction of its own, write a
   file or call `nextval`). In a second transaction, holding the run `FOR UPDATE`, the stamp of the run's inputs is taken
   again: if a batch, issue, resolution, the cutover moment or a policy decision changed while the dry run ran, nothing is
-  stored (409 `run_changed`); otherwise the report, the time, who ran it, the stamp, the writer's identity and whether the
+  stored (409 `run_changed`); otherwise the report, the time, who ran it, the stamp, the writers' identity and whether the
   preview's balances equal the dry run's are stored on the run. The balances compare per branch and kind, summed, in any
   order, a zero the same as none: stock quantity and value, receivables, loan principal, loans and principal per arrears
   bucket, and each journal's debit and credit. It writes no audit row, so that every table's row count is unchanged; the
   run row itself records who ran it and when. The log line carries the run id and counts only.
-- **The writer it rehearsed.** `BatchWriter.identity()` says what a writer is: by default its class, without the JDK's
-  per-process lambda suffix; the retail export's writer adds the SHA-256 of every export file and the first live day; a
-  template's loader will add its template and version (#133). The commit's start and a resume refuse a writer whose
-  identity is not the dry run's (409 `dry_run_writer_differs`), so a run never commits code its dry run did not run.
+- **The writers it rehearsed.** The dry run stores, one line per batch, the batch's number, its template and version,
+  the template's class, the entity set and the loader's `BatchWriter.identity()` (by default its class without the JDK's
+  per-process lambda suffix; the retail export's writer adds the SHA-256 of every export file and the first live day). The
+  same text, with the application's version and commit, is part of the stamp, so a template, version, loader or deploy
+  changed since the dry run makes it stop counting. The commit's start, and a resume for the batches it has left, refuse
+  writers that are not those lines (409 `dry_run_writer_differs`), so a run never commits code its dry run did not run.
 - **When it counts.** `ImportRuns.dryRunReport(run)` answers the stored dry run and whether it still counts: its stamp is
   the run's stamp now. The stamp is an MD5 over the application's version and commit (another build of the templates' code),
   the cutover moment and policy, every batch's status, file, mapping version, parse and row count, every issue's status,
@@ -1113,12 +1120,14 @@ the dry run take the writer as a parameter, the seam #133 fills.
   commit's start checks the same again. A `ready` run cannot change, so the dry run it was made ready with is the one
   that counts at the commit.
 - **The retail export.** Until the retail template of #135, `import-retail` stays the retail path and its own logic is the
-  writer: `RetailImporter.exportWriter(dir, firstLiveDate)` imports the whole export directory as one batch in the batch's
-  transaction (each file's transaction joins it) and tells the checkpoint what the command's report holds
-  (`ImportReport.into`, each opening journal's debit and credit read from its entry's lines; `RetailImporter.toCommitReport`
-  for a run of the command), so the framework's dry run of such a run is the command's real path rolled back. Without a
-  retail forecast its preview predicts no journal, so such a run is not made `ready` (`preview_differs`) until #135 gives it
-  one.
+  writer the retail template's loader will be: `RetailImporter.exportWriter(dir, firstLiveDate)` imports the whole export
+  directory as one batch in the batch's transaction (each file's transaction joins it) and tells the checkpoint what the
+  command's report holds (`ImportReport.into`, each opening journal's debit and credit read from its entry's lines) and the
+  stock of every branch as the books hold it (the quantity on hand from the stock ledger, the value from the inventory
+  account); `RetailImporter.toCommitReport` gives a run of the command the same report, so the framework's dry run of such
+  a run is the command's real path rolled back. Without a retail forecast its preview predicts nothing, so such a run is
+  not made `ready` (`preview_differs`) until #135 gives it one. Loan principal and arrears buckets belong to the lending
+  template, whose preview #136 proves against the loan book.
 - **Proven by** `ImportPreviewIT` (the golden files' rows by outcome and records by type, and an exclusion moving a row; the
   fixture forecast's balances on two branches, worked out by hand; the comparison sums per branch and kind and tells a
   different quantity, bucket, branch or an unbalanced journal; a dry run leaves every table's row count, every sequence and
@@ -1128,14 +1137,18 @@ the dry run take the writer as a parameter, the seam #133 fills.
   credit from its lines), equal the preview; no text of the report names a personal value of the run, a careless writer's
   names in notes, on other files, on line 0, of other lines and batches, in the checksum and as a source all hidden, a
   buyer's number kept; a stored dry run stops counting after an override, a `map_value`, another run's commit into the
-  business and a cancelled batch, and `ready` is refused until a new one; a commit with another writer than the rehearsed
-  one is refused and leaves no trace; a commit and a dry run of the business meanwhile are refused at once while a dry run
-  holds the loop; a failed dry run is stored, leaves no trace and refuses `ready`; a dry run that differs from the preview
-  refuses `ready`; the refusals outside review and with a refused file; another business can neither preview, dry run nor
-  read either stored report, and reads none of `import_runs` or `import_batches` as `bms_app` under forced RLS),
-  `RetailDryRunIT` (the framework's dry run over `fixtures/retail/import-sample/` writes nothing, every table and sequence
-  counted and every file listed, its journals balanced as the ledger held them, and equals a real `import-retail` run's
-  report, the golden counts and opening journals included; the export's content and first live day are part of its
-  writer's identity; it names no buyer; another business cannot reach it), `ImportRunsIT`, `ImportMappingsIT`,
-  `ImportUploadsIT` and `ImportUploadReviewIT` (a run made ready through a dry run, and `dry_run_required` without one), and
+  business and a cancelled batch, and `ready` is refused until a new one; the writers are the templates', one line per
+  batch, no method of `ImportRuns` takes a writer, and a run whose writers changed since its dry run is refused and left
+  untouched; a dry run that finds the business's import key taken is answered at once and stores nothing, and a commit
+  and a dry run of the business while a dry run runs are answered at once; a failed dry run is stored, leaves no trace
+  and refuses `ready`; a dry run that differs from the preview refuses `ready`; the refusals outside review and with a
+  refused file; another business can neither preview, dry run nor read either stored report, and reads none of
+  `import_runs` or `import_batches` as `bms_app` under forced RLS), `RetailDryRunIT` (the framework's dry run over
+  `fixtures/retail/import-sample/` writes nothing, every table and sequence counted and every file listed, and equals a
+  real `import-retail` run's report, the golden counts and opening journals included; after the real run, the stock per
+  branch it reported (three branches) is the stock ledger's and the inventory account's, and each journal's debit and
+  credit are its lines', balanced; a changed export file makes the stored dry run stop counting; it names no buyer;
+  another business cannot reach it), `ImportRunsIT` (every writer through the test-only `ScriptedTemplate`),
+  `ImportMappingsIT` (the fixture's loader resolved for the dry run and the commit), `ImportUploadsIT` and
+  `ImportUploadReviewIT` (`dry_run_required`, and `BATCH_HAS_NO_MAPPING` for a file read without a mapping), and
   `MigrationOrderIT` (V142 keeps every run and batch, and the CHECK keeps the dry run columns whole).
