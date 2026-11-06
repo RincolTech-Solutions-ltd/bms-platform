@@ -1206,6 +1206,13 @@ public class RlsIsolationIT {
                         INSERT INTO import_rows (id, tenant_id, batch_id, source_row_no, raw)
                         VALUES (?, ?, ?, 2, '{"Item": {"value": "Fabricated item", "type": "text"}}')
                         """).params(UUID.randomUUID(), t.tenantId(), importBatch).update();
+        // Versioned mappings (migration V139, #129): one fabricated mapping version.
+        owner.sql("""
+                        INSERT INTO import_mappings (id, tenant_id, name, version, template_key, template_version, document,
+                                                     created_by)
+                        VALUES (?, ?, 'fab-shop', 1, 'fixture_shop', 1,
+                                '{"template": "fixture_shop", "template_version": 1}', ?)
+                        """).params(UUID.randomUUID(), t.tenantId(), user).update();
     }
 
     /**
@@ -1982,7 +1989,9 @@ public class RlsIsolationIT {
                 "lending_savings_transactions",
                 "lending_savings_daily_balances",
                 "lending_savings_interest_postings",
-                "lending_investment_transactions")) {
+                "lending_investment_transactions",
+                // A business's import mapping versions (#129).
+                "import_mappings")) {
             assertThatThrownBy(() -> asApp(
                             a.tenantId(),
                             c -> count(c, "WITH d AS (DELETE FROM " + table + " RETURNING 1) SELECT count(*) FROM d")))

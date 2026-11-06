@@ -68,7 +68,8 @@ class UploadService implements ImportUploads {
 
     private static final String BATCH_COLUMNS = """
             id, run_id, seq, status, source_filename, file_type, size_bytes, source_sha256, encoding, sheet_name,
-            header_row_no, row_count, column_count, parse_warnings, failure_code, failure_reason, uploaded_at""";
+            header_row_no, row_count, column_count, parse_warnings, failure_code, failure_reason, uploaded_at, mapping_id,
+            mapping_source, template_key, template_version, source_headers""";
 
     private final JdbcClient jdbc;
     private final JdbcTemplate batchJdbc;
@@ -279,7 +280,8 @@ class UploadService implements ImportUploads {
                     settings.maxColumns(),
                     opts.requiredHeaders(),
                     opts.ignoredColumns(),
-                    settings.maxFileSize().toBytes());
+                    settings.maxFileSize().toBytes(),
+                    opts.headerRow());
             try {
                 SourceParser.Parsed parsed = tx.execute(s -> readInto(held, copy, dataKey, limits, opts));
                 log.info(
@@ -342,6 +344,14 @@ class UploadService implements ImportUploads {
         if (!stillOpen(held)) {
             throw invalidTransition("The batch or its import changed while its file was read; nothing was written.");
         }
+        // The mapping version the batch records (issue #129), read under RLS: one of another business is not found.
+        MappingTemplate template = opts.mappingId() == null
+                ? null
+                : jdbc.sql("SELECT template_key, template_version FROM import_mappings WHERE id = ?")
+                        .param(opts.mappingId())
+                        .query((rs, n) -> new MappingTemplate(rs.getString(1), rs.getInt(2)))
+                        .optional()
+                        .orElseThrow(ApiException::notFound);
         jdbc.sql("DELETE FROM import_rows WHERE batch_id = ?").param(held.id()).update();
         SourceParser.Parsed parsed;
         try {
@@ -368,7 +378,8 @@ class UploadService implements ImportUploads {
         }
         jdbc.sql("""
                         UPDATE import_batches SET status = 'parsed', sheet_name = ?, header_row_no = ?, row_count = ?,
-                               column_count = ?, parse_warnings = ?, parsed_at = now()
+                               column_count = ?, parse_warnings = ?, parsed_at = now(), source_headers = ?,
+                               mapping_id = ?, mapping_source = ?, template_key = ?, template_version = ?
                          WHERE id = ?
                         """)
                 .params(
@@ -377,6 +388,11 @@ class UploadService implements ImportUploads {
                         parsed.rows(),
                         parsed.columns(),
                         parsed.warnings().toArray(String[]::new),
+                        parsed.headers().toArray(String[]::new),
+                        opts.mappingId(),
+                        opts.mappingSource(),
+                        template == null ? null : template.key(),
+                        template == null ? null : template.version(),
                         held.id())
                 .update();
         Map<String, Object> after = new LinkedHashMap<>();
@@ -384,6 +400,9 @@ class UploadService implements ImportUploads {
         after.put("columns", parsed.columns());
         after.put("ignored_columns", opts.ignoredColumns().size());
         after.put("warnings", parsed.warnings());
+        if (opts.mappingId() != null) {
+            after.put("mapping_id", opts.mappingId());
+        }
         audit.record(new AuditLog.Entry(
                 "core.import_batch.parsed", "import_batch", held.id(), null, Map.of("status", held.status()), after));
         return parsed;
@@ -514,6 +533,8 @@ class UploadService implements ImportUploads {
     // ---------------------------------------------------------------------------------------------
 
     private record RunRow(String status, byte[] wrappedKey) {}
+
+    private record MappingTemplate(String key, int version) {}
 
     private record Held(
             UUID id,
@@ -711,6 +732,7 @@ class UploadService implements ImportUploads {
 
     private static Batch batchRow(ResultSet rs, int n) throws SQLException {
         Array warnings = rs.getArray("parse_warnings");
+        Array headers = rs.getArray("source_headers");
         Timestamp uploaded = rs.getTimestamp("uploaded_at");
         return new Batch(
                 rs.getObject("id", UUID.class),
@@ -729,6 +751,11 @@ class UploadService implements ImportUploads {
                 warnings == null ? List.of() : List.of((String[]) warnings.getArray()),
                 rs.getString("failure_code"),
                 rs.getString("failure_reason"),
-                uploaded == null ? null : uploaded.toInstant());
+                uploaded == null ? null : uploaded.toInstant(),
+                rs.getObject("mapping_id", UUID.class),
+                rs.getString("mapping_source"),
+                rs.getString("template_key"),
+                rs.getObject("template_version", Integer.class),
+                headers == null ? List.of() : List.of((String[]) headers.getArray()));
     }
 }
