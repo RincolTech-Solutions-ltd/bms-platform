@@ -61,9 +61,13 @@ ALTER TABLE import_batches
         (mapping_id IS NULL) = (mapping_source IS NULL)
         AND (mapping_id IS NULL) = (template_key IS NULL)
         AND (mapping_id IS NULL) = (template_version IS NULL)),
+    -- NOT VALID: every batch stored before this migration has no mapping, so the scan that validation runs could find
+    -- nothing, and that scan is a query under import_batches' forced row security, which raises for an owner without
+    -- BYPASSRLS (no app.tenant_id is bound here; MigrationOrderIT migrates that way). Every row inserted or updated from now
+    -- on is checked by the constraint's triggers.
     ADD CONSTRAINT import_batches_mapping_fk
         FOREIGN KEY (tenant_id, mapping_id, template_key, template_version)
-        REFERENCES import_mappings (tenant_id, id, template_key, template_version);
+        REFERENCES import_mappings (tenant_id, id, template_key, template_version) NOT VALID;
 
 CREATE INDEX import_batches_by_mapping ON import_batches (tenant_id, mapping_id) WHERE mapping_id IS NOT NULL;
 

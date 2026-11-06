@@ -1309,7 +1309,9 @@ Added by `V139__import_mappings.sql` (issue #129, ADR-027 decision 3, chapter 13
   and the removal and purge of a closed business aside). It holds header names and value labels, no personal data.
 - **`import_batches`** gains `mapping_id`, `mapping_source varchar(40)`, `template_key`, `template_version` (all four set or
   none, `import_batches_mapping_complete`; FK `(tenant_id, mapping_id, template_key, template_version)` to
-  `import_mappings`, so the batch's template is the mapping's) and `source_headers text[]` (the header names its parse found).
+  `import_mappings`, so the batch's template is the mapping's; added `NOT VALID`, since every earlier batch has no mapping and
+  the validation scan is a query under forced row security that an owner without BYPASSRLS cannot run, while every row
+  written afterwards is checked) and `source_headers text[]` (the header names its parse found).
   The plain index `import_batches_by_mapping (tenant_id, mapping_id) WHERE mapping_id IS NOT NULL` serves the foreign key.
   The trigger `import_batches_mapping_kept` refuses a change to those five columns once the batch is `committed`.
 
