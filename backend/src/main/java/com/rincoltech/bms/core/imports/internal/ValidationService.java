@@ -153,7 +153,8 @@ class ValidationService implements ImportValidation {
             ReviewState review,
             Map<String, UUID> rowsByCopy,
             Map<String, Set<String>> shasByKey,
-            Map<UUID, Integer> occurrences) {}
+            Map<UUID, Integer> occurrences,
+            Map<String, Integer> copies) {}
 
     private static final String BATCHES = """
             SELECT id, seq, status, source_filename, mapping_id, mapping_source, template_key, template_version,
@@ -283,7 +284,8 @@ class ValidationService implements ImportValidation {
         }
         ReviewState review = read(here, () -> ReviewState.load(jdbc, runId));
         if (batches.isEmpty()) {
-            return new Prepared(run, seen, null, null, List.of(), List.of(), review, Map.of(), Map.of(), Map.of());
+            return new Prepared(
+                    run, seen, null, null, List.of(), List.of(), review, Map.of(), Map.of(), Map.of(), Map.of());
         }
         ImportTemplate template = templates.require(
                 batches.getFirst().templateKey(), batches.getFirst().templateVersion());
@@ -299,9 +301,9 @@ class ValidationService implements ImportValidation {
                     documents.get(b.mappingId()),
                     b.source()));
         }
-        // Pass 1: what the run holds, with the edits in force. A row the review left out is not indexed, so it is no
-        // other row's duplicate and no reference reaches it (review of #868, item 5). Each copy of a line repeated
-        // verbatim is counted in the run's order (batch, then line), so a decision on one copy never reaches another.
+        // Each copy of a line repeated verbatim is counted in the run's order (batch, then line), so a decision on one
+        // copy never reaches another, and the run's number of such copies is known before any decision is applied (Lead
+        // ruling on #868). With no resolution in the run this is pass 1 itself; with some, the rows are read once more.
         Map<String, UUID> rowsByCopy = new HashMap<>();
         Map<String, Set<String>> shasByKey = new HashMap<>();
         Map<String, Integer> copies = new HashMap<>();
@@ -315,11 +317,27 @@ class ValidationService implements ImportValidation {
                         ReviewState.copy(key, staged.sha(), occurrence),
                         staged.row().rowId());
                 shasByKey.computeIfAbsent(key, k -> new HashSet<>()).add(staged.sha());
-                ReviewState.Row decided = review.row(key, staged.sha(), occurrence);
-                if (decided.excludedBy() == null) {
-                    engine.index(input, reviewed(staged, decided));
+                if (review.isEmpty()) {
+                    engine.index(input, staged.row());
                 }
             });
+        }
+        // Pass 1 with a review: what the run holds, with the edits in force. A row the review left out is not indexed,
+        // so it is no other row's duplicate and no reference reaches it (review of #868, item 5).
+        if (!review.isEmpty()) {
+            for (BatchInput input : inputs) {
+                readRows(input.batchId(), here, staged -> {
+                    String key = engine.rowKey(input, staged.row());
+                    ReviewState.Row decided = review.row(
+                            key,
+                            staged.sha(),
+                            occurrences.get(staged.row().rowId()),
+                            copies.get(key + "|" + staged.sha()));
+                    if (decided.excludedBy() == null) {
+                        engine.index(input, reviewed(staged, decided));
+                    }
+                });
+            }
         }
         // The codes references name that no row of the run holds: does the business hold them?
         read(here, () -> {
@@ -327,7 +345,8 @@ class ValidationService implements ImportValidation {
                     .forEach((set, keys) -> engine.addExisting(set, template.existingKeys(set, keys)));
             return null;
         });
-        return new Prepared(run, seen, template, engine, ordered, inputs, review, rowsByCopy, shasByKey, occurrences);
+        return new Prepared(
+                run, seen, template, engine, ordered, inputs, review, rowsByCopy, shasByKey, occurrences, copies);
     }
 
     /** The row with the review's edits read in place of their fields' cells. */
@@ -456,6 +475,7 @@ class ValidationService implements ImportValidation {
                             rowKey,
                             staged.sha(),
                             p.occurrences().getOrDefault(row.rowId(), 1),
+                            p.copies().getOrDefault(rowKey + "|" + staged.sha(), 1),
                             p.shasByKey().getOrDefault(rowKey, Set.of(staged.sha())));
             RowResult result = engine.validate(input, reviewed(staged, decided));
             rows[0]++;

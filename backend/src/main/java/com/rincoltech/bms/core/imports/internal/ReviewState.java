@@ -33,6 +33,7 @@ final class ReviewState {
             String rowKey,
             String sha,
             int occurrence,
+            int copies,
             String code,
             String field,
             String kind,
@@ -77,7 +78,7 @@ final class ReviewState {
         Map<String, List<Made>> byRow = new HashMap<>();
         long[] last = {0};
         jdbc.sql("""
-                        SELECT id, seq, row_key, raw_sha256, occurrence, code, field, resolution,
+                        SELECT id, seq, row_key, raw_sha256, occurrence, copies, code, field, resolution,
                                after_value::text AS after_value
                           FROM import_issue_resolutions WHERE run_id = ? ORDER BY seq
                         """)
@@ -89,6 +90,7 @@ final class ReviewState {
                             rs.getString("row_key"),
                             rs.getString("raw_sha256"),
                             rs.getInt("occurrence"),
+                            rs.getInt("copies"),
                             rs.getString("code"),
                             rs.getString("field"),
                             rs.getString("resolution"),
@@ -100,6 +102,11 @@ final class ReviewState {
                 .forEach(m -> byRow.computeIfAbsent(m.rowKey(), k -> new ArrayList<>())
                         .add(m));
         return new ReviewState(byRow, last[0]);
+    }
+
+    /** Whether the run has no resolution at all. */
+    boolean isEmpty() {
+        return byRow.isEmpty();
     }
 
     /** The newest resolution's place in the run's order, or 0: a validation writes only if it is unchanged at the end. */
@@ -116,11 +123,11 @@ final class ReviewState {
     }
 
     /**
-     * What the review decided for the row of this identity with these cells, the {@code occurrence}-th such row of the run,
-     * without asking whether it changed.
+     * What the review decided for the row of this identity with these cells, the {@code occurrence}-th of the {@code copies}
+     * such rows of the run, without asking whether it changed.
      */
-    Row row(String rowKey, String sha, int occurrence) {
-        return row(rowKey, sha, occurrence, null);
+    Row row(String rowKey, String sha, int occurrence, int copies) {
+        return row(rowKey, sha, occurrence, copies, null);
     }
 
     /**
@@ -129,9 +136,10 @@ final class ReviewState {
      * its own. So two rows of one reference with different cells (a duplicate the queue resolves on one of them) never mark
      * each other changed; only cells that are gone from the run do. A resolution applies only to the copy it was made on:
      * a line repeated verbatim has the same identity and cells as its twin, and is told apart by its occurrence (review of
-     * #868, must-fix 1).
+     * #868, must-fix 1). A resolution made while the run held another number of such copies is never matched by guess: it
+     * applies to none of them, and each comes back as changed (Lead ruling on #868).
      */
-    Row row(String rowKey, String sha, int occurrence, Set<String> present) {
+    Row row(String rowKey, String sha, int occurrence, int copies, Set<String> present) {
         List<Made> all = byRow.get(rowKey);
         if (all == null) {
             return Row.NONE;
@@ -146,10 +154,12 @@ final class ReviewState {
         boolean reviewedElsewhere = false;
         for (Made m : all) {
             boolean sameCells = m.sha().equals(sha);
-            boolean here = sameCells && m.occurrence() == occurrence;
+            boolean sameCopies = m.copies() == copies;
+            boolean here = sameCells && sameCopies && m.occurrence() == occurrence;
             if (DECIDING.contains(m.kind())) {
                 reviewedHere |= here;
-                reviewedElsewhere |= !sameCells && present != null && !present.contains(m.sha());
+                reviewedElsewhere |=
+                        present != null && ((!sameCells && !present.contains(m.sha())) || (sameCells && !sameCopies));
             }
             if (!here) {
                 continue;

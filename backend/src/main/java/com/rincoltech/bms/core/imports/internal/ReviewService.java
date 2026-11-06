@@ -344,29 +344,37 @@ class ReviewService implements ImportReview {
     }
 
     /**
-     * The occurrence of each row of the run that repeats another verbatim: the n-th row (from 2) with the same identity
-     * and the same cells, in the run's order (batch, then line), as the validation counts them in its first pass. A row
-     * not in the map is the first of its kind. The identity is made from the stored {@code source_ref}, as
+     * Each row of the run that has a verbatim twin: which of the rows with the same identity and the same cells it is, in
+     * the run's order (batch, then line), and how many there are, as the validation counts them before its first pass. A
+     * row not in the map has no twin ({@link #ONE}). The identity is made from the stored {@code source_ref}, as
      * {@link RowValidator#rowKeyOf} makes it. JUSTIFICATION-A3: the review's must-fix 1 needs each copy's occurrence.
      */
-    private Map<UUID, Integer> occurrences(UUID runId) {
-        Map<UUID, Integer> out = new HashMap<>();
+    private Map<UUID, Copy> occurrences(UUID runId) {
+        Map<UUID, Copy> out = new HashMap<>();
         jdbc.sql("""
-                        SELECT id, occurrence FROM (
-                            SELECT r.id, row_number() OVER (
-                                       PARTITION BY CASE WHEN r.source_ref LIKE 'col:%' THEN r.source_ref
-                                                         ELSE 'row:' || b.mapping_source || ':' || r.source_row_no END,
-                                                    encode(sha256(convert_to(r.raw::text, 'UTF8')), 'hex')
-                                       ORDER BY b.seq, r.source_row_no) AS occurrence
-                              FROM import_rows r JOIN import_batches b ON b.id = r.batch_id
+                        SELECT id, occurrence, copies FROM (
+                            SELECT r.id,
+                                   row_number() OVER (PARTITION BY rk, sha ORDER BY b.seq, r.source_row_no) AS occurrence,
+                                   count(*) OVER (PARTITION BY rk, sha) AS copies
+                              FROM import_rows r JOIN import_batches b ON b.id = r.batch_id,
+                                   LATERAL (SELECT CASE WHEN r.source_ref LIKE 'col:%' THEN r.source_ref
+                                                        ELSE 'row:' || b.mapping_source || ':' || r.source_row_no END
+                                                   AS rk,
+                                                   encode(sha256(convert_to(r.raw::text, 'UTF8')), 'hex') AS sha) k
                              WHERE b.run_id = ? AND b.status IN ('parsed', 'committed') AND b.mapping_id IS NOT NULL
-                        ) copies WHERE occurrence > 1
+                        ) counted WHERE copies > 1
                         """)
                 .param(runId)
-                .query((rs, n) -> out.put(rs.getObject("id", UUID.class), rs.getInt("occurrence")))
+                .query((rs, n) ->
+                        out.put(rs.getObject("id", UUID.class), new Copy(rs.getInt("occurrence"), rs.getInt("copies"))))
                 .list();
         return out;
     }
+
+    /** Which of the run's verbatim copies of a row it is, and how many there are; {@link #ONE} for a row with no twin. */
+    record Copy(int occurrence, int copies) {}
+
+    static final Copy ONE = new Copy(1, 1);
 
     /** 409 {@code version_conflict} for an issue a resolution was made on and a validation then replaced; else 404. */
     private ApiException missing(UUID issueId) {
@@ -429,9 +437,9 @@ class ReviewService implements ImportReview {
             UUID by,
             UUID bulkId,
             ReviewState review,
-            Map<UUID, Integer> copies) {
-        Map<UUID, Integer> occurrences = copies == null ? occurrences(t.runId()) : copies;
-        int occurrence = occurrences.getOrDefault(t.rowId(), 1);
+            Map<UUID, Copy> copies) {
+        Map<UUID, Copy> occurrences = copies == null ? occurrences(t.runId()) : copies;
+        Copy copy = occurrences.getOrDefault(t.rowId(), ONE);
         String cleanNote = note == null || note.isBlank() ? null : note.strip();
         if (cleanNote != null && cleanNote.length() > MAX_NOTE) {
             throw ApiException.validation(
@@ -449,7 +457,7 @@ class ReviewService implements ImportReview {
                     throw ApiException.validation(List.of(
                             new FieldProblem("value", "too_long", "At most " + MAX_VALUE + " characters, as a cell.")));
                 }
-                before = valueMap(currentText(t, review, occurrence));
+                before = valueMap(currentText(t, review, copy));
                 after = valueMap(value == null || value.isBlank() ? null : value);
                 revalidate = true;
             }
@@ -458,7 +466,7 @@ class ReviewService implements ImportReview {
                     throw ApiException.rule("no_suggestion", "This issue has no suggested value to accept.");
                 }
                 if (t.suggestion().containsKey("value")) {
-                    before = valueMap(currentText(t, review, occurrence));
+                    before = valueMap(currentText(t, review, copy));
                     after = valueMap(String.valueOf(t.suggestion().get("value")));
                 } else {
                     after.putAll(t.suggestion());
@@ -498,7 +506,9 @@ class ReviewService implements ImportReview {
                                             rs.getString("mapping_source"),
                                             rs.getInt("source_row_no")));
                             m.put("sha", rs.getString("sha"));
-                            m.put("occurrence", occurrences.getOrDefault(linkRowId, 1));
+                            m.put(
+                                    "occurrence",
+                                    occurrences.getOrDefault(linkRowId, ONE).occurrence());
                             m.put("row_id", linkRowId.toString());
                             return m;
                         })
@@ -529,10 +539,11 @@ class ReviewService implements ImportReview {
         UUID id = UUID.randomUUID();
         jdbc.sql("""
                         INSERT INTO import_issue_resolutions (id, tenant_id, run_id, batch_id, issue_id, row_key, raw_sha256,
-                                                              occurrence, source_row_no, code, field, resolution,
-                                                              before_value, after_value, note, resolved_by, bulk_id)
-                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb),
-                                CAST(? AS jsonb), ?, ?, ?)
+                                                              occurrence, copies, source_row_no, code, field,
+                                                              resolution, before_value, after_value, note, resolved_by,
+                                                              bulk_id)
+                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                                CAST(? AS jsonb), CAST(? AS jsonb), ?, ?, ?)
                         """)
                 .params(
                         id,
@@ -541,7 +552,8 @@ class ReviewService implements ImportReview {
                         t.id(),
                         t.rowKey(),
                         t.sha(),
-                        occurrence,
+                        copy.occurrence(),
+                        copy.copies(),
                         t.line(),
                         t.code(),
                         t.field(),
@@ -639,9 +651,9 @@ class ReviewService implements ImportReview {
     }
 
     /** The field's text as the row now reads it: the edit in force (in {@code review}, read now when null), or the cell. */
-    private String currentText(Target t, ReviewState review, int occurrence) {
-        ReviewState.Row decided =
-                (review == null ? ReviewState.load(jdbc, t.runId()) : review).row(t.rowKey(), t.sha(), occurrence);
+    private String currentText(Target t, ReviewState review, Copy copy) {
+        ReviewState.Row decided = (review == null ? ReviewState.load(jdbc, t.runId()) : review)
+                .row(t.rowKey(), t.sha(), copy.occurrence(), copy.copies());
         if (decided.edits().containsKey(t.field())) {
             return decided.edits().get(t.field());
         }
@@ -712,7 +724,7 @@ class ReviewService implements ImportReview {
      * a customer's records, spec section 4.2), an issue with no cell text, and a batch whose mapping is no longer the newest
      * version of its name.
      */
-    private MapResult mapValue(Target t, String value, UUID by, Map<UUID, Integer> occurrences) {
+    private MapResult mapValue(Target t, String value, UUID by, Map<UUID, Copy> occurrences) {
         requireField(t);
         Field field = fieldOf(t);
         if (field.isPersonal()) {
@@ -780,8 +792,8 @@ class ReviewService implements ImportReview {
                 .query((rs, n) -> {
                     String key =
                             RowValidator.rowKeyOf(rs.getString("source_ref"), t.source(), rs.getInt("source_row_no"));
-                    ReviewState.Row decided = review.row(
-                            key, rs.getString("sha"), occurrences.getOrDefault(rs.getObject("id", UUID.class), 1));
+                    Copy copy = occurrences.getOrDefault(rs.getObject("id", UUID.class), ONE);
+                    ReviewState.Row decided = review.row(key, rs.getString("sha"), copy.occurrence(), copy.copies());
                     String text = decided.edits().containsKey(t.field())
                             ? decided.edits().get(t.field())
                             : cellText(source, ValidationService.cells(rs.getString("raw")), t.field());
@@ -834,7 +846,7 @@ class ReviewService implements ImportReview {
                     .list();
             UUID bulkId = UUID.randomUUID();
             ReviewState review = ReviewState.load(jdbc, runId);
-            Map<UUID, Integer> copies = occurrences(runId);
+            Map<UUID, Copy> copies = occurrences(runId);
             Set<UUID> revalidate = new LinkedHashSet<>();
             Set<UUID> excluded = new LinkedHashSet<>();
             int resolved = 0;

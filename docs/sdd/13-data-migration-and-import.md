@@ -1006,9 +1006,12 @@ template's catalogue and severities, nothing per template.
   for `row_hash`) and `raw_sha256` (the SHA-256 of the cells as stored), with its code and field, among every resolution of the
   run. So it carries across a new validation, a new parse and a new upload of the file into the run (the old batch cancelled).
   A line repeated verbatim has its twin's identity and cells, so a resolution also records its `occurrence`, the n-th row of
-  that identity and those cells in the run's order (batch, then line): a decision on one copy never reaches the other, and
-  a link names the exact copy it points at (review of #868). A row left out is not indexed by pass 1, so it is no other
-  row's duplicate and no reference reaches it.
+  that identity and those cells in the run's order (batch, then line), and `copies`, how many there were: a decision on
+  one copy never reaches another, and a link names the exact copy it points at (review of #868). A new upload that holds
+  another number of such copies is never matched by guess: the old decision applies to none of them and each comes back
+  as `ROW_CHANGED_SINCE_REVIEW` (Lead ruling on #868). The copies are counted before pass 1 (the rows are then read once
+  more, only when the run has a resolution). A row left out is not indexed by pass 1, so it is no other row's duplicate
+  and no reference reaches it.
   Both passes read the edits in force in place of their fields' cells, so duplicates and references see them; an issue is
   resolved by the resolution in force for its code and field, or by the row's exclusion; `ask_customer` is kept the same way.
   A row whose identity had a deciding resolution on other cells and none on its own cells gets `ROW_CHANGED_SINCE_REVIEW`
@@ -1033,8 +1036,8 @@ template's catalogue and severities, nothing per template.
   version 2, moves the run's batches to it and validates exactly the one row it reaches, every other issue keeping its id,
   version and status; two resolvers at once, the second gets `version_conflict`, and so does a second edit of an issue an
   edit replaced; after a new upload a changed row comes back with `ROW_CHANGED_SINCE_REVIEW` and an unchanged one keeps its
-  exclusion; of two lines repeated verbatim, excluding one leaves the other open and no longer its duplicate through a full
-  validation; the questions, as JSON and CSV, are numbered with file and line and hold no personal value; another business
+  exclusion; of three lines repeated verbatim, an exclusion, an override or an edit of the second reaches neither other copy
+  through a full validation, and a new upload with two copies sends both back as changed; the questions, as JSON and CSV, are numbered with file and line and hold no personal value; another business
   reaches none of the routes; an unknown property is refused), `ImportCatalogueTest` (`ROW_CHANGED_SINCE_REVIEW` leaves the
   pending list, produced by `ImportReviewIT#aChangedRowComesBackToTheQueueAndAnUnchangedRowKeepsItsResolution`),
   `RlsIsolationIT` (forced RLS and append-only on `import_issue_resolutions`), `MigrationOrderIT` (V141 keeps every issue),

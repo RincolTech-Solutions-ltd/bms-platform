@@ -1344,7 +1344,8 @@ Added by `V141__import_review_queue.sql` (issue #131, FR-IMP-05, chapter 13 sect
   a validation replaces a batch's issues and the resolution stays), `row_key varchar(400)` (the row's identity: its reference
   without the content hash, `col:<source>:<value>` or `row:<source>:<line>`), `raw_sha256 char(64)` (the SHA-256 of the row's
   cells as stored), `occurrence integer NOT NULL DEFAULT 1` (which copy, when the run holds that identity with those cells
-  more than once: a line repeated verbatim), `source_row_no`, `code`, `field`, `resolution` [`edit_value`, `exclude_row`, `accept_suggestion`,
+  more than once: a line repeated verbatim), `copies integer NOT NULL DEFAULT 1` (how many such copies the run held then,
+  `CHECK (copies >= occurrence)`; another number in a new upload sends the copies back as changed), `source_row_no`, `code`, `field`, `resolution` [`edit_value`, `exclude_row`, `accept_suggestion`,
   `link_row`, `link_member`, `override`, `map_value`, `ask_customer`], `before_value jsonb`, `after_value jsonb`,
   `note varchar(500)` (required, 3 characters or more, for `override` and `exclude_row`, a CHECK), `resolved_by uuid NOT NULL`,
   `bulk_id` (the bulk resolution it was one of). Plain indexes `import_issue_resolutions_by_row (tenant_id, run_id, row_key)`

@@ -55,6 +55,10 @@ CREATE TABLE import_issue_resolutions (
     -- Which copy it was made on when the run holds the same identity with the same cells more than once (a line repeated
     -- verbatim): the n-th such row in the run's order (batch, then line), so a decision on one copy never reaches another.
     occurrence    integer       NOT NULL DEFAULT 1 CHECK (occurrence > 0),
+    -- How many such copies the run held then. When a new upload holds another number, the copies are not matched by
+    -- guess: they come back to the queue as changed (Lead ruling on #868).
+    copies        integer       NOT NULL DEFAULT 1,
+    CHECK (copies >= occurrence),
     source_row_no integer       NOT NULL CHECK (source_row_no > 0),
     code          text          NOT NULL CHECK (code ~ '^[A-Z][A-Z0-9_]{1,59}$'),
     field         text          CHECK (field ~ '^[a-z][a-z0-9_]{0,39}$'),

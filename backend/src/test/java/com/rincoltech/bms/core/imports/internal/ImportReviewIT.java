@@ -591,52 +591,142 @@ class ImportReviewIT extends IntegrationTest {
         assertThat(issue(again, 4, "CODE_DUPLICATE").status()).isEqualTo("open");
     }
 
-    /**
-     * A line repeated verbatim has the same reference and the same cells as its twin: a decision on one copy stays on that
-     * copy through a full validation, and the copy left out is no longer the other's duplicate (review of #868, must-fix 1
-     * and item 5). JUSTIFICATION-A3: the test the review's must-fix 1 asks for.
-     */
-    @Test
-    void anExclusionOfOneOfTwoIdenticalLinesNeverReachesTheOther() throws IOException {
-        String twins = new String(golden(ITEMS), StandardCharsets.UTF_8)
-                .replace("FAB-008,Fabricated Tray,pcs,800,Goods,yes,", "FAB-008,Fabricated Tray,pcs,800.50,Goods,yes,")
-                .replace(
-                        "FAB-008,Fabricated Tray Copy,pcs,800,Goods,yes,",
-                        "FAB-008,Fabricated Tray,pcs,800.50,Goods,yes,");
+    // ---------------------------------------------------------------------------------------------
+    // Lines repeated verbatim (review of #868, must-fix 1, and the Lead's ruling on it).
+    // JUSTIFICATION-A3: the tests the review's must-fix 1 and the Lead ask for, one per kind.
+    // ---------------------------------------------------------------------------------------------
+
+    /** One line of the fabricated item list, repeated verbatim from line 9 on. */
+    static final String TWIN = "FAB-008,Fabricated Tray,pcs,800.50,Goods,yes,";
+
+    record Twins(UUID runId, Batch items) {}
+
+    /** The golden item list with lines 9 onwards one line repeated verbatim, {@code copies} times. */
+    static byte[] twinsFile(int copies) throws IOException {
+        StringBuilder file = new StringBuilder(new String(golden(ITEMS), StandardCharsets.UTF_8)
+                .replace("FAB-008,Fabricated Tray,pcs,800,Goods,yes,", TWIN)
+                .replace("FAB-008,Fabricated Tray Copy,pcs,800,Goods,yes,", TWIN));
+        for (int i = 2; i < copies; i++) {
+            file.append(TWIN).append('\n');
+        }
+        return file.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    /** A run with three verbatim copies on lines 9, 10 and 11, validated. */
+    Twins threeCopies() throws IOException {
         Mapping mapping = as(t, () -> mappings.save("fab-shop", ImportCatalogueTest.mapping(), operator, null));
         UUID runId = as(t, () -> runs.open(operator).id());
-        Batch items = upload(t, runId, ITEMS, twins.getBytes(StandardCharsets.UTF_8), mapping.id(), "item_list");
+        Batch items = upload(t, runId, ITEMS, twinsFile(3), mapping.id(), "item_list");
         as(t, () -> validation.validate(runId));
         assertThat(onLine(items, 9)).extracting(Issue::code).containsExactly("MONEY_FRACTION");
+        for (int line : new int[] {10, 11}) {
+            assertThat(onLine(items, line))
+                    .extracting(Issue::code)
+                    .containsExactly("MONEY_FRACTION", "DUPLICATE_SOURCE_REF", "CODE_DUPLICATE");
+        }
+        return new Twins(runId, items);
+    }
+
+    @Test
+    void anExclusionOfOneOfIdenticalLinesNeverReachesTheOthers() throws IOException {
+        Twins run = threeCopies();
+        Batch items = run.items();
+
+        resolve(issue(items, 10, "MONEY_FRACTION"), "exclude_row", null, "The fabricated line is entered twice");
+        as(t, () -> validation.validate(run.runId()));
+
+        // Only the second copy is left out; the first and third keep their own issues open.
         assertThat(onLine(items, 10))
+                .allMatch(i -> "resolved".equals(i.status()) && "exclude_row".equals(i.resolution()));
+        assertThat(onLine(items, 9)).allMatch(i -> "open".equals(i.status()));
+        assertThat(onLine(items, 11)).allMatch(i -> "open".equals(i.status()));
+        assertThat(onLine(items, 11))
                 .extracting(Issue::code)
                 .containsExactly("MONEY_FRACTION", "DUPLICATE_SOURCE_REF", "CODE_DUPLICATE");
-
-        resolve(issue(items, 9, "MONEY_FRACTION"), "exclude_row", null, "The fabricated line is entered twice");
-        as(t, () -> validation.validate(runId));
-
-        // The first copy is left out; the second keeps its own issue open and is nobody's duplicate any more.
-        assertThat(onLine(items, 9))
-                .allMatch(i -> "resolved".equals(i.status()) && "exclude_row".equals(i.resolution()));
-        assertThat(onLine(items, 10)).extracting(Issue::code).containsExactly("MONEY_FRACTION");
-        assertThat(issue(items, 10, "MONEY_FRACTION").status()).isEqualTo("open");
         assertThat(count("SELECT count(*) FROM import_rows WHERE batch_id = ? AND excluded_by IS NOT NULL", items.id()))
                 .isEqualTo(1);
-        assertThat(TestDatabase.owner()
-                        .sql("SELECT occurrence FROM import_issue_resolutions WHERE run_id = ?")
-                        .param(runId)
-                        .query(Integer.class)
-                        .single())
+        assertThat(count(
+                        "SELECT count(*) FROM import_rows WHERE batch_id = ? AND source_row_no = 10 AND excluded_by IS"
+                                + " NOT NULL",
+                        items.id()))
                 .isEqualTo(1);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT occurrence || '/' || copies FROM import_issue_resolutions WHERE run_id = ?")
+                        .param(run.runId())
+                        .query(String.class)
+                        .single())
+                .isEqualTo("2/3");
         // A bulk resolution names a batch of its own run only.
         assertCode(
                 () -> as(
                         t,
                         () -> review.resolveAll(
-                                runId,
+                                run.runId(),
                                 new Bulk("MONEY_FRACTION", UUID.randomUUID(), "override", null, "Fabricated"),
                                 operator)),
                 "not_found");
+    }
+
+    @Test
+    void anOverrideOfOneOfIdenticalLinesNeverReachesTheOthers() throws IOException {
+        Twins run = threeCopies();
+        Batch items = run.items();
+
+        resolve(issue(items, 10, "CODE_DUPLICATE"), "override", null, "The fabricated copy is the same tray");
+        as(t, () -> validation.validate(run.runId()));
+
+        assertThat(issue(items, 10, "CODE_DUPLICATE").status()).isEqualTo("resolved");
+        assertThat(issue(items, 10, "CODE_DUPLICATE").resolution()).isEqualTo("override");
+        assertThat(issue(items, 11, "CODE_DUPLICATE").status()).isEqualTo("open");
+        assertThat(issue(items, 11, "CODE_DUPLICATE").resolutionId()).isNull();
+        assertThat(onLine(items, 9)).allMatch(i -> "open".equals(i.status()));
+    }
+
+    @Test
+    void anEditOfOneOfIdenticalLinesNeverReachesTheOthers() throws IOException {
+        Twins run = threeCopies();
+        Batch items = run.items();
+
+        resolve(issue(items, 10, "MONEY_FRACTION"), "edit_value", "800", null);
+        as(t, () -> validation.validate(run.runId()));
+
+        assertThat(onLine(items, 10)).extracting(Issue::code).doesNotContain("MONEY_FRACTION");
+        assertThat(issue(items, 9, "MONEY_FRACTION").status()).isEqualTo("open");
+        assertThat(issue(items, 11, "MONEY_FRACTION").status()).isEqualTo("open");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT source_row_no || '=' || coalesce(normalised ->> 'price', '-') FROM import_rows"
+                                + " WHERE batch_id = ? AND source_row_no >= 9 ORDER BY source_row_no")
+                        .param(items.id())
+                        .query(String.class)
+                        .list())
+                .containsExactly("9=-", "10=800", "11=-");
+    }
+
+    /**
+     * A new upload that holds another number of identical copies never guesses which copy a decision was for: every copy
+     * comes back to the queue as changed and the old decision applies to none (Lead ruling on #868).
+     */
+    @Test
+    void aNewUploadWithAnotherNumberOfIdenticalLinesSendsThemBackToTheQueue() throws IOException {
+        Twins run = threeCopies();
+        resolve(issue(run.items(), 10, "MONEY_FRACTION"), "exclude_row", null, "The fabricated line is entered twice");
+        as(t, () -> uploads.cancelBatch(run.items().id()));
+        UUID mapping = as(t, () -> mappings.latest("fab-shop").orElseThrow().id());
+        Batch again = upload(t, run.runId(), ITEMS, twinsFile(2), mapping, "item_list");
+
+        as(t, () -> validation.validate(run.runId()));
+
+        assertThat(onLine(again, 9))
+                .extracting(Issue::code)
+                .containsExactly("ROW_CHANGED_SINCE_REVIEW", "MONEY_FRACTION");
+        assertThat(onLine(again, 10))
+                .extracting(Issue::code)
+                .containsExactly(
+                        "ROW_CHANGED_SINCE_REVIEW", "MONEY_FRACTION", "DUPLICATE_SOURCE_REF", "CODE_DUPLICATE");
+        assertThat(onLine(again, 9)).allMatch(i -> "open".equals(i.status()));
+        assertThat(onLine(again, 10)).allMatch(i -> "open".equals(i.status()));
+        assertThat(count("SELECT count(*) FROM import_rows WHERE batch_id = ? AND excluded_by IS NOT NULL", again.id()))
+                .isZero();
     }
 
     // ---------------------------------------------------------------------------------------------
