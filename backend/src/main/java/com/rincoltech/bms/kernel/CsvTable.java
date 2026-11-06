@@ -66,6 +66,16 @@ public final class CsvTable {
         return rows;
     }
 
+    /** The words an import adds when it refuses an amount for its comma (issue #870). */
+    public static final String COMMA_WORDS =
+            " Use a point for decimals; a comma only goes between thousands, for example 12,500.";
+
+    /** True when a comma in the amount is not between groups of three digits, as in 1,5 or 12,50: refused, never read. */
+    public static boolean commaDecimal(String text) {
+        String strip = text.strip();
+        return strip.indexOf(',') >= 0 && !GROUPED.matcher(strip).matches();
+    }
+
     /**
      * A non-negative amount in major units, with or without thousands commas, as integer minor units for a currency with
      * {@code exponent} decimals (the same rule as the screens' parseMinor); a fraction is accepted only up to the
@@ -74,7 +84,7 @@ public final class CsvTable {
      */
     public static Long amountMinor(String text, int exponent) {
         String strip = text.strip();
-        if (strip.indexOf(',') >= 0 && !GROUPED.matcher(strip).matches()) {
+        if (commaDecimal(strip)) {
             return null;
         }
         String clean = strip.replace(",", "");

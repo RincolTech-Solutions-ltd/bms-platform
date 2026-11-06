@@ -163,9 +163,8 @@ describe('Add many items', () => {
     // The check found it: nothing was added.
     expect(applies()).toHaveLength(0);
     expect(screen.getByTestId('am-result').textContent).toBe('0 items added, 1 needs a look.');
+    // One tap posts its quantity to the item already held, without Save the list.
     fireEvent.click(screen.getByRole('button', { name: 'Add to its stock instead' }));
-    expect(screen.getByTestId('am-adds-to-1').textContent).toContain('Adds to the stock of Test Rice 1kg (GNR-0009)');
-    fireEvent.click(saveButton());
     await waitFor(() => expect(applies()).toHaveLength(1));
     expect(linesOf(applies()[0]?.[0] ?? '')).toEqual([['Test Rice 1kg', 'General', 'Piece', '8', '', '', 'yes']]);
     expect((await screen.findByTestId('am-result')).textContent).toBe('1 item added.');
@@ -286,19 +285,29 @@ describe('Add many items', () => {
     expect(input('am-name-1').value).toBe('Test Soap');
   });
 
-  it('says why when the apply refuses a row with a quantity, and keeps every row (review of #871)', async () => {
+  it('keeps a row with a quantity the apply skipped, and one tap adds its quantity to the item (Lead, FAIL of 00210db)', async () => {
     importProducts.mockImplementation(async (csv: string, dry: boolean) => {
-      if (!dry) throw new RetailError('1 row with a quantity names an item already in your list, so its stock would not be added. Nothing was added.', 422, 'import_stock_skipped');
+      // The online race: Test Soap is added on another phone between the check and the apply.
+      if (!dry) existing = { 'Test Soap': 'GNR-0042' };
       return answer(csv, dry);
     });
     open();
     type('am-name-1', 'Test Soap');
     type('am-qty-1', '24');
     type('am-sell-1', '2500');
+    type('am-name-2', 'Test Brush');
+    type('am-qty-2', '6');
+    type('am-sell-2', '800');
     fireEvent.click(saveButton());
-    expect(await screen.findByText(/so its stock would not be added\. Nothing was added\./)).toBeTruthy();
+    expect((await screen.findByTestId('am-result')).textContent).toBe('1 item added, 1 needs a look.');
+    // The skipped row stays with what was typed, never counted done.
     expect(input('am-name-1').value).toBe('Test Soap');
     expect(input('am-qty-1').value).toBe('24');
+    fireEvent.click(screen.getByRole('button', { name: 'Add to its stock instead' }));
+    await waitFor(() => expect(applies()).toHaveLength(2));
+    expect(linesOf(applies()[1]?.[0] ?? '')).toEqual([['Test Soap', 'General', 'Piece', '24', '', '', 'yes']]);
+    expect(applies()[1]?.[3]?.key).not.toBe(applies()[0]?.[3]?.key);
+    expect((await screen.findByTestId('am-result')).textContent).toBe('1 item added.');
   });
 
   it('moves to the next cell on Enter, and adds a row after the last one', async () => {
@@ -362,5 +371,37 @@ describe('Add many items', () => {
     });
     expect(sends.map((s) => s.key)).toEqual([items[0]?.key]);
     expect(recorded.size).toBe(1);
+  });
+
+  // JUSTIFICATION-A3: the Lead's FAIL of 00210db asks a test of an offline list with an existing name; one new test.
+  it('brings a list kept on the phone back with Fix when the server skipped a name it holds (Lead, FAIL of 00210db)', async () => {
+    const send = async () => ({
+      status: 200,
+      body: { added: 1, skipped: 1, errors: 0, rows: [
+        { line: 2, description: 'Test Basin', outcome: 'skipped', message: 'An item with this name exists already.', qty: 3, existing_code: 'GNR-0077' },
+        { line: 3, description: 'Test Jug', outcome: 'added', message: 'Added.' },
+      ] },
+    });
+    const offline = testOffline(owner, { online: false, deps: { send } });
+    open(owner, offline);
+    type('am-name-1', 'Test Basin');
+    type('am-qty-1', '3');
+    type('am-sell-1', '8000');
+    type('am-name-2', 'Test Jug');
+    type('am-qty-2', '2');
+    type('am-sell-2', '6000');
+    fireEvent.click(saveButton());
+    await screen.findByTestId('am-result');
+    offline?.connectivity.set(true);
+    await act(async () => {
+      await offline?.engine.syncNow();
+    });
+    // Never counted sent quietly: it waits with Fix, which opens only the skipped row, set to add to the item held.
+    const [item] = offline?.engine.snapshot().items ?? [];
+    expect(item?.state).toBe('failed');
+    expect(item?.error?.code).toBe('items_skipped');
+    expect(item?.error?.message).toBe('1 item is already in your list, so its stock was not added. Tap Fix to add it to its stock.');
+    const draft = item?.entry?.fix?.draft as { rows: { name: string; qty: string; addTo?: { code: string } }[] };
+    expect(draft.rows.map((r) => [r.name, r.qty, r.addTo?.code])).toEqual([['Test Basin', '3', 'GNR-0077']]);
   });
 });

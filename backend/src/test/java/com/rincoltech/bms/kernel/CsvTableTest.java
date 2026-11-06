@@ -29,10 +29,18 @@ class CsvTableTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"1,5", "12,50", "1000,000", "12,5000", ",500", "1,,000", "1,000,00"})
+    @ValueSource(strings = {"1,5", "0,250", "12,50", "1000,000", "12,5000", ",500", "1,,000", "1,000,00"})
     void refusesACommaThatIsNotBetweenThousands(String text) {
         assertThat(CsvTable.amountMinor(text, 0)).as(text).isNull();
         assertThat(CsvTable.amountMinor(text, 2)).as(text).isNull();
+    }
+
+    @Test
+    void namesACommaUsedAsADecimalPointSoTheImportCanSaySo() {
+        assertThat(CsvTable.commaDecimal("1,5")).isTrue();
+        assertThat(CsvTable.commaDecimal("0,250")).isTrue();
+        assertThat(CsvTable.commaDecimal("12,500")).isFalse();
+        assertThat(CsvTable.commaDecimal("1500")).isFalse();
     }
 
     @Test

@@ -139,5 +139,7 @@ opening stock path.
 the owner saves again.
 
 **Watch for:** a list kept offline is checked only when it arrives; a name added meanwhile makes it a refused entry to fix on the
-phone: on an apply a row with a quantity is never skipped (422 `import_stock_skipped`, nothing added), so no stock is dropped
-unseen (review of #871). A file from before #870 that relied on a comma decimal being stripped is now refused on that row.
+phone: the apply skips that row with its quantity and code, the phone refuses the answer as `items_skipped`, and Fix opens just
+the skipped rows, each set to Add to its stock; online the skipped row stays on the screen with Add to its stock, one tap, so
+no stock is dropped unseen (the Lead on the FAIL of 00210db). A file from before #870 that relied on a comma decimal being
+stripped is now refused on that row, and so is a lending existing loans sheet, with words saying to use a point for decimals.

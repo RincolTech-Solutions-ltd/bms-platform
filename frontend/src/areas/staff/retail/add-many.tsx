@@ -50,6 +50,8 @@ interface ListDraft {
    * next list is a new request. Absent, the draft's own key (a fresh one when Fix put the draft back).
    */
   listKey?: string;
+  /** In a draft kept with an outbox entry: the row keys in the order its lines were sent, so skipped rows come back. */
+  keys?: number[];
 }
 
 /** One apply: the import file of the rows it carries (by row key), the shop, and the key it goes under. */
@@ -164,16 +166,22 @@ export function AddManyForm() {
           kind: 'items', body: { csv: plan.csv, ...(plan.branchId ? { branch_id: plan.branchId } : {}) }, key: plan.key, branchId: where,
           detail: `${count} ${count === 1 ? 'item' : 'items'}`,
           // Fixed later, the list comes back without its spent key, so it is a new request.
-          fix: { to: '/staff/retail/catalogue/import', draftName, draft: { rows: draft.rows, where: draft.where, pending: null } },
+          fix: { to: '/staff/retail/catalogue/import', draftName, draft: { rows: draft.rows, where: draft.where, pending: null, keys: plan.keys } },
         },
         () => retail.importProducts(plan.csv, false, false, { branchId: plan.branchId, key: plan.key }),
       );
     },
     onSuccess: (answer, plan) => {
       const kept = isKept(answer);
-      // Review of #871: a row the apply did not add stays on the screen, never counted done; the next check marks it.
-      const notAdded = new Set(kept ? [] : (answer.rows ?? [])
-        .filter((row) => row.outcome !== 'added' && row.outcome !== 'stock').map((row) => plan.keys[rowOf(row.line)]));
+      // The Lead on the review of #871: every row of the answer maps back. A row the apply did not add stays on the screen,
+      // counted under need a look; one the answer names as already held offers Add to its stock at once.
+      const missed = kept ? [] : (answer.rows ?? []).filter((row) => row.outcome !== 'added' && row.outcome !== 'stock');
+      const notAdded = new Set(missed.map((row) => plan.keys[rowOf(row.line)]));
+      const named = missed.flatMap((row) => {
+        const r = draft.rows.find((x) => x.key === plan.keys[rowOf(row.line)]);
+        return r && row.existing_code ? [[r.key, { forName: nameKey(r.name), item: { id: row.existing_code, code: row.existing_code, name: r.name.trim(), mayAddAnyway: false } }] as const] : [];
+      });
+      if (named.length > 0) setFound((m) => ({ ...m, ...Object.fromEntries(named) }));
       const sent = new Set(plan.keys.filter((k) => !notAdded.has(k)));
       const left = draft.rows.filter((r) => !sent.has(r.key) && !isBlank(r));
       const needLook = left.length;
@@ -211,6 +219,20 @@ export function AddManyForm() {
       setRefusal(error);
     },
   });
+
+  /**
+   * The Lead on the review of #871: Add to its stock is one tap. The row becomes the item already in the list and, when its
+   * quantity is good and nothing else is on its way, its quantity is posted to that item at once, alone; otherwise the row
+   * says what to fix and Save the list sends it with the others.
+   */
+  const addToStockNow = (r: ListRow, index: number, item: ExistingItem) => {
+    const next: ListRow = { ...r, addTo: { id: item.id, code: item.code, name: item.name }, refused: undefined };
+    setResult(null);
+    setDraft((d) => ({ ...d, rows: d.rows.map((x) => (x.key === r.key ? next : x)) }));
+    const [c] = checkRows([next], { ...context, groups: [groups[index] ?? ''] });
+    if (!c?.send || save.isPending || checking || draft.pending) return;
+    save.mutate({ csv: listCsv([c.send], profit, mayCount), branchId: mayCount ? where : undefined, keys: [r.key], key: draft.listKey ?? draftKey });
+  };
 
   /** The import's check of the rows sent: the rows it would add, and the others marked on the screen. */
   const checkOnServer = async (plan: Plan): Promise<number[]> => {
@@ -308,6 +330,7 @@ export function AddManyForm() {
               found={found[r.key]?.forName === nameKey(r.name) ? found[r.key]?.item : undefined}
               onChange={(patch) => change(r.key, patch)}
               onRemove={() => removeRow(r.key)}
+              onAddToStock={(item) => addToStockNow(r, i, item)}
             />
           ))}
         </ol>
@@ -333,7 +356,7 @@ function columnsHint(): string {
   return [2, 3, 4, 5].map((n) => (COLUMNS[n] ?? []).map((c) => words[c]).join(', ')).join('; or ');
 }
 
-function RowCard({ row: r, index, check, group, categories, units, unitsLoad, pieceId, profit, mayCount, whereName, showErrors, found, onChange, onRemove }: {
+function RowCard({ row: r, index, check, group, categories, units, unitsLoad, pieceId, profit, mayCount, whereName, showErrors, found, onChange, onRemove, onAddToStock }: {
   row: ListRow;
   index: number;
   check: RowCheck;
@@ -349,6 +372,8 @@ function RowCard({ row: r, index, check, group, categories, units, unitsLoad, pi
   found?: ExistingItem;
   onChange: (patch: Partial<ListRow>) => void;
   onRemove: () => void;
+  /** One tap: the row adds its quantity to the stock of the item already in the list (posted at once when it can be). */
+  onAddToStock: (item: ExistingItem) => void;
 }) {
   const id = (f: string) => `am-${f}-${r.key}`;
   const e = check.errors;
@@ -390,7 +415,7 @@ function RowCard({ row: r, index, check, group, categories, units, unitsLoad, pi
           <div className="am-full stack" data-testid={`am-exists-${index + 1}`}>
             {mayCount ? (
               <p className="cluster">
-                <button type="button" className="btn" onClick={() => onChange({ addTo: { id: found.id, code: found.code, name: found.name } })}>Add to its stock instead</button>
+                <button type="button" className="btn" onClick={() => onAddToStock(found)}>Add to its stock instead</button>
               </p>
             ) : <p className="hint">Change the name, or remove this row: it is already in your items.</p>}
           </div>

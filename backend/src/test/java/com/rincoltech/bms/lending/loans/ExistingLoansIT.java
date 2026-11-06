@@ -1282,8 +1282,12 @@ class ExistingLoansIT extends LoanFixtures {
                 .forEach(r -> outcomes.put(
                         r.get("line").asInt(),
                         r.get("outcome").asString() + ":" + r.get("message").asString("")));
-        assertThat(outcomes.get(2)).startsWith("error:The principal must be");
-        assertThat(outcomes.get(3)).startsWith("error:The principal must be");
+        assertThat(outcomes.get(2))
+                .startsWith("error:The principal must be")
+                .contains("Use a point for decimals; a comma only goes between thousands");
+        assertThat(outcomes.get(3))
+                .startsWith("error:The principal must be")
+                .contains("Use a point for decimals; a comma only goes between thousands");
         assertThat(outcomes.get(4)).startsWith("ready");
         assertThat(importCsv(csv, false).getBody().get("added").asInt()).isZero();
         assertThat(count("SELECT count(*) FROM lending_loans WHERE tenant_id = ?", t.tenantId()))

@@ -183,9 +183,10 @@ class RetailImportWithStockIT extends IntegrationTest {
 
     // JUSTIFICATION-A3: the review of #871 asks a test of the name race and of the import's trace, one each.
     @Test
-    void aRowWithAQuantityIsNeverSkippedOnApplySoNoStockIsLostUnseen() {
-        // Review of #871: the check passes Test Soap with 24; another phone then adds Test Soap; the apply (or a list
-        // from the outbox) must not skip it with 200 and drop the 24: nothing is added and the words say why.
+    void aNameAddedBetweenTheCheckAndTheApplyComesBackWithItsQuantityAndCode() {
+        // The Lead on the review of #871: the check passes Test Soap with 24; another phone then adds Test Soap.
+        // The apply adds the other rows and answers the Soap row skipped, naming the item and the 24, so the screen
+        // (or the outbox, with Fix) shows it with Add to its stock; its stock is never dropped unseen.
         String list =
                 HEADER + "\nTest Soap,Test Cleaning,Piece,24,2000,2500\nTest Brush,Test Cleaning,Piece,3,500,800\n";
         assertThat(check(list, hq).getBody().get("added").asInt()).isEqualTo(2);
@@ -193,16 +194,19 @@ class RetailImportWithStockIT extends IntegrationTest {
         UUID soap = productNamed("Test Soap");
 
         ResponseEntity<JsonNode> r = apply(list, hq);
-        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(r.getBody().get("code").asString()).isEqualTo("import_stock_skipped");
-        assertThat(r.getBody().toString()).contains("Add to its stock");
-        assertThat(products()).isEqualTo(1);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+        JsonNode skipped = r.getBody().get("rows").get(0);
+        assertThat(skipped.get("outcome").asString()).isEqualTo("skipped");
+        assertThat(skipped.get("qty").asString()).isEqualTo("24");
+        assertThat(skipped.get("existing_code").asString()).isNotBlank();
+        assertThat(r.getBody().get("rows").get(1).get("outcome").asString()).isEqualTo("added");
         assertThat(stockAt(hq, soap)).isEqualByComparingTo("5");
-        // A file without quantities still skips a name already held, as before #870.
-        String noQty = "description,category,unit,sell_price\nTest Soap,Test Cleaning,Piece,2500\n";
-        ResponseEntity<JsonNode> plain = api.post("/products/import?dry_run=false", body(noQty, hq), ADMIN);
-        assertThat(plain.getStatusCode()).as("%s", plain.getBody()).isEqualTo(HttpStatus.OK);
-        assertThat(plain.getBody().get("skipped").asInt()).isEqualTo(1);
+        assertThat(stockAt(hq, productNamed("Test Brush"))).isEqualByComparingTo("3");
+
+        // Add to its stock: one row of stock_only posts the 24 to the item already in the list.
+        String addTo = "description,category,unit,qty,sell_price,stock_only\nTest Soap,Test Cleaning,Piece,24,,yes\n";
+        assertThat(apply(addTo, hq).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(stockAt(hq, soap)).isEqualByComparingTo("29");
     }
 
     @Test
