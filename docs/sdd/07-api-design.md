@@ -798,6 +798,15 @@ by its type and id only (`report-<document id>.pdf` or `.xlsx`), never by anythi
 | POST | `/imports/{batch_id}/cancel` | `core.imports.manage` | |
 | GET | `/imports/{batch_id}/reconciliation` | `core.imports.manage` | FR-IMP-08 |
 
+As built (customer data onboarding, ADR-027, chapter 13 section 13.14.1): none of the routes above exists yet. Runs (#127),
+the quarantined upload (#128) and, since #129, the canonical templates and versioned mappings are services of
+`core.imports` that the operator's tooling calls; their routes and screens are #141, which will replace the planned
+`/imports/templates` with the registry's templates and their JSON Schemas (`ImportTemplates.list` and `schema`) and add the
+mappings (`ImportMappings`: save a version, read versions, check a document, validate against a batch's headers). Because
+#129 adds no route, `docs/api/openapi.json` and `frontend/src/api/schema.d.ts` are unchanged. The refusals those routes will
+answer are fixed now: 422 `mapping_invalid` (every problem in `errors`, each with its JSON Pointer and catalogue code), 422
+`TEMPLATE_UNKNOWN`, 422 `SOURCE_UNKNOWN`, 409 `mapping_version_conflict`, 409 `batch_not_parsed`.
+
 ### 7.11.10 Payments
 
 | Method | Path | Permission | Notes |
