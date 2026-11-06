@@ -307,6 +307,15 @@ final class RowValidator {
         return new Finding(f.code(), severity, f.field(), cap(message.toString()), f.original());
     }
 
+    /** The digits of a value without a leading 256 or 0, so one phone written three ways compares equal. */
+    private static String national(String v) {
+        String digits = v.replaceAll("\\D", "");
+        if (digits.startsWith("256") && digits.length() == 12) {
+            return digits.substring(3);
+        }
+        return digits.startsWith("0") && digits.length() == 10 ? digits.substring(1) : digits;
+    }
+
     /** A message cut to {@value #MAX_MESSAGE} characters, ending in three dots when cut. */
     static String cap(String message) {
         if (message.codePointCount(0, message.length()) <= MAX_MESSAGE) {
@@ -335,9 +344,9 @@ final class RowValidator {
      * by its digits ({@code 700000101} in {@code +256700000101}).
      */
     static boolean holds(String v, List<String> personal) {
-        String digits = v.replaceAll("\\D", "");
+        String digits = national(v);
         for (String s : personal) {
-            String sDigits = s.replaceAll("\\D", "");
+            String sDigits = national(s);
             if (v.contains(s)
                     || (digits.length() >= 7
                             && sDigits.length() >= 7
