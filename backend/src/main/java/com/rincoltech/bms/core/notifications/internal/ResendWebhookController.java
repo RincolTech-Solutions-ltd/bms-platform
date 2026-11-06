@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
@@ -202,20 +203,18 @@ class ResendWebhookController {
         details.values().removeIf(java.util.Objects::isNull);
         UUID tenant = uuidOrNullAsUuid(tags.get("tenant_id"));
         audit.record(action, null, tenant, details);
-        // JUSTIFICATION-A3: issue #767's one new step, the row itself marked failed (by id and business, from the tags).
+        // JUSTIFICATION-A3: issue #767's one step, the row itself marked failed (by id and business, from the tags).
         UUID outboxId = uuidOrNullAsUuid(tags.get("outbox_id"));
-        String row = outboxId == null || action.equals(SUPPRESSED)
-                ? "none"
-                : jdbc.sql("SELECT notification_outbox_mark_undelivered(?, CAST(? AS uuid), ?, ?)")
-                        .params(
-                                outboxId,
-                                tenant,
-                                action.equals(BOUNCED) ? "bounced" : "complained",
-                                java.sql.Timestamp.from(clock.now()))
-                        .query(String.class)
-                        .single();
+        String row = "none";
+        if (outboxId != null && !action.equals(SUPPRESSED)) {
+            String reason = action.equals(BOUNCED) ? "bounced" : "complained";
+            row = jdbc.sql("SELECT notification_outbox_mark_undelivered(?, CAST(? AS uuid), ?, ?)")
+                    .params(outboxId, tenant, reason, Timestamp.from(clock.now()))
+                    .query(String.class)
+                    .single();
+        }
         // The recipient's domain only, never the address.
-        log.info("resend {} recorded: outbox={} domain={} row={}", type, outboxId, details.get("recipient_domain"), row);
+        log.info("resend {}: outbox={} domain={} row={}", type, outboxId, details.get("recipient_domain"), row);
         return ResponseEntity.noContent().build();
     }
 
