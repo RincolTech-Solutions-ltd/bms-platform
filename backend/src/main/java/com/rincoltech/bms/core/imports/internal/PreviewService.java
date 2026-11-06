@@ -176,7 +176,7 @@ class PreviewService implements ImportPreview {
      * version, the template's class, the entity set and the loader's {@link BatchWriter#identity()}. A caller never passes
      * a writer, so the dry run rehearses exactly the code the commit runs.
      */
-    record Writers(Map<UUID, BatchWriter> byBatch, String identity) {
+    record Writers(Map<UUID, BatchWriter> byBatch, String identity, List<UUID> order, Map<UUID, BatchSource> sources) {
 
         BatchWriter of(UUID batchId) {
             BatchWriter writer = byBatch.get(batchId);
@@ -185,7 +185,25 @@ class PreviewService implements ImportPreview {
             }
             return writer;
         }
+
+        /** Where the batch's rows come from, for their {@code source_ref} (issue #133). */
+        BatchSource source(UUID batchId) {
+            return sources.get(batchId);
+        }
+
+        /** The position of a batch in the template's dependency order (issue #133): its entity set's, then its number. */
+        int rank(UUID batchId) {
+            int at = order.indexOf(batchId);
+            return at < 0 ? Integer.MAX_VALUE : at;
+        }
     }
+
+    /**
+     * A batch's source as {@link com.rincoltech.bms.core.imports.ImportRefs#sourceRef} reads it (issue #133): the entity
+     * set it writes, the mapping source's key, and the file and tab the mapping names (the source's key when it names no
+     * file).
+     */
+    record BatchSource(EntitySet set, String source, String file, String tab) {}
 
     /** The writers of the run's pending and parsed batches, inside the caller's transaction. */
     Writers writers(UUID runId) {
@@ -207,6 +225,8 @@ class PreviewService implements ImportPreview {
                 .list();
         Map<UUID, BatchWriter> byBatch = new LinkedHashMap<>();
         Map<UUID, Map<String, Object>> documents = new HashMap<>();
+        Map<UUID, BatchSource> sources = new HashMap<>();
+        Map<UUID, Integer> ranks = new HashMap<>();
         StringBuilder identity = new StringBuilder();
         for (BatchRow b : batches) {
             if (b.mappingId() == null || b.templateKey() == null) {
@@ -224,6 +244,10 @@ class PreviewService implements ImportPreview {
             }
             BatchWriter loader = template.loader(set);
             byBatch.put(b.id(), loader);
+            List<String> order =
+                    template.entitySets().stream().map(EntitySet::key).toList();
+            ranks.put(b.id(), rank(order, set));
+            sources.put(b.id(), source(template, b, set, documents.get(b.mappingId())));
             identity.append(b.seq())
                     .append(' ')
                     .append(template.id())
@@ -235,8 +259,133 @@ class PreviewService implements ImportPreview {
                     .append(loader.identity())
                     .append('\n');
         }
-        return new Writers(byBatch, identity.toString());
+        // The template's dependency order, then the batch's own number (spec section 3.7; issue #133), as the
+        // validation and the preview order them.
+        List<UUID> order = batches.stream()
+                .sorted(Comparator.comparingInt((BatchRow b) -> ranks.get(b.id()))
+                        .thenComparingInt(BatchRow::seq))
+                .map(BatchRow::id)
+                .toList();
+        return new Writers(byBatch, identity.toString(), order, sources);
     }
+
+    /** The source of a batch: its entity set, and the file and tab its mapping source names. */
+    private static BatchSource source(ImportTemplate template, BatchRow b, String set, Map<String, Object> document) {
+        EntitySet entities = template.entitySets().stream()
+                .filter(e -> e.key().equals(set))
+                .findFirst()
+                .orElseThrow();
+        return sourceOf(document, b.source(), entities);
+    }
+
+    /** The file and tab a mapping source names: the commit's and the validation's one reading of them. */
+    static BatchSource sourceOf(Map<String, Object> document, String sourceKey, EntitySet set) {
+        Map<String, Object> source = MappingValidator.sources(document).get(sourceKey);
+        String file = source != null && source.get("file") instanceof String f && !f.isBlank() ? f : sourceKey;
+        String tab = source != null && source.get("sheet") instanceof String s && !s.isBlank() ? s : null;
+        return new BatchSource(set, sourceKey, file, tab);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The policy decisions a run needs, and the rows a writer reads (issue #133, spec sections 3.7 and 3.8).
+    // JUSTIFICATION-A3: new reads of the staged rows the commit of #133 needs, beside the preview's own reads.
+    // ---------------------------------------------------------------------------------------------
+
+    /** The policies the run's template declares; none when no batch was read with a mapping. */
+    List<ImportTemplate.Policy> policies(UUID runId) {
+        ImportTemplate template = template(batchRows(runId));
+        return template == null ? List.of() : template.policies();
+    }
+
+    /**
+     * The policies the run needs and has not recorded, inside the caller's transaction: a policy is needed when a row the
+     * commit writes, of the policy's entity set, matches its rule.
+     */
+    List<ImportTemplate.Policy> missingPolicies(UUID runId, Set<String> recorded) {
+        List<BatchRow> batches = batchRows(runId);
+        ImportTemplate template = template(batches);
+        if (template == null) {
+            return List.of();
+        }
+        List<ImportTemplate.Policy> missing = new ArrayList<>();
+        Map<UUID, Map<String, Object>> documents = new HashMap<>();
+        for (ImportTemplate.Policy p : template.policies()) {
+            if (recorded.contains(p.key())) {
+                continue;
+            }
+            EntitySet set = template.entitySets().stream()
+                    .filter(e -> e.key().equals(p.entitySet()))
+                    .findFirst()
+                    .orElse(null);
+            boolean needed = false;
+            for (BatchRow b : batches) {
+                if (set == null || needed || b.mappingId() == null || !set.key().equals(entitySet(b, documents))) {
+                    continue;
+                }
+                needed = anyRow(b.id(), set, p.neededBy());
+            }
+            if (needed) {
+                missing.add(p);
+            }
+        }
+        return missing;
+    }
+
+    private boolean anyRow(UUID batchId, EntitySet set, java.util.function.Predicate<Map<String, Object>> rule) {
+        int after = 0;
+        while (true) {
+            List<Object[]> chunk = jdbc.sql("SELECT r.source_row_no, r.normalised::text FROM import_rows r"
+                            + " WHERE r.batch_id = ? AND r.source_row_no > ? AND r.normalised IS NOT NULL AND " + WRITE
+                            + " ORDER BY r.source_row_no LIMIT " + CHUNK)
+                    .params(batchId, after)
+                    .query((rs, n) -> new Object[] {rs.getInt(1), rs.getString(2)})
+                    .list();
+            for (Object[] row : chunk) {
+                if (rule.test(typed(set, JSON.readValue((String) row[1], OBJECT)))) {
+                    return true;
+                }
+                after = (Integer) row[0];
+            }
+            if (chunk.size() < CHUNK) {
+                return false;
+            }
+        }
+    }
+
+    private List<BatchRow> batchRows(UUID runId) {
+        return jdbc.sql("""
+                        SELECT id, seq, source_filename, mapping_id, mapping_source, template_key, template_version
+                          FROM import_batches
+                         WHERE run_id = ? AND status IN ('pending', 'parsed', 'committed')
+                         ORDER BY seq
+                        """)
+                .param(runId)
+                .query((rs, n) -> new BatchRow(
+                        rs.getObject("id", UUID.class),
+                        rs.getInt("seq"),
+                        rs.getString("source_filename"),
+                        rs.getObject("mapping_id", UUID.class),
+                        rs.getString("mapping_source"),
+                        rs.getString("template_key"),
+                        (Integer) rs.getObject("template_version")))
+                .list();
+    }
+
+    /** The rows of a batch the commit writes, after a line, with their stored reference and typed values (issue #133). */
+    List<StoredRow> rowsToWrite(UUID batchId, EntitySet set, int afterLine, int limit) {
+        return jdbc.sql("SELECT r.source_row_no, r.source_ref, r.normalised::text FROM import_rows r"
+                        + " WHERE r.batch_id = ? AND r.source_row_no > ? AND r.normalised IS NOT NULL AND " + WRITE
+                        + " ORDER BY r.source_row_no LIMIT ?")
+                .params(batchId, afterLine, Math.max(1, Math.min(limit, CHUNK)))
+                .query((rs, n) -> {
+                    Map<String, Object> stored = JSON.readValue(rs.getString(3), OBJECT);
+                    return new StoredRow(rs.getInt(1), rs.getString(2), stored, typed(set, stored));
+                })
+                .list();
+    }
+
+    /** A staged row as stored: its line, the validation's reference, its values as stored and as typed. */
+    record StoredRow(int line, String validationRef, Map<String, Object> stored, Map<String, Object> typed) {}
 
     /** The one template the batches were read with, or null when none was read with a mapping. */
     private ImportTemplate template(List<BatchRow> batches) {

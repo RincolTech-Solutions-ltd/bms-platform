@@ -38,6 +38,15 @@ public interface LedgerPosting {
      */
     PostedEntry reverse(ReversalRequest request);
 
+    /**
+     * The debit and credit totals, in minor units, the ledger holds on the lines of one entry of the bound tenant (issue
+     * #133): what a report says was posted, read back rather than the amount the caller meant to post. Zero for an entry
+     * the tenant does not hold.
+     */
+    Totals totals(UUID entryId);
+
+    record Totals(long debitMinor, long creditMinor) {}
+
     record ReversalRequest(UUID entryId, LocalDate entryDate, String reference, String memo, String idempotencyKey) {}
 
     record EntryRequest(

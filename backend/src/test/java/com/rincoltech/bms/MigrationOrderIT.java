@@ -3625,9 +3625,9 @@ class MigrationOrderIT {
                             .success)
                     .isTrue();
 
-            assertThat(owner.sql("SELECT status = 'ready' AND commit_requested_by IS NULL AND commit_approved_by IS NULL"
-                                    + " AND commit_approved_version IS NULL AND pre_import_dump_verified_at IS NULL"
-                                    + " FROM import_runs WHERE id = ?")
+            assertThat(owner.sql("SELECT status = 'ready' AND commit_requested_by IS NULL"
+                                    + " AND commit_approved_by IS NULL AND commit_approved_version IS NULL"
+                                    + " AND pre_import_dump_verified_at IS NULL FROM import_runs WHERE id = ?")
                             .param(run)
                             .query(Boolean.class)
                             .single())

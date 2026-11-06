@@ -48,6 +48,16 @@ class JdbcLedgerPosting implements LedgerPosting {
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
+    public Totals totals(UUID entryId) {
+        return jdbc.sql(
+                        "SELECT coalesce(sum(debit), 0), coalesce(sum(credit), 0) FROM journal_lines WHERE entry_id = ?")
+                .param(entryId)
+                .query((rs, n) -> new Totals(rs.getLong(1), rs.getLong(2)))
+                .single();
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
     public PostedEntry reverse(ReversalRequest request) {
         Original original = jdbc.sql("""
                         SELECT branch_id, source_module, source_type, source_id, reverses_entry_id
