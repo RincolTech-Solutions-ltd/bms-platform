@@ -72,6 +72,9 @@ final class RowValidator {
     /** The longest {@code source_ref} kept as written; a longer column value is kept by its hash. */
     static final int MAX_REF_TEXT = 200;
 
+    private static final Pattern SAFE_NUMBER = Pattern.compile("^[+-]?\\d{1,15}(\\.\\d{1,6})?$");
+    private static final Pattern SAFE_CODE = Pattern.compile("^[A-Z][A-Z_]{1,39}$");
+
     /** The longest file name a message shows. */
     static final int MAX_FILE_NAME = 100;
 
@@ -238,7 +241,11 @@ final class RowValidator {
         for (RowCheck check : template.rowChecks(p.set.key())) {
             for (RowFinding finding : check.check(values)) {
                 for (String v : finding.params().values()) {
-                    if (v != null && personal.stream().anyMatch(s -> !s.isEmpty() && v.contains(s))) {
+                    if (v == null || !safeParam(v)) {
+                        throw new IllegalStateException("a row check gave " + finding.code()
+                                + " a parameter that is not a number, code or name");
+                    }
+                    if (personal.stream().anyMatch(s -> !s.isEmpty() && v.contains(s))) {
                         throw new IllegalStateException("a row check put a personal value into " + finding.code());
                     }
                 }
@@ -257,6 +264,20 @@ final class RowValidator {
             }
         }
         return new RowResult(normalised, t.sourceRef, List.copyOf(findings));
+    }
+
+    /**
+     * The only values a cross-field rule may give a placeholder (Lead ruling on #867): a number, a code in capitals
+     * ({@code FAB-001} is not one, a rule's code such as {@code UGX} or {@code SALE_QTY} is), or the name of one of the
+     * template's entity sets or fields. A person's name, phone or NIN is none of these.
+     */
+    boolean safeParam(String v) {
+        if (SAFE_NUMBER.matcher(v).matches() || SAFE_CODE.matcher(v).matches()) {
+            return true;
+        }
+        return template.entitySets().stream()
+                .anyMatch(s -> s.key().equals(v)
+                        || s.fields().stream().anyMatch(f -> f.name().equals(v)));
     }
 
     /** The message of a code, filled from the engine's own placeholders: never a cell's text. */

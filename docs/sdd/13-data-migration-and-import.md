@@ -899,7 +899,8 @@ operator's tooling calls the services, as it calls the upload and the commit.
   transaction bound to the business); a key repeated across the run ignoring case and spaces (`CODE_DUPLICATE`); a NIN
   repeated in the entity set within the run (`NIN_DUPLICATE`; a NIN the business already holds is matched by the
   template's linking step, section 13.9, with #136); then the template's cross-field rules (`rowChecks`), whose parameters
-  may not hold any personal value of the row (the engine refuses one that does). A row whose kept cells are all empty is
+  may only be a number, a code in capitals or a name of the template's entity sets and fields, and never a personal value
+  of the row (the engine refuses anything else). A row whose kept cells are all empty is
   `BLANK_ROW` and nothing else.
 - **The template contract grows.** A `Field` may be `personalData()` (never interpolated; a `phone` or `nin` always is), the
   set's key (`asKey()`, at most one, a `text`, which a `ref` to the set names) and have a `range(min, max)` (money and qty).
@@ -923,8 +924,9 @@ operator's tooling calls the services, as it calls the upload and the commit.
   deleted and written again in `import_issues` (code, severity, field, line, message, the original cell text, `open` or
   `resolved` for `info`), and each row's `normalised` and `source_ref` are set; `raw` is never changed (a column grant). A
   committed batch is read for its keys and references and never written; the triggers `import_issues_batch_kept` and
-  `import_rows_validation_kept` refuse it for every role but a migration and the removal of a business (a delete of the
-  rows themselves, the purge of #139, takes their issues with it through the foreign key). An issue's row is of its
+  `import_rows_validation_kept` refuse it for every role but a migration and the removal of a business, a delete cascaded
+  from the rows included: the purge of #139, which removes a committed batch's staged rows, brings its own way past the
+  guard (Lead ruling on #867). An issue's row is of its
   business and its batch (the foreign key `(tenant_id, batch_id, row_id)`). An `uploaded` run
   moves to `in_review`. Audited as `core.import_run.validated` with counts by code; the log line carries the run id and the
   counts by code only.
@@ -943,7 +945,7 @@ operator's tooling calls the services, as it calls the upload and the commit.
   fixture's names, phones or NINs; validating again stores the same issues, values and references; a committed batch is
   read and never written, by the service or by `bms_app` directly; another business can neither validate the run, read
   its issues nor lend it a reference; a cancelled run is not validated; a file read again between the passes is refused
-  with `batch_changed` and a file not yet read with `batch_not_parsed`; deleting a committed batch's rows takes their
-  issues; and, in `ImportCatalogueTest`, each code of another stage is asserted in its named test method, two long file
+  with `batch_changed` and a file not yet read with `batch_not_parsed`; deleting a committed batch's rows is refused by
+  the guard; and, in `ImportCatalogueTest`, each code of another stage is asserted in its named test method, two long file
   names fit a message, ambiguous commas are refused and a rule's personal parameter is refused), `RlsIsolationIT` (forced RLS on `import_issues`),
   `MigrationOrderIT` (V140 keeps every staged row) and `ModularityTest`.

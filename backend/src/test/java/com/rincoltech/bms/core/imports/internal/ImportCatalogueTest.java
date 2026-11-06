@@ -27,7 +27,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
@@ -301,8 +303,8 @@ class ImportCatalogueTest {
         assertThatThrownBy(() -> runWithCheck(values -> List.of(new RowFinding("NO_SUCH_CODE", null, Map.of()))))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("not in the template's catalogue");
-        assertThatThrownBy(() -> runWithCheck(
-                        values -> List.of(new RowFinding("FIXTURE_SALE_QTY_NOT_POSITIVE", "qty", Map.of("name", "x")))))
+        assertThatThrownBy(() -> runWithCheck(values ->
+                        List.of(new RowFinding("FIXTURE_SALE_QTY_NOT_POSITIVE", "qty", Map.of("name", "qty")))))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("not a message placeholder");
     }
@@ -335,15 +337,39 @@ class ImportCatalogueTest {
         assertThat(findings).allSatisfy(f -> assertThat(f.message().length()).isLessThanOrEqualTo(500));
     }
 
-    /** A cross-field rule cannot put a value of a personal field into a message, whatever key it uses (review of #867). */
+    /**
+     * A cross-field rule may give a placeholder only a number, a code in capitals or a name of the template, and never a
+     * value of a personal field, whatever key it uses (Lead ruling on #867).
+     */
     @Test
     void aRowCheckThatPutsAPersonalValueIntoAMessageIsRefused() {
+        assertThatThrownBy(() -> customerWithCheck("Fabricated Buyer Alpha", values -> (String) values.get("name")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("not a number, code or name");
+        // A name written in capitals looks like a code; it is still the row's personal value.
+        assertThatThrownBy(() -> customerWithCheck("FABRICATED", values -> (String) values.get("name")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("personal value");
+        assertThat(customerWithCheck("Fabricated Buyer Alpha", values -> "name"))
+                .extracting(RowValidator.Finding::message)
+                .contains("name on fab-buyers.csv line 3 must be above zero for a sale.");
+        RowValidator engine = new RowValidator(new FixtureShopTemplate(), catalogue(), null);
+        assertThat(engine.safeParam("12500")).isTrue();
+        assertThat(engine.safeParam("SALE_QTY")).isTrue();
+        assertThat(engine.safeParam("joined_on")).isTrue();
+        assertThat(engine.safeParam("0700000101x")).isFalse();
+        assertThat(engine.safeParam("Fabricated")).isFalse();
+    }
+
+    /** One customer row through a template whose customers rule gives the placeholder {@code range} the value given. */
+    private static List<RowValidator.Finding> customerWithCheck(
+            String name, Function<Map<String, Object>, String> param) {
         ImportTemplate leaky = new FixtureShopTemplate() {
             @Override
             public List<RowCheck> rowChecks(String entitySet) {
                 return "customers".equals(entitySet)
                         ? List.of(values -> List.of(new RowFinding(
-                                "FIXTURE_SALE_QTY_NOT_POSITIVE", "name", Map.of("range", (String) values.get("name")))))
+                                "FIXTURE_SALE_QTY_NOT_POSITIVE", "name", Map.of("range", param.apply(values)))))
                         : List.of();
             }
         };
@@ -352,14 +378,9 @@ class ImportCatalogueTest {
         SourceRow row = new SourceRow(
                 UUID.randomUUID(),
                 3,
-                Map.of(
-                        "Fab Buyer No", new RawCell("B-001", "text"),
-                        "Fab Buyer", new RawCell("Fabricated Buyer Alpha", "text")));
+                Map.of("Fab Buyer No", new RawCell("B-001", "text"), "Fab Buyer", new RawCell(name, "text")));
         engine.index(batch, row);
-
-        assertThatThrownBy(() -> engine.validate(batch, row))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("personal value");
+        return engine.validate(batch, row).findings();
     }
 
     @Test
@@ -410,6 +431,37 @@ class ImportCatalogueTest {
             }
         }
         return false;
+    }
+
+    /**
+     * A pending code leaves {@link #PENDING} with the step that produces it (Lead ruling on #867): this fails as soon as
+     * any main class other than the catalogue itself names the code, so the step that adds its producer must add the
+     * fixture row and move the code out of the list in the same change. JUSTIFICATION-A3: the Lead's ruling 3.
+     */
+    @Test
+    void aPendingCodeHasNoProducerYet() throws IOException {
+        assertThat(PENDING).containsOnlyKeys("ROW_CHANGED_SINCE_REVIEW", "CHANGED_SINCE_IMPORT");
+        assertThat(PENDING)
+                .containsEntry("ROW_CHANGED_SINCE_REVIEW", "#131")
+                .containsEntry("CHANGED_SINCE_IMPORT", "#133");
+        List<String> producers = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(Path.of("src/main/java"))) {
+            for (Path file : files.filter(f -> f.toString().endsWith(".java")).toList()) {
+                if (file.getFileName().toString().equals("ImportTemplates.java")) {
+                    continue;
+                }
+                String source = Files.readString(file);
+                PENDING.forEach((code, issue) -> {
+                    if (source.contains("\"" + code + "\"")) {
+                        producers.add(code + " (" + issue + ") in " + file);
+                    }
+                });
+            }
+        }
+
+        assertThat(producers)
+                .as("a pending code now has a producer: add its fixture row and remove it from PENDING")
+                .isEmpty();
     }
 
     @Test

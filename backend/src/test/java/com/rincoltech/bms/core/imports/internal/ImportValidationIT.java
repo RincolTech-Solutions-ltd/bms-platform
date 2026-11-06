@@ -227,9 +227,9 @@ class ImportValidationIT extends IntegrationTest {
                 .hasStackTraceContaining("the rows of a committed import batch never change");
         assertThatThrownBy(() -> asApp(t, "UPDATE import_rows SET raw = '{}' WHERE batch_id = ?", items))
                 .hasStackTraceContaining("permission denied");
-        // Removing the staged rows themselves (the purge of #139) takes their issues with them (review of #867).
-        assertThat(asApp(t, "DELETE FROM import_rows WHERE batch_id = ?", items))
-                .isPositive();
+        // Nor through the cascade from its rows: the purge of #139 brings its own way past the guard (Lead, #867).
+        assertThatThrownBy(() -> asApp(t, "DELETE FROM import_rows WHERE batch_id = ?", items))
+                .hasStackTraceContaining("the issues of a committed import batch never change");
     }
 
     @Test

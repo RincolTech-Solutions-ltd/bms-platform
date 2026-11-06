@@ -66,9 +66,9 @@ CREATE INDEX import_issues_by_code ON import_issues (tenant_id, batch_id, code);
 SELECT bms_apply_tenant_rls('import_issues');
 SELECT bms_grant_app('import_issues', 'SELECT, INSERT, DELETE');
 
--- No issue of a committed batch is written or removed by a validation. A delete cascaded from its row (pg_trigger_depth
--- above 1: the foreign key's own trigger) goes through: removing a committed batch's staged rows is the purge's decision
--- (#139), and the issues of a row go with it.
+-- No issue of a committed batch is written or removed, by a validation or by a cascade from its row. The purge of #139,
+-- which removes a committed batch's staged rows, needs its own way past this guard and adds it with its migration (Lead
+-- ruling on #867).
 CREATE FUNCTION import_issues_batch_kept() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -76,7 +76,7 @@ DECLARE
 BEGIN
     IF TG_OP = 'DELETE' THEN
         IF (session_user = 'bms_owner' AND coalesce(current_setting('bms.allow_mutation', true), '') = 'on')
-           OR bms_erasing(to_jsonb(OLD)) OR pg_trigger_depth() > 1 THEN
+           OR bms_erasing(to_jsonb(OLD)) THEN
             RETURN OLD;
         END IF;
         v_batch := OLD.batch_id;

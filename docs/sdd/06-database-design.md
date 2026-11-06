@@ -1334,7 +1334,7 @@ Added by `V140__import_validation.sql` (issue #130, chapter 13 sections 13.4, 13
   `core.imports.view_raw` only), `status` [`open`, `resolved`] (`info` is created `resolved`, a CHECK). Plain indexes
   `import_issues_by_row (row_id)` and `import_issues_by_code (tenant_id, batch_id, code)`. A new validation of a batch deletes
   its issues and writes them again; the trigger `import_issues_batch_kept` refuses an insert or delete for a `committed`
-  batch, except a delete cascaded from the row's own removal. Both triggers keep V102's bypass for a migration and for the removal and purge of a closed business.
+  batch, a delete cascaded from its rows included (the purge of #139 brings its own way past it). Both triggers keep V102's bypass for a migration and for the removal and purge of a closed business.
 
 ## 6.6 General ledger (RLS)
 
