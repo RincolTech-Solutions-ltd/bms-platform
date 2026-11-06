@@ -83,7 +83,8 @@ class ImportMappingsIT extends IntegrationTest {
 
     static void assertCode(Runnable call, String code) {
         assertThatThrownBy(call::run)
-                .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.code()).isEqualTo(code));
+                .isInstanceOfSatisfying(
+                        ApiException.class, e -> assertThat(e.code()).isEqualTo(code));
     }
 
     Batch upload(UUID runId, ParseOptions options) {
@@ -92,7 +93,12 @@ class ImportMappingsIT extends IntegrationTest {
                 t,
                 () -> uploads.upload(
                         runId,
-                        new Upload("fab-item-list.csv", new ByteArrayInputStream(bytes), bytes.length, operator, options)));
+                        new Upload(
+                                "fab-item-list.csv",
+                                new ByteArrayInputStream(bytes),
+                                bytes.length,
+                                operator,
+                                options)));
     }
 
     @Test
@@ -108,7 +114,8 @@ class ImportMappingsIT extends IntegrationTest {
         Mapping first = as(t, () -> mappings.save("fab-shop", document, operator, null));
         @SuppressWarnings("unchecked")
         Map<String, Object> enumMaps = (Map<String, Object>)
-                ((Map<String, Object>) ((Map<String, Object>) document.get("sources")).get("till_roll")).get("enum_maps");
+                ((Map<String, Object>) ((Map<String, Object>) document.get("sources")).get("till_roll"))
+                        .get("enum_maps");
         enumMaps.put("kind", Map.of("Sold", "sale", "Stock take", "adjustment", "Count", "adjustment"));
         Mapping second = as(t, () -> mappings.save("fab-shop", document, operator, "map_value from review question 3"));
 
@@ -117,13 +124,16 @@ class ImportMappingsIT extends IntegrationTest {
         assertThat(second.templateKey()).isEqualTo(FixtureShopTemplate.KEY);
         assertThat(second.templateVersion()).isEqualTo(1);
         assertThat(second.note()).isEqualTo("map_value from review question 3");
-        assertThat(as(t, () -> mappings.versions("fab-shop"))).extracting(Mapping::version).containsExactly(1, 2);
+        assertThat(as(t, () -> mappings.versions("fab-shop")))
+                .extracting(Mapping::version)
+                .containsExactly(1, 2);
         assertThat(as(t, () -> mappings.latest("fab-shop")).orElseThrow().id()).isEqualTo(second.id());
         assertThat(as(t, () -> mappings.get(first.id())).document())
                 .isEqualTo(first.document())
                 .isEqualTo(fixture("fixture_shop_v1.mapping.json"));
         assertThat(TestDatabase.owner()
-                        .sql("SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'core.import_mapping.saved'")
+                        .sql(
+                                "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'core.import_mapping.saved'")
                         .param(t.tenantId())
                         .query(Long.class)
                         .single())
@@ -133,7 +143,9 @@ class ImportMappingsIT extends IntegrationTest {
     @Test
     void anInvalidMappingIsRefusedWithEveryProblemAndNothingIsStored() {
         assertThatThrownBy(() -> as(
-                        t, () -> mappings.save("fab-bad", fixture("fixture_shop_v1.invalid.mapping.json"), operator, null)))
+                        t,
+                        () -> mappings.save(
+                                "fab-bad", fixture("fixture_shop_v1.invalid.mapping.json"), operator, null)))
                 .isInstanceOfSatisfying(ApiException.class, e -> {
                     assertThat(e.code()).isEqualTo("mapping_invalid");
                     assertThat(e.errors())
@@ -174,7 +186,8 @@ class ImportMappingsIT extends IntegrationTest {
                         "Fab Item Code", "Fab Item Label", "Fab Pack", "Fab Shelf Note", "Fab Colour", "Fab Aisle");
         // The ignored column is never stored (spec section 6.1).
         assertThat(TestDatabase.owner()
-                        .sql("SELECT count(*) FROM import_rows WHERE batch_id = ? AND raw -> 'Fab Shelf Note' IS NOT NULL")
+                        .sql(
+                                "SELECT count(*) FROM import_rows WHERE batch_id = ? AND raw -> 'Fab Shelf Note' IS NOT NULL")
                         .param(batch.id())
                         .query(Long.class)
                         .single())
@@ -183,7 +196,9 @@ class ImportMappingsIT extends IntegrationTest {
         Validation validation = as(t, () -> mappings.validateBatch(batch.id()));
 
         assertThat(validation.valid()).isFalse();
-        assertThat(validation.problems()).extracting(Problem::code).containsExactly("COLUMN_UNMAPPED", "COLUMN_UNMAPPED");
+        assertThat(validation.problems())
+                .extracting(Problem::code)
+                .containsExactly("COLUMN_UNMAPPED", "COLUMN_UNMAPPED");
         assertThat(validation.problems()).extracting(Problem::column).containsExactly("Fab Colour", "Fab Aisle");
         assertThat(validation.problems().toString()).doesNotContain("Fabricated Kettle", "blue");
 
@@ -208,7 +223,9 @@ class ImportMappingsIT extends IntegrationTest {
                 t,
                 () -> runs.commit(
                         runId,
-                        templates.require(batch.templateKey(), batch.templateVersion()).loader("items")));
+                        templates
+                                .require(batch.templateKey(), batch.templateVersion())
+                                .loader("items")));
         assertThat(outcome).isEqualTo(CommitOutcome.COMMITTED);
 
         Map<String, Object> changed = fixture("fixture_shop_v1.mapping.json");
@@ -235,9 +252,11 @@ class ImportMappingsIT extends IntegrationTest {
     void aStoredVersionIsNeverUpdatedOrDeleted() throws SQLException {
         Mapping v1 = as(t, () -> mappings.save("fab-shop", fixture("fixture_shop_v1.mapping.json"), operator, null));
 
-        assertThatThrownBy(() -> asApp(t.tenantId(), c -> execute(c, "UPDATE import_mappings SET note = 'x' WHERE id = ?", v1.id())))
+        assertThatThrownBy(() -> asApp(
+                        t.tenantId(), c -> execute(c, "UPDATE import_mappings SET note = 'x' WHERE id = ?", v1.id())))
                 .hasStackTraceContaining("permission denied");
-        assertThatThrownBy(() -> asApp(t.tenantId(), c -> execute(c, "DELETE FROM import_mappings WHERE id = ?", v1.id())))
+        assertThatThrownBy(
+                        () -> asApp(t.tenantId(), c -> execute(c, "DELETE FROM import_mappings WHERE id = ?", v1.id())))
                 .hasStackTraceContaining("permission denied");
         assertThatThrownBy(() -> TestDatabase.owner()
                         .sql("UPDATE import_mappings SET note = 'x' WHERE id = ?")
@@ -254,7 +273,9 @@ class ImportMappingsIT extends IntegrationTest {
         assertCode(() -> as(other, () -> mappings.parseOptions(mine.id(), "item_list")), "not_found");
         assertThat(as(other, () -> mappings.latest("fab-shop"))).isEmpty();
         assertThat(as(other, () -> mappings.versions("fab-shop"))).isEmpty();
-        assertThat(asApp(other.tenantId(), c -> count(c, "SELECT count(*) FROM import_mappings WHERE tenant_id = ?", t.tenantId())))
+        assertThat(asApp(
+                        other.tenantId(),
+                        c -> count(c, "SELECT count(*) FROM import_mappings WHERE tenant_id = ?", t.tenantId())))
                 .isZero();
         // Bound to the other business, a row for this one is refused by the policy's WITH CHECK.
         assertThatThrownBy(() -> asApp(other.tenantId(), c -> execute(c, """
@@ -265,9 +286,12 @@ class ImportMappingsIT extends IntegrationTest {
                         """, t.tenantId())))
                 .hasStackTraceContaining("row-level security");
         // The other business's own version 1 of the same name is its own.
-        Mapping theirs = as(other, () -> mappings.save("fab-shop", fixture("fixture_shop_v1.mapping.json"), operator, null));
+        Mapping theirs =
+                as(other, () -> mappings.save("fab-shop", fixture("fixture_shop_v1.mapping.json"), operator, null));
         assertThat(theirs.version()).isEqualTo(1);
-        assertThat(as(t, () -> mappings.versions("fab-shop"))).extracting(Mapping::id).containsExactly(mine.id());
+        assertThat(as(t, () -> mappings.versions("fab-shop")))
+                .extracting(Mapping::id)
+                .containsExactly(mine.id());
         // A batch of the other business cannot record this business's mapping.
         UUID theirRun = as(other, () -> runs.open(operator).id());
         byte[] bytes = ITEMS_CSV.getBytes(StandardCharsets.UTF_8);

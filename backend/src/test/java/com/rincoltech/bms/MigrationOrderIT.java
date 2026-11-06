@@ -3295,8 +3295,9 @@ class MigrationOrderIT {
                             .success)
                     .isTrue();
 
-            assertThat(owner.sql("SELECT status = 'parsed' AND row_count = 2 AND mapping_id IS NULL"
-                                    + " AND template_key IS NULL AND source_headers IS NULL FROM import_batches WHERE id = ?")
+            assertThat(owner.sql(
+                                    "SELECT status = 'parsed' AND row_count = 2 AND mapping_id IS NULL"
+                                            + " AND template_key IS NULL AND source_headers IS NULL FROM import_batches WHERE id = ?")
                             .param(batch)
                             .query(Boolean.class)
                             .single())

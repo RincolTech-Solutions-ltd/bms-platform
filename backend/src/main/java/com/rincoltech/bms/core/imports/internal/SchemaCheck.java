@@ -26,9 +26,31 @@ final class SchemaCheck {
     record Violation(String pointer, String reason) {}
 
     private static final List<String> KNOWN = List.of(
-            "$schema", "$id", "title", "$defs", "$ref", "type", "const", "enum", "properties", "required",
-            "additionalProperties", "propertyNames", "minProperties", "items", "minItems", "maxItems", "minLength",
-            "maxLength", "pattern", "minimum", "maximum", "anyOf", "allOf", "if", "then");
+            "$schema",
+            "$id",
+            "title",
+            "$defs",
+            "$ref",
+            "type",
+            "const",
+            "enum",
+            "properties",
+            "required",
+            "additionalProperties",
+            "propertyNames",
+            "minProperties",
+            "items",
+            "minItems",
+            "maxItems",
+            "minLength",
+            "maxLength",
+            "pattern",
+            "minimum",
+            "maximum",
+            "anyOf",
+            "allOf",
+            "if",
+            "then");
 
     private final Map<String, Object> root;
 
@@ -61,21 +83,19 @@ final class SchemaCheck {
             out.add(new Violation(at, "must be " + words(schema.get("const"))));
         }
         if (schema.get("enum") instanceof List<?> allowed && allowed.stream().noneMatch(a -> same(a, value))) {
-            out.add(new Violation(
-                    at,
-                    allowed.isEmpty()
-                            ? "is not allowed here"
-                            : "must be one of " + String.join(", ", allowed.stream().map(SchemaCheck::words).toList())));
+            out.add(new Violation(at, allowed.isEmpty() ? "is not allowed here" : "must be one of " + listed(allowed)));
         }
         if (value instanceof String s) {
             int length = s.codePointCount(0, s.length());
             if (schema.get("minLength") instanceof Number min && length < min.intValue()) {
-                out.add(new Violation(at, min.intValue() == 1 ? "must not be empty" : "must be at least " + min + " characters"));
+                out.add(new Violation(
+                        at, min.intValue() == 1 ? "must not be empty" : "must be at least " + min + " characters"));
             }
             if (schema.get("maxLength") instanceof Number max && length > max.intValue()) {
                 out.add(new Violation(at, "must be at most " + max + " characters"));
             }
-            if (schema.get("pattern") instanceof String p && !Pattern.compile(p).matcher(s).find()) {
+            if (schema.get("pattern") instanceof String p
+                    && !Pattern.compile(p).matcher(s).find()) {
                 out.add(new Violation(at, "is not in the expected form"));
             }
         }
@@ -144,9 +164,8 @@ final class SchemaCheck {
                 }
             }
         }
-        Map<String, Object> properties = schema.get("properties") instanceof Map<?, ?> p
-                ? (Map<String, Object>) p
-                : Map.of();
+        Map<String, Object> properties =
+                schema.get("properties") instanceof Map<?, ?> p ? (Map<String, Object>) p : Map.of();
         Object additional = schema.get("additionalProperties");
         for (Map.Entry<String, Object> e : object.entrySet()) {
             String name = e.getKey();
@@ -234,6 +253,10 @@ final class SchemaCheck {
             case Number x -> BigDecimal.valueOf(x.longValue());
             default -> throw new IllegalArgumentException("not a number");
         };
+    }
+
+    private static String listed(List<?> constants) {
+        return String.join(", ", constants.stream().map(SchemaCheck::words).toList());
     }
 
     /** A schema's own constants, never a value from the document, are quoted. */

@@ -136,12 +136,13 @@ public interface ImportTemplate {
         public static final Normaliser TRIM = new Normaliser("trim", s -> s == null ? null : s.strip());
 
         /** Trimmed, and every run of spaces inside one space. */
-        public static final Normaliser COLLAPSE_SPACES =
-                new Normaliser("collapse_spaces", s -> s == null ? null : s.strip().replaceAll("\\s+", " "));
+        public static final Normaliser COLLAPSE_SPACES = new Normaliser(
+                "collapse_spaces", s -> s == null ? null : s.strip().replaceAll("\\s+", " "));
 
         /** Spaces collapsed and upper case, for codes compared ignoring case. */
         public static final Normaliser UPPER = new Normaliser(
-                "upper", s -> s == null ? null : s.strip().replaceAll("\\s+", " ").toUpperCase(Locale.ROOT));
+                "upper",
+                s -> s == null ? null : s.strip().replaceAll("\\s+", " ").toUpperCase(Locale.ROOT));
 
         public Normaliser {
             Objects.requireNonNull(name, "name");

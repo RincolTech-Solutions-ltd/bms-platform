@@ -41,7 +41,8 @@ final class MappingValidator {
      * whose template is not found has the one problem {@code TEMPLATE_UNKNOWN}, and one that breaks the schema only its
      * {@code MAPPING_INVALID} problems, since the later checks read its shape.
      */
-    static List<Problem> check(Map<String, Object> document, BiFunction<String, Integer, Optional<ImportTemplate>> templates) {
+    static List<Problem> check(
+            Map<String, Object> document, BiFunction<String, Integer, Optional<ImportTemplate>> templates) {
         List<Problem> out = new ArrayList<>();
         if (document == null) {
             out.add(schemaProblem("", "must be an object"));
@@ -57,7 +58,8 @@ final class MappingValidator {
         }
         Optional<ImportTemplate> found = templates.apply(key, v.intValue());
         if (found.isEmpty()) {
-            out.add(problem("TEMPLATE_UNKNOWN", null, null, null, "/template", Map.of("template", key + "_v" + v.intValue())));
+            out.add(problem(
+                    "TEMPLATE_UNKNOWN", null, null, null, "/template", Map.of("template", key + "_v" + v.intValue())));
             return out;
         }
         ImportTemplate template = found.get();
@@ -84,7 +86,8 @@ final class MappingValidator {
      * per header neither mapped nor ignored, {@code REQUIRED_COLUMN_MISSING} per required field whose column is not among
      * them, {@code SOURCE_UNKNOWN} for a source the mapping does not have.
      */
-    static List<Problem> headers(ImportTemplate template, Map<String, Object> document, String sourceKey, List<String> headers) {
+    static List<Problem> headers(
+            ImportTemplate template, Map<String, Object> document, String sourceKey, List<String> headers) {
         List<Problem> out = new ArrayList<>();
         Map<String, Object> source = sources(document).get(sourceKey);
         if (source == null) {
@@ -110,7 +113,8 @@ final class MappingValidator {
         return out;
     }
 
-    private static void checkSource(ImportTemplate template, String key, Map<String, Object> source, List<Problem> out) {
+    private static void checkSource(
+            ImportTemplate template, String key, Map<String, Object> source, List<Problem> out) {
         EntitySet set = entitySet(template, (String) source.get("entity_set"));
         Map<String, String> seen = new LinkedHashMap<>();
         Map<String, String> feeds = new LinkedHashMap<>();

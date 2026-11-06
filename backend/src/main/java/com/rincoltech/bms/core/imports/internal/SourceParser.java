@@ -47,7 +47,8 @@ final class SourceParser {
      * names of the header row (ignored ones included) and of any other column a row holds (a cell past the header's
      * width, a key a later JSON line adds), in the order first met: what the mapping validator checks (issue #129).
      */
-    record Parsed(String sheetName, int headerRowNo, int columns, int rows, List<String> warnings, List<String> headers) {}
+    record Parsed(
+            String sheetName, int headerRowNo, int columns, int rows, List<String> warnings, List<String> headers) {}
 
     static Parsed parse(
             FileType type,
@@ -83,7 +84,8 @@ final class SourceParser {
             case XLSX -> {
                 Parsing.Sheet sheet = new Parsing.Sheet(limits, chunks);
                 String read = XlsxRows.read(source, sheetName, sheet);
-                parsed = new Parsed(read, sheet.headerRowNo(), sheet.columns(), sheet.rows(), warnings, chunks.headers());
+                parsed = new Parsed(
+                        read, sheet.headerRowNo(), sheet.columns(), sheet.rows(), warnings, chunks.headers());
             }
             case CSV -> {
                 Parsing.Sheet sheet = new Parsing.Sheet(limits, chunks);
@@ -91,7 +93,8 @@ final class SourceParser {
                     CsvRows.read(in, sheet, limits);
                 }
                 sheet.end();
-                parsed = new Parsed(null, sheet.headerRowNo(), sheet.columns(), sheet.rows(), warnings, chunks.headers());
+                parsed = new Parsed(
+                        null, sheet.headerRowNo(), sheet.columns(), sheet.rows(), warnings, chunks.headers());
             }
             case JSONL -> {
                 int columns;

@@ -77,7 +77,8 @@ public interface ImportUploads {
             requiredHeaders = requiredHeaders == null ? Set.of() : Set.copyOf(requiredHeaders);
             ignoredColumns = ignoredColumns == null ? Set.of() : Set.copyOf(ignoredColumns);
             if (headerRow < 0 || (mappingId == null) != (mappingSource == null)) {
-                throw new IllegalArgumentException("a header row of 0 or more, and a mapping with its source or neither");
+                throw new IllegalArgumentException(
+                        "a header row of 0 or more, and a mapping with its source or neither");
             }
         }
 

@@ -26,7 +26,7 @@ import org.springframework.stereotype.Service;
  * A vertical registers a template by declaring the bean in its own module; this class takes them through an
  * {@link ObjectProvider}, so it compiles and starts with none, and never names a vertical. Each template is checked once,
  * at start-up, and a template that fails a check stops the application with the reason, so a broken contract never reaches a
- * customer's run. The schemas are built once per template version.
+ * customer's run.
  */
 @Service
 class TemplateRegistry implements ImportTemplates {
@@ -35,7 +35,6 @@ class TemplateRegistry implements ImportTemplates {
     static final Pattern CODE = Pattern.compile("^[A-Z][A-Z0-9_]{1,59}$");
 
     private final Map<String, ImportTemplate> templates = new LinkedHashMap<>();
-    private final Map<String, Map<String, Object>> schemas = new LinkedHashMap<>();
 
     @Autowired
     TemplateRegistry(ObjectProvider<ImportTemplate> registered) {
@@ -51,7 +50,6 @@ class TemplateRegistry implements ImportTemplates {
             if (templates.putIfAbsent(id(t.key(), t.version()), t) != null) {
                 throw new IllegalStateException("import template " + t.id() + " is registered twice");
             }
-            schemas.put(id(t.key(), t.version()), TemplateSchema.of(t));
         }
     }
 
@@ -70,13 +68,10 @@ class TemplateRegistry implements ImportTemplates {
         return find(key, version).orElseThrow(() -> unknown(key, version));
     }
 
+    /** Built on each call, so no caller can change the document another reads. */
     @Override
     public Map<String, Object> schema(String key, int version) {
-        Map<String, Object> schema = schemas.get(id(key, version));
-        if (schema == null) {
-            throw unknown(key, version);
-        }
-        return schema;
+        return TemplateSchema.of(require(key, version));
     }
 
     @Override
@@ -101,13 +96,17 @@ class TemplateRegistry implements ImportTemplates {
     /** The checks of a template's contract; each failure names the template and what is wrong. */
     static void verify(ImportTemplate t) {
         String where = "import template " + t.key() + " version " + t.version() + ": ";
-        require(t.key() != null && KEY.matcher(t.key()).matches(), where + "the key must be lower-case letters, digits, _");
+        require(
+                t.key() != null && KEY.matcher(t.key()).matches(),
+                where + "the key must be lower-case letters, digits, _");
         require(t.version() > 0, where + "the version must be 1 or more");
         List<EntitySet> sets = t.entitySets();
         require(sets != null && !sets.isEmpty(), where + "it declares no entity set");
         Set<String> before = new HashSet<>();
         for (EntitySet set : sets) {
-            require(KEY.matcher(set.key()).matches(), where + "entity set " + set.key() + " is not a plain lower-case name");
+            require(
+                    KEY.matcher(set.key()).matches(),
+                    where + "entity set " + set.key() + " is not a plain lower-case name");
             require(!before.contains(set.key()), where + "entity set " + set.key() + " is declared twice");
             require(!set.fields().isEmpty(), where + "entity set " + set.key() + " has no field");
             Set<String> names = new HashSet<>();
@@ -120,10 +119,13 @@ class TemplateRegistry implements ImportTemplates {
                 require(
                         kind != Kind.ENUM
                                 || (!f.type().values().isEmpty()
-                                        && new HashSet<>(f.type().values()).size() == f.type().values().size()),
+                                        && new HashSet<>(f.type().values()).size()
+                                                == f.type().values().size()),
                         at + "an enum needs distinct values");
                 require(
-                        kind != Kind.REF || before.contains(f.type().ref()) || set.key().equals(f.type().ref()),
+                        kind != Kind.REF
+                                || before.contains(f.type().ref())
+                                || set.key().equals(f.type().ref()),
                         at + "a ref must name this entity set or one committed before it");
             }
             before.add(set.key());
@@ -132,7 +134,9 @@ class TemplateRegistry implements ImportTemplates {
         SHARED_CODES.forEach(c -> shared.add(c.code()));
         Set<String> own = new HashSet<>();
         for (IssueCode c : t.issueCodes()) {
-            require(CODE.matcher(c.code()).matches(), where + "code " + c.code() + " is not upper-case letters, digits, _");
+            require(
+                    CODE.matcher(c.code()).matches(),
+                    where + "code " + c.code() + " is not upper-case letters, digits, _");
             require(!shared.contains(c.code()), where + "code " + c.code() + " is a shared code");
             require(own.add(c.code()), where + "code " + c.code() + " is declared twice");
             require(!c.message().isBlank(), where + "code " + c.code() + " has no message");

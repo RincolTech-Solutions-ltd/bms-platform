@@ -73,7 +73,8 @@ public interface ImportTemplates {
                     "QTY_PRECISION",
                     Severity.BLOCKING,
                     "{field} on {file} line {line} has more than three decimal places."),
-            new IssueCode("DUPLICATE_SOURCE_REF", Severity.BLOCKING, "Line {line} repeats the reference of line {other}."),
+            new IssueCode(
+                    "DUPLICATE_SOURCE_REF", Severity.BLOCKING, "Line {line} repeats the reference of line {other}."),
             new IssueCode(
                     "REF_UNKNOWN",
                     Severity.BLOCKING,
@@ -103,8 +104,7 @@ public interface ImportTemplates {
                     Severity.BLOCKING,
                     "Line {line} was already imported with other content; correct it in the app, not by import."),
             // The mapping codes (issue #129): what the validator of a mapping reports.
-            new IssueCode(
-                    "TEMPLATE_UNKNOWN", Severity.REFUSED, "No template {template} is registered on this server."),
+            new IssueCode("TEMPLATE_UNKNOWN", Severity.REFUSED, "No template {template} is registered on this server."),
             new IssueCode(
                     "MAPPING_INVALID",
                     Severity.REFUSED,

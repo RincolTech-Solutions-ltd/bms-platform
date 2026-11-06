@@ -63,8 +63,8 @@ class FixtureShopTemplate implements ImportTemplate {
 
     @Override
     public List<IssueCode> issueCodes() {
-        return List.of(new IssueCode(
-                "FIXTURE_ITEM_UNNAMED", Severity.BLOCKING, "The item on line {line} has no name."));
+        return List.of(
+                new IssueCode("FIXTURE_ITEM_UNNAMED", Severity.BLOCKING, "The item on line {line} has no name."));
     }
 
     @Override

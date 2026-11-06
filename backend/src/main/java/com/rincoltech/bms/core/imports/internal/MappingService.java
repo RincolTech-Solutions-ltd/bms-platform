@@ -182,8 +182,8 @@ class MappingService implements ImportMappings {
                     "The batch has not been read yet, so there are no headers to check.");
         }
         if (batch.mappingId() == null) {
-            return new Validation(
-                    List.of(MappingValidator.problem("SOURCE_UNKNOWN", null, null, null, null, Map.of("source", "(none)"))));
+            return new Validation(List.of(
+                    MappingValidator.problem("SOURCE_UNKNOWN", null, null, null, null, Map.of("source", "(none)"))));
         }
         return validate(batch.mappingId(), batch.source(), batch.headers());
     }
@@ -224,7 +224,8 @@ class MappingService implements ImportMappings {
         if (problems.isEmpty()) {
             return;
         }
-        if (problems.size() == 1 && "TEMPLATE_UNKNOWN".equals(problems.getFirst().code())) {
+        if (problems.size() == 1
+                && "TEMPLATE_UNKNOWN".equals(problems.getFirst().code())) {
             throw new ApiException(
                     HttpStatus.UNPROCESSABLE_CONTENT,
                     "TEMPLATE_UNKNOWN",

@@ -92,7 +92,12 @@ class MappingValidatorTest {
     void anIgnoredColumnIsNotUnmappedAndHeadersCompareTrimmedIgnoringCase() {
         Map<String, Object> mapping = fixture("fixture_shop_v1.mapping.json");
         List<String> file = List.of(
-                "FAB ITEM CODE", "fab item label", "Fab Pack ", "Fab Asking Price", "Fab Line Type", "Fab In Use",
+                "FAB ITEM CODE",
+                "fab item label",
+                "Fab Pack ",
+                "Fab Asking Price",
+                "Fab Line Type",
+                "Fab In Use",
                 "Fab Shelf Note");
 
         assertThat(MappingValidator.headers(shop, mapping, "item_list", file)).isEmpty();
@@ -123,7 +128,10 @@ class MappingValidatorTest {
 
         assertThat(codes(problems))
                 .containsExactly(
-                        "FIELD_MAPPED_TWICE", "REQUIRED_FIELD_UNMAPPED", "MAP_FIELD_UNMAPPED", "SOURCE_REF_COLUMN_UNKNOWN");
+                        "FIELD_MAPPED_TWICE",
+                        "REQUIRED_FIELD_UNMAPPED",
+                        "MAP_FIELD_UNMAPPED",
+                        "SOURCE_REF_COLUMN_UNKNOWN");
         assertThat(problems).allSatisfy(p -> assertThat(p.severity()).isEqualTo("blocking"));
     }
 
@@ -199,12 +207,15 @@ class MappingValidatorTest {
         assertThat(schema.get("$schema")).isEqualTo("https://json-schema.org/draft/2020-12/schema");
         assertThat(schema.get("$id")).isEqualTo("urn:bms:imports:mapping:fixture_shop_v1");
         Map<String, Object> defs = (Map<String, Object>) schema.get("$defs");
-        assertThat(defs).containsKeys("source", "ignored", "source_ref", "entity_items", "entity_customers", "entity_sales");
-        Map<String, Object> sales = (Map<String, Object>) ((Map<String, Object>) defs.get("entity_sales")).get("properties");
+        assertThat(defs)
+                .containsKeys("source", "ignored", "source_ref", "entity_items", "entity_customers", "entity_sales");
+        Map<String, Object> sales =
+                (Map<String, Object>) ((Map<String, Object>) defs.get("entity_sales")).get("properties");
         Map<String, Object> enumMaps = (Map<String, Object>) sales.get("enum_maps");
         assertThat((Map<String, Object>) enumMaps.get("propertyNames")).containsEntry("enum", List.of("kind"));
         assertThatThrownBy(() -> registry.schema("no_such_template", 1))
-                .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.code()).isEqualTo("TEMPLATE_UNKNOWN"));
+                .isInstanceOfSatisfying(
+                        ApiException.class, e -> assertThat(e.code()).isEqualTo("TEMPLATE_UNKNOWN"));
     }
 
     @Test
@@ -220,7 +231,8 @@ class MappingValidatorTest {
 
         assertThat(MappingValidator.requiredColumns(shop, source(mapping, "till_roll")))
                 .containsExactly("Fab Item Code", "Fab When", "Fab Count", "Fab Paid", "Fab Entry Type");
-        assertThat(MappingValidator.ignoredColumns(source(mapping, "till_roll"))).containsExactly("Fab Cashier");
+        assertThat(MappingValidator.ignoredColumns(source(mapping, "till_roll")))
+                .containsExactly("Fab Cashier");
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -251,26 +263,35 @@ class MappingValidatorTest {
     void theRegistryRefusesATemplateItCannotTrust() {
         assertRefused(List.of(new FixtureShopTemplate(), new FixtureShopTemplate()), "registered twice");
         assertRefused(
-                List.of(template("later_ref", List.of(
-                        new EntitySet("sales", List.of(Field.required("item", FieldType.ref("items")))),
-                        new EntitySet("items", List.of(Field.required("code", FieldType.text(10))))))),
+                List.of(template(
+                        "later_ref",
+                        List.of(
+                                new EntitySet("sales", List.of(Field.required("item", FieldType.ref("items")))),
+                                new EntitySet("items", List.of(Field.required("code", FieldType.text(10))))))),
                 "a ref must name this entity set or one committed before it");
         assertRefused(
-                List.of(template("empty_enum", List.of(
-                        new EntitySet("items", List.of(Field.required("kind", FieldType.enumOf()))))))),
+                List.of(template(
+                        "empty_enum",
+                        List.of(new EntitySet("items", List.of(Field.required("kind", FieldType.enumOf())))))),
                 "an enum needs distinct values");
         assertRefused(
-                List.of(template("no_length", List.of(
-                        new EntitySet("items", List.of(Field.required("code", FieldType.text(0))))))),
+                List.of(template(
+                        "no_length",
+                        List.of(new EntitySet("items", List.of(Field.required("code", FieldType.text(0))))))),
                 "a text field needs a length above 0");
         assertRefused(
-                List.of(template("twice", List.of(new EntitySet(
-                        "items",
-                        List.of(Field.required("code", FieldType.text(5)), Field.optional("code", FieldType.money())))))),
+                List.of(template(
+                        "twice",
+                        List.of(new EntitySet(
+                                "items",
+                                List.of(
+                                        Field.required("code", FieldType.text(5)),
+                                        Field.optional("code", FieldType.money())))))),
                 "the field is declared twice");
         assertRefused(
                 List.of(template(
-                        "Bad-Key", List.of(new EntitySet("items", List.of(Field.required("code", FieldType.text(5)))))))),
+                        "Bad-Key",
+                        List.of(new EntitySet("items", List.of(Field.required("code", FieldType.text(5))))))),
                 "the key must be");
         ImportTemplate clash = new FixtureShopTemplate() {
             @Override
@@ -335,12 +356,14 @@ class MappingValidatorTest {
         Parsing.Sheet blank = new Parsing.Sheet(fixedAt2, sink);
         blank.row(1, List.of(Parsing.Cell.text("Fab Title")));
         assertThatThrownBy(() -> blank.row(3, List.of(Parsing.Cell.text("Fab Buyer No"))))
-                .isInstanceOfSatisfying(Parsing.Failure.class, f -> assertThat(f.code).isEqualTo("HEADER_NOT_FOUND"));
+                .isInstanceOfSatisfying(
+                        Parsing.Failure.class, f -> assertThat(f.code).isEqualTo("HEADER_NOT_FOUND"));
 
         Parsing.Sheet incomplete = new Parsing.Sheet(fixedAt2, sink);
         incomplete.row(1, List.of(Parsing.Cell.text("Fab Title")));
         assertThatThrownBy(() -> incomplete.row(2, List.of(Parsing.Cell.text("Fab Buyer"))))
-                .isInstanceOfSatisfying(Parsing.Failure.class, f -> assertThat(f.code).isEqualTo("HEADER_NOT_FOUND"));
+                .isInstanceOfSatisfying(
+                        Parsing.Failure.class, f -> assertThat(f.code).isEqualTo("HEADER_NOT_FOUND"));
     }
 
     private static void assertRefused(List<ImportTemplate> templates, String reason) {
