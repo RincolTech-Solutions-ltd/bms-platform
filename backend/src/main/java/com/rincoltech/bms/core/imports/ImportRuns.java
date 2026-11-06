@@ -59,13 +59,15 @@ public interface ImportRuns {
 
     /**
      * Continues a {@code committing} run from its first uncommitted batch, after a halt, a failure or a restart, only on
-     * the build and with the writers its dry run rehearsed (409 {@code dry_run_writer_differs}).
+     * the build and with the writers its dry run rehearsed (409 {@code dry_run_writer_differs}); after a new deploy, a new
+     * {@link #dryRun} of the batches it has left comes first, and one that failed is 409 {@code dry_run_failed}.
      */
     CommitOutcome resume(UUID runId);
 
     // JUSTIFICATION-A3: issue #132 adds the dry run and the stored reports to the run's API, new methods beside commit.
     /**
-     * The dry run of a run {@code in_review} (issue #132, ADR-027 decision 5): the commit's own batch code, with the writers
+     * The dry run of a run {@code in_review}, or of one {@code committing} for the batches it has left before a resume on
+     * a new build (issue #132, ADR-027 decision 5): the commit's own batch code, with the writers
      * the commit resolves (each batch's template loader), inside one outer transaction that is rolled back, so nothing is
      * written (no row, no sequence value, no file, no audit row); then its report is stored on the run with the stamp of the
      * run's inputs (the writers' identities and template versions and the application's version included), the writers'

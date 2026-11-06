@@ -113,7 +113,7 @@ class ImportRunService implements ImportRuns {
      * The application's build and commit: a dry run of another build no longer counts, and a run rehearsed on one build
      * neither starts nor resumes on another (reviews of #869). Null when the server knows neither; it then refuses both.
      */
-    private final String codeVersion;
+    private volatile String codeVersion;
 
     /** How long a dry run into a business that trades, under the approved override, may hold its rows (review of #869). */
     private volatile Duration tradingDryRunLimit;
@@ -161,6 +161,13 @@ class ImportRunService implements ImportRuns {
     /** For a test of the time limit only. */
     void tradingDryRunLimit(Duration limit) {
         this.tradingDryRunLimit = limit;
+    }
+
+    /** For a test of a server with no build identity (null) only; answers the identity it had. */
+    String buildIdentity(String identity) {
+        String had = codeVersion;
+        codeVersion = identity;
+        return had;
     }
 
     private void requireKnownBuild() {
@@ -444,6 +451,14 @@ class ImportRunService implements ImportRuns {
                 // again: a resume goes on only on the build, and with the writers, the dry run rehearsed for the
                 // batches left (Lead ruling 4 and the review of d8d1e5b on #869).
                 requireSameWriters(runId);
+                // A dry run of the batches left, taken for a new build, must not have failed either.
+                if (storedDryRun(runId).map(d -> d.report().failure() != null).orElse(false)) {
+                    throw new ApiException(
+                            HttpStatus.CONFLICT,
+                            "dry_run_failed",
+                            "Dry run failed",
+                            "The last dry run of this import stopped at a batch; fix the cause and run it again.");
+                }
                 // The trading guard is not asked again: it was passed when the run started, and the batches this run
                 // already committed are the business's records now.
                 jdbc.sql(
@@ -539,7 +554,9 @@ class ImportRunService implements ImportRuns {
                 Run run = find(runId, false);
                 requireDryRunPossible(run);
                 List<String> areas = tradingAreas();
-                if (!areas.isEmpty() && !run.tradingOverrideApproved()) {
+                // A run being imported passed the guard when it started, and its own batches are the business's
+                // records now; it is dry run again only for a resume on a new build, within the limit all the same.
+                if (!areas.isEmpty() && !run.tradingOverrideApproved() && !RunStates.COMMITTING.equals(run.status())) {
                     // As the commit's start refuses it, but with nothing audited: the dry run writes nothing.
                     throw new ApiException(
                             HttpStatus.CONFLICT,
@@ -739,12 +756,15 @@ class ImportRunService implements ImportRuns {
     }
 
     private void requireDryRunPossible(Run run) {
-        if (!RunStates.IN_REVIEW.equals(run.status())) {
+        // In review; or being imported, for the batches it has left, so a resume after a new deploy has a dry run on
+        // the build that resumes it (Lead on #869). The loop claim keeps a live commit out meanwhile.
+        if (!RunStates.IN_REVIEW.equals(run.status()) && !RunStates.COMMITTING.equals(run.status())) {
             throw new ApiException(
                     HttpStatus.CONFLICT,
                     "run_not_open",
                     "Import not open",
-                    "Only an import in review can be dry run; this one is " + RunStates.words(run.status()) + ".");
+                    "Only an import in review, or one being imported for the files it has left, can be dry run; this"
+                            + " one is " + RunStates.words(run.status()) + ".");
         }
         if (jdbc.sql(
                         "SELECT EXISTS (SELECT 1 FROM import_batches WHERE run_id = ? AND status IN ('uploaded', 'failed'))")
@@ -837,7 +857,12 @@ class ImportRunService implements ImportRuns {
         }
         if (!claimed) {
             DataSourceUtils.releaseConnection(connection, dataSource);
-            throw importInProgress();
+            // A commit, a resume or a dry run of the business holds the loop: said plainly (Lead on #869).
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "IMPORT_IN_PROGRESS",
+                    "Import in progress",
+                    "Another import of this business is being committed or dry run; try again when it ends.");
         }
         return new LoopClaim(connection, key);
     }

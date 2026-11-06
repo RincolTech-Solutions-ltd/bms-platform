@@ -1081,12 +1081,15 @@ commit only through test-only templates (`FixtureShopTemplate`, `ScriptedTemplat
   `CommitReport.HIDDEN`. A failure names the batch and the kind of failure (`batch 3 failed (IllegalStateException)`), never
   the message, which may quote a row. Each batch's part is stored in `import_batches.report` in its commit transaction, so
   `ImportRuns.commitReport(run)` is the committed batches' parts in order, resumed or not.
-- **The dry run** (`ImportRuns.dryRun(run, by)`, a run `in_review` only, 409 `run_not_open`; 409 `batch_not_parsed`
+- **The dry run** (`ImportRuns.dryRun(run, by)`, a run `in_review`, or `committing` for a resume on a new build, else 409
+  `run_not_open`; 409 `batch_not_parsed`
   while a file is not read or was refused). It first takes the business's commit loop, the session lock a commit holds
   (#779), and keeps it to the end, and every batch, of a dry run or a commit, takes the business's import key with
   `pg_try_advisory_xact_lock`, never a wait (Lead ruling 5 on #869): a commit or resume of the business while a dry run
   runs, a dry run while a commit runs, and a batch that finds the key taken are all answered at once with 409
-  `IMPORT_IN_PROGRESS` ("another import is being written for this business"), so a dry run never makes a commit fail at
+  `IMPORT_IN_PROGRESS` ("Another import of this business is being committed or dry run; try again when it ends." when
+  the loop is held, "Another import is being written for this business" when the key is), so a dry run never makes a
+  commit fail at
   a statement timeout. A server that cannot tell its build apart (no `build-info.properties`, no commit SHA) refuses the
   dry run, the commit and a resume with 503 `build_unknown`. The commit's trading guard is asked before any row is held:
   the writers' postings lock the business's ledger and stock rows until the rollback, so a business that already trades is
@@ -1113,8 +1116,10 @@ commit only through test-only templates (`FixtureShopTemplate`, `ScriptedTemplat
   The same text is part of the stamp, so a template, version, loader or deploy changed since the dry run makes it stop
   counting. The commit's start, and a resume for the batches it has left, refuse another build or writers that are not
   those lines (409 `dry_run_writer_differs`), so a run never commits code its dry run did not run: a loader's class name
-  alone does not tell two builds apart. A run part committed when a new build is deployed resumes only on the build it
-  was rehearsed on; otherwise it is restored from its pre-import dump (section 13.14).
+  alone does not tell two builds apart. A run part committed when a new build is deployed needs a new dry run before it
+  resumes (Lead on #869): a run `committing` and not being written may be dry run for the batches it has left, on the
+  build that will resume it, and a resume refuses a dry run that failed (409 `dry_run_failed`). The trading guard is not
+  asked of that dry run, as it is not asked of the resume, but the time limit holds while the business trades.
 - **When it counts.** `ImportRuns.dryRunReport(run)` answers the stored dry run and whether it still counts: its stamp is
   the run's stamp now. The stamp is an MD5 over the application's version and commit (another build of the templates' code),
   the cutover moment and policy, every batch's status, file, mapping version, parse and row count, every issue's status,
@@ -1152,7 +1157,8 @@ commit only through test-only templates (`FixtureShopTemplate`, `ScriptedTemplat
   buyer's number kept; a stored dry run stops counting after an override, a `map_value`, another run's commit into the
   business and a cancelled batch, and `ready` is refused until a new one; the writers are the templates', one line per
   batch, no method of `ImportRuns` takes a writer, and a run whose writers changed since its dry run is refused and left
-  untouched; a run rehearsed on another build does not resume, and a server with no build identity is none; a trading
+  untouched; a run rehearsed on another build does not resume until a new dry run of its batches left, and a server with
+  neither build-info nor a commit SHA refuses the dry run, the commit and a resume, leaving no trace; a trading
   business is not dry run without the approved override, nothing audited, and under it a dry run past its time limit is
   stopped and stored as failed; a name in capitals is hidden too; a dry run that finds the business's import key taken is answered at once and stores nothing, and a commit
   and a dry run of the business while a dry run runs are answered at once; a failed dry run is stored, leaves no trace

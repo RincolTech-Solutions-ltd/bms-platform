@@ -30,6 +30,7 @@ import com.rincoltech.bms.core.imports.ImportValidation.Issue;
 import com.rincoltech.bms.core.ledger.LedgerPosting;
 import com.rincoltech.bms.core.ledger.LedgerPosting.EntryRequest;
 import com.rincoltech.bms.core.ledger.LedgerPosting.Line;
+import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.Money;
 import com.rincoltech.bms.kernel.TenantContext;
 import com.rincoltech.bms.retail.RetailTestSupport;
@@ -824,10 +825,10 @@ class ImportPreviewIT extends IntegrationTest {
         assertCode(() -> as(t, () -> runs.resume(scripted(run, NOTHING))), "dry_run_writer_differs");
         assertThat(as(t, () -> runs.get(run)).status()).isEqualTo("committing");
 
-        TestDatabase.owner()
-                .sql("UPDATE import_runs SET dry_run_writer = ? WHERE id = ?")
-                .params(rehearsed, run)
-                .update();
+        // A resume after a new deploy needs a new dry run (Lead on #869): one of the batches left, on this build.
+        DryRun again = as(t, () -> runs.dryRun(scripted(run, NOTHING), operator));
+        assertThat(again.writer()).isEqualTo(rehearsed);
+        assertThat(as(t, () -> runs.get(run)).status()).isEqualTo("committing");
         assertThat(as(t, () -> runs.resume(scripted(run, NOTHING)))).isEqualTo(CommitOutcome.COMMITTED);
 
         // A server that knows neither its build nor its commit has no build to tell apart, so it refuses both.
@@ -845,6 +846,29 @@ class ImportPreviewIT extends IntegrationTest {
                 .isEqualTo("-|" + "f".repeat(40));
         assertThat(ImportRunService.codeVersion(null, new GitProperties(git), "fab1234"))
                 .isEqualTo("-|fab1234");
+    }
+
+    // JUSTIFICATION-A3: the Lead's ruling 2 on the FAIL of d8d1e5b asks for a test with both identities missing.
+    @Test
+    void aServerWithNeitherBuildInfoNorACommitShaRefusesTheDryRunTheCommitAndAResume() {
+        UUID review = emptyRun(t);
+        UUID ready = emptyRun(t);
+        as(t, () -> runs.dryRun(scripted(ready, NOTHING), operator));
+        as(t, () -> runs.transition(ready, "ready"));
+        as(t, () -> runs.recordPreImportDump(ready, "pre-import-fabricated.dump", Instant.now(), SHA));
+        // As a server built without build-info and started without BMS_GIT_SHA: no identity at all.
+        String had = service.buildIdentity(ImportRunService.codeVersion(null, null, ""));
+        try {
+            Map<String, Object> before = traces(t);
+            assertCode(() -> as(t, () -> runs.dryRun(scripted(review, NOTHING), operator)), "build_unknown");
+            assertCode(() -> as(t, () -> runs.commit(ready)), "build_unknown");
+            assertCode(() -> as(t, () -> runs.resume(ready)), "build_unknown");
+            assertThat(traces(t)).isEqualTo(before);
+        } finally {
+            service.buildIdentity(had);
+        }
+        assertThat(as(t, () -> runs.get(ready)).status()).isEqualTo("ready");
+        assertThat(as(t, () -> runs.commit(ready))).isEqualTo(CommitOutcome.COMMITTED);
     }
 
     // JUSTIFICATION-A3: the review of d8d1e5b on #869: a dry run holds the business's rows, so the guard and a limit.
@@ -963,8 +987,16 @@ class ImportPreviewIT extends IntegrationTest {
             assertThat(inside.await(20, TimeUnit.SECONDS)).isTrue();
             long again = System.nanoTime();
             try {
-                assertCode(() -> as(t, () -> runs.commit(ready)), "IMPORT_IN_PROGRESS");
-                assertCode(() -> as(t, () -> runs.dryRun(ready, operator)), "IMPORT_IN_PROGRESS");
+                // Said plainly (Lead on #869): the business's loop is held, by a commit or, here, a dry run.
+                for (Runnable call : List.<Runnable>of(
+                        () -> as(t, () -> runs.commit(ready)), () -> as(t, () -> runs.dryRun(ready, operator)))) {
+                    assertThatThrownBy(call::run).isInstanceOfSatisfying(ApiException.class, e -> {
+                        assertThat(e.code()).isEqualTo("IMPORT_IN_PROGRESS");
+                        assertThat(e.getMessage())
+                                .isEqualTo("Another import of this business is being committed or dry run; try again"
+                                        + " when it ends.");
+                    });
+                }
             } finally {
                 done.countDown();
             }
