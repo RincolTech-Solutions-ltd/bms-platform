@@ -376,7 +376,51 @@ class RetailV1Template implements ImportTemplate {
                     .list();
             return out;
         });
-        return new StockForecast(held == null ? Map.of() : held, journalled == null ? Map.of() : journalled);
+        // The ledger takes no entry at a closed branch, so the loader journals none there and none is predicted.
+        Set<String> inactive = readOnly.execute(s -> branches.all().stream()
+                .filter(b -> !b.active())
+                .map(b -> compare(b.code()))
+                .collect(Collectors.toSet()));
+        return new StockForecast(
+                held == null ? Map.of() : held,
+                journalled == null ? Map.of() : journalled,
+                inactive == null ? Set.of() : inactive);
+    }
+
+    // JUSTIFICATION-A3: the Lead's steer for round 4 asks one netting function shared by the forecast and the loader.
+    /**
+     * One branch's opening stock by data dictionary rule 5, the one rule the loader posts and the forecast predicts (Lead's
+     * steer on the review of 51cfb70): the branch's balance rows, the source's quantity of each item (which the legacy
+     * balance makes the derived one), valued at each item's current cost. Only items with a balance row count, as the old
+     * command journalled them; an item with history and no balance row is not journalled.
+     *
+     * @param qty the quantity of the branch's rows, the negatives included
+     * @param valueMinor what those rows are worth
+     * @param aboveZeroMinor what the rows above zero are worth: the opening journal's measure (the negative-stock rule)
+     */
+    record BranchOpening(BigDecimal qty, long valueMinor, long aboveZeroMinor) {
+
+        /** The journal to post on what import journals already hold; zero is none, below zero a journal the other way. */
+        long change(long journalledMinor) {
+            return Math.subtractExact(aboveZeroMinor, journalledMinor);
+        }
+    }
+
+    /** {@link BranchOpening} of a branch's balance rows, item to quantity, each item valued by {@code costMinor}. */
+    static BranchOpening branchOpening(
+            Map<String, BigDecimal> rows, java.util.function.ToLongFunction<String> costMinor) {
+        BigDecimal qty = BigDecimal.ZERO;
+        long value = 0;
+        long aboveZero = 0;
+        for (Map.Entry<String, BigDecimal> e : rows.entrySet()) {
+            long v = Quantities.value(e.getValue(), costMinor.applyAsLong(e.getKey()));
+            qty = qty.add(e.getValue());
+            value = Math.addExact(value, v);
+            if (e.getValue().signum() > 0) {
+                aboveZero = Math.addExact(aboveZero, v);
+            }
+        }
+        return new BranchOpening(qty, value, aboveZero);
     }
 
     /** The forecast of one run or one row: see {@link #forecast(Map)}. */
@@ -386,15 +430,20 @@ class RetailV1Template implements ImportTemplate {
         private final Map<String, Map<String, BigDecimal>> qty = new TreeMap<>();
         private final Map<String, Long> journalled = new TreeMap<>();
         private final List<Journal> journals = new ArrayList<>();
+        private final Set<String> inactive;
 
         StockForecast(Map<String, Long> held) {
-            this(held, Map.of());
+            this(held, Map.of(), Set.of());
         }
 
-        /** {@code journalledBefore}: what earlier imports' opening stock journals hold per branch (compare form). */
-        StockForecast(Map<String, Long> held, Map<String, Long> journalledBefore) {
+        /**
+         * {@code journalledBefore}: what earlier imports' opening stock journals hold per branch; {@code inactive}: the
+         * closed branches, where no journal is posted (both in compare form).
+         */
+        StockForecast(Map<String, Long> held, Map<String, Long> journalledBefore, Set<String> inactive) {
             this.cost = new HashMap<>(held);
             this.journalled.putAll(journalledBefore);
+            this.inactive = Set.copyOf(inactive);
         }
 
         @Override
@@ -426,21 +475,19 @@ class RetailV1Template implements ImportTemplate {
             return Quantities.value(q, cost.getOrDefault(product, 0L));
         }
 
-        /** Closes a batch: its journal per branch is the change in what the run's items above zero are worth. */
+        /** Closes a batch: its journal per branch is the loader's, {@link #branchOpening} netted on what is journalled. */
         private void close() {
             qty.forEach((branch, items) -> {
-                long now = 0;
-                for (Map.Entry<String, BigDecimal> e : items.entrySet()) {
-                    if (e.getValue().signum() > 0) {
-                        now = Math.addExact(now, value(e.getKey(), e.getValue()));
-                    }
+                if (inactive.contains(branch)) {
+                    return;
                 }
-                long change = Math.subtractExact(now, journalled.getOrDefault(branch, 0L));
+                BranchOpening opening = branchOpening(items, product -> cost.getOrDefault(product, 0L));
+                long change = opening.change(journalled.getOrDefault(branch, 0L));
                 if (change != 0) {
                     long amount = Math.abs(change);
                     journals.add(new Journal(branch, "inventory", amount, amount));
                 }
-                journalled.put(branch, now);
+                journalled.put(branch, opening.aboveZeroMinor());
             });
         }
 
@@ -449,13 +496,8 @@ class RetailV1Template implements ImportTemplate {
             close();
             List<Stock> stock = new ArrayList<>();
             qty.forEach((branch, items) -> {
-                BigDecimal onHand = BigDecimal.ZERO;
-                long worth = 0;
-                for (Map.Entry<String, BigDecimal> e : items.entrySet()) {
-                    onHand = onHand.add(e.getValue());
-                    worth = Math.addExact(worth, value(e.getKey(), e.getValue()));
-                }
-                stock.add(new Stock(branch, onHand, worth));
+                BranchOpening opening = branchOpening(items, product -> cost.getOrDefault(product, 0L));
+                stock.add(new Stock(branch, opening.qty(), opening.valueMinor()));
             });
             return new Balances(stock, List.of(), List.of(), List.of(), List.copyOf(journals));
         }

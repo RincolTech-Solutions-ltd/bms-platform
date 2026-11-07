@@ -38,6 +38,7 @@ import java.util.function.Supplier;
 import org.assertj.core.groups.Tuple;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.http.HttpEntity;
@@ -197,6 +198,69 @@ class RetailV1TemplateIT extends IntegrationTest {
         // Fabricated figures worked out by hand: KLA 12.5 x 700 + 1.5 x 2500, ENT 5 x 700 + 2 x 4000; ENT's -1 of
         // TS-002 is listed for the first stock-take, never journalled.
         assertThat(state(t)).contains("journal|ENT|inventory|11500|0", "journal|KLA|inventory|12500|0");
+        ImportReconciliation.Report r = as(t, () -> reconciliation.latest(run)).orElseThrow();
+        assertThat(r.signable()).as(r.render()).isTrue();
+    }
+
+    // JUSTIFICATION-A3: the Lead's steer for round 4 asks these two integration tests (must-fix B and C).
+    /**
+     * Must-fix C of the review of 51cfb70 (Lead's steer): on a business the command imported, the same export uploaded
+     * through the screens previews no journal, its dry run matches the preview, and its commit posts no second journal
+     * and writes nothing twice: the books are the command's.
+     */
+    @Test
+    void theSameExportThroughTheScreensAfterTheCommandPostsNoSecondJournalAndWritesNoDuplicates() throws IOException {
+        ImportReport command = importer.run(t.slug(), RetailImportIT.SAMPLE, false);
+        assertThat(command.failed()).as(command.render()).isFalse();
+        List<String> before = state(t);
+        assertThat(owner("SELECT count(*) FROM journal_entries WHERE tenant_id = ?", t))
+                .isEqualTo(3L);
+
+        UUID run = reviewed(t, "retail-export-upload", exportMapping(), RetailImportIT.SAMPLE, exportFiles());
+        DryRun dry = as(t, () -> runs.dryRun(run, operator));
+
+        assertThat(dry.report().failure()).as(dry.report().render()).isNull();
+        assertThat(dry.previewMatches()).as(dry.report().render()).isTrue();
+        assertThat(dry.report().journals()).as(dry.report().render()).isEmpty();
+        committed(t, run);
+
+        assertThat(owner("SELECT count(*) FROM journal_entries WHERE tenant_id = ?", t))
+                .as("no second journal")
+                .isEqualTo(3L);
+        assertThat(state(t)).as("no duplicates: the books are the command's").isEqualTo(before);
+    }
+
+    /**
+     * Must-fix B of the review of 51cfb70 (Lead's steer): a credit sale whose buyer is not in customers.jsonl. The loader
+     * creates no customer for it (a sales row only looks the buyer up, {@code RetailImporter.sales}); the sale is written
+     * and registered, and the reconciliation, which finds every record the run wrote, ties.
+     */
+    @Test
+    void aCreditSaleNamingABuyerMissingFromTheCustomersFileCreatesNoUnregisteredRecord(@TempDir Path dir)
+            throws IOException {
+        Files.writeString(dir.resolve("categories.jsonl"), "{\"name\": \"Test Category\"}\n");
+        Files.writeString(dir.resolve("units.jsonl"), "{\"name\": \"piece\"}\n");
+        Files.writeString(dir.resolve("products.jsonl"), """
+                {"code": "TB-7", "description": "Test cup seven", "category": "Test Category", "unit": "piece", "cost_minor": 100, "sell_minor": 150}
+                """);
+        Files.writeString(dir.resolve("sales.jsonl"), """
+                {"source_ref": "S-77", "branch": "HQ", "product_code": "TB-7", "qty": "1", "unit_price_minor": 150, "unit_cost_minor": 100, "payment_method": "credit", "buyer": "Test Buyer 77", "sold_at": "2026-09-01T10:00:00"}
+                """);
+        Files.writeString(dir.resolve("balances.jsonl"), """
+                {"branch": "HQ", "product_code": "TB-7", "qty": "0"}
+                """);
+        UUID run = reviewed(t, "retail-export-buyer", exportMapping(), dir, exportFiles());
+        committed(t, run);
+
+        assertThat(owner("SELECT count(*) FROM retail_customers WHERE tenant_id = ?", t))
+                .as("no customer is created by a sales row")
+                .isZero();
+        assertThat(owner("SELECT count(*) FROM retail_sales WHERE tenant_id = ?", t))
+                .isEqualTo(1L);
+        assertThat(owner("""
+                        SELECT count(*) FROM retail_sales s WHERE s.tenant_id = ?
+                           AND NOT EXISTS (SELECT 1 FROM import_refs r WHERE r.target_id = s.id)
+                        """, t)).as("the sale is registered").isZero();
         ImportReconciliation.Report r = as(t, () -> reconciliation.latest(run)).orElseThrow();
         assertThat(r.signable()).as(r.render()).isTrue();
     }

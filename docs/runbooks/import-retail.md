@@ -287,11 +287,11 @@ The import is idempotent for the data it imports:
   never silently changed.
 - The opening journal is posted once per branch (`already posted, not posted again`), and so is
   the cash opening journal of each shop (`retail.cash_opening:<branch>`). Since issue #135 the stock
-  opening journal is posted by the import framework for the change in what the business's imported
-  stock above zero is worth (every import's history and legacy balances, an earlier or stopped
-  run's and the old command's included), less what every import's opening journals already hold.
-  So a re-run that adds history (new `source_ref` values) posts a journal for that stock, a run
-  resumed after a stop journals the history the stopped run wrote, and one that adds nothing posts
+  opening journal is posted by the import framework for what the branch's balance rows above zero
+  are worth (the source's quantities, which the legacy balances make the derived ones), less what
+  every import's opening journals already hold (an earlier or stopped run's and the old
+  command's included). So a run resumed after a stop journals what the stopped run did not, a
+  re-run whose balances changed posts the difference, and one whose balances are unchanged posts
   none. Stock is valued at each item's current cost: if a cost was changed in the app since the
   earlier import, a re-run posts that difference too, said in its report line. At a branch that
   is now inactive nothing is journalled: the report lists the change (`branch BR2 is inactive; its
@@ -306,7 +306,12 @@ The import is idempotent for the data it imports:
   business's imported stock and the balances differ (sales made in the app since), run the
   re-import through the command instead. A second upload through the screens after an earlier
   one is previewed without the earlier upload's journals; re-import such a business through the
-  command too.
+  command too. For the same reason a command run after a screens upload changes what that
+  upload's reconciliation predicts if it is computed again: reconcile and sign an upload before
+  running the command on the business.
+- A history row (`source_ref`) is imported once. Uploaded again, through the command or the
+  screens, it is counted existing whatever its content, with no issue raised: a corrected sale or
+  restock is corrected in the app, not by import.
 - Only one command runs per business. A second one started while the first is writing, or within
   15 minutes of its last file, is refused (`Another import is being written for this business`);
   wait and run it again. A run left `committing` for longer by a killed process is cancelled by

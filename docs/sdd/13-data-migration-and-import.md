@@ -666,7 +666,7 @@ transaction that is rolled back, and prints the same report.
 | Sales, restocks, usage and damage | Historical documents and movements, no journals, keyed by `source_ref` in `import_refs` by key alone (`sales.jsonl\|-\|ref:<source_ref>#by-key`, and still in `retail_import_refs` until the contract step, #135); each movement's `business_date` is the source row's sale, purchase or usage date in the tenant's zone, so valuation `as_of` and daily profit read them by business date |
 | Restocks of kind `adjustment` or `return` | `adjustment` or `return` movements, not purchases, with no supplier payable |
 | Restock price changes | An `import` history row where consecutive restocks of a product changed its cost or sell price |
-| Balances | One `legacy_balance` movement per branch and product, equal to the source quantity less the balance the imported history left, so the derived balance equals the source exactly, dated with the import date as its business date; then one opening journal per branch, dated the same day, (debit `inventory`, credit `opening_balance_equity`) for the positive balances at the product's current cost, posted through the framework's `openingJournal` since #135 as the change in what the business's imported items above zero are worth less what its import opening journals hold, so a re-run that writes nothing reports it already posted and a resumed run journals the history a stopped one wrote. A balance the history already gives (a zero difference) writes nothing and counts as existing |
+| Balances | One `legacy_balance` movement per branch and product, equal to the source quantity less the balance the imported history left, so the derived balance equals the source exactly, dated with the import date as its business date; then one opening journal per branch, dated the same day, (debit `inventory`, credit `opening_balance_equity`) for the positive balances at the product's current cost, posted through the framework's `openingJournal` since #135 as what the branch's balance rows above zero are worth less what its import opening journals hold, so a re-run that writes nothing reports it already posted and a resumed run journals the history a stopped one wrote. A balance the history already gives (a zero difference) writes nothing and counts as existing |
 
 **Never guess, never lose a row (13.2).** A row with an unknown product or branch code, a missing
 or malformed field, a duplicate `source_ref`, a duplicate product code or a duplicate balance is
@@ -1407,12 +1407,14 @@ section 4.1 and Appendix A).**
   back as the export's lines and run through the same file code, so a sheet read with a mapping and the export read by
   the command write one way. Nothing is kept from one batch to the next: the names a products row may use are the
   catalogue's, the instant before the history is the stock ledger's, and each branch's opening stock journal is posted
-  through `openingJournal` (ledger type `retail.import_opening`, source module `core.imports`) for the change in what the
-  business's imported items above zero are worth (every import's historical movements, whichever run wrote them, V145's
-  copies of the old command's included), less what every import's opening stock journals already hold, read from the
-  ledger (the rules of #872 and #873: a negative balance is never journalled and is listed for the first stock-take; each
-  item is netted over all its imported movements; a fall is a journal the other way). A run resumed after a stop therefore
-  journals the history the stopped run wrote. Every row the loader writes is registered, the records it matched included, so the
+  through `openingJournal` (ledger type `retail.import_opening`, source module `core.imports`) for what the branch's
+  balance rows above zero are worth at each item's current cost (the source's quantity, which the legacy balance makes
+  the derived one, whichever run wrote the history), less what every import's opening stock journals already hold, read
+  from the ledger (the rules of #872 and #873: a negative balance is never journalled and is listed for the first
+  stock-take; a fall is a journal the other way; an item with history and no balance row is not journalled, as the old
+  command did). The forecast predicts by the same function (`RetailV1Template.branchOpening`), netted on the journals
+  the command's runs and V145 registered, so the same export uploaded after the command previews and posts nothing. A
+  run resumed after a stop journals what the stopped run did not. Every row the loader writes is registered, the records it matched included, so the
   reconciliation finds each one in the books.
 - **The wrapper.** `import-retail --tenant --dir [--dry-run] [--first-live-date]` keeps its interface, its tolerant reading
   of the export and its report, and runs on the framework (`ImportCommandRuns`): a run of origin `import_retail`, one

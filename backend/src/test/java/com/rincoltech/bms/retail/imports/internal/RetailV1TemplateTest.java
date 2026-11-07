@@ -114,16 +114,39 @@ class RetailV1TemplateTest {
     @Test
     void theForecastNetsWhatAnEarlierImportJournalled() {
         ImportForecast f = new RetailV1Template.StockForecast(
-                Map.of(), Map.of(RetailV1Template.compare("KLA"), 8_750L, RetailV1Template.compare("ENT"), 1_000L));
+                Map.of(),
+                Map.of(RetailV1Template.compare("KLA"), 8_750L, RetailV1Template.compare("ENT"), 1_000L),
+                Set.of(RetailV1Template.compare("JJA")));
         f.batch(1);
         f.row("products", Map.of("code", "TS-001", "cost_minor", 700L));
         f.batch(2);
         f.row("balances", Map.of("branch", "KLA", "product_code", "TS-001", "qty", new BigDecimal("12.5")));
         f.row("balances", Map.of("branch", "ENT", "product_code", "TS-001", "qty", new BigDecimal("2")));
+        f.row("balances", Map.of("branch", "JJA", "product_code", "TS-001", "qty", new BigDecimal("1")));
 
-        // KLA: 12.5 x 700 is already journalled, nothing more; ENT: 1,400 less the 1,000 held.
+        // KLA: 12.5 x 700 is already journalled, nothing more; ENT: 1,400 less the 1,000 held; JJA is closed, so the
+        // loader posts none there and none is predicted.
         assertThat(f.balances().journals())
                 .containsExactly(new ImportForecast.Journal(RetailV1Template.compare("ENT"), "inventory", 400, 400));
+    }
+
+    // JUSTIFICATION-A3: the Lead's steer for round 4 asks the shared netting function to be shown; a test of its own.
+    /** The one rule the loader posts and the forecast predicts (Lead's steer on the review of 51cfb70). */
+    @Test
+    void theOpeningOfABranchValuesItsBalanceRowsAndJournalsOnlyThoseAboveZero() {
+        Map<String, BigDecimal> rows = new LinkedHashMap<>();
+        rows.put("TS-001", new BigDecimal("12.5"));
+        rows.put("TS-009", new BigDecimal("-3"));
+        Map<String, Long> cost = Map.of("TS-001", 700L, "TS-009", 9_000L);
+
+        RetailV1Template.BranchOpening o = RetailV1Template.branchOpening(rows, cost::get);
+
+        assertThat(o.qty()).isEqualByComparingTo("9.5");
+        assertThat(o.valueMinor()).isEqualTo(8_750 - 27_000);
+        assertThat(o.aboveZeroMinor()).isEqualTo(8_750);
+        assertThat(o.change(0)).isEqualTo(8_750);
+        assertThat(o.change(8_750)).as("already journalled").isZero();
+        assertThat(o.change(10_000)).as("a fall, the other way").isEqualTo(-1_250);
     }
 
     @Test

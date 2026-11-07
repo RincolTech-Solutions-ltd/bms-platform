@@ -163,11 +163,15 @@ public final class ImportReport {
             out.append("  none\n");
         }
         long total = 0;
+        long falls = 0;
         for (Opening o : openings) {
-            // A fall is a journal the other way: it is netted out of the total, not added as a debit.
-            total = FALL.equals(o.status())
-                    ? Math.subtractExact(total, o.debitMinor())
-                    : Math.addExact(total, o.debitMinor());
+            // A fall is a journal the other way: totalled on a line of its own, never added to or netted from the
+            // debits of the total (re-review of 51cfb70, nice-to-have 3).
+            if (FALL.equals(o.status())) {
+                falls = Math.addExact(falls, o.debitMinor());
+            } else {
+                total = Math.addExact(total, o.debitMinor());
+            }
             out.append(String.format(
                     "  %-10s debit %15d  credit %15d  %s%s%n",
                     o.branch(),
@@ -176,7 +180,14 @@ public final class ImportReport {
                     o.status(),
                     o.entryNo() == null ? "" : " " + o.entryNo()));
         }
-        out.append(String.format("  %-10s debit %15d  credit %15d%n%n", "total", total, total));
+        if (falls == 0) {
+            out.append(String.format("  %-10s debit %15d  credit %15d%n%n", "total", total, total));
+        } else {
+            out.append(String.format("  %-10s debit %15d  credit %15d%n", "total", total, total));
+            out.append(String.format(
+                    "  %-10s credit inventory %15d, debit opening balance equity %15d%n%n",
+                    "the other way", falls, falls));
+        }
         if (!cashOpenings.isEmpty()) {
             out.append("cash book opening journals (debit cash on hand, bank, savings reserve and one owner advances "
                     + "line per outstanding advance, credit opening balance equity):\n");

@@ -2901,8 +2901,8 @@ as `bms_app` under the tenant's row-level security:
   consecutive restocks of a product carried different prices.
 - **The opening journal**: one per branch (section 6.11.2), for the positive balances only. Since #135 it is posted
   through the import framework's `openingJournal` (source module `core.imports`, ledger type `retail.import_opening`),
-  registered in `import_refs` as `ledger.journal_entry`, for the change in what the business's imported items above zero
-  are worth (every import's historical movements) less what every import's opening stock journals hold.
+  registered in `import_refs` as `ledger.journal_entry`, for what the branch's balance rows above zero are worth less
+  what every import's opening stock journals hold.
 - **On the framework (#135).** Every file the command reads, and every batch of a run of the import screens read with a
   mapping onto the canonical template `retail_v1`, is one batch of a run in `import_runs` (`origin` `import_retail` for the
   command) written by the same code. Each record it makes (a branch, category, unit, item, supplier, credit buyer, sale,
