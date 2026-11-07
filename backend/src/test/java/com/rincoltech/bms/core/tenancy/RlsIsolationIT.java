@@ -1250,8 +1250,8 @@ public class RlsIsolationIT {
                         + " 'fab-items.csv|-|ref:FAB-001#0123456789abcdef', 'test.record', ?)")
                 .params(UUID.randomUUID(), t.tenantId(), importRun, importBatch, UUID.randomUUID())
                 .update();
-        // The reconciliation and its sign-off (migration V144, #134): a committed run, its fabricated reconciliation and
-        // the sign-off of it, the name typed fabricated. JUSTIFICATION-A3: the factory rows of the two new tables.
+        // The reconciliation and its sign-off (migration V144, #134): a committed run, its fabricated reconciliation
+        // and the sign-off of it, the name typed fabricated. JUSTIFICATION-A3: the factory rows of the two new tables.
         UUID committedRun = UUID.randomUUID();
         owner.sql("INSERT INTO import_runs (id, tenant_id, created_by, status) VALUES (?, ?, ?, 'committed')")
                 .params(committedRun, t.tenantId(), user)

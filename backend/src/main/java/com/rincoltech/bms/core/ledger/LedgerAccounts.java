@@ -51,7 +51,7 @@ public interface LedgerAccounts {
      */
     long balanceBySource(String systemKey, String sourceModule, String sourceType);
 
-    // JUSTIFICATION-A3: issue #134, the reconciliation reads the journals it checks from the ledger through its own port.
+    // JUSTIFICATION-A3: issue #134, the reconciliation reads its journals through the ledger's own port.
     /**
      * The lines of these entries as the ledger holds them (issue #134, the import reconciliation): each with its entry, the
      * entry's branch, day and source, the account's {@code system_key} (null for an account without one), and its debit and

@@ -103,7 +103,9 @@ public interface ImportReconciliation {
             out.append("run: ").append(runId).append('\n');
             out.append("version: ").append(version).append('\n');
             out.append("as at: ").append(asAt).append('\n');
-            out.append("signable: ").append(signable ? "yes" : "no, a difference is not itemised").append("\n\n");
+            out.append("signable: ")
+                    .append(signable ? "yes" : "no, a difference is not itemised")
+                    .append("\n\n");
             for (Section s : sections) {
                 out.append("== ").append(s.key()).append(": ").append(s.title()).append('\n');
                 for (Fact f : s.facts()) {
@@ -115,12 +117,7 @@ public interface ImportReconciliation {
                 for (Check c : s.checks()) {
                     out.append(String.format(
                             "%-40s %-6s %20s %20s %20s %20s%n",
-                            c.label(),
-                            c.unit(),
-                            c.source(),
-                            c.system(),
-                            c.difference(),
-                            c.unitemised()));
+                            c.label(), c.unit(), c.source(), c.system(), c.difference(), c.unitemised()));
                 }
                 if (!s.items().isEmpty()) {
                     out.append("itemised:\n");

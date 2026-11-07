@@ -284,7 +284,8 @@ class FixtureShopTemplate implements ImportTemplate {
                                 """)
                         .param(journals.toArray(UUID[]::new))
                         .query((rs, n) -> {
-                            String key = rs.getString(1) + "|" + bucket(rs.getDate(2).toLocalDate(), asAt);
+                            String key =
+                                    rs.getString(1) + "|" + bucket(rs.getDate(2).toLocalDate(), asAt);
                             long[] b = buckets.computeIfAbsent(key, k -> new long[2]);
                             b[0]++;
                             b[1] = Math.addExact(b[1], rs.getLong(3));

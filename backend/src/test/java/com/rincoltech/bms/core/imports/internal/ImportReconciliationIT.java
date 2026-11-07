@@ -160,7 +160,8 @@ class ImportReconciliationIT extends IntegrationTest {
 
     static void assertCode(Runnable call, String code) {
         assertThatThrownBy(call::run)
-                .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.code()).isEqualTo(code));
+                .isInstanceOfSatisfying(
+                        ApiException.class, e -> assertThat(e.code()).isEqualTo(code));
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -317,16 +318,22 @@ class ImportReconciliationIT extends IntegrationTest {
                                 qty = qty.add(counted);
                                 value += amount;
                             } else if (decided) {
-                                boolean credit = FixtureShopTemplate.RECEIVABLE.neededBy().test(v);
-                                checkpoint.register(row.sourceRef(), credit ? "test.credit_sale" : "test.cash_sale", record);
-                                if (credit && Policy.OPEN_FROM_LIST.equals(
-                                        checkpoint.policy(Policy.RECEIVABLE).orElse(null))) {
+                                boolean credit = FixtureShopTemplate.RECEIVABLE
+                                        .neededBy()
+                                        .test(v);
+                                checkpoint.register(
+                                        row.sourceRef(), credit ? "test.credit_sale" : "test.cash_sale", record);
+                                if (credit
+                                        && Policy.OPEN_FROM_LIST.equals(checkpoint
+                                                .policy(Policy.RECEIVABLE)
+                                                .orElse(null))) {
                                     owed += amount;
                                 }
                             } else if (v.get("customer") != null) {
                                 checkpoint.register(row.sourceRef(), "test.loan", record);
                                 lent += amount;
-                                LocalDate on = at.atZone(FixtureShopTemplate.ZONE).toLocalDate();
+                                LocalDate on =
+                                        at.atZone(FixtureShopTemplate.ZONE).toLocalDate();
                                 lentOn = lentOn == null || on.isBefore(lentOn) ? on : lentOn;
                                 long[] b = buckets.computeIfAbsent(FixtureShopTemplate.bucket(at), k -> new long[2]);
                                 b[0]++;
@@ -416,7 +423,13 @@ class ImportReconciliationIT extends IntegrationTest {
         assertThat(r.asAt()).isEqualTo(FixtureShopTemplate.AS_AT);
         assertThat(r.sections())
                 .extracting(Section::key)
-                .containsExactly("counts", "stock_quantity", "stock_value", "receivables", "loan_principal", "arrears",
+                .containsExactly(
+                        "counts",
+                        "stock_quantity",
+                        "stock_value",
+                        "receivables",
+                        "loan_principal",
+                        "arrears",
                         "ledger");
         List<Check> notTied = r.sections().stream()
                 .flatMap(s -> s.checks().stream())
@@ -427,8 +440,9 @@ class ImportReconciliationIT extends IntegrationTest {
         assertThat(r.sha256()).isEqualTo(ReconciliationService.sha256(r.render()));
 
         // The system side is the books, worked out by hand from the golden files: the stock take of till line 4 (1.5 of
-        // FAB-900 worth a fabricated 1000), the sale of till line 2 to buyer B-001 (a loan of 90000 made on 15 September,
-        // 16 days before 1 October) and the sale of till line 3 without a buyer (45000 owed to the second branch).
+        // FAB-900 worth a fabricated 1000), the sale of till line 2 to buyer B-001 (a loan of 90000 made on 15
+        // September, 16 days before 1 October) and the sale of till line 3 without a buyer (45000 owed to the second
+        // branch).
         assertThat(check(r, "stock_quantity", "HQ FAB-900").system()).isEqualTo("1.5");
         assertThat(check(r, "stock_value", "HQ").system()).isEqualTo("1000");
         assertThat(check(r, "receivables", "BR2").system()).isEqualTo("45000");
@@ -445,7 +459,8 @@ class ImportReconciliationIT extends IntegrationTest {
         assertThat(left).hasSize(14);
         Section counts = section(r, "counts");
         Set<String> listed = counts.items().stream()
-                .filter(i -> i.reason().equals(ImportReconciliation.EXCLUDED) && i.check().startsWith("batch "))
+                .filter(i -> i.reason().equals(ImportReconciliation.EXCLUDED)
+                        && i.check().startsWith("batch "))
                 .map(i -> i.file() + ":" + i.line())
                 .collect(Collectors.toCollection(TreeSet::new));
         assertThat(listed).isEqualTo(left);
@@ -489,7 +504,8 @@ class ImportReconciliationIT extends IntegrationTest {
         }
         // Stored once, with the audit of its making.
         assertThat(TestDatabase.owner()
-                        .sql("SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'core.import_run.reconciled'")
+                        .sql("SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action ="
+                                + " 'core.import_run.reconciled'")
                         .param(t.tenantId())
                         .query(Long.class)
                         .single())
@@ -503,8 +519,8 @@ class ImportReconciliationIT extends IntegrationTest {
         Report r = as(t, () -> reconciliation.latest(run)).orElseThrow();
 
         assertThat(r.signable()).as(r.render()).isTrue();
-        // The credit sale of till line 2 (90000 to buyer B-001) is history only under treat_as_settled: no receivable is
-        // opened, and the difference is the decision, listed once with the day the customer confirmed it.
+        // The credit sale of till line 2 (90000 to buyer B-001) is history only under treat_as_settled: no receivable
+        // is opened, and the difference is the decision, listed once with the day the customer confirmed it.
         Check owed = check(r, "receivables", "HQ");
         assertThat(owed.system()).isEqualTo("0");
         List<Item> policy = section(r, "receivables").items().stream()
@@ -677,9 +693,11 @@ class ImportReconciliationIT extends IntegrationTest {
         // Without core.imports.sign_off (the accountant holds the other import permissions): 403 on every route.
         String accountant = "core.imports.manage,core.imports.approve_commit";
         UUID someone = UUID.randomUUID();
-        assertThat(send(t, someone, accountant, HttpMethod.GET, path + "/reconciliation", null).getStatusCode())
+        assertThat(send(t, someone, accountant, HttpMethod.GET, path + "/reconciliation", null)
+                        .getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
-        assertThat(send(t, someone, accountant, HttpMethod.GET, "/api/v1/imports/sign-off", null).getStatusCode())
+        assertThat(send(t, someone, accountant, HttpMethod.GET, "/api/v1/imports/sign-off", null)
+                        .getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("reconciliation_id", r.id());
@@ -687,27 +705,32 @@ class ImportReconciliationIT extends IntegrationTest {
         body.put("sections", allSections(r));
         body.put("name", "Fabricated Signer");
         body.put("date", today(t).toString());
-        assertThat(send(t, someone, accountant, HttpMethod.POST, path + "/sign-off", body).getStatusCode())
+        assertThat(send(t, someone, accountant, HttpMethod.POST, path + "/sign-off", body)
+                        .getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
 
         // The tenant administrator sees the run to sign and its reconciliation.
-        JsonNode list = send(t, admin, ADMIN, HttpMethod.GET, "/api/v1/imports/sign-off", null).getBody();
+        JsonNode list = send(t, admin, ADMIN, HttpMethod.GET, "/api/v1/imports/sign-off", null)
+                .getBody();
         assertThat(list.get("items").get(0).get("run_id").asString()).isEqualTo(run.toString());
         assertThat(list.get("items").get(0).get("signable").asBoolean()).isTrue();
-        JsonNode read = send(t, admin, ADMIN, HttpMethod.GET, path + "/reconciliation", null).getBody();
+        JsonNode read = send(t, admin, ADMIN, HttpMethod.GET, path + "/reconciliation", null)
+                .getBody();
         assertThat(read.get("sha256").asString()).isEqualTo(r.sha256());
         assertThat(read.get("sections").size()).isEqualTo(r.sections().size());
 
         // Every section ticked, a name and today's date, or nothing is signed.
         List<String> missing = new ArrayList<>(allSections(r));
         missing.removeLast();
-        assertThat(code(signOff(t, run, r, missing, "Fabricated Signer", today(t)))).isEqualTo("sections_not_ticked");
+        assertThat(code(signOff(t, run, r, missing, "Fabricated Signer", today(t))))
+                .isEqualTo("sections_not_ticked");
         assertThat(code(signOff(t, run, r, allSections(r), "   ", today(t)))).isEqualTo("name_required");
         assertThat(code(signOff(t, run, r, allSections(r), "Fabricated Signer", today(t).minusDays(1))))
                 .isEqualTo("sign_off_date_not_today");
         Map<String, Object> unknown = new LinkedHashMap<>(body);
         unknown.put("approved", true);
-        assertThat(send(t, admin, ADMIN, HttpMethod.POST, path + "/sign-off", unknown).getStatusCode())
+        assertThat(send(t, admin, ADMIN, HttpMethod.POST, path + "/sign-off", unknown)
+                        .getStatusCode())
                 .isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(status(run)).isEqualTo("committed");
         assertThat(signoffs(run)).isZero();
@@ -741,9 +764,13 @@ class ImportReconciliationIT extends IntegrationTest {
         assertThat(code(signOff(t, run, again, allSections(again), "Fabricated Signer", today(t))))
                 .isEqualTo("run_not_committed");
         assertCode(() -> as(t, () -> reconciliation.reconcile(run, operator)), "run_not_committed");
-        assertThat(as(t, () -> reconciliation.latest(run)).orElseThrow().signed().sections())
+        assertThat(as(t, () -> reconciliation.latest(run))
+                        .orElseThrow()
+                        .signed()
+                        .sections())
                 .containsExactlyInAnyOrderElementsOf(allSections(again));
-        assertThat(send(t, admin, ADMIN, HttpMethod.POST, path + "/reconciliation", null).getStatusCode())
+        assertThat(send(t, admin, ADMIN, HttpMethod.POST, path + "/reconciliation", null)
+                        .getStatusCode())
                 .isEqualTo(HttpStatus.CONFLICT);
     }
 
@@ -757,7 +784,8 @@ class ImportReconciliationIT extends IntegrationTest {
     void theSignedReportNeverChangesAndAnotherBusinessReachesNoneOfIt() throws IOException {
         UUID run = committedGoldenRun(null);
         Report r = as(t, () -> reconciliation.latest(run)).orElseThrow();
-        assertThat(signOff(t, run, r, allSections(r), "Fabricated Signer", today(t)).getStatusCode())
+        assertThat(signOff(t, run, r, allSections(r), "Fabricated Signer", today(t))
+                        .getStatusCode())
                 .isEqualTo(HttpStatus.OK);
 
         // No update path: bms_app may not change or delete either table, and nor may the owner (append-only).

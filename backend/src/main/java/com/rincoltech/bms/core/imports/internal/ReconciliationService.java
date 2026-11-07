@@ -155,7 +155,10 @@ class ReconciliationService implements ImportReconciliation {
         try {
             tx.executeWithoutResult(s -> generate(runId, null));
         } catch (RuntimeException e) {
-            log.warn("import run {}: the reconciliation after the commit failed ({})", runId, e.getClass().getSimpleName());
+            log.warn(
+                    "import run {}: the reconciliation after the commit failed ({})",
+                    runId,
+                    e.getClass().getSimpleName());
         }
     }
 
@@ -220,7 +223,8 @@ class ReconciliationService implements ImportReconciliation {
                             "reconciliation_missing",
                             "No reconciliation yet",
                             "This import has no reconciliation yet; make it first."));
-            if (!newest.id().equals(signOff.reconciliationId()) || !newest.sha256().equals(signOff.sha256())) {
+            if (!newest.id().equals(signOff.reconciliationId())
+                    || !newest.sha256().equals(signOff.sha256())) {
                 throw new ApiException(
                         HttpStatus.CONFLICT,
                         "reconciliation_changed",
@@ -284,7 +288,8 @@ class ReconciliationService implements ImportReconciliation {
     // The run and the stored documents.
     // ---------------------------------------------------------------------------------------------
 
-    private record RunRow(String status, Instant cutoverAt, Instant committedAt, Map<String, Map<String, Object>> policy) {}
+    private record RunRow(
+            String status, Instant cutoverAt, Instant committedAt, Map<String, Map<String, Object>> policy) {}
 
     private RunRow run(UUID runId, boolean forUpdate) {
         return jdbc.sql("SELECT status, cutover_at, committed_at, policy::text FROM import_runs WHERE id = ?"
@@ -316,8 +321,8 @@ class ReconciliationService implements ImportReconciliation {
                 HttpStatus.CONFLICT,
                 "run_not_committed",
                 "Not committed",
-                "The import is " + RunStates.words(status) + "; only an imported run that is not signed off is reconciled"
-                        + " or signed.");
+                "The import is " + RunStates.words(status)
+                        + "; only an import not signed off is reconciled or signed.");
     }
 
     private Optional<Report> newest(UUID runId) {
@@ -345,7 +350,14 @@ class ReconciliationService implements ImportReconciliation {
                 .orElse(null);
         Report r = stored.get();
         return Optional.of(new Report(
-                r.id(), r.runId(), r.version(), r.generatedAt(), r.asAt(), r.sha256(), r.signable(), r.sections(),
+                r.id(),
+                r.runId(),
+                r.version(),
+                r.generatedAt(),
+                r.asAt(),
+                r.sha256(),
+                r.signable(),
+                r.sections(),
                 signed));
     }
 
@@ -459,8 +471,12 @@ class ReconciliationService implements ImportReconciliation {
             List<Check> checks = new ArrayList<>();
             List<Item> items = new ArrayList<>();
             Set<CheckId> ids = new LinkedHashSet<>();
-            sheet.source.keySet().stream().filter(id -> id.section().equals(key)).forEach(ids::add);
-            sheet.system.keySet().stream().filter(id -> id.section().equals(key)).forEach(ids::add);
+            sheet.source.keySet().stream()
+                    .filter(id -> id.section().equals(key))
+                    .forEach(ids::add);
+            sheet.system.keySet().stream()
+                    .filter(id -> id.section().equals(key))
+                    .forEach(ids::add);
             sheet.items.keySet().stream().filter(id -> id.section().equals(key)).forEach(ids::add);
             for (CheckId id : sorted(ids)) {
                 BigDecimal src = sheet.source.getOrDefault(id, BigDecimal.ZERO);
@@ -469,9 +485,8 @@ class ReconciliationService implements ImportReconciliation {
                 if (src.signum() == 0 && sys.signum() == 0 && its.isEmpty()) {
                     continue;
                 }
-                BigDecimal itemised = its.stream()
-                        .map(i -> new BigDecimal(i.amount()))
-                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+                BigDecimal itemised =
+                        its.stream().map(i -> new BigDecimal(i.amount())).reduce(BigDecimal.ZERO, BigDecimal::add);
                 BigDecimal difference = src.subtract(sys);
                 BigDecimal unitemised = difference.subtract(itemised);
                 String checkKey = screen(id.key(), privacy);
@@ -538,13 +553,18 @@ class ReconciliationService implements ImportReconciliation {
         after.put("sha256", sha256);
         audit.record(AuditLog.Entry.created("core.import_run.reconciled", "import_run", runId, null, after));
         log.info(
-                "import run {}: reconciliation {} made, signable {}, {} checks not tied", runId, version, signable, notTied);
+                "import run {}: reconciliation {} made, signable {}, {} checks not tied",
+                runId,
+                version,
+                signable,
+                notTied);
         return report;
     }
 
     /** The run's committed batches in the commit's order, and the one template they were read with (or null). */
     private ImportTemplate batches(UUID runId, List<BatchInfo> out) {
-        record Row(UUID id, int seq, String file, UUID mapping, String source, String key, Integer version, String sha) {}
+        record Row(
+                UUID id, int seq, String file, UUID mapping, String source, String key, Integer version, String sha) {}
         List<Row> rows = jdbc.sql("""
                         SELECT id, seq, source_filename, mapping_id, mapping_source, template_key, template_version,
                                source_sha256
@@ -607,7 +627,8 @@ class ReconciliationService implements ImportReconciliation {
             Sheet sheet) {
         String file = screen(b.file(), privacy);
         CheckId batchRows = new CheckId(COUNTS, "batch " + b.seq(), "Rows of " + file, "rows");
-        CheckId setRows = new CheckId(COUNTS, "set " + b.set().key(), "Rows of " + b.set().key(), "rows");
+        CheckId setRows =
+                new CheckId(COUNTS, "set " + b.set().key(), "Rows of " + b.set().key(), "rows");
         int read = 0;
         int blank = 0;
         int excluded = 0;
@@ -617,8 +638,14 @@ class ReconciliationService implements ImportReconciliation {
         int after = 0;
         while (true) {
             record Staged(
-                    int line, String ref, String normalised, boolean excluded, String excludedCode, boolean blank,
-                    String overridden, String blocked) {}
+                    int line,
+                    String ref,
+                    String normalised,
+                    boolean excluded,
+                    String excludedCode,
+                    boolean blank,
+                    String overridden,
+                    String blocked) {}
             // A row the review left out, and a row an open blocking issue held back (the commit writes neither, as the
             // preview counts them), with their codes; and the warnings overridden on a row.
             List<Staged> chunk = jdbc.sql("""
@@ -730,7 +757,8 @@ class ReconciliationService implements ImportReconciliation {
                     }
                     for (CheckId id : keys) {
                         BigDecimal o = part.getOrDefault(id, BigDecimal.ZERO);
-                        BigDecimal d = asDecided == null ? BigDecimal.ZERO : asDecided.getOrDefault(id, BigDecimal.ZERO);
+                        BigDecimal d =
+                                asDecided == null ? BigDecimal.ZERO : asDecided.getOrDefault(id, BigDecimal.ZERO);
                         sheet.policy.merge(id, o.subtract(d), BigDecimal::add);
                     }
                 }
@@ -845,8 +873,7 @@ class ReconciliationService implements ImportReconciliation {
             String account = l.accountKey() == null ? "" : l.accountKey();
             switch (account) {
                 case "inventory" -> sheet.add(sheet.system, valueId(STOCK_VALUE, branch), BigDecimal.valueOf(net));
-                case "trade_debtors" ->
-                    sheet.add(sheet.system, valueId(RECEIVABLES, branch), BigDecimal.valueOf(net));
+                case "trade_debtors" -> sheet.add(sheet.system, valueId(RECEIVABLES, branch), BigDecimal.valueOf(net));
                 case "loans_receivable" ->
                     sheet.add(sheet.system, valueId(LOAN_PRINCIPAL, branch), BigDecimal.valueOf(net));
                 default -> {}
@@ -881,7 +908,8 @@ class ReconciliationService implements ImportReconciliation {
                     || ("retail".equals(l.sourceModule()) && RefService.RETAIL_OPENINGS.contains(l.sourceType()));
             opening.merge(l.entryId(), isOpening, Boolean::logicalAnd);
         }
-        long unbalanced = perEntry.values().stream().filter(dc -> dc[0] != dc[1]).count();
+        long unbalanced =
+                perEntry.values().stream().filter(dc -> dc[0] != dc[1]).count();
         long notOpening = opening.values().stream().filter(o -> !o).count();
         LedgerAccounts.TrialBalanceCheck tb = ledger.trialBalanceCheck();
         List<Check> out = new ArrayList<>();
@@ -892,11 +920,7 @@ class ReconciliationService implements ImportReconciliation {
                 debits,
                 credits));
         out.add(compare(
-                "journals out of balance",
-                "Journals of this import that do not balance",
-                "entries",
-                0,
-                unbalanced));
+                "journals out of balance", "Journals of this import that do not balance", "entries", 0, unbalanced));
         out.add(compare(
                 "journals not opening",
                 "Journals of this import that are not opening balances",
@@ -960,7 +984,10 @@ class ReconciliationService implements ImportReconciliation {
     private static CheckId journalId(String branch, String kind) {
         String k = kind == null ? "opening" : kind;
         return new CheckId(
-                LEDGER, "journal " + branch + " " + k, "Opening journal " + k.replace('_', ' ') + " at " + branch, "minor");
+                LEDGER,
+                "journal " + branch + " " + k,
+                "Opening journal " + k.replace('_', ' ') + " at " + branch,
+                "minor");
     }
 
     /** Checks in a fixed order: by key, so two reconciliations of the same books read alike. */
@@ -975,7 +1002,8 @@ class ReconciliationService implements ImportReconciliation {
             }
             if (ka == 0) {
                 return Integer.compare(
-                        Integer.parseInt(a.key().substring(6)), Integer.parseInt(b.key().substring(6)));
+                        Integer.parseInt(a.key().substring(6)),
+                        Integer.parseInt(b.key().substring(6)));
             }
             return a.key().compareTo(b.key());
         });
@@ -991,8 +1019,9 @@ class ReconciliationService implements ImportReconciliation {
     /** The recorded decisions in words: the option and the day the customer confirmed it, never the reference. */
     private static String decisionWords(Map<String, Map<String, Object>> policy) {
         List<String> words = new ArrayList<>();
-        policy.forEach((key, d) -> words.add(key + " decision " + d.get("option") + ", confirmed on " + d.get("confirmed_on")
-                + (d.get("follow_up_on") == null ? "" : ", follow up on " + d.get("follow_up_on"))));
+        policy.forEach(
+                (key, d) -> words.add(key + " decision " + d.get("option") + ", confirmed on " + d.get("confirmed_on")
+                        + (d.get("follow_up_on") == null ? "" : ", follow up on " + d.get("follow_up_on"))));
         return words.isEmpty() ? "policy decision" : String.join("; ", words);
     }
 

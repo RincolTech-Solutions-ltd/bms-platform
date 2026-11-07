@@ -50,8 +50,13 @@ class ReconciliationController {
             UUID runId,
             @Schema(description = "committed or signed_off") String status,
             Instant committedAt,
-            @Schema(description = "The newest reconciliation's version, or null while none was made") Integer version,
-            @Schema(description = "Whether every difference is explained, or null while none was made") Boolean signable,
+
+            @Schema(description = "The newest reconciliation's version, or null while none was made")
+            Integer version,
+
+            @Schema(description = "Whether every difference is explained, or null while none was made")
+            Boolean signable,
+
             Instant signedAt) {}
 
     @Schema(name = "ImportSignOffRunList")
@@ -66,28 +71,41 @@ class ReconciliationController {
     record CheckResponse(
             String key,
             String label,
-            @Schema(description = "rows, qty, minor, loans or entries") String unit,
+
+            @Schema(description = "rows, qty, minor, loans or entries")
+            String unit,
+
             String source,
             String system,
             @Schema(description = "Source less system") String difference,
-            @Schema(description = "The part of the difference the items explain") String itemised,
-            @Schema(description = "The part no item explains; anything but 0 blocks the sign-off") String unitemised,
+
+            @Schema(description = "The part of the difference the items explain")
+            String itemised,
+
+            @Schema(description = "The part no item explains; anything but 0 blocks the sign-off")
+            String unitemised,
+
             boolean ties) {}
 
     @Schema(name = "ImportReconciliationItem", description = "One explained difference, without any value of a row")
     record ItemResponse(
             String check,
             String file,
-            @Schema(description = "The line of the file, or 0 for the run as a whole") int line,
-            @Schema(description = "excluded, overridden or policy") String reason,
+
+            @Schema(description = "The line of the file, or 0 for the run as a whole")
+            int line,
+
+            @Schema(description = "excluded, overridden or policy")
+            String reason,
+
             String detail,
             String amount) {}
 
     @Schema(name = "ImportReconciliationSection")
     record SectionResponse(
-            @Schema(
-                    description = "counts, stock_quantity, stock_value, receivables, loan_principal, arrears or ledger")
+            @Schema(description = "counts, stock_quantity, stock_value, receivables, loan_principal, arrears or ledger")
             String key,
+
             String title,
             List<FactResponse> facts,
             List<CheckResponse> checks,
@@ -103,11 +121,20 @@ class ReconciliationController {
             UUID runId,
             int version,
             Instant generatedAt,
-            @Schema(description = "The day arrears are aged to: the cutover day") LocalDate asAt,
-            @Schema(description = "The SHA-256 of the report's text; name it when signing") String sha256,
-            @Schema(description = "False while any difference is not explained") boolean signable,
+
+            @Schema(description = "The day arrears are aged to: the cutover day")
+            LocalDate asAt,
+
+            @Schema(description = "The SHA-256 of the report's text; name it when signing")
+            String sha256,
+
+            @Schema(description = "False while any difference is not explained")
+            boolean signable,
+
             List<SectionResponse> sections,
-            @Schema(description = "The sign-off, or null before it") SignedResponse signed) {
+
+            @Schema(description = "The sign-off, or null before it")
+            SignedResponse signed) {
 
         static ReconciliationResponse of(Report r) {
             return new ReconciliationResponse(
@@ -155,7 +182,8 @@ class ReconciliationController {
 
     @Schema(name = "ImportSignOffRequest")
     record SignOffRequest(
-            @NotNull @Schema(description = "The reconciliation read") UUID reconciliationId,
+            @NotNull @Schema(description = "The reconciliation read")
+            UUID reconciliationId,
 
             @NotNull @Pattern(regexp = "[0-9a-f]{64}") @Schema(description = "Its sha256 as read")
             String sha256,
@@ -166,7 +194,8 @@ class ReconciliationController {
             @NotNull @Size(max = 120) @Schema(description = "The signer's name as typed")
             String name,
 
-            @NotNull @Schema(description = "Today's date as typed") LocalDate date) {}
+            @NotNull @Schema(description = "Today's date as typed")
+            LocalDate date) {}
 
     @GetMapping("/sign-off")
     @RequiresPermission("core.imports.sign_off")
