@@ -488,14 +488,10 @@ class ImportReconciliationIT extends IntegrationTest {
                         "review");
         // FR-IMP-08 (Lead on the review of 4105c2a): each opening journal by its entry number, and every resolution of
         // the review with who, when, before, after and note. JUSTIFICATION-A3: the assertions the ruling asks for.
-        List<String> entryNos = TestDatabase.owner()
-                .sql("""
-                        SELECT e.entry_no FROM journal_entries e JOIN import_refs r ON r.target_id = e.id
-                         WHERE r.run_id = ? AND r.target_type = 'ledger.journal_entry' ORDER BY e.entry_no
-                        """)
-                .param(run)
-                .query(String.class)
-                .list();
+        String numbers = "SELECT e.entry_no FROM journal_entries e JOIN import_refs r ON r.target_id = e.id"
+                + " WHERE r.run_id = ? AND r.target_type = 'ledger.journal_entry' ORDER BY e.entry_no";
+        List<String> entryNos =
+                TestDatabase.owner().sql(numbers).param(run).query(String.class).list();
         assertThat(entryNos).isNotEmpty();
         assertThat(section(r, "ledger").facts())
                 .extracting(ImportReconciliation.Fact::label)
