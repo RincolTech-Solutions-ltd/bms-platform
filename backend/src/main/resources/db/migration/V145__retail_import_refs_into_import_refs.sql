@@ -180,6 +180,26 @@ BEGIN
 END
 $$;
 
+-- The items each import opening stock journal valued (Lead's note on the review of 7f42ea3): one row per item above zero
+-- of the branch's balances file when the journal was posted, keyed by the journal's import_refs row. A later balances
+-- file of the branch must list every item of these sets (an item of the old command's journals, which have none, is one
+-- with an unregistered legacy balance movement there), or it is refused: one that leaves an item out would value the
+-- branch without it and journal it away. A new, empty table: written by imports only, append-only, tenant-scoped.
+CREATE TABLE retail_import_opening_items (
+    tenant_id   uuid         NOT NULL REFERENCES tenants (id),
+    created_at  timestamptz  NOT NULL DEFAULT now(),
+    ref_id      uuid         NOT NULL REFERENCES import_refs (id),
+    branch_id   uuid         NOT NULL,
+    product_id  uuid         NOT NULL,
+    PRIMARY KEY (tenant_id, ref_id, product_id),
+    FOREIGN KEY (tenant_id, branch_id) REFERENCES branches (tenant_id, id),
+    FOREIGN KEY (tenant_id, product_id) REFERENCES retail_products (tenant_id, id)
+);
+CREATE INDEX retail_import_opening_items_by_branch ON retail_import_opening_items (tenant_id, branch_id);
+SELECT bms_apply_tenant_rls('retail_import_opening_items');
+SELECT bms_grant_app('retail_import_opening_items', 'SELECT, INSERT');
+SELECT bms_make_append_only('retail_import_opening_items');
+
 -- The retail_v1 loader reads a run's own records by type for each branch's opening journal (the stock the run put on
 -- hand, what it already journalled), and the reconciliation reads them for its books. A plain index, built in this
 -- transaction under the lock_timeout above: import_refs holds only what imports registered, so it is small, and its

@@ -1414,6 +1414,13 @@ expand only:
   or cancelled at its end, no upload, review or maker and checker, never reconciled or listed for sign-off) or
   `retail_import_refs` (the backfill's run, at most one per business: the plain partial unique index
   `import_runs_one_backfill (tenant_id) WHERE origin = 'retail_import_refs'`).
+- **`retail_import_opening_items`** (V145, #135): the items each import opening stock journal valued, one row per item
+  above zero of the branch's balances when the journal was posted: `tenant_id`, `created_at`, `ref_id` (the journal's
+  `import_refs` row), `branch_id`, `product_id`; primary key `(tenant_id, ref_id, product_id)`, the plain index
+  `retail_import_opening_items_by_branch (tenant_id, branch_id)`, forced row-level security, `SELECT, INSERT` for the
+  application, append-only. A later balances file of the branch must list every item of the union of these sets (and,
+  for the old command's journals, which have none, every item with an unregistered legacy balance movement there), or
+  it is refused: `BALANCES_INCOMPLETE` at validation, and by the loader. No personal value.
 - **`bms_refuse_during_import_commit()`**, a `BEFORE INSERT` trigger on `notification_outbox`, `sms_deliveries`,
   `approval_requests` and `scheduled_tasks`: while the transaction has set `app.import_commit` to `on` (an import batch
   does, with `SET LOCAL`), a new row is refused, so an imported record sends no message, starts no task and raises no

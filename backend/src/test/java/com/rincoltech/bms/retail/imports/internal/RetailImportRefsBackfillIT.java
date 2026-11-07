@@ -9,7 +9,9 @@ import com.rincoltech.bms.retail.RetailTestSupport;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -226,6 +228,58 @@ class RetailImportRefsBackfillIT extends IntegrationTest {
                         .single())
                 .as("no journal, no legacy balance")
                 .isEqualTo(before);
+    }
+
+    // JUSTIFICATION-A3: the Lead's note on the review of 7f42ea3 asks tests (a) and (b), one each.
+    /**
+     * (a) of the Lead's note on the review of 7f42ea3: TB-2 has history and no balance row, so the journal values TB-1
+     * alone and records only TB-1 as valued; the identical export run again is not refused and posts nothing more.
+     */
+    @Test
+    void aHistoryOnlyItemDoesNotStopAnIdenticalReRun(@TempDir Path dir) throws IOException {
+        TestDatabase.Fixture t = TestDatabase.tenant("retail-hist", false, true);
+        RetailTestSupport retail = new RetailTestSupport(http, t);
+        retail.product("TB-1", 100, 150);
+        retail.product("TB-2", 200, 300);
+        Files.writeString(dir.resolve("purchases.jsonl"), """
+                {"source_ref": "P-1", "product_code": "TB-1", "supplier": "Test Supplier 01", "kind": "purchase", "unit_cost_minor": 100, "unit_sell_minor": 150, "qty_by_branch": {"HQ": "10"}, "purchased_on": "2026-09-01", "source_user": "test.admin01"}
+                {"source_ref": "P-2", "product_code": "TB-2", "supplier": "Test Supplier 01", "kind": "purchase", "unit_cost_minor": 200, "unit_sell_minor": 300, "qty_by_branch": {"HQ": "4"}, "purchased_on": "2026-09-01", "source_user": "test.admin01"}
+                """);
+        Files.writeString(dir.resolve("balances.jsonl"), """
+                {"branch": "HQ", "product_code": "TB-1", "qty": "7"}
+                """);
+
+        ImportReport first = importer.run(t.slug(), dir, false);
+        assertThat(first.failed()).as(first.render()).isFalse();
+        assertThat(journalled(t)).isEqualTo(7 * 100);
+
+        ImportReport again = importer.run(t.slug(), dir, false);
+        assertThat(again.failed()).as(again.render()).isFalse();
+        assertThat(journalled(t)).isEqualTo(7 * 100);
+    }
+
+    /**
+     * (b) of the Lead's note: a run that stopped after balances.jsonl (here, one whose export had no cash book yet) is run
+     * again with its cash files; its balances pass and the cash files are imported.
+     */
+    @Test
+    void aRunStoppedAfterTheBalancesFinishesItsCashFilesOnARerun(@TempDir Path dir) throws IOException {
+        TestDatabase.Fixture t = TestDatabase.tenant("retail-cash", false, true);
+        ImportReport first = importer.run(t.slug(), RetailImportIT.SAMPLE, false);
+        assertThat(first.failed()).as(first.render()).isFalse();
+        for (Path source : List.of(RetailImportIT.SAMPLE, RetailImportIT.SAMPLE.resolve("cashbook"))) {
+            try (Stream<Path> files = Files.list(source)) {
+                for (Path f : files.filter(p -> p.toString().endsWith(".jsonl")).toList()) {
+                    Files.copy(f, dir.resolve(f.getFileName().toString()));
+                }
+            }
+        }
+
+        ImportReport again = importer.run(t.slug(), dir, false);
+
+        assertThat(again.failed()).as(again.render()).isFalse();
+        assertThat(again.counts("balances.jsonl")).containsExactly(60, 0, 60, 0);
+        assertThat(again.counts("savings.jsonl")[1]).as(again.render()).isPositive();
     }
 
     private static String status(UUID run) {

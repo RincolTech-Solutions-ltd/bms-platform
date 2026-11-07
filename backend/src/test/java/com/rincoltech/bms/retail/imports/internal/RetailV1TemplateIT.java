@@ -1,6 +1,7 @@
 package com.rincoltech.bms.retail.imports.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
 import com.rincoltech.bms.IntegrationTest;
@@ -265,6 +266,47 @@ class RetailV1TemplateIT extends IntegrationTest {
                         """, t)).as("the sale is registered").isZero();
         ImportReconciliation.Report r = as(t, () -> reconciliation.latest(run)).orElseThrow();
         assertThat(r.signable()).as(r.render()).isTrue();
+    }
+
+    // JUSTIFICATION-A3: the Lead's note on the review of 7f42ea3 asks the screens-path test of (c).
+    /**
+     * (c) through the screens (Lead's note on the review of 7f42ea3): after the command imported the sample, a balances
+     * file with two KLA rows is refused at validation on its first KLA row ({@code BALANCES_INCOMPLETE}, blocking), and the
+     * dry run, which writes the other row, refuses the file too, so the run cannot be made ready; nothing is posted.
+     */
+    @Test
+    void aPartialBalancesFileThroughTheScreensIsRefusedAtValidationAndCannotCommit(@TempDir Path dir)
+            throws IOException {
+        ImportReport command = importer.run(t.slug(), RetailImportIT.SAMPLE, false);
+        assertThat(command.failed()).as(command.render()).isFalse();
+        List<String> kla = Files.readAllLines(RetailImportIT.SAMPLE.resolve("balances.jsonl")).stream()
+                .filter(l -> l.contains("\"KLA\""))
+                .limit(2)
+                .toList();
+        Files.writeString(dir.resolve("balances.jsonl"), String.join("\n", kla) + "\n");
+
+        UUID run = uploaded(t, "retail-partial", exportMapping(), dir, Map.of("balances", "balances.jsonl"));
+
+        List<Issue> issues = as(
+                t,
+                () -> uploads.batches(run).stream()
+                        .flatMap(b -> validation.issues(b.id()).stream())
+                        .toList());
+        assertThat(issues)
+                .filteredOn(i -> "BALANCES_INCOMPLETE".equals(i.code()))
+                .singleElement()
+                .satisfies(i -> {
+                    assertThat(i.severity()).isEqualTo("blocking");
+                    assertThat(i.status()).isEqualTo("open");
+                });
+        DryRun dry = as(t, () -> runs.dryRun(run, operator));
+        // A dry run's failure names the batch and the kind of failure, never the message; the issue above names it.
+        assertThat(dry.report().failure())
+                .as(dry.report().render())
+                .isEqualTo("batch 1 failed (IllegalArgumentException)");
+        assertThatThrownBy(() -> as(t, () -> runs.transition(run, "ready"))).isInstanceOf(ApiException.class);
+        assertThat(owner("SELECT count(*) FROM journal_entries WHERE tenant_id = ?", t))
+                .isEqualTo(3L);
     }
 
     @Test

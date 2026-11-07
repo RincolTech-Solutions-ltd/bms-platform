@@ -1245,10 +1245,16 @@ public class RlsIsolationIT {
                 .params(importIssue, t.tenantId(), importBatch, importRow, importResolution)
                 .update();
         // The commit (migration V143, #133): one fabricated reference of a record the batch created.
+        UUID importRef = UUID.randomUUID();
         owner.sql("INSERT INTO import_refs (id, tenant_id, run_id, batch_id, source_key, source_ref, target_type,"
                         + " target_id) VALUES (?, ?, ?, ?, 'fab-items.csv|-|ref:FAB-001',"
                         + " 'fab-items.csv|-|ref:FAB-001#0123456789abcdef', 'test.record', ?)")
-                .params(UUID.randomUUID(), t.tenantId(), importRun, importBatch, UUID.randomUUID())
+                .params(importRef, t.tenantId(), importRun, importBatch, UUID.randomUUID())
+                .update();
+        // The items an import opening journal valued (migration V145, #135), on that fabricated reference.
+        owner.sql("INSERT INTO retail_import_opening_items (tenant_id, ref_id, branch_id, product_id)"
+                        + " VALUES (?, ?, ?, ?)")
+                .params(t.tenantId(), importRef, t.headOffice(), retailProduct)
                 .update();
         // The reconciliation and its sign-off (migration V144, #134): a committed run, its fabricated reconciliation
         // and the sign-off of it, the name typed fabricated. JUSTIFICATION-A3: the factory rows of the two new tables.
@@ -2053,6 +2059,8 @@ public class RlsIsolationIT {
                 "import_issue_resolutions",
                 // The references of imported records (#133).
                 "import_refs",
+                // The items each import opening stock journal valued (#135).
+                "retail_import_opening_items",
                 // The reconciliation of an import and the customer's sign-off (#134).
                 "import_reconciliations",
                 "import_signoffs")) {

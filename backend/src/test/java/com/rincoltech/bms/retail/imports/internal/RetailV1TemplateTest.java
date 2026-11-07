@@ -116,7 +116,8 @@ class RetailV1TemplateTest {
         ImportForecast f = new RetailV1Template.StockForecast(
                 Map.of(),
                 Map.of(RetailV1Template.compare("KLA"), 8_750L, RetailV1Template.compare("ENT"), 1_000L),
-                Set.of(RetailV1Template.compare("JJA")));
+                Set.of(RetailV1Template.compare("JJA")),
+                Map.of(RetailV1Template.compare("ENT"), Set.of(RetailV1Template.compare("TS-001"))));
         f.batch(1);
         f.row("products", Map.of("code", "TS-001", "cost_minor", 700L));
         f.batch(2);
@@ -147,6 +148,13 @@ class RetailV1TemplateTest {
         assertThat(o.change(0)).isEqualTo(8_750);
         assertThat(o.change(8_750)).as("already journalled").isZero();
         assertThat(o.change(10_000)).as("a fall, the other way").isEqualTo(-1_250);
+
+        // What an earlier journal valued must be listed (Lead's note on the review of 7f42ea3).
+        assertThat(RetailV1Template.missing(Set.of("TS-001", "TS-002", "TS-009"), Set.of("TS-001")))
+                .containsExactly("TS-002", "TS-009");
+        assertThat(RetailV1Template.missing(Set.of("TS-001"), Set.of("TS-001", "TS-005")))
+                .isEmpty();
+        assertThat(RetailV1Template.missing(Set.of(), null)).isEmpty();
     }
 
     @Test

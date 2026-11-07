@@ -252,6 +252,24 @@ public interface ImportTemplate {
         return List.of();
     }
 
+    // JUSTIFICATION-A3: issue #135 (Lead's note on the review of 7f42ea3) needs a rule over a whole entity set.
+    /**
+     * A rule over one entity set as a whole (issue #135): the validation shows it every row of the set the run holds (the
+     * rows the review left out excepted), typed, in pass 1, then asks it for each row's findings in pass 2, as a
+     * {@link RowCheck}. One instance serves one validation. {@code row} names a row of the run (its batch and line).
+     */
+    interface SetCheck {
+
+        void see(String row, Map<String, Object> values);
+
+        List<RowFinding> check(String row, Map<String, Object> values);
+    }
+
+    /** The whole-set rule of one entity set, a new one per validation; none by default. */
+    default SetCheck setCheck(String entitySet) {
+        return null;
+    }
+
     /**
      * The keys of one entity set the business already holds, among {@code keys} (spec section 3.4: a reference names a
      * record "in the import or the tenant"). The validation asks only for the keys a {@code ref} names that no row of the

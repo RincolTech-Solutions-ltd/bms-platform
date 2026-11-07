@@ -342,6 +342,18 @@ public class RetailImporter {
                 ImportReport report = new ImportReport("", "", false);
                 Run run = new Run(Map.of(name, file), report, runId, null, false);
                 run.attach(checkpoint, batchId, new StagedRefs(checkpoint, staged));
+                Map<String, Set<String>> unchanged = new HashMap<>();
+                staged.values().stream()
+                        .filter(r -> !history && r.status() == ImportRefs.Status.EXISTING)
+                        .forEach(r -> {
+                            if (r.values().get("branch") instanceof String b
+                                    && r.values().get("product_code") instanceof String item) {
+                                unchanged
+                                        .computeIfAbsent(RetailV1Template.compare(b), k -> new HashSet<>())
+                                        .add(RetailV1Template.compare(item));
+                            }
+                        });
+                run.unchangedBalances = unchanged;
                 run.begin();
                 ImportReport.Counts counts = report.file(name);
                 counts.read = staged.size();
@@ -656,6 +668,8 @@ public class RetailImporter {
 
         UUID batchId;
         Refs refs;
+        /** A framework batch's balances rows imported before unchanged, by branch and item (compare form). */
+        Map<String, Set<String>> unchangedBalances = Map.of();
 
         Run(Map<String, ExportFile> export, ImportReport report, UUID id, LocalDate firstLiveDate, boolean command) {
             this.export = export;
@@ -1813,27 +1827,34 @@ public class RetailImporter {
                     .filter(b -> !b.active())
                     .map(Branches.Branch::id)
                     .collect(java.util.stream.Collectors.toSet());
-            Map<String, Set<UUID>> listed = new HashMap<>();
+            Map<String, UUID> productIds = new HashMap<>();
+            // The rows of the file at each branch, those imported before unchanged included (Lead's note on the review
+            // of 7f42ea3, point 3), by item code in compare form.
+            Map<String, Set<String>> listed = new HashMap<>();
+            unchangedBalances.forEach((code, items) ->
+                    listed.computeIfAbsent(code, k -> new HashSet<>()).addAll(items));
             for (Balance b : rows) {
                 byBranch.computeIfAbsent(b.branchCode(), k -> new LinkedHashMap<>())
                         .putIfAbsent(b.product().code(), b.qty());
                 costs.put(b.product().code(), b.product().costMinor());
+                productIds.put(b.product().code(), b.product().id());
                 ids.put(b.branchCode(), b.branch());
-                listed.computeIfAbsent(b.branchCode(), k -> new HashSet<>())
-                        .add(b.product().id());
+                listed.computeIfAbsent(RetailV1Template.compare(b.branchCode()), k -> new HashSet<>())
+                        .add(RetailV1Template.compare(b.product().code()));
             }
-            // A branch an earlier import already journalled takes only a full balances file: one that leaves out an
-            // item the imported stock holds would value the branch without it and journal it away (review of 6205617,
-            // must-fix 2; Lead's note). The batch is refused before anything is posted.
+            // A branch an earlier import journalled takes only a file that lists every item that journal valued (Lead's
+            // note on the review of 7f42ea3): one that leaves one out would value the branch without it and journal it
+            // away. The validation refuses it on the branch's first row and the forecast predicts nothing; the loader
+            // refuses it too, before anything is posted.
+            Map<String, Set<String>> valued = RetailV1Template.valuedItems(jdbc);
             byBranch.keySet().forEach(code -> {
-                UUID branch = ids.get(code);
-                if (importJournalled(branch) != 0) {
-                    List<String> missing = heldNotListed(branch, listed.get(code));
-                    if (!missing.isEmpty()) {
-                        throw new IllegalArgumentException("balances.jsonl must list every item at " + code
-                                + ", which an earlier import already journalled; missing: " + String.join(", ", missing)
-                                + ". Correct one item with a stock-take, not a re-import.");
-                    }
+                List<String> missing = RetailV1Template.missing(
+                        valued.getOrDefault(RetailV1Template.compare(code), Set.of()),
+                        listed.get(RetailV1Template.compare(code)));
+                if (!missing.isEmpty()) {
+                    throw new IllegalArgumentException("balances.jsonl must list every item at " + code
+                            + ", which an earlier import already journalled; missing: " + String.join(", ", missing)
+                            + ". Correct one item with a stock-take, not a re-import.");
                 }
             });
             byBranch.forEach((code, items) -> {
@@ -1873,12 +1894,26 @@ public class RetailImporter {
                         RetailV1Template.OPENING_TYPE));
                 Optional<Map<String, Object>> entry =
                         jdbc.sql("""
-                                SELECT e.id, e.entry_no FROM import_refs r JOIN journal_entries e ON e.id = r.target_id
+                                SELECT r.id AS ref_id, e.id, e.entry_no
+                                  FROM import_refs r JOIN journal_entries e ON e.id = r.target_id
                                  WHERE r.batch_id = ? AND r.target_type = 'ledger.journal_entry'
                                    AND r.source_key LIKE 'opening|inventory|%' AND e.branch_id = ?
                                 """).params(batchId, branch).query().listOfRows().stream()
                                 .findFirst();
                 entry.ifPresent(e -> refs.journal("opening", code, "core.journal_entry", (UUID) e.get("id")));
+                // The items this journal valued, for a later balances file of the branch to list (Lead's note on the
+                // review of 7f42ea3).
+                entry.ifPresent(e -> items.forEach((item, q) -> {
+                    if (q.signum() > 0) {
+                        jdbc.sql("""
+                                        INSERT INTO retail_import_opening_items (tenant_id, ref_id, branch_id, product_id)
+                                        VALUES (current_setting('app.tenant_id')::uuid, ?, ?, ?)
+                                        ON CONFLICT DO NOTHING
+                                        """)
+                                .params((UUID) e.get("ref_id"), branch, productIds.get(item))
+                                .update();
+                    }
+                }));
                 // A fall is a journal the other way: its amount, and the status says it credits inventory.
                 report.opening(new ImportReport.Opening(
                         code,
@@ -1886,32 +1921,6 @@ public class RetailImporter {
                         entry.map(e -> (String) e.get("entry_no")).orElse(null),
                         change > 0 ? "posted" : ImportReport.FALL));
             });
-        }
-
-        // JUSTIFICATION-A3: the Lead's note on the review of 6205617 asks the refusal to name the items left out.
-        /**
-         * The items the business's imported stock holds at the branch (every import's historical movements, above zero)
-         * that the balances file does not list, by code.
-         */
-        private List<String> heldNotListed(UUID branch, Set<UUID> listedItems) {
-            List<Map<String, Object>> held =
-                    jdbc.sql("""
-                            SELECT p.id, p.code FROM retail_stock_movements m JOIN retail_products p ON p.id = m.product_id
-                             WHERE m.tenant_id = current_setting('app.tenant_id')::uuid AND m.branch_id = ?
-                               AND m.historical
-                               AND (m.source_type = ?
-                                    OR EXISTS (SELECT 1 FROM import_refs r
-                                                WHERE r.tenant_id = m.tenant_id AND r.target_id = m.source_id)
-                                    OR EXISTS (SELECT 1 FROM retail_import_refs o
-                                                WHERE o.tenant_id = m.tenant_id AND o.target_id = m.source_id))
-                             GROUP BY p.id, p.code
-                            HAVING sum(m.qty) > 0
-                             ORDER BY p.code
-                            """).params(branch, SOURCE_TYPE).query().listOfRows();
-            return held.stream()
-                    .filter(h -> !listedItems.contains((UUID) h.get("id")))
-                    .map(h -> (String) h.get("code"))
-                    .toList();
         }
 
         /**

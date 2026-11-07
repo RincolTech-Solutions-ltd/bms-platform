@@ -12,6 +12,7 @@ import java.math.BigDecimal;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -66,6 +67,7 @@ class RetailV1Template implements ImportTemplate {
     static final String NEGATIVE_BALANCE = "NEGATIVE_BALANCE";
     static final String PRICE_DIFFERS_EXISTING = "PRICE_DIFFERS_EXISTING";
     static final String CREDIT_SALE_UNPAID = "CREDIT_SALE_UNPAID";
+    static final String BALANCES_INCOMPLETE = "BALANCES_INCOMPLETE";
 
     /**
      * The receivable decision (spec section 3.8) of a source with credit sales and no payments. {@code open_from_list} is
@@ -236,7 +238,97 @@ class RetailV1Template implements ImportTemplate {
                 new IssueCode(
                         CREDIT_SALE_UNPAID,
                         Severity.INFO,
-                        "Credit sale imported without payment history; the receivable decision applies."));
+                        "Credit sale imported without payment history; the receivable decision applies."),
+                new IssueCode(
+                        BALANCES_INCOMPLETE,
+                        Severity.BLOCKING,
+                        "An earlier import journalled the opening stock at {branch} with {limit} items this file does"
+                                + " not list; list every item at {branch}, or correct one item with a stock-take, not a"
+                                + " re-import."));
+    }
+
+    // JUSTIFICATION-A3: the Lead's note on the review of 7f42ea3 asks the refusal at validation, on the rows.
+    /**
+     * The balances rule over the whole set (Lead's note on the review of 7f42ea3): at a branch an earlier import journalled,
+     * the first row of the branch carries {@link #BALANCES_INCOMPLETE} when the rows the run holds there leave out an item
+     * that journal valued ({@link #missing}), so the review shows it and no commit is possible. Rows imported before and
+     * unchanged are rows of the run, so a full file with one changed row lists everything.
+     */
+    @Override
+    public SetCheck setCheck(String entitySet) {
+        if (!"balances".equals(entitySet)) {
+            return null;
+        }
+        return new SetCheck() {
+            private final Map<String, Set<String>> listed = new HashMap<>();
+            private final Map<String, String> first = new HashMap<>();
+            private Map<String, Set<String>> valued;
+
+            @Override
+            public void see(String row, Map<String, Object> values) {
+                if (values.get("branch") instanceof String branch
+                        && values.get("product_code") instanceof String item) {
+                    listed.computeIfAbsent(compare(branch), k -> new HashSet<>())
+                            .add(compare(item));
+                    first.putIfAbsent(compare(branch), row);
+                }
+            }
+
+            @Override
+            public List<RowFinding> check(String row, Map<String, Object> values) {
+                if (!(values.get("branch") instanceof String branch) || !row.equals(first.get(compare(branch)))) {
+                    return List.of();
+                }
+                if (valued == null) {
+                    valued = valuedItems(jdbc);
+                }
+                List<String> missing =
+                        missing(valued.getOrDefault(compare(branch), Set.of()), listed.get(compare(branch)));
+                return missing.isEmpty()
+                        ? List.of()
+                        : List.of(new RowFinding(
+                                BALANCES_INCOMPLETE,
+                                "branch",
+                                Map.of("branch", branch, "limit", String.valueOf(missing.size()))));
+            }
+        };
+    }
+
+    /**
+     * The items each branch's import opening stock journals valued, by branch code and item code (compare form): the sets
+     * recorded when each was posted ({@code retail_import_opening_items}), and for the old command's journals, which
+     * recorded none, the items with an unregistered legacy balance movement there. The one read the validation, the
+     * forecast and the loader refuse by.
+     */
+    static Map<String, Set<String>> valuedItems(JdbcClient jdbc) {
+        Map<String, Set<String>> out = new HashMap<>();
+        jdbc.sql("""
+                        SELECT b.code AS branch, p.code AS item
+                          FROM retail_import_opening_items i
+                          JOIN branches b ON b.id = i.branch_id JOIN retail_products p ON p.id = i.product_id
+                         WHERE i.tenant_id = current_setting('app.tenant_id')::uuid
+                        UNION
+                        SELECT b.code, p.code
+                          FROM retail_stock_movements m
+                          JOIN branches b ON b.id = m.branch_id JOIN retail_products p ON p.id = m.product_id
+                         WHERE m.tenant_id = current_setting('app.tenant_id')::uuid AND m.historical
+                           AND m.kind = 'legacy_balance' AND m.source_type = ?
+                           AND NOT EXISTS (SELECT 1 FROM import_refs r
+                                            WHERE r.tenant_id = m.tenant_id AND r.target_id = m.id)
+                        """)
+                .param(RetailImporter.SOURCE_TYPE)
+                .query((rs, n) -> out.computeIfAbsent(compare(rs.getString(1)), k -> new HashSet<>())
+                        .add(compare(rs.getString(2))))
+                .list();
+        return out;
+    }
+
+    /** The valued items a branch's rows leave out, in order: empty when the rows list every one (compare form). */
+    static List<String> missing(Set<String> valued, Set<String> listed) {
+        return valued.stream()
+                .filter(item -> listed == null || !listed.contains(item))
+                .sorted()
+                .toList();
     }
 
     /**
@@ -381,10 +473,14 @@ class RetailV1Template implements ImportTemplate {
                 .filter(b -> !b.active())
                 .map(b -> compare(b.code()))
                 .collect(Collectors.toSet()));
+        // A file that leaves out an item an earlier journal valued is refused at validation and by the loader: none is
+        // predicted for its branch either.
+        Map<String, Set<String>> valued = readOnly.execute(s -> valuedItems(jdbc));
         return new StockForecast(
                 held == null ? Map.of() : held,
                 journalled == null ? Map.of() : journalled,
-                inactive == null ? Set.of() : inactive);
+                inactive == null ? Set.of() : inactive,
+                valued == null ? Map.of() : valued);
     }
 
     // JUSTIFICATION-A3: the Lead's steer for round 4 asks one netting function shared by the forecast and the loader.
@@ -431,19 +527,26 @@ class RetailV1Template implements ImportTemplate {
         private final Map<String, Long> journalled = new TreeMap<>();
         private final List<Journal> journals = new ArrayList<>();
         private final Set<String> inactive;
+        private final Map<String, Set<String>> valued;
 
         StockForecast(Map<String, Long> held) {
-            this(held, Map.of(), Set.of());
+            this(held, Map.of(), Set.of(), Map.of());
         }
 
         /**
          * {@code journalledBefore}: what earlier imports' opening stock journals hold per branch; {@code inactive}: the
-         * closed branches, where no journal is posted (both in compare form).
+         * closed branches, where no journal is posted; {@code valued}: the items those journals valued ({@link
+         * #valuedItems}); all in compare form.
          */
-        StockForecast(Map<String, Long> held, Map<String, Long> journalledBefore, Set<String> inactive) {
+        StockForecast(
+                Map<String, Long> held,
+                Map<String, Long> journalledBefore,
+                Set<String> inactive,
+                Map<String, Set<String>> valued) {
             this.cost = new HashMap<>(held);
             this.journalled.putAll(journalledBefore);
             this.inactive = Set.copyOf(inactive);
+            this.valued = Map.copyOf(valued);
         }
 
         @Override
@@ -478,7 +581,9 @@ class RetailV1Template implements ImportTemplate {
         /** Closes a batch: its journal per branch is the loader's, {@link #branchOpening} netted on what is journalled. */
         private void close() {
             qty.forEach((branch, items) -> {
-                if (inactive.contains(branch)) {
+                if (inactive.contains(branch)
+                        || !missing(valued.getOrDefault(branch, Set.of()), items.keySet())
+                                .isEmpty()) {
                     return;
                 }
                 BranchOpening opening = branchOpening(items, product -> cost.getOrDefault(product, 0L));

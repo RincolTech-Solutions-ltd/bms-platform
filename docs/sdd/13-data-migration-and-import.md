@@ -1399,7 +1399,8 @@ section 4.1 and Appendix A).**
   of the normalised export in its import order, each field of `docs/specs/retail-pilot-data-dictionary.md` section 4 with
   its type (codes by the catalogue's normaliser, `ref` from history and balances to branches and products, money ranged
   from zero, dates as the export writes them, `qty_by_branch` a JSON object or `BRANCH=qty` pairs from a sheet), the retail
-  codes of spec 3.4.1 (`NAME_MISSING`, `NEGATIVE_BALANCE`, `PRICE_DIFFERS_EXISTING`, `CREDIT_SALE_UNPAID`; the receivable
+  codes of spec 3.4.1 (`NAME_MISSING`, `NEGATIVE_BALANCE`, `PRICE_DIFFERS_EXISTING`, `CREDIT_SALE_UNPAID`,
+  `BALANCES_INCOMPLETE`, the last from `ImportTemplate.SetCheck`, a rule over the whole set; the receivable
   decision's `CREDIT_DECISION_MISSING` is shared), the receivable decision with `treat_as_settled` and `defer` (the export
   holds no outstanding amount per buyer, so `open_from_list` is not offered and is refused with `policy_option_unknown`),
   a forecast and its books. The cash book files of 13.13.1 are not in it: they stay the command's.

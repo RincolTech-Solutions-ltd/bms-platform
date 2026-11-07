@@ -301,11 +301,16 @@ The import is idempotent for the data it imports:
   journalled; the report lists each such item (`no balance row for branch ... its derived balance
   ... is kept`). Import a branch's balances whole, in one file, the first time.
 - Once an import has journalled a branch's opening stock, a later balances file must list every
-  item the imported stock holds there. One that leaves an item out is refused before anything is
-  posted (`balances.jsonl must list every item at KLA, which an earlier import already journalled;
-  missing: ...`), from the command and from the screens alike. Correct one item with a stock-take
-  in the app, not by a re-import. Two sources mapped onto `balances` for the same branch in one
-  upload are refused the same way at the second; give the balances as one source.
+  item that journal valued (each journal records its items; for the old command's journals, the
+  items it wrote a legacy balance for). An item with history and no balance row was never valued,
+  so it is not required, and a re-run of the same export passes. A file that leaves a valued item
+  out is refused before anything is posted: the command fails at `balances.jsonl` (`balances.jsonl
+  must list every item at KLA, which an earlier import already journalled; missing: ...`), and the
+  screens raise `BALANCES_INCOMPLETE` (blocking) on the branch's first balances row, and the dry
+  run fails, so the import cannot be made ready. Rows imported before and unchanged count as
+  listed, so a full re-upload with one changed row passes. The check is per file: when one branch
+  fails, the other branches of the same file are not journalled either. Correct one item with a
+  stock-take in the app, not by a re-import. Give a branch's balances as one source.
 - A dry run of the command holds the business's import key for its whole run: a real command or
   a screens commit started meanwhile is refused (`IMPORT_IN_PROGRESS`); run it after the dry run.
 - The same export uploaded through the import screens after the command (mapping onto
