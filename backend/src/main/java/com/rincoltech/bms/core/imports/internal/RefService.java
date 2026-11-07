@@ -259,10 +259,11 @@ class RefService {
         Set<UUID> registered = new HashSet<>(held);
         long refused = 0;
         for (TransactionEntry e : posted) {
-            if (isFrameworkOpening(e) && registered.contains(e.entryId())) {
+            // Registered already, by this batch or by an earlier batch of one outer transaction (a dry run's).
+            if ((isFrameworkOpening(e) || isRetailCommandOpening(e)) && registered.contains(e.entryId())) {
                 continue;
             }
-            if (isRetailCommandOpening(e) && !registered.contains(e.entryId())) {
+            if (isRetailCommandOpening(e)) {
                 insert(
                         runId,
                         batchId,

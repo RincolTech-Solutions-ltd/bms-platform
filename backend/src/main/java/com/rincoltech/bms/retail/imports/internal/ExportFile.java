@@ -122,18 +122,25 @@ final class ExportFile {
         return file;
     }
 
-    /** {@code {"KLA": "4"}} as written, or {@code KLA=4; ENT=-2.5}; anything else is left as text for the row to refuse. */
+    /**
+     * {@code {"KLA": "4"}} as written; {@code KLA=4; ENT=-2.5} from a sheet; or {@code {KLA=4, ENT=-2.5}}, the text the
+     * staged row holds for a JSON Lines object (the stored cell read back as a map). Anything else is left as text for the
+     * row to refuse.
+     */
     static JsonNode branchQuantities(String text) {
         String s = text.strip();
         if (s.startsWith("{")) {
             try {
                 return JSON.readTree(s);
             } catch (JacksonException e) {
-                return JSON.getNodeFactory().stringNode(text);
+                if (!s.endsWith("}")) {
+                    return JSON.getNodeFactory().stringNode(text);
+                }
+                s = s.substring(1, s.length() - 1);
             }
         }
         ObjectNode out = JSON.createObjectNode();
-        for (String part : s.split(";")) {
+        for (String part : s.split("[;,]")) {
             if (part.isBlank()) {
                 continue;
             }

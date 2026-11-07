@@ -990,8 +990,17 @@ public class RetailImporter {
                                     null,
                                     null,
                                     "Imported " + r.ref())));
-                    target = stock.recordHistorical(r.on(), moves).getFirst();
+                    List<UUID> made = stock.recordHistorical(r.on(), moves);
+                    target = made.getFirst();
                     targetType = "retail.stock_movement";
+                    remember("purchases", r.row(), r.ref(), targetType, target, r.user());
+                    // Every branch's movement is the run's own stock (issue #135): the first is the row's record, as
+                    // before, and the others are registered with it, so a move between shops nets to zero in the books.
+                    for (UUID other : made.subList(1, made.size())) {
+                        remember("purchases", r.row(), r.ref(), targetType, other, r.user());
+                    }
+                    c.written++;
+                    continue;
                 }
                 remember("purchases", r.row(), r.ref(), targetType, target, r.user());
                 c.written++;

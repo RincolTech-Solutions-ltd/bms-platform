@@ -127,6 +127,9 @@ class RetailV1TemplateTest {
         assertThat(ExportFile.branchQuantities("KLA=4; ENT=-2.5").toString())
                 .isEqualTo(ExportFile.branchQuantities("{\"KLA\":\"4\",\"ENT\":\"-2.5\"}")
                         .toString());
+        assertThat(ExportFile.branchQuantities("{KLA=4, ENT=-2.5}").toString())
+                .as("a JSON Lines object as the staged row holds it")
+                .isEqualTo("{\"KLA\":\"4\",\"ENT\":\"-2.5\"}");
         assertThat(ExportFile.branchQuantities("not a list").isString()).isTrue();
     }
 
