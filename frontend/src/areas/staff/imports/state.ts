@@ -10,7 +10,7 @@ import { showDate } from '../../../app/ui/PeriodPicker';
 export function grouped(value: string): string {
   const m = /^(-?)(\d+)(\.\d+)?$/.exec(value.trim());
   if (!m) return value;
-  return `${m[1]}${m[2].replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${m[3] ?? ''}`;
+  return `${m[1]}${(m[2] ?? '').replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${m[3] ?? ''}`;
 }
 
 /** A figure of a check in its unit: money through the one formatter, every other unit grouped as it is. */

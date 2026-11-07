@@ -750,9 +750,10 @@ class BusinessClosureIT extends IntegrationTest {
         assertThat(count("SELECT count(*) FROM retail_sales WHERE tenant_id = ?", t.tenantId()))
                 .isPositive();
         // The import run and its batch (V127, #127), seeded by RlsIsolationIT.seedOneRowInEveryTable. The batch names
-        // its run with no ON DELETE CASCADE, so the purge's passes must delete the batch before the run (#736).
+        // its run with no ON DELETE CASCADE, so the purge's passes must delete the batch before the run (#736). The second
+        // run is the committed one whose reconciliation and sign-off (V144, #134) name it, deleted before it too.
         assertThat(count("SELECT count(*) FROM import_runs WHERE tenant_id = ?", t.tenantId()))
-                .isEqualTo(1);
+                .isEqualTo(2);
         assertThat(count("SELECT count(*) FROM import_batches WHERE tenant_id = ?", t.tenantId()))
                 .isEqualTo(1);
         TestDatabase.owner()

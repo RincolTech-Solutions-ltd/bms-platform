@@ -544,6 +544,7 @@ class ImportReconciliationIT extends IntegrationTest {
         assertThat(signoffs(run)).isZero();
 
         // The database refuses it too, whatever the application does.
+        LocalDate day = today(t);
         assertThatThrownBy(() -> as(
                         t,
                         () -> new TransactionTemplate(transactionManager).execute(s -> jdbc.sql("""
@@ -559,7 +560,7 @@ class ImportReconciliationIT extends IntegrationTest {
                                         r.id(),
                                         r.sha256(),
                                         allSections(r).toArray(String[]::new),
-                                        java.sql.Date.valueOf(today(t)),
+                                        java.sql.Date.valueOf(day),
                                         admin)
                                 .update())))
                 .hasStackTraceContaining("a reconciliation with a difference that is not itemised is never signed");
