@@ -271,7 +271,7 @@ The import is idempotent for the data it imports:
 
 - History rows are keyed by `source_ref` in `import_refs` (issue #135: the key
   `<file>.jsonl|-|ref:<source_ref>`, held by key alone), and still written to `retail_import_refs`
-  beside it until that table is retired; a reference already imported, by this command before or
+  beside it until that table is retired (by a `retail_v1` upload through the screens too); a reference already imported, by this command before or
   after the upgrade (migration V145 copied every earlier reference), is counted as `existing` and
   skipped.
 - Catalogue, suppliers, credit buyers and branches are matched by code or name.
@@ -287,9 +287,17 @@ The import is idempotent for the data it imports:
   never silently changed.
 - The opening journal is posted once per branch (`already posted, not posted again`), and so is
   the cash opening journal of each shop (`retail.cash_opening:<branch>`). Since issue #135 the stock
-  opening journal is posted by the import framework for what the run's own stock above zero is
-  worth, so a re-run that adds history (new `source_ref` values) posts a journal for that stock;
-  one that adds nothing posts none.
+  opening journal is posted by the import framework for the change in what the business's imported
+  stock above zero is worth (every import's history and legacy balances, an earlier or stopped
+  run's and the old command's included), less what every import's opening journals already hold.
+  So a re-run that adds history (new `source_ref` values) posts a journal for that stock, a run
+  resumed after a stop journals the history the stopped run wrote, and one that adds nothing posts
+  none. Stock is valued at each item's current cost: if a cost was changed in the app since the
+  earlier import, a re-run posts that difference too, said in its report line.
+- Only one command runs per business. A second one started while the first is writing, or within
+  15 minutes of its last file, is refused (`Another import is being written for this business`);
+  wait and run it again. A run left `committing` for longer by a killed process is cancelled by
+  the next command, which recognises what the killed one wrote.
 - Cash book rows are keyed by `source_ref` per file (`savings`, `expenses`, `banking`,
   `withdrawals`, `advances`, `advance_payments`); a re-run takes no advance number and adds no row.
   A banked row keeps the expected amount it was computed with; a savings, expense or advance added

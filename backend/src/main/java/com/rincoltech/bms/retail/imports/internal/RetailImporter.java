@@ -50,6 +50,8 @@ import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -211,6 +213,8 @@ public class RetailImporter {
                             "unit_cost_minor",
                             "reported_at",
                             "source_user")));
+
+    private static final Logger log = LoggerFactory.getLogger(RetailImporter.class);
 
     private final TenantJobs tenants;
     private final TransactionTemplate transactions;
@@ -515,8 +519,15 @@ public class RetailImporter {
      * aborted by the failure, so nothing more is sent to it.
      */
     private void stopped(CommandRun command, boolean dryRun) {
-        if (!dryRun) {
+        if (dryRun) {
+            return;
+        }
+        try {
             transactions.executeWithoutResult(status -> commandRuns.finish(command.id(), true));
+        } catch (RuntimeException e) {
+            // The failure that stopped the file is the one reported; a run that cannot be ended now is cancelled by
+            // the next command once its lease lapses (review of 97cb1be, finding 2).
+            log.warn("import-retail could not end run {}: {}", command.id(), e.getMessage());
         }
     }
 
@@ -661,10 +672,25 @@ public class RetailImporter {
 
         /**
          * Whether a name a row uses was listed: by the reference file the command read before (the command), or held by
-         * the catalogue before this row (a batch of the framework, which keeps nothing from an earlier batch).
+         * the catalogue before this row (a batch of the framework, which keeps nothing from an earlier batch). A name the
+         * framework's row makes is registered on that row (review of 97cb1be, finding 5).
          */
-        boolean listed(Set<String> names, String name, java.util.function.BooleanSupplier createdNow) {
-            return command ? names.contains(name.toLowerCase(Locale.ROOT)) : !createdNow.getAsBoolean();
+        // JUSTIFICATION-A3: the review asks every record a framework batch writes registered; this is that one case.
+        boolean listed(
+                Set<String> names,
+                String name,
+                java.util.function.Supplier<Made> ensure,
+                String file,
+                Row row,
+                String targetType) {
+            if (command) {
+                return names.contains(name.toLowerCase(Locale.ROOT));
+            }
+            Made made = ensure.get();
+            if (made.created()) {
+                refs.created(file, row, targetType, made.id());
+            }
+            return !made.created();
         }
 
         void begin() {
@@ -823,10 +849,13 @@ public class RetailImporter {
                 if (!listed(
                         namedCategories,
                         category,
-                        () -> catalogue.ensureCategory(category).created())) {
+                        () -> made(catalogue.ensureCategory(category)),
+                        file.name,
+                        row,
+                        "retail.category")) {
                     report.anomaly(file.name, row.line(), "category " + category + " is not in categories.jsonl");
                 }
-                if (!listed(namedUnits, unit, () -> catalogue.ensureUnit(unit).created())) {
+                if (!listed(namedUnits, unit, () -> made(catalogue.ensureUnit(unit)), file.name, row, "retail.unit")) {
                     report.anomaly(file.name, row.line(), "unit " + unit + " is not in units.jsonl");
                 }
                 UUID unitId = catalogue.ensureUnit(unit).id();
@@ -1755,11 +1784,13 @@ public class RetailImporter {
         /**
          * Data dictionary rule 5 through the framework (issues #135, #872 and #873): one opening journal per branch of the
          * batch's balances, through {@link BatchWriter.Checkpoint#openingJournal} against opening balance equity, of the
-         * change in what the run's items above zero are worth at their current cost: the run's own stock, from the
-         * movements it registered in {@code import_refs} (its history and its legacy balances, every batch of it), less
-         * what its own opening journals already hold, read from the ledger. So a negative balance is never journalled
-         * (the negative-stock rule: it is listed for the first stock-take), a resumed or a second batch journals only what
-         * changed, a fall is a journal the other way, and nothing is kept in memory. A branch that changes nothing and
+         * change in what the business's imported items above zero are worth at their current cost: every historical
+         * movement an import wrote, whichever run wrote it (review of 97cb1be, finding 1: the history may be a stopped or
+         * an earlier run's, or the old command's that V145 copied, and the legacy balance this run's), less what every
+         * import's opening stock journal already holds, read from the ledger. So a negative balance is never journalled
+         * (the negative-stock rule: it is listed for the first stock-take), each item is netted over all its imported
+         * movements, a resumed or a second batch or run journals only what changed, a fall is a journal the other way,
+         * and nothing is kept in memory. A branch that changes nothing and
          * already has an opening journal from an earlier import (this one's, an earlier command's or one V145 copied) is
          * reported as already posted, with what its balance rows are worth, as the command always reported it.
          */
@@ -1777,9 +1808,11 @@ public class RetailImporter {
             byBranch.forEach((code, v) -> {
                 UUID branch = ids.get(code);
                 long[] stockNow = runStock(branch);
-                // What the stock of the branch is worth now, told to the report as the preview predicts it.
+                // What the run's own stock of the branch is worth, told to the report as the preview predicts it.
                 checkpoint.stock(code, BigDecimal.valueOf(stockNow[0], 3), stockNow[1]);
-                long change = Math.subtractExact(stockNow[2], runJournalled(branch));
+                // The journal nets every import of the business, not this run alone (review of 97cb1be, finding 1):
+                // the history a stopped or an earlier run wrote, the legacy balance this one wrote, and V145's rows.
+                long change = Math.subtractExact(importedAboveZero(branch), importJournalled(branch));
                 if (change == 0) {
                     String posted = earlierOpening(branch, code);
                     report.opening(
@@ -1798,14 +1831,20 @@ public class RetailImporter {
                         change > 0,
                         Math.abs(change),
                         RetailV1Template.OPENING_TYPE));
-                Map<String, Object> entry =
+                Optional<Map<String, Object>> entry =
                         jdbc.sql("""
                                 SELECT e.id, e.entry_no FROM import_refs r JOIN journal_entries e ON e.id = r.target_id
                                  WHERE r.batch_id = ? AND r.target_type = 'ledger.journal_entry'
                                    AND r.source_key LIKE 'opening|inventory|%' AND e.branch_id = ?
-                                """).params(batchId, branch).query().singleRow();
-                refs.journal("opening", code, "core.journal_entry", (UUID) entry.get("id"));
-                report.opening(new ImportReport.Opening(code, change, (String) entry.get("entry_no"), "posted"));
+                                """).params(batchId, branch).query().listOfRows().stream()
+                                .findFirst();
+                entry.ifPresent(e -> refs.journal("opening", code, "core.journal_entry", (UUID) e.get("id")));
+                // A fall is a journal the other way: its amount, and the status says it credits inventory.
+                report.opening(new ImportReport.Opening(
+                        code,
+                        Math.abs(change),
+                        entry.map(e -> (String) e.get("entry_no")).orElse(null),
+                        change > 0 ? "posted" : "posted the other way (credit inventory, debit equity)"));
             });
         }
 
@@ -1818,7 +1857,7 @@ public class RetailImporter {
             jdbc.sql("""
                             SELECT sum(m.qty) AS qty, p.cost_minor
                               FROM retail_stock_movements m JOIN retail_products p ON p.id = m.product_id
-                             WHERE m.branch_id = ?
+                             WHERE m.tenant_id = current_setting('app.tenant_id')::uuid AND m.branch_id = ?
                                AND (m.id IN (SELECT r.target_id FROM import_refs r
                                               WHERE r.run_id = ? AND r.target_type = 'retail.stock_movement')
                                     OR m.source_id IN (SELECT r.target_id FROM import_refs r
@@ -1842,18 +1881,56 @@ public class RetailImporter {
             return out;
         }
 
-        /** What the run's own opening journals already put on the branch's inventory account, from the ledger. */
-        private long runJournalled(UUID branch) {
+        /**
+         * What every import's opening stock journal already put on the branch's inventory account, from the ledger: the
+         * framework's, this command's since #135, and the earlier command's (V145's copies and the old table).
+         */
+        private long importJournalled(UUID branch) {
             return jdbc.sql("""
                             SELECT coalesce(sum(l.debit - l.credit), 0)
-                              FROM import_refs r
-                              JOIN journal_entries e ON e.id = r.target_id
+                              FROM journal_entries e
                               JOIN journal_lines l ON l.entry_id = e.id
                               JOIN gl_accounts a ON a.id = l.account_id
-                             WHERE r.run_id = ? AND r.target_type = 'ledger.journal_entry'
-                               AND r.source_key LIKE 'opening|inventory|%' AND a.system_key = 'inventory'
-                               AND e.branch_id = ?
-                            """).params(id, branch).query(Long.class).single();
+                             WHERE e.tenant_id = current_setting('app.tenant_id')::uuid AND e.branch_id = ?
+                               AND a.system_key = 'inventory'
+                               AND e.id IN (SELECT r.target_id FROM import_refs r
+                                             WHERE r.tenant_id = e.tenant_id AND r.target_type = 'ledger.journal_entry'
+                                               AND r.source_key LIKE 'opening|inventory|%'
+                                            UNION
+                                            SELECT o.target_id FROM retail_import_refs o
+                                             WHERE o.tenant_id = e.tenant_id AND o.source_file = 'opening')
+                            """).params(branch).query(Long.class).single();
+        }
+
+        // JUSTIFICATION-A3: the review of 97cb1be (finding 1) asks the journal to net every import, a read of its own.
+        /**
+         * What the business's imported stock at a branch, item by item above zero, is worth at each item's current cost:
+         * every historical movement an import wrote (the export's adjustments, returns and legacy balances, of source type
+         * {@code retail.import}, and the movements of the purchases, sales and usage reports any import registered,
+         * V145's copies included), whichever run wrote it.
+         */
+        private long importedAboveZero(UUID branch) {
+            long[] out = new long[1];
+            jdbc.sql("""
+                            SELECT sum(m.qty) AS qty, p.cost_minor
+                              FROM retail_stock_movements m JOIN retail_products p ON p.id = m.product_id
+                             WHERE m.tenant_id = current_setting('app.tenant_id')::uuid AND m.branch_id = ?
+                               AND m.historical
+                               AND (m.source_type = ?
+                                    OR EXISTS (SELECT 1 FROM import_refs r
+                                                WHERE r.tenant_id = m.tenant_id AND r.target_id = m.source_id))
+                             GROUP BY m.product_id, p.cost_minor
+                            """)
+                    .params(branch, SOURCE_TYPE)
+                    .query((rs, n) -> {
+                        BigDecimal qty = rs.getBigDecimal("qty");
+                        if (qty.signum() > 0) {
+                            out[0] = Math.addExact(out[0], Quantities.value(qty, rs.getLong("cost_minor")));
+                        }
+                        return null;
+                    })
+                    .list();
+            return out[0];
         }
 
         /** The first opening stock journal of the branch any import posted, by its number; null when none did. */
@@ -1861,11 +1938,13 @@ public class RetailImporter {
             return jdbc.sql("""
                             SELECT min(entry_no) FROM (
                                 SELECT e.entry_no FROM import_refs r JOIN journal_entries e ON e.id = r.target_id
-                                 WHERE r.target_type = 'ledger.journal_entry' AND r.source_key LIKE 'opening|inventory|%'
+                                 WHERE r.tenant_id = current_setting('app.tenant_id')::uuid
+                                   AND r.target_type = 'ledger.journal_entry' AND r.source_key LIKE 'opening|inventory|%'
                                    AND e.branch_id = ?
                                 UNION ALL
                                 SELECT e.entry_no FROM retail_import_refs r JOIN journal_entries e ON e.id = r.target_id
-                                 WHERE r.source_file = 'opening' AND r.source_ref = ?) o
+                                 WHERE r.tenant_id = current_setting('app.tenant_id')::uuid
+                                   AND r.source_file = 'opening' AND r.source_ref = ?) o
                             """)
                     .params(branch, code)
                     .query(String.class)
@@ -1880,7 +1959,8 @@ public class RetailImporter {
         private Instant openingInstant() {
             return jdbc.sql("""
                             SELECT min(occurred_at) FROM retail_stock_movements
-                             WHERE historical AND kind <> 'legacy_balance'
+                             WHERE tenant_id = current_setting('app.tenant_id')::uuid AND historical
+                               AND kind <> 'legacy_balance'
                             """)
                     .query(java.sql.Timestamp.class)
                     .optional()
@@ -2014,8 +2094,11 @@ public class RetailImporter {
         @Override
         public boolean seen(String file, Row row, String ref) {
             return jdbc.sql("""
-                            SELECT EXISTS (SELECT 1 FROM import_refs WHERE source_key = ?)
-                                OR EXISTS (SELECT 1 FROM retail_import_refs WHERE source_file = ? AND source_ref = ?)
+                            SELECT EXISTS (SELECT 1 FROM import_refs
+                                            WHERE tenant_id = current_setting('app.tenant_id')::uuid AND source_key = ?)
+                                OR EXISTS (SELECT 1 FROM retail_import_refs
+                                            WHERE tenant_id = current_setting('app.tenant_id')::uuid
+                                              AND source_file = ? AND source_ref = ?)
                             """)
                     .params(historyKey(file, ref), file, ref)
                     .query(Boolean.class)
@@ -2057,10 +2140,19 @@ public class RetailImporter {
 
     /**
      * A batch of the framework (issue #135): each row is the staged row of its line, known by its {@code source_ref} and
-     * whether the business's imports hold it, and every record it makes is registered under that reference.
+     * whether the business's imports hold it, and every record it makes is registered under that reference. Its history
+     * rows and opening journals are written to {@code retail_import_refs} too, as the command's are, so the previous
+     * release recognises them after a rollback (review of 97cb1be, finding 4).
      */
-    private record StagedRefs(BatchWriter.Checkpoint checkpoint, Map<Integer, ImportRefs.StagedRow> rows)
-            implements Refs {
+    private final class StagedRefs implements Refs {
+
+        private final BatchWriter.Checkpoint checkpoint;
+        private final Map<Integer, ImportRefs.StagedRow> rows;
+
+        StagedRefs(BatchWriter.Checkpoint checkpoint, Map<Integer, ImportRefs.StagedRow> rows) {
+            this.checkpoint = checkpoint;
+            this.rows = rows;
+        }
 
         @Override
         public boolean seen(String file, Row row, String ref) {
@@ -2070,6 +2162,7 @@ public class RetailImporter {
         @Override
         public void remember(String file, Row row, String ref, String targetType, UUID targetId, String sourceUser) {
             checkpoint.register(staged(row).sourceRef(), targetType, targetId);
+            legacy(file, ref, targetType, targetId, sourceUser);
         }
 
         @Override
@@ -2084,7 +2177,8 @@ public class RetailImporter {
 
         @Override
         public void journal(String file, String ref, String targetType, UUID entryId) {
-            // The framework registered the journal as it posted it.
+            // The framework registered the journal as it posted it; the old table keeps it for the previous release.
+            legacy(file, ref, targetType, entryId, null);
         }
 
         private ImportRefs.StagedRow staged(Row row) {

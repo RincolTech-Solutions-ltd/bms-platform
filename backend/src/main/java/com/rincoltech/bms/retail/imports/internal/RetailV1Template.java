@@ -284,7 +284,8 @@ class RetailV1Template implements ImportTemplate {
 
     /** The cost and sell price of the business's product with this code, compared ignoring case. */
     private Optional<long[]> existingPrices(String code) {
-        return jdbc.sql("SELECT cost_minor, sell_minor FROM retail_products WHERE lower(code) = lower(?)")
+        return jdbc.sql("SELECT cost_minor, sell_minor FROM retail_products"
+                        + " WHERE tenant_id = current_setting('app.tenant_id')::uuid AND lower(code) = lower(?)")
                 .param(code)
                 .query((rs, n) -> new long[] {rs.getLong(1), rs.getLong(2)})
                 .optional();

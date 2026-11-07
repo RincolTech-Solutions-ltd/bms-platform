@@ -20,7 +20,8 @@
 --      target type becomes `ledger.journal_entry`. A row without a target is left out, since import_refs needs one; the
 --      command always wrote one (RetailImporter's remember). It is idempotent: a row whose record import_refs already
 --      holds, under any key (the command now registers each record it makes there as it writes the old row), is skipped.
---      The migration calls it in batches of 5,000 until it copies nothing.
+--      It returns the rows it selected, and fails on a source_file it has no batch for. The migration calls it in
+--      batches of 5,000 until it selects nothing.
 --
 -- retail_import_refs stays, unchanged, and the command still writes it beside import_refs, so the previous release keeps
 -- reading it after a rollback and the cash book's first live day keeps its read. Dropping it is the contract step of a
@@ -31,7 +32,8 @@
 -- SHARE on import_refs, which only imports write. The backfill reads retail_import_refs and branches
 -- without locking a row and inserts new rows only (import_runs, import_batches, import_refs); its foreign keys take FOR KEY
 -- SHARE on the business's tenants row and on the rows it just made. It updates or locks no row of a trading business's
--- sales, stock or ledger, so a shop's requests never wait on it, and each batch of 5,000 is one bounded statement. Every
+-- sales, stock or ledger, so a shop's requests never wait on it. Each batch of 5,000 bounds a statement, not the
+-- transaction: every batch runs in this migration's one transaction, which holds only the locks above. Every
 -- lock is taken under lock_timeout 5s, so the migration fails fast behind a long transaction instead of queueing requests
 -- behind it. The tables have FORCE ROW LEVEL SECURITY and no app.tenant_id is bound here: as in V103 and V115, bms_owner
 -- has BYPASSRLS (deploy/postgres/initdb/01-roles.sh), every statement names the business it reads or writes, and an owner
@@ -68,6 +70,7 @@ DECLARE
     v_count  integer;
     v_tenant uuid;
     v_run    uuid;
+    v_file   text;
 BEGIN
     IF p_limit IS NULL OR p_limit <= 0 THEN
         RAISE EXCEPTION 'the backfill limit must be above zero';
@@ -116,6 +119,16 @@ BEGIN
                        ('cash_opening', 11)) AS f (file, seq)
          WHERE EXISTS (SELECT 1 FROM bms_backfill_refs r WHERE r.source_file = f.file)
         ON CONFLICT (run_id, seq) DO NOTHING;
+        -- A source_file without a batch would never be copied, and the loop below would stop with rows left behind:
+        -- the migration fails instead, naming it.
+        SELECT r.source_file INTO v_file FROM bms_backfill_refs r
+         WHERE NOT EXISTS (SELECT 1 FROM import_batches b
+                            WHERE b.tenant_id = v_tenant AND b.run_id = v_run AND b.source_filename = r.source_file)
+         LIMIT 1;
+        IF v_file IS NOT NULL THEN
+            RAISE EXCEPTION 'retail_import_refs of business % has source_file %, which the backfill does not know',
+                v_tenant, v_file;
+        END IF;
 
         INSERT INTO import_refs (id, tenant_id, created_at, run_id, batch_id, source_key, source_ref, target_type,
                                  target_id)
@@ -124,9 +137,12 @@ BEGIN
           FROM bms_backfill_refs r
           JOIN import_batches b ON b.tenant_id = v_tenant AND b.run_id = v_run AND b.source_filename = r.source_file
         ON CONFLICT DO NOTHING;
-        GET DIAGNOSTICS v_count = ROW_COUNT;
+        -- The rows selected, not those inserted, count against the limit: a row skipped by the conflict (a second old
+        -- row of the same record) is held after this batch, so the next selection leaves it out and the loop ends.
+        SELECT count(*) INTO v_count FROM bms_backfill_refs;
         v_left := v_left - v_count;
     END LOOP;
+    -- The rows selected: zero only when import_refs holds every record retail_import_refs names.
     RETURN p_limit - v_left;
 END
 $$;

@@ -1,6 +1,7 @@
 package com.rincoltech.bms.retail.imports.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
@@ -106,5 +107,99 @@ class RetailImportRefsBackfillIT extends IntegrationTest {
                         .single())
                 .as("the dual-written rows are already in import_refs")
                 .isZero();
+    }
+
+    // JUSTIFICATION-A3: the review of 97cb1be asks a test of findings 1 and 2; each is a test of its own.
+    /**
+     * Review of 97cb1be, finding 1: the opening stock journal nets every import of the business, not the run alone. The
+     * first run writes the purchases and stops before any balance (no balances file); the second sees every purchase as
+     * existing and writes only the legacy balances: TB-1 has 10 from history and 7 in the source (a legacy movement of
+     * -3, registered by the second run), TB-2 has 4 from history and 4 in the source (no movement). The journal is what
+     * the imported stock above zero is worth, 7 x 100 + 4 x 200, and a third run posts nothing more.
+     */
+    @Test
+    void theOpeningJournalCountsTheHistoryAnEarlierRunWrote(@TempDir Path dir) throws IOException {
+        TestDatabase.Fixture t = TestDatabase.tenant("retail-open", false, true);
+        RetailTestSupport retail = new RetailTestSupport(http, t);
+        retail.product("TB-1", 100, 150);
+        retail.product("TB-2", 200, 300);
+        Files.writeString(dir.resolve("purchases.jsonl"), """
+                {"source_ref": "P-1", "product_code": "TB-1", "supplier": "Test Supplier 01", "kind": "purchase", "unit_cost_minor": 100, "unit_sell_minor": 150, "qty_by_branch": {"HQ": "10"}, "purchased_on": "2026-09-01", "source_user": "test.admin01"}
+                {"source_ref": "P-2", "product_code": "TB-2", "supplier": "Test Supplier 01", "kind": "purchase", "unit_cost_minor": 200, "unit_sell_minor": 300, "qty_by_branch": {"HQ": "4"}, "purchased_on": "2026-09-01", "source_user": "test.admin01"}
+                """);
+
+        ImportReport first = importer.run(t.slug(), dir, false);
+
+        assertThat(first.failed()).as(first.render()).isFalse();
+        assertThat(journalled(t)).as("no balances, no journal").isZero();
+
+        Files.writeString(dir.resolve("balances.jsonl"), """
+                {"branch": "HQ", "product_code": "TB-1", "qty": "7"}
+                {"branch": "HQ", "product_code": "TB-2", "qty": "4"}
+                """);
+        ImportReport second = importer.run(t.slug(), dir, false);
+
+        assertThat(second.failed()).as(second.render()).isFalse();
+        assertThat(second.counts("purchases.jsonl")).containsExactly(2, 0, 2, 0);
+        assertThat(journalled(t)).as(second.render()).isEqualTo(7 * 100 + 4 * 200);
+
+        ImportReport third = importer.run(t.slug(), dir, false);
+
+        assertThat(third.failed()).as(third.render()).isFalse();
+        assertThat(journalled(t)).isEqualTo(7 * 100 + 4 * 200);
+        assertThat(third.render()).contains("already posted, not posted again");
+    }
+
+    /**
+     * Review of 97cb1be, finding 2: a command run that wrote a batch within its lease is live, and a second command is
+     * refused rather than cancelling it; one left committing past the lease (a killed process) is cancelled.
+     */
+    @Test
+    void aLiveCommandRunIsNeverCancelledByAnother(@TempDir Path dir) throws IOException {
+        TestDatabase.Fixture t = TestDatabase.tenant("retail-live", false, true);
+        new RetailTestSupport(http, t).product("TB-1", 100, 150);
+        Files.writeString(dir.resolve("balances.jsonl"), """
+                {"branch": "HQ", "product_code": "TB-1", "qty": "2"}
+                """);
+        JdbcClient owner = TestDatabase.owner();
+        UUID live = UUID.randomUUID();
+        owner.sql("INSERT INTO import_runs (id, tenant_id, created_by, status, committing_at, origin)"
+                        + " VALUES (?, ?, ?, 'committing', now(), 'import_retail')")
+                .params(live, t.tenantId(), new UUID(0, 0))
+                .update();
+
+        assertThatThrownBy(() -> importer.run(t.slug(), dir, false)).hasMessageContaining("Another import");
+        assertThat(status(live)).isEqualTo("committing");
+
+        owner.sql("UPDATE import_runs SET updated_at = now() - interval '1 hour' WHERE id = ?")
+                .param(live)
+                .update();
+        ImportReport report = importer.run(t.slug(), dir, false);
+
+        assertThat(report.failed()).as(report.render()).isFalse();
+        assertThat(status(live)).as("left by a killed process").isEqualTo("cancelled");
+    }
+
+    private static String status(UUID run) {
+        return TestDatabase.owner()
+                .sql("SELECT status FROM import_runs WHERE id = ?")
+                .param(run)
+                .query(String.class)
+                .single();
+    }
+
+    /** What the business's imported opening journals put on inventory, from the ledger. */
+    private static long journalled(TestDatabase.Fixture t) {
+        return TestDatabase.owner()
+                .sql("""
+                        SELECT coalesce(sum(l.debit - l.credit), 0) FROM journal_entries e
+                          JOIN journal_lines l ON l.entry_id = e.id JOIN gl_accounts a ON a.id = l.account_id
+                         WHERE e.tenant_id = ? AND a.system_key = 'inventory'
+                           AND e.id IN (SELECT r.target_id FROM import_refs r
+                                         WHERE r.tenant_id = e.tenant_id AND r.target_type = 'ledger.journal_entry')
+                        """)
+                .param(t.tenantId())
+                .query(Long.class)
+                .single();
     }
 }

@@ -666,7 +666,7 @@ transaction that is rolled back, and prints the same report.
 | Sales, restocks, usage and damage | Historical documents and movements, no journals, keyed by `source_ref` in `import_refs` by key alone (`sales.jsonl\|-\|ref:<source_ref>#by-key`, and still in `retail_import_refs` until the contract step, #135); each movement's `business_date` is the source row's sale, purchase or usage date in the tenant's zone, so valuation `as_of` and daily profit read them by business date |
 | Restocks of kind `adjustment` or `return` | `adjustment` or `return` movements, not purchases, with no supplier payable |
 | Restock price changes | An `import` history row where consecutive restocks of a product changed its cost or sell price |
-| Balances | One `legacy_balance` movement per branch and product, equal to the source quantity less the balance the imported history left, so the derived balance equals the source exactly, dated with the import date as its business date; then one opening journal per branch, dated the same day, (debit `inventory`, credit `opening_balance_equity`) for the positive balances at the product's current cost, posted through the framework's `openingJournal` since #135 as the change in what the run's own items above zero are worth, so a re-run that writes nothing reports it already posted. A balance the history already gives (a zero difference) writes nothing and counts as existing |
+| Balances | One `legacy_balance` movement per branch and product, equal to the source quantity less the balance the imported history left, so the derived balance equals the source exactly, dated with the import date as its business date; then one opening journal per branch, dated the same day, (debit `inventory`, credit `opening_balance_equity`) for the positive balances at the product's current cost, posted through the framework's `openingJournal` since #135 as the change in what the business's imported items above zero are worth less what its import opening journals hold, so a re-run that writes nothing reports it already posted and a resumed run journals the history a stopped one wrote. A balance the history already gives (a zero difference) writes nothing and counts as existing |
 
 **Never guess, never lose a row (13.2).** A row with an unknown product or branch code, a missing
 or malformed field, a duplicate `source_ref`, a duplicate product code or a duplicate balance is
@@ -1408,9 +1408,11 @@ section 4.1 and Appendix A).**
   the command write one way. Nothing is kept from one batch to the next: the names a products row may use are the
   catalogue's, the instant before the history is the stock ledger's, and each branch's opening stock journal is posted
   through `openingJournal` (ledger type `retail.import_opening`, source module `core.imports`) for the change in what the
-  run's items above zero are worth, from the run's own movements in `import_refs`, less what its own opening journals
-  already hold (the rules of #872 and #873: a negative balance is never journalled and is listed for the first stock-take;
-  a fall is a journal the other way). Every row the loader writes is registered, the records it matched included, so the
+  business's imported items above zero are worth (every import's historical movements, whichever run wrote them, V145's
+  copies of the old command's included), less what every import's opening stock journals already hold, read from the
+  ledger (the rules of #872 and #873: a negative balance is never journalled and is listed for the first stock-take; each
+  item is netted over all its imported movements; a fall is a journal the other way). A run resumed after a stop therefore
+  journals the history the stopped run wrote. Every row the loader writes is registered, the records it matched included, so the
   reconciliation finds each one in the books.
 - **The wrapper.** `import-retail --tenant --dir [--dry-run] [--first-live-date]` keeps its interface, its tolerant reading
   of the export and its report, and runs on the framework (`ImportCommandRuns`): a run of origin `import_retail`, one
@@ -1418,8 +1420,10 @@ section 4.1 and Appendix A).**
   business as `import-retail-export`), each written with the commit's guards (the import key, `app.import_commit`, the
   imported marker, the end-of-batch journal check), its records in `import_refs`. The command is the platform operator's
   tool on the host under its runbook, so it has no upload, review, stored dry run or maker and checker, and its runs are
-  not reconciled in the app; its dry run is one outer transaction rolled back, run included. A run of the command a
-  killed process left `committing` is cancelled by the next one.
+  not reconciled in the app; its dry run is one outer transaction rolled back, run included. A second command is refused
+  with `IMPORT_IN_PROGRESS` while the first writes a batch (it holds the import key) or within its lease of 15 minutes
+  after its last batch; a run of the command a killed process left `committing` past its lease is cancelled by the next
+  one. Each file of a real run is its own transaction.
 - **`retail_import_refs` into `import_refs`, expand and contract (chapter 6 section 6.9).** V145 copies every reference of
   the old table into `import_refs` under the key a JSON Lines upload of the export derives (`sales.jsonl|-|ref:SAL-00011`)
   with the marker `#by-key` (`ImportRefs.BY_KEY`): the command never hashed a row, so such a key is the same row whatever

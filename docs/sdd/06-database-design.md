@@ -2901,7 +2901,8 @@ as `bms_app` under the tenant's row-level security:
   consecutive restocks of a product carried different prices.
 - **The opening journal**: one per branch (section 6.11.2), for the positive balances only. Since #135 it is posted
   through the import framework's `openingJournal` (source module `core.imports`, ledger type `retail.import_opening`),
-  registered in `import_refs` as `ledger.journal_entry`, for the change in what the run's own items above zero are worth.
+  registered in `import_refs` as `ledger.journal_entry`, for the change in what the business's imported items above zero
+  are worth (every import's historical movements) less what every import's opening stock journals hold.
 - **On the framework (#135).** Every file the command reads, and every batch of a run of the import screens read with a
   mapping onto the canonical template `retail_v1`, is one batch of a run in `import_runs` (`origin` `import_retail` for the
   command) written by the same code. Each record it makes (a branch, category, unit, item, supplier, credit buyer, sale,
@@ -2914,7 +2915,9 @@ as `bms_app` under the tenant's row-level security:
 Being replaced by `import_refs` (#135, expand and contract, section 6.9). V145 copied every row with a target into
 `import_refs` (function `bms_backfill_retail_import_refs(limit)`, under the key of `bms_retail_import_ref_key`, the marker
 `#by-key`, one committed backfill run of `origin` `retail_import_refs` per business and one committed batch per
-`source_file`); the command still writes this table beside `import_refs` (`ON CONFLICT DO NOTHING`), so the previous
+`source_file`), returning the rows it selected and failing on a `source_file` it has no batch for, so the migration's loop
+of 5,000 never stops with rows left; the command, and a framework batch of `retail_v1`, still write this table's history
+rows and stock opening journals beside `import_refs` (`ON CONFLICT DO NOTHING`), so the previous
 release recognises the rows after a rollback, and the cash book still reads its `cash_opening` rows for the first live day.
 Every other reader reads `import_refs`. The contract step, a later release once no deployed release reads it, stops the
 second write, moves the cash book's read and drops the table.

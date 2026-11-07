@@ -33,6 +33,9 @@ class CommandRunService implements ImportCommandRuns {
     /** No person opened the run: the command runs on the host, as the platform operator's tool. */
     static final UUID NO_PERSON = new UUID(0, 0);
 
+    /** How long a command run stays live after its last batch: longer than the gap between two of its files. */
+    static final String LEASE = "15 minutes";
+
     private final JdbcClient jdbc;
     private final RefService refs;
     private final ImportMappings mappings;
@@ -60,12 +63,30 @@ class CommandRunService implements ImportCommandRuns {
                     "Imports are switched off",
                     "The platform operator has switched imports off; nothing was written.");
         }
-        // A run of the command left committing was stopped by a killed process: the command holds no run between its
-        // own invocations. Its committed batches stay, and this run recognises what they wrote.
+        // A batch being written holds the business's import key: another command (or a commit) is live, so this one
+        // is refused at once, never cancels it (review of 97cb1be, finding 2).
+        if (!jdbc.sql("SELECT pg_try_advisory_xact_lock(" + ImportRunService.LOCK_KEY + ")")
+                .query(Boolean.class)
+                .single()) {
+            throw importInProgress();
+        }
+        // Between two batches the run's lease is its last batch: a command run that wrote within LEASE is live and
+        // this one is refused. One left committing for longer was stopped by a killed process; it is cancelled, its
+        // committed batches stay, and this run recognises what they wrote.
+        boolean live =
+                jdbc.sql("""
+                        SELECT EXISTS (SELECT 1 FROM import_runs
+                                        WHERE tenant_id = current_setting('app.tenant_id')::uuid AND origin = ?
+                                          AND status = 'committing' AND updated_at > now() - CAST(? AS interval))
+                        """).params(IMPORT_RETAIL, LEASE).query(Boolean.class).single();
+        if (live) {
+            throw importInProgress();
+        }
         List<UUID> left = jdbc.sql("""
                         UPDATE import_runs SET status = 'cancelled', cancelled_at = now(), updated_at = now(),
                                version = version + 1
-                         WHERE origin = ? AND status = 'committing'
+                         WHERE tenant_id = current_setting('app.tenant_id')::uuid AND origin = ?
+                           AND status = 'committing'
                         RETURNING id
                         """).param(IMPORT_RETAIL).query(UUID.class).list();
         left.forEach(id -> record(id, "core.import_run.status_changed", "committing", "cancelled"));
@@ -156,6 +177,11 @@ class CommandRunService implements ImportCommandRuns {
                         mapper.writeValueAsString(checkpoint.part.build(CommitReport.COMMIT)),
                         batchId)
                 .update();
+        // The run's lease: a batch written now keeps the run live for the next file.
+        jdbc.sql("""
+                        UPDATE import_runs SET updated_at = clock_timestamp()
+                         WHERE id = ? AND tenant_id = current_setting('app.tenant_id')::uuid
+                        """).param(runId).update();
         return counts;
     }
 
@@ -168,6 +194,10 @@ class CommandRunService implements ImportCommandRuns {
                         + " WHERE id = ? AND origin = ? AND status = 'committing'")
                 .params(status, runId, IMPORT_RETAIL)
                 .update();
+        if (changed != 1 && stopped) {
+            // Already ended (cancelled as stale by a later command): a stopped run has nothing more to record.
+            return;
+        }
         if (changed != 1) {
             throw new IllegalStateException("the command's run is not committing");
         }
