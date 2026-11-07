@@ -293,7 +293,9 @@ The import is idempotent for the data it imports:
   So a re-run that adds history (new `source_ref` values) posts a journal for that stock, a run
   resumed after a stop journals the history the stopped run wrote, and one that adds nothing posts
   none. Stock is valued at each item's current cost: if a cost was changed in the app since the
-  earlier import, a re-run posts that difference too, said in its report line.
+  earlier import, a re-run posts that difference too, said in its report line. At a branch that
+  is now inactive nothing is journalled: the report lists the change (`branch BR2 is inactive; its
+  opening stock change of ... is not journalled`) for the owner to post by hand.
 - Only one command runs per business. A second one started while the first is writing, or within
   15 minutes of its last file, is refused (`Another import is being written for this business`);
   wait and run it again. A run left `committing` for longer by a killed process is cancelled by

@@ -1797,6 +1797,10 @@ public class RetailImporter {
         private void openingJournals(List<Balance> rows, LocalDate today) {
             Map<String, long[]> byBranch = new TreeMap<>();
             Map<String, UUID> ids = new HashMap<>();
+            Set<UUID> inactive = branches.all().stream()
+                    .filter(b -> !b.active())
+                    .map(Branches.Branch::id)
+                    .collect(java.util.stream.Collectors.toSet());
             for (Balance b : rows) {
                 long[] v = byBranch.computeIfAbsent(b.branchCode(), k -> new long[1]);
                 ids.put(b.branchCode(), b.branch());
@@ -1813,6 +1817,15 @@ public class RetailImporter {
                 // The journal nets every import of the business, not this run alone (review of 97cb1be, finding 1):
                 // the history a stopped or an earlier run wrote, the legacy balance this one wrote, and V145's rows.
                 long change = Math.subtractExact(importedAboveZero(branch), importJournalled(branch));
+                if (change != 0 && inactive.contains(branch)) {
+                    // The ledger takes no entry at a closed branch: the change is told, for the owner to post by hand.
+                    report.anomaly(
+                            "balances.jsonl",
+                            0,
+                            "branch " + code + " is inactive; its opening stock change of " + change
+                                    + " minor units is not journalled");
+                    return;
+                }
                 if (change == 0) {
                     String posted = earlierOpening(branch, code);
                     report.opening(
