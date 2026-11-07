@@ -511,7 +511,7 @@ class PreviewService implements ImportPreview {
                 Map<String, Object> stored = JSON.readValue((String) row[1], OBJECT);
                 if (!imported.isEmpty()) {
                     String ref = RefService.sourceRef(source, (String) row[2], after, stored);
-                    if (imported.getOrDefault(ImportRefs.keyOf(ref), Set.of()).contains(ref)) {
+                    if (ImportRefs.holds(imported.get(ImportRefs.keyOf(ref)), ref)) {
                         continue;
                     }
                 }
