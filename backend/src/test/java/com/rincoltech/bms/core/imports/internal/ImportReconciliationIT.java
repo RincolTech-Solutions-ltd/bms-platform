@@ -152,7 +152,13 @@ class ImportReconciliationIT extends IntegrationTest {
         FixtureShopTemplate.SCRIPT = null;
         FixtureShopTemplate.POLICIES = List.of();
         extra = 0;
+        extraTillRows = "";
+        FixtureShopTemplate.SLOW_BOOKS = false;
+        ReconciliationService.signOffTimeout = "60s";
     }
+
+    /** Rows a test adds to the end of the golden till roll, in its columns; none by default. */
+    volatile String extraTillRows = "";
 
     <T> T as(TestDatabase.Fixture f, Supplier<T> work) {
         return TenantContext.callAs(f.tenantId(), work);
@@ -181,7 +187,10 @@ class ImportReconciliationIT extends IntegrationTest {
         UUID runId = as(t, () -> runs.open(operator).id());
         List<UUID> batches = new ArrayList<>();
         for (GoldenRun.GoldenFile g : GoldenRun.FILES) {
-            byte[] bytes = Files.readAllBytes(GoldenRun.DIR.resolve(g.file()));
+            byte[] read = Files.readAllBytes(GoldenRun.DIR.resolve(g.file()));
+            byte[] bytes = "till_roll".equals(g.source()) && !extraTillRows.isEmpty()
+                    ? (new String(read, StandardCharsets.UTF_8) + extraTillRows).getBytes(StandardCharsets.UTF_8)
+                    : read;
             Batch batch = as(
                     t,
                     () -> uploads.upload(
@@ -277,6 +286,8 @@ class ImportReconciliationIT extends IntegrationTest {
             long lent = 0;
             LocalDate lentOn = null;
             Map<String, long[]> buckets = new TreeMap<>();
+            Map<String, BigDecimal> itemQty = new TreeMap<>();
+            Map<String, Long> itemValue = new TreeMap<>();
             int after = 0;
             while (true) {
                 List<ImportRefs.StagedRow> rows = checkpoint.rows(after, 1_000);
@@ -317,6 +328,8 @@ class ImportReconciliationIT extends IntegrationTest {
                                 checkpoint.register(row.sourceRef(), "retail.stock_movement", movement);
                                 qty = qty.add(counted);
                                 value += amount;
+                                itemQty.merge((String) v.get("item"), counted, BigDecimal::add);
+                                itemValue.merge((String) v.get("item"), amount, Long::sum);
                             } else if (decided) {
                                 boolean credit = FixtureShopTemplate.RECEIVABLE
                                         .neededBy()
@@ -351,9 +364,16 @@ class ImportReconciliationIT extends IntegrationTest {
                     break;
                 }
             }
-            if (value != 0) {
-                checkpoint.openingJournal(
-                        new ImportRefs.Opening(f.headOffice(), HQ, "inventory", DAY, "inventory", true, value + extra));
+            // The opening inventory journal holds the items counted above zero; a negative balance is listed apart.
+            long journalled = itemQty.entrySet().stream()
+                    .filter(e -> e.getValue().signum() > 0)
+                    .mapToLong(e -> itemValue.get(e.getKey()))
+                    .sum();
+            if (journalled != 0) {
+                checkpoint.openingJournal(new ImportRefs.Opening(
+                        f.headOffice(), HQ, "inventory", DAY, "inventory", true, journalled + extra));
+            }
+            if (value != 0 || qty.signum() != 0) {
                 checkpoint.stock(HQ, qty, value);
             }
             if (lent != 0) {
@@ -873,6 +893,59 @@ class ImportReconciliationIT extends IntegrationTest {
         Report after = as(t, () -> reconciliation.latest(run)).orElseThrow();
         assertThat(after.id()).isEqualTo(read.id());
         assertThat(after.sha256()).isEqualTo(read.sha256());
+    }
+
+    @Test
+    void aRunTooBigToMeasureInTimeIsRefusedPlainlyAndSignsLater() throws IOException {
+        UUID run = committedGoldenRun(null);
+        Report r = as(t, () -> reconciliation.latest(run)).orElseThrow();
+
+        // The sign-off's own limit is shortened and the books take a second to read: refused, nothing signed.
+        ReconciliationService.signOffTimeout = "200ms";
+        FixtureShopTemplate.SLOW_BOOKS = true;
+        ResponseEntity<JsonNode> refused = signOff(t, run, r, allSections(r), "Fabricated Signer", today(t));
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(code(refused)).isEqualTo("sign_off_too_big");
+        assertThat(status(run)).isEqualTo("committed");
+        assertThat(signoffs(run)).isZero();
+
+        // Tried again when the books answer in time: signed.
+        FixtureShopTemplate.SLOW_BOOKS = false;
+        ReconciliationService.signOffTimeout = "60s";
+        assertThat(signOff(t, run, r, allSections(r), "Fabricated Signer", today(t))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(status(run)).isEqualTo("signed_off");
+    }
+
+    // JUSTIFICATION-A3: the fixture row with a negative quantity the Lead's ruling 2 on the review of 391e1dc asks for.
+    @Test
+    void aNegativeStockBalanceIsListedApartAndTheRunStillTiesAndSigns() throws IOException {
+        // A stock take of 2 below zero of a second item the business holds, at the fabricated cost of 700 the writer
+        // records. The source counts its value (-1400); the opening inventory journal holds the positive balances only.
+        new RetailTestSupport(http, t).product(FixtureShopTemplate.SHORT_ITEM, 700, 900);
+        extraTillRows = FixtureShopTemplate.SHORT_ITEM + ",,16/09/2026 09:40,-2,-1400,Stock take,\n";
+        UUID run = committedGoldenRun(null);
+        Report r = as(t, () -> reconciliation.latest(run)).orElseThrow();
+
+        assertThat(r.signable()).as(r.render()).isTrue();
+        assertThat(check(r, "stock_quantity", "HQ " + FixtureShopTemplate.SHORT_ITEM)
+                        .system())
+                .isEqualTo("-2");
+        Check value = check(r, "stock_value", "HQ");
+        assertThat(value.system()).isEqualTo("1000");
+        assertThat(value.ties()).as(r.render()).isTrue();
+        assertThat(value.unitemised()).isEqualTo("0");
+        assertThat(section(r, "stock_value").items())
+                .filteredOn(i -> i.reason().equals(ImportReconciliation.POLICY))
+                .extracting(Item::amount)
+                .containsExactly("-1400");
+        assertThat(check(r, "ledger", "journal HQ inventory").system()).isEqualTo("1000");
+        assertThat(check(r, "ledger", "journal HQ inventory").ties()).isTrue();
+
+        ResponseEntity<JsonNode> signed = signOff(t, run, r, allSections(r), "Fabricated Signer", today(t));
+        assertThat(signed.getStatusCode()).as(String.valueOf(signed.getBody())).isEqualTo(HttpStatus.OK);
+        assertThat(status(run)).isEqualTo("signed_off");
     }
 
     @Test

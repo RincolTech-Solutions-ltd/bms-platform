@@ -119,8 +119,16 @@ class FixtureShopTemplate implements ImportTemplate {
         if (between != null) {
             between.run();
         }
-        return "items".equals(entitySet) && keys.contains(EXISTING_ITEM) ? Set.of(EXISTING_ITEM) : Set.of();
+        if (!"items".equals(entitySet)) {
+            return Set.of();
+        }
+        return Set.of(EXISTING_ITEM, SHORT_ITEM).stream()
+                .filter(keys::contains)
+                .collect(java.util.stream.Collectors.toSet());
     }
+
+    /** A second item the business holds, which a test counts below zero (review of 391e1dc); no golden file names it. */
+    static final String SHORT_ITEM = "FAB-901";
 
     /** The test business's head office: stock takes and loans. */
     static final String HEAD_OFFICE = "HQ";
@@ -187,7 +195,11 @@ class FixtureShopTemplate implements ImportTemplate {
                 List<ArrearsBucket> arrears = new ArrayList<>();
                 if (value != 0 || qty.signum() != 0) {
                     stock.add(new Stock(HEAD_OFFICE, qty, value));
-                    journals.add(new Journal(HEAD_OFFICE, "inventory", value, value));
+                }
+                // The journal holds the positive balances only; a negative one is listed apart (ImportBooks.stock).
+                long journalled = products.journalled();
+                if (journalled != 0) {
+                    journals.add(new Journal(HEAD_OFFICE, "inventory", journalled, journalled));
                 }
                 if (lent != 0) {
                     loans.add(new Amount(HEAD_OFFICE, lent));
@@ -221,6 +233,17 @@ class FixtureShopTemplate implements ImportTemplate {
             value.merge(item, amount, Math::addExact);
         }
 
+        /** The value of the items counted above zero: what the opening inventory journal holds. */
+        long journalled() {
+            long sum = 0;
+            for (Map.Entry<String, BigDecimal> e : qty.entrySet()) {
+                if (e.getValue().signum() > 0) {
+                    sum = Math.addExact(sum, value.get(e.getKey()));
+                }
+            }
+            return sum;
+        }
+
         List<ImportForecast.ProductStock> list() {
             List<ImportForecast.ProductStock> out = new ArrayList<>();
             qty.forEach((item, q) -> out.add(
@@ -228,6 +251,9 @@ class FixtureShopTemplate implements ImportTemplate {
             return out;
         }
     }
+
+    /** Whether reading the fixture's books takes a second, as a big book would; off by default. */
+    static volatile boolean SLOW_BOOKS;
 
     /** The test business's database, for the fixture's books; null when a unit test makes the template by hand. */
     @Autowired(required = false)
@@ -250,6 +276,10 @@ class FixtureShopTemplate implements ImportTemplate {
         return new ImportBooks() {
             @Override
             public List<ImportForecast.ProductStock> stock(Scope scope) {
+                if (SLOW_BOOKS) {
+                    // A big book: one statement longer than a short limit (the sign-off's time limit test).
+                    db.sql("SELECT pg_sleep(1)").query().singleRow();
+                }
                 List<UUID> movements = scope.of("retail.stock_movement");
                 if (movements.isEmpty()) {
                     return List.of();

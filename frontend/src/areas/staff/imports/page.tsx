@@ -4,6 +4,7 @@ import { type FormEvent, useState } from 'react';
 import { businessToday } from '../../../api/retail';
 import {
   downloadReconciliation,
+  ImportError,
   reconcileAgain,
   reconciliationOf,
   signOff,
@@ -30,6 +31,9 @@ import { figure, itemPlace, notTied, reasonWords, runState, runTitle, signOffPro
 
 const RUNS = ['imports-sign-off'] as const;
 const reconciliationKey = (run: string) => ['imports-reconciliation', run] as const;
+
+/** The sign-off was refused because the figures changed since they were read. */
+const changed = (error: unknown) => error instanceof ImportError && error.code === 'reconciliation_changed';
 
 export function ImportsSignOff() {
   const { me } = useStaff();
@@ -90,8 +94,13 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
       queryClient.setQueryData(reconciliationKey(runId), signed);
       await queryClient.invalidateQueries({ queryKey: RUNS });
     },
-    // A refusal may mean the figures changed since they were read: show the newest ones (review of 391e1dc, point 5).
-    onError: () => queryClient.invalidateQueries({ queryKey: reconciliationKey(runId) }),
+    // The figures changed since they were read: show the newest ones, to be checked and ticked again (Lead on the review
+    // of 391e1dc, point 5).
+    onError: async (error) => {
+      if (!changed(error)) return;
+      setTicked(new Set());
+      await queryClient.invalidateQueries({ queryKey: reconciliationKey(runId) });
+    },
   });
   // busy-exempt: the download button says Downloading the report itself and is disabled meanwhile
   // toast-exempt: saves nothing: a download changes nothing, and the device shows the saved file
@@ -225,7 +234,11 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
           {tried && problem && <p role="alert" className="field-error">{problem}</p>}
           {sign.isError && (
             <p role="alert" className="alert alert-danger">
-              {sign.error instanceof Error ? sign.error.message : 'Could not sign. Nothing was signed.'}
+              {changed(sign.error)
+                ? 'The figures changed since you opened them. The newest figures are shown now. Check each section, tick it again and sign.'
+                : sign.error instanceof Error
+                  ? sign.error.message
+                  : 'Could not sign. Nothing was signed.'}
             </p>
           )}
           <ActionBar>

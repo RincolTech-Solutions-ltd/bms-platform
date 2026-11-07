@@ -13,10 +13,20 @@ export type ReconciliationCheck = S['ImportReconciliationCheck'];
 export type ReconciliationItem = S['ImportReconciliationItem'];
 export type SignOffRequest = S['ImportSignOffRequest'];
 
+/** A refusal with the API's code, so the screen can answer reconciliation_changed by showing the newest figures. */
+export class ImportError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+  ) {
+    super(message);
+  }
+}
+
 function fail(error: unknown, fallback: string): never {
   const problem = problemOf(error);
   const fields = problem.errors ?? [];
-  throw new Error(fields.length > 0 ? fields.map((f) => f.message).join(' ') : (problem.detail ?? fallback));
+  throw new ImportError(fields.length > 0 ? fields.map((f) => f.message).join(' ') : (problem.detail ?? fallback), problem.code);
 }
 
 export async function signOffRuns(): Promise<SignOffRun[]> {

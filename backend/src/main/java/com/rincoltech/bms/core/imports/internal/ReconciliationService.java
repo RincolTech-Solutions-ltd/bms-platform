@@ -76,6 +76,9 @@ class ReconciliationService implements ImportReconciliation {
     static final String ARREARS = "arrears";
     static final String LEDGER = "ledger";
 
+    /** Each statement's limit while the sign-off measures again; a test shortens it to reach the refusal. */
+    static volatile String signOffTimeout = "60s";
+
     /** The sections in the order the signer reads them, with their titles. */
     private static final Map<String, String> TITLES = new LinkedHashMap<>();
 
@@ -242,7 +245,21 @@ class ReconciliationService implements ImportReconciliation {
             }
             // The books as they are now, measured again in this transaction, which holds the run: a sign-off of figures
             // the books no longer hold is refused (review of #873). JUSTIFICATION-A3: must-fix 2 of that review.
-            Measured now = measure(runId, run);
+            // Inside a request and holding the run, so each statement gets 60 seconds, not a batch's 10 minutes (the
+            // Lead on the review of 391e1dc); a run too big for that is refused plainly, and nothing is signed.
+            Measured now;
+            try {
+                now = measure(runId, run, signOffTimeout);
+            } catch (RuntimeException e) {
+                if (!UploadService.queryTimedOut(e)) {
+                    throw e;
+                }
+                throw new ApiException(
+                        HttpStatus.SERVICE_UNAVAILABLE,
+                        "sign_off_too_big",
+                        "Too big to sign at once",
+                        "This import is too big to sign at once. Try again in a few minutes.");
+            }
             String again = sha256(new Report(
                             newest.id(),
                             runId,
@@ -426,7 +443,7 @@ class ReconciliationService implements ImportReconciliation {
         if (!RunStates.COMMITTED.equals(run.status())) {
             throw notCommitted(run.status());
         }
-        Measured m = measure(runId, run);
+        Measured m = measure(runId, run, "10min");
         LocalDate asAt = m.asAt();
         boolean signable = m.signable();
         List<Section> sections = m.sections();
@@ -471,8 +488,9 @@ class ReconciliationService implements ImportReconciliation {
      * Measures the run's source against the books, inside the caller's transaction (which holds the run). It reads every
      * staged row of the run, so it runs under a statement timeout like a batch's (review of #873).
      */
-    private Measured measure(UUID runId, RunRow run) {
-        jdbc.sql("SELECT set_config('statement_timeout', '10min', true)")
+    private Measured measure(UUID runId, RunRow run, String timeout) {
+        jdbc.sql("SELECT set_config('statement_timeout', ?, true)")
+                .param(timeout)
                 .query()
                 .singleRow();
         ZoneId zone = tenant.profile().timezone();

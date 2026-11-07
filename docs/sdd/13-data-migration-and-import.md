@@ -520,7 +520,10 @@ Contents (FR-IMP-08):
 
 As built for every template (#134, section 13.14.1 8/16; spec sections 3.9 and 3.10): the reconciliation is made by the
 commit as it finishes and stored as a document (`import_reconciliations`, append-only, migration `V144`), and made again
-on request as the next version until the customer signs it. Each check shows a **source value**, a **system value** and the
+on request as the next version until the customer signs it. "Stored as a document" is met by that row and not by a file
+in `core.documents` (the Lead's decision on #134, ADR-027 note of 7 November 2026): the row holds the whole report as
+JSONB with the SHA-256 of its plain text, the text is rendered from it byte for byte, the database refuses any change to
+it, and the download is that same text, so a stored file would only be a second copy that could drift. Each check shows a **source value**, a **system value** and the
 **difference** (source less system). The source is the run's staged rows: every row that is not blank, the rows left out
 included, each measured alone by the template's own forecast, so a row's part in every check is known. The system is the
 books, never the commit's report: the run's journals (found in `import_refs`) read line by line through the ledger's port,
@@ -531,7 +534,7 @@ are:
 |---|---|---|
 | `counts` | rows per file and per entity set (not blank); facts per file: read, blank, left out, written by this import, already imported before, not found in the books; records created per target type | rows whose `source_ref` `import_refs` holds |
 | `stock_quantity` | per branch and product: the balances checksum | the stock ledger's movements the run registered (`ImportBooks.stock`), never the business's whole balance, so stock held before or moved after the import is not a difference |
-| `stock_value` | per branch | the run's journal lines on `inventory`; each negative balance listed separately as a `policy` item at its value, which ties only because a writer never journals a negative balance (the journal holds the positive ones; `ImportBooks.stock`), so a writer that does leaves it unexplained and the sign-off is refused |
+| `stock_value` | per branch | the run's journal lines on `inventory`; each negative balance listed separately as a `policy` item at its value, which is below zero like the difference it explains (source less system). Rule for every writer (spec section 3.9, the retail rule 5): the opening `inventory` journal holds the positive balances only, at the product's cost, so the source, which counts every balance, is the journal plus the negative ones. A writer that journals a negative value leaves it unexplained and the sign-off is refused. The fixture's negative stock take ties and signs (`ImportReconciliationIT`) |
 | `receivables` | per branch, as if every credit sale were opened | the run's journal lines on `trade_debtors` |
 | `loan_principal` | per branch | the run's journal lines on `loans_receivable` |
 | `arrears` | loans and principal per branch and bucket, as at the cutover day | the template's loan book |
@@ -555,7 +558,11 @@ The **sign-off** (spec section 3.10, `core.imports.sign_off`, the tenant admin's
 reconciliation, ticks each section, types their name and today's date; the sign-off names the reconciliation and its
 SHA-256 as read (409 `reconciliation_changed` if it was made again), and inside its own transaction, which holds the run,
 measures the books again: when the text that measurement gives has another SHA-256 than the one read, what the import
-brought in changed since, and the sign-off is refused (409 `reconciliation_changed`; make it again and sign that). It is stored in
+brought in changed since, and the sign-off is refused (409 `reconciliation_changed`; make it again and sign that; the
+screen says plainly that the figures changed, shows the newest and clears the ticks). That measurement runs with a
+60-second limit per statement, not a batch's 10 minutes, because it holds the run inside a request; a run too big for
+it is refused with 503 `sign_off_too_big` ("too big to sign at once, try again") and nothing is signed. A sign-off that
+measures in the background for very large runs is #874. It is stored in
 `import_signoffs` (append-only, one per run), moves the run to `signed_off` and is audited `core.import_run.signed_off`
 without the name. The run reaches `signed_off` no other way. After it, no new reconciliation of the run is stored (the
 trigger takes the run `FOR UPDATE` in both cases, so a reconciliation and a sign-off never pass each other), so the signed

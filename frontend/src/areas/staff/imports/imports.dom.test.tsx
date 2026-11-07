@@ -62,9 +62,13 @@ let runs: SignOffRun[] = [];
 let view: Reconciliation = recon(true);
 const sent: SignOffRequest[] = [];
 let remade = 0;
+// The code the next sign-off is refused with, after the figures moved to a version 2; null to sign.
+let refuse: string | null = null;
 
-vi.mock('../../../api/imports', async (original) => ({
-  ...(await original<typeof import('../../../api/imports')>()),
+vi.mock('../../../api/imports', async (original) => {
+  const real = await original<typeof import('../../../api/imports')>();
+  return {
+  ...real,
   signOffRuns: () => Promise.resolve(runs),
   reconciliationOf: () => Promise.resolve(view),
   reconcileAgain: () => {
@@ -74,10 +78,17 @@ vi.mock('../../../api/imports', async (original) => ({
   },
   signOff: (_run: string, body: SignOffRequest) => {
     sent.push(body);
+    if (refuse) {
+      view = { ...recon(true), id: 'rec-2', version: 2, sha256: 'b'.repeat(64) };
+      const code = refuse;
+      refuse = null;
+      return Promise.reject(new real.ImportError('Refused.', code));
+    }
     view = { ...view, signed: { signed_at: '2026-10-02T09:00:00Z', signed_by: 'u-1', signed_name: body.name, signed_on: body.date, sections: body.sections } };
     return Promise.resolve(view);
   },
-}));
+  };
+});
 
 const { ImportsSignOff } = await import('./page');
 
@@ -103,6 +114,7 @@ beforeEach(() => {
   view = recon(true);
   sent.length = 0;
   remade = 0;
+  refuse = null;
 });
 
 afterEach(() => cleanup());
@@ -137,6 +149,34 @@ describe('imports to sign off', () => {
     expect(sent[0]).toEqual({ reconciliation_id: 'rec-1', sha256: 'a'.repeat(64), sections: ['counts', 'stock_value'], name: 'Fabricated Signer', date: today });
     expect(await screen.findByText(/Signed by Fabricated Signer/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Sign the reconciliation' })).toBeNull();
+  });
+
+  // JUSTIFICATION-A3: the screen case of the Lead's ruling 5 on the review of 391e1dc.
+  it('says plainly when the figures changed before signing and shows the newest, ticked again before it signs', async () => {
+    refuse = 'reconciliation_changed';
+    const today = businessToday(new Date(), 'Africa/Kampala');
+    show(admin);
+    fireEvent.click(await screen.findByRole('button', { name: /Imported on 1 Oct 2026/ }));
+    await screen.findByRole('heading', { name: 'Rows and records' });
+    const tickAll = () => {
+      fireEvent.click(screen.getByRole('checkbox', { name: /rows and records/ }));
+      fireEvent.click(screen.getByRole('checkbox', { name: /stock value per branch/ }));
+    };
+    tickAll();
+    fireEvent.change(screen.getByLabelText(/Your name/), { target: { value: 'Fabricated Signer' } });
+    fireEvent.change(screen.getByLabelText(/Today's date/), { target: { value: today } });
+    await pause();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign the reconciliation' }));
+
+    expect(await screen.findByText(/The figures changed since you opened them/)).toBeTruthy();
+    await waitFor(() => expect((screen.getByRole('checkbox', { name: /rows and records/ }) as HTMLInputElement).checked).toBe(false));
+
+    tickAll();
+    await pause();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign the reconciliation' }));
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[1]).toMatchObject({ reconciliation_id: 'rec-2', sha256: 'b'.repeat(64) });
+    expect(await screen.findByText(/Signed by Fabricated Signer/)).toBeTruthy();
   });
 
   it('shows a difference that is not explained and offers no way to sign', async () => {
