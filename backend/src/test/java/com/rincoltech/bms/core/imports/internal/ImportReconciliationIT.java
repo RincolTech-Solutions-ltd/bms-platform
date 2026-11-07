@@ -397,15 +397,12 @@ class ImportReconciliationIT extends IntegrationTest {
 
     /** The rows the commit did not write because the review left them out: "file:line". */
     Set<String> excludedRows(UUID runId) {
-        return new TreeSet<>(TestDatabase.owner()
-                .sql("""
+        return new TreeSet<>(
+                TestDatabase.owner().sql("""
                         SELECT b.source_filename || ':' || r.source_row_no
                           FROM import_rows r JOIN import_batches b ON b.id = r.batch_id
                          WHERE b.run_id = ? AND r.excluded_by IS NOT NULL
-                        """)
-                .param(runId)
-                .query(String.class)
-                .list());
+                        """).param(runId).query(String.class).list());
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -561,24 +558,24 @@ class ImportReconciliationIT extends IntegrationTest {
 
         // The database refuses it too, whatever the application does.
         LocalDate day = today(t);
+        String insert = """
+                INSERT INTO import_signoffs (id, tenant_id, run_id, reconciliation_id, report_sha256, sections,
+                                             signed_name, signed_on, signed_by)
+                VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, 'Fabricated Signer', ?, ?)
+                """;
+        Object[] values = {
+            UUID.randomUUID(),
+            run,
+            r.id(),
+            r.sha256(),
+            allSections(r).toArray(String[]::new),
+            java.sql.Date.valueOf(day),
+            admin
+        };
         assertThatThrownBy(() -> as(
                         t,
-                        () -> new TransactionTemplate(transactionManager).execute(s -> jdbc.sql("""
-                                        INSERT INTO import_signoffs (id, tenant_id, run_id, reconciliation_id,
-                                                                     report_sha256, sections, signed_name, signed_on,
-                                                                     signed_by)
-                                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, 'Fabricated Signer',
-                                                ?, ?)
-                                        """)
-                                .params(
-                                        UUID.randomUUID(),
-                                        run,
-                                        r.id(),
-                                        r.sha256(),
-                                        allSections(r).toArray(String[]::new),
-                                        java.sql.Date.valueOf(day),
-                                        admin)
-                                .update())))
+                        () -> new TransactionTemplate(transactionManager)
+                                .execute(s -> jdbc.sql(insert).params(values).update())))
                 .hasStackTraceContaining("a reconciliation with a difference that is not itemised is never signed");
     }
 

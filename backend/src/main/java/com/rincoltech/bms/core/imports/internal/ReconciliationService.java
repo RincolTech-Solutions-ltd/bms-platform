@@ -532,15 +532,7 @@ class ReconciliationService implements ImportReconciliation {
                                                             sha256, signable)
                         VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, CAST(? AS jsonb), ?, ?)
                         """)
-                .params(
-                        id,
-                        runId,
-                        version,
-                        by,
-                        Date.valueOf(asAt),
-                        mapper.writeValueAsString(report),
-                        sha256,
-                        signable)
+                .params(id, runId, version, by, Date.valueOf(asAt), mapper.writeValueAsString(report), sha256, signable)
                 .update();
         long notTied = sections.stream()
                 .flatMap(sec -> sec.checks().stream())
