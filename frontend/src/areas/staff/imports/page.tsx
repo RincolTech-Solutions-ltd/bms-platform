@@ -98,11 +98,12 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
     // The figures changed since they were read: the API stores what it measured as the next version, so show the newest,
     // to be checked and ticked again (Lead on the review of 391e1dc, point 5). The one refused is remembered, so a refetch
     // that brings it back is never called the newest (review of 1ea73e5).
-    onError: async (error, refusedOne) => {
+    onError: (error, refusedOne) => {
       if (!changed(error)) return;
       setRefused(refusedOne.id ?? null);
       setTicked(new Set());
-      await queryClient.invalidateQueries({ queryKey: reconciliationKey(runId) });
+      // Not awaited: the refusal shows at once and hides the form while the newest figures are on their way.
+      void queryClient.invalidateQueries({ queryKey: reconciliationKey(runId) });
     },
   });
   // busy-exempt: the download button says Downloading the report itself and is disabled meanwhile
@@ -160,10 +161,12 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
   // Refused because the figures changed: the API's own words, which name the new version. Should the one on screen still be
   // the one refused, offer to make it again rather than sign it once more.
   const moved = !signed && changed(sign.error);
-  // Settled only once the refetch is done, so the normal path never flashes the remake button (review of 4105c2a).
-  const stale = moved && !reconciliation.isFetching && refused !== null && refused === r.id;
-  // The refused version is never offered for signing again: no ticks and no form while it is on screen.
+  // The refused version is never offered for signing again: no ticks and no form while it is on screen, the refetch done
+  // or not (Lead on the review of 5b32682).
+  const stale = moved && refused !== null && refused === r.id;
   const signing = !signed && r.signable === true && !stale;
+  // The ways out wait for the refetch, so the normal path never flashes them (review of 4105c2a).
+  const settled = stale && !reconciliation.isFetching;
 
   function onSign(e: FormEvent) {
     e.preventDefault();
@@ -204,8 +207,8 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
           {sign.error.message}
         </p>
       )}
-      {!signed && (!r.signable || stale) && remakeButton}
-      {stale && !canRemake && (
+      {!signed && (stale ? settled : !r.signable) && remakeButton}
+      {settled && !canRemake && (
         <BusyButton type="button" className="btn" busy={reconciliation.isFetching} onClick={() => void reconciliation.refetch()}>
           Show the new figures
         </BusyButton>

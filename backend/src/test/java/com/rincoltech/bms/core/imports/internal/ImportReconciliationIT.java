@@ -154,6 +154,8 @@ class ImportReconciliationIT extends IntegrationTest {
         extra = 0;
         extraTillRows = "";
         secondTillRoll = "";
+        killAfterBatch = 0;
+        seams.killAfter = 0;
         FixtureShopTemplate.SLOW_BOOKS = false;
         ReconciliationService.signOffTimeout = "60s";
     }
@@ -248,9 +250,24 @@ class ImportReconciliationIT extends IntegrationTest {
         as(t, () -> runs.transition(runId, "ready"));
         as(t, () -> runs.recordPreImportDump(runId, "pre-import-fabricated.dump", Instant.now(), SHA));
         CommitApproval.readyToCommit(http, t, runs, runId, SHA);
+        if (killAfterBatch > 0) {
+            // The process killed right after that batch committed, and the run resumed by a writer made anew, which
+            // holds nothing from before (Lead on the review of 5b32682).
+            seams.killAfter = killAfterBatch;
+            assertThatThrownBy(() -> as(t, () -> runs.commit(runId))).isInstanceOf(CommitTestSeams.Killed.class);
+            FixtureShopTemplate.SCRIPT = writer(t);
+            assertThat(as(t, () -> runs.resume(runId))).isEqualTo(ImportRuns.CommitOutcome.COMMITTED);
+            return runId;
+        }
         assertThat(as(t, () -> runs.commit(runId))).isEqualTo(ImportRuns.CommitOutcome.COMMITTED);
         return runId;
     }
+
+    /** The batch after which the commit is killed and then resumed; 0 for an unbroken commit. */
+    volatile int killAfterBatch;
+
+    @Autowired
+    CommitTestSeams seams;
 
     /** Leaves out every row with an open blocking issue, then overrides every open warning, until none is open. */
     void reviewEverything(List<UUID> batches) {
@@ -291,14 +308,49 @@ class ImportReconciliationIT extends IntegrationTest {
      * the second branch; under the decision a credit sale is opened at the head office only under {@code open_from_list}.
      * Each opening journal posts through the framework and its balance is told to the report, as the forecast predicts.
      */
+    // JUSTIFICATION-A3: ruling 4 of the Lead on the review of 5b32682, the writer's state read from the database.
+    /**
+     * The stock takes of the run's earlier batches that it wrote (a batch with a stock movement registered by the run,
+     * other than this one): each row's item, quantity and amount, as staged, added to the maps.
+     */
+    void earlierStockTakes(UUID runId, UUID batchId, Map<String, BigDecimal> qty, Map<String, Long> value) {
+        String sql = "SELECT r.normalised::text FROM import_rows r JOIN import_batches b ON b.id = r.batch_id"
+                + " WHERE b.run_id = ? AND b.id <> ? AND r.excluded_by IS NULL AND r.normalised IS NOT NULL"
+                + " AND EXISTS (SELECT 1 FROM import_refs f WHERE f.batch_id = b.id AND f.run_id = ?"
+                + " AND f.target_type = 'retail.stock_movement')";
+        List<String> rows =
+                jdbc.sql(sql).params(runId, batchId, runId).query(String.class).list();
+        tools.jackson.databind.json.JsonMapper reader =
+                tools.jackson.databind.json.JsonMapper.builder().build();
+        for (String json : rows) {
+            JsonNode v = reader.readTree(json);
+            if (v.get("kind") == null || !"adjustment".equals(v.get("kind").asString())) {
+                continue;
+            }
+            String item = v.get("item").asString();
+            JsonNode q = v.get("qty");
+            JsonNode a = v.get("amount");
+            qty.merge(item, q.isNumber() ? q.decimalValue() : new BigDecimal(q.asString()), BigDecimal::add);
+            value.merge(item, a.isNumber() ? a.longValue() : Long.parseLong(a.asString()), Long::sum);
+        }
+    }
+
+    /** What the run's registered journals hold on inventory: debits less credits. */
+    long journalledOnInventory(UUID runId) {
+        String sql = "SELECT coalesce(sum(l.debit - l.credit), 0) FROM journal_lines l"
+                + " JOIN gl_accounts a ON a.id = l.account_id JOIN import_refs f ON f.target_id = l.entry_id"
+                + " WHERE f.run_id = ? AND f.target_type = 'ledger.journal_entry' AND a.system_key = 'inventory'";
+        return jdbc.sql(sql).param(runId).query(Long.class).single();
+    }
+
     BatchWriter writer(TestDatabase.Fixture f) {
-        // The run's items so far, over every batch: each batch's inventory journal is the change in what the items
-        // counted above zero are worth (Lead on the review of 4105c2a).
-        Map<String, BigDecimal> itemQty = new TreeMap<>();
-        Map<String, Long> itemValue = new TreeMap<>();
-        long[] journalledSoFar = {0};
-        int[] lastSeq = {Integer.MIN_VALUE};
         return (runId, batchId, seq, checkpoint) -> {
+            // The run's items, over every batch: the earlier batches' from the database and this batch's as it is
+            // written, never kept in memory, so a resume after a killed process journals what an unbroken run would
+            // (Lead on the review of 5b32682).
+            Map<String, BigDecimal> itemQty = new TreeMap<>();
+            Map<String, Long> itemValue = new TreeMap<>();
+            earlierStockTakes(runId, batchId, itemQty, itemValue);
             String source = jdbc.sql("SELECT mapping_source FROM import_batches WHERE id = ?")
                     .param(batchId)
                     .query(String.class)
@@ -315,13 +367,6 @@ class ImportReconciliationIT extends IntegrationTest {
             long lent = 0;
             LocalDate lentOn = null;
             Map<String, long[]> buckets = new TreeMap<>();
-            if (seq <= lastSeq[0]) {
-                // The commit after the dry run's rehearsal starts the run again from its first batch.
-                itemQty.clear();
-                itemValue.clear();
-                journalledSoFar[0] = 0;
-            }
-            lastSeq[0] = seq;
             int after = 0;
             while (true) {
                 List<ImportRefs.StagedRow> rows = checkpoint.rows(after, 1_000);
@@ -404,8 +449,8 @@ class ImportReconciliationIT extends IntegrationTest {
                     .filter(e -> e.getValue().signum() > 0)
                     .mapToLong(e -> itemValue.get(e.getKey()))
                     .sum();
-            long change = journalled - journalledSoFar[0];
-            journalledSoFar[0] = journalled;
+            // What the run's journals already hold on inventory, read from its own registered journals.
+            long change = journalled - journalledOnInventory(runId);
             if (change != 0) {
                 checkpoint.openingJournal(new ImportRefs.Opening(
                         f.headOffice(), HQ, "inventory", DAY, "inventory", change > 0, Math.abs(change) + extra));
@@ -1086,6 +1131,86 @@ class ImportReconciliationIT extends IntegrationTest {
     void countsOfFiveAndThenMinusTwoInTwoBatchesAreNettedOverTheRunAndSign() throws IOException {
         // Batch 3 journals 1000 + 3500 = 4500; batch 4's -2 brings the item to 3, worth 2100, so it journals the fall
         // of 1400 the other way: the journals' debits are 5900 and their net on inventory is 3100.
+        twoCounts("5,3500", "-2,-1400", true, "3", "3100", "5900", List.of());
+    }
+
+    // JUSTIFICATION-A3: ruling 2 of the Lead on the review of 5b32682, the review section failing closed.
+    @Test
+    void aResolutionOnABatchNotCommittedOrOnAFieldTheSetDoesNotKnowShowsNoValue() throws IOException {
+        UUID run = committedGoldenRun(null);
+        // A batch the run never committed (an upload of another run, as a replaced upload would be), and a committed
+        // batch with a field its set does not know: resolutions whose values the run no longer holds anywhere.
+        Mapping mapping = as(t, () -> mappings.latest("fab-shop").orElseThrow());
+        UUID other = as(t, () -> runs.open(operator).id());
+        byte[] bytes = Files.readAllBytes(GoldenRun.DIR.resolve("fab-buyers.csv"));
+        UUID notCommitted = as(
+                        t,
+                        () -> uploads.upload(
+                                other,
+                                new Upload(
+                                        "fab-buyers.csv",
+                                        new ByteArrayInputStream(bytes),
+                                        bytes.length,
+                                        operator,
+                                        mappings.parseOptions(mapping.id(), "buyer_book"))))
+                .id();
+        UUID committed = TestDatabase.owner()
+                .sql("SELECT id FROM import_batches WHERE run_id = ? AND mapping_source = 'till_roll'")
+                .param(run)
+                .query(UUID.class)
+                .single();
+        String insert = "INSERT INTO import_issue_resolutions (id, tenant_id, run_id, batch_id, issue_id, row_key,"
+                + " raw_sha256, source_row_no, code, field, resolution, before_value, after_value, note, resolved_by)"
+                + " VALUES (?, ?, ?, ?, ?, 'fabricated-row', ?, ?, 'FABRICATED_CODE', ?, 'edit_value',"
+                + " CAST(? AS jsonb), CAST(? AS jsonb), 'Fabricated note', ?)";
+        TestDatabase.owner()
+                .sql(insert)
+                .params(
+                        UUID.randomUUID(),
+                        t.tenantId(),
+                        run,
+                        notCommitted,
+                        UUID.randomUUID(),
+                        "e".repeat(64),
+                        77,
+                        "name",
+                        "{\"value\": \"Fabricated Gone Person\"}",
+                        "{\"value\": \"Fabricated Gone Persona\"}",
+                        operator)
+                .update();
+        TestDatabase.owner()
+                .sql(insert)
+                .params(
+                        UUID.randomUUID(),
+                        t.tenantId(),
+                        run,
+                        committed,
+                        UUID.randomUUID(),
+                        "f".repeat(64),
+                        78,
+                        "nickname",
+                        "{\"value\": \"Fabricated Odd Value\"}",
+                        "{\"value\": \"Fabricated Odd Valued\"}",
+                        operator)
+                .update();
+
+        Report r = as(t, () -> reconciliation.reconcile(run, operator));
+        List<ImportReconciliation.Fact> added = section(r, "review").facts().stream()
+                .filter(fact -> fact.label().contains("FABRICATED_CODE"))
+                .toList();
+        assertThat(added)
+                .hasSize(2)
+                .allSatisfy(fact -> assertThat(fact.value())
+                        .contains("; before a personal value, not shown; after a personal value, not shown"));
+        assertThat(r.render()).doesNotContain("Fabricated Gone", "Fabricated Odd");
+    }
+
+    @Test
+    void killedAfterTheBatchOfFiveAndResumedWithMinusTwoTheRunStillTiesAndSigns() throws IOException {
+        // Killed after batch 3 (the golden till roll with +5) committed, resumed with batch 4 (-2) by a writer that
+        // holds nothing: it reads the 4500 already journalled from the run's own journals and credits the 1400 fall,
+        // as the unbroken run does (Lead on the review of 5b32682).
+        killAfterBatch = 3;
         twoCounts("5,3500", "-2,-1400", true, "3", "3100", "5900", List.of());
     }
 

@@ -911,8 +911,9 @@ class ReconciliationService implements ImportReconciliation {
     // JUSTIFICATION-A3: FR-IMP-08, the Lead's ruling 3 on the review of 4105c2a: every resolution in the signed report.
     /**
      * Every resolution of the run's review, in the order made (FR-IMP-08): the file and line, the code and field, what was
-     * decided, who (the user's id) and when, before and after, and the note. A value of a personal field is never shown,
-     * and any text that names a personal value of the run is hidden, as in the resolution's audit row.
+     * decided, who (the user's id) and when, before and after, and the note. A before or after is shown only for a field
+     * the committed batch's set knows and does not mark personal; any other is "a personal value, not shown". Any text
+     * that names a personal value of the run is hidden too, as the resolution's audit row keeps them out.
      */
     private void resolutions(UUID runId, List<BatchInfo> batches, PreviewService.RunPrivacy privacy, Sheet sheet) {
         Map<UUID, BatchInfo> byId = new HashMap<>();
@@ -929,9 +930,12 @@ class ReconciliationService implements ImportReconciliation {
                     BatchInfo b = byId.get(rs.getObject(1, UUID.class));
                     String file = b == null ? "-" : screen(b.file(), privacy);
                     String field = rs.getString(4);
-                    boolean personal = b != null
-                            && field != null
-                            && b.set().fields().stream().anyMatch(f -> f.name().equals(field) && f.personal());
+                    // Shown only for a field the batch's set knows and does not mark personal: a batch that is not
+                    // among the run's committed ones, a row-level resolution or a field the set does not know fails
+                    // closed (Lead on the review of 5b32682), since screening finds only values the run still holds.
+                    boolean personal = b == null
+                            || field == null
+                            || b.set().fields().stream().noneMatch(f -> f.name().equals(field) && !f.personal());
                     String note = rs.getString(8);
                     String value = rs.getString(5)
                             + " by " + rs.getObject(9, UUID.class)

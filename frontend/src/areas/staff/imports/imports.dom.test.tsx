@@ -66,6 +66,8 @@ let remade = 0;
 let refuse: string | null = null;
 // Whether that refusal leaves the same version stored, so the refetch brings back the one refused.
 let refuseSame = false;
+// A refetch held open until the test lets it answer; null to answer at once.
+let hold: { promise: Promise<Reconciliation>; answer: () => void } | null = null;
 // The API's words for that refusal, which the screen keeps.
 const CHANGED = 'What the import brought in changed in the books since you opened it, so the reconciliation was made again as version 2. Read it and sign that.';
 
@@ -74,7 +76,7 @@ vi.mock('../../../api/imports', async (original) => {
   return {
   ...real,
   signOffRuns: () => Promise.resolve(runs),
-  reconciliationOf: () => Promise.resolve(view),
+  reconciliationOf: () => (hold ? hold.promise : Promise.resolve(view)),
   reconcileAgain: () => {
     remade += 1;
     view = { ...recon(true), id: 'rec-2', version: 2 };
@@ -120,6 +122,7 @@ beforeEach(() => {
   remade = 0;
   refuse = null;
   refuseSame = false;
+  hold = null;
 });
 
 afterEach(() => cleanup());
@@ -214,6 +217,44 @@ describe('imports to sign off', () => {
     expect(await screen.findByText(/Version 2, as at 1 Oct 2026/)).toBeTruthy();
     expect(screen.queryByText(CHANGED)).toBeNull();
     expect(screen.getByRole('button', { name: 'Sign the reconciliation' })).toBeTruthy();
+  });
+
+  // JUSTIFICATION-A3: ruling 1 of the Lead on the review of 5b32682, the refused version while the refetch is pending.
+  it('offers no form for the refused version while the refetch is still on its way', async () => {
+    refuse = 'reconciliation_changed';
+    const today = businessToday(new Date(), 'Africa/Kampala');
+    show(admin);
+    fireEvent.click(await screen.findByRole('button', { name: /Imported on 1 Oct 2026/ }));
+    await screen.findByRole('heading', { name: 'Rows and records' });
+    fireEvent.click(screen.getByRole('checkbox', { name: /rows and records/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /stock value per branch/ }));
+    fireEvent.change(screen.getByLabelText(/Your name/), { target: { value: 'Fabricated Signer' } });
+    fireEvent.change(screen.getByLabelText(/Today's date/), { target: { value: today } });
+    // From here the refetch the refusal asks for waits until the test lets it answer.
+    let answer: () => void = () => undefined;
+    const promise = new Promise<Reconciliation>((resolve) => {
+      answer = () => resolve(view);
+    });
+    hold = { promise, answer: () => answer() };
+    await pause();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign the reconciliation' }));
+
+    // Version 1 on screen, the refetch pending: no ticks, no name or date, no sign button, and no way out offered yet.
+    expect(await screen.findByText(CHANGED)).toBeTruthy();
+    expect(screen.getByText(/Version 1, as at 1 Oct 2026/)).toBeTruthy();
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    expect(screen.queryByLabelText(/Your name/)).toBeNull();
+    expect(screen.queryByLabelText(/Today's date/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Sign the reconciliation' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Show the new figures' })).toBeNull();
+
+    // The refetch answers with version 2: the form is back for it.
+    const pending = hold;
+    hold = null;
+    pending.answer();
+    expect(await screen.findByText(/Version 2, as at 1 Oct 2026/)).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Sign the reconciliation' })).toBeTruthy();
+    expect(sent).toHaveLength(1);
   });
 
   it('offers a signer who cannot make it again only the new figures, never the refused version to sign', async () => {
