@@ -66,6 +66,8 @@ let remade = 0;
 let refuse: string | null = null;
 // Whether that refusal leaves the same version stored, so the refetch brings back the one refused.
 let refuseSame = false;
+// The API's words for that refusal, which the screen keeps.
+const CHANGED = 'What the import brought in changed in the books since you opened it, so the reconciliation was made again as version 2. Read it and sign that.';
 
 vi.mock('../../../api/imports', async (original) => {
   const real = await original<typeof import('../../../api/imports')>();
@@ -84,7 +86,7 @@ vi.mock('../../../api/imports', async (original) => {
       if (!refuseSame) view = { ...recon(true), id: 'rec-2', version: 2, sha256: 'b'.repeat(64) };
       const code = refuse;
       refuse = null;
-      return Promise.reject(new real.ImportError('Make it again, read it and sign that.', code));
+      return Promise.reject(new real.ImportError(CHANGED, code));
     }
     view = { ...view, signed: { signed_at: '2026-10-02T09:00:00Z', signed_by: 'u-1', signed_name: body.name, signed_on: body.date, sections: body.sections } };
     return Promise.resolve(view);
@@ -171,7 +173,8 @@ describe('imports to sign off', () => {
     await pause();
     fireEvent.click(screen.getByRole('button', { name: 'Sign the reconciliation' }));
 
-    expect(await screen.findByText(/The figures changed since you opened them/)).toBeTruthy();
+    expect(await screen.findByText(CHANGED)).toBeTruthy();
+    expect(await screen.findByText(/Version 2, as at 1 Oct 2026/)).toBeTruthy();
     await waitFor(() => expect((screen.getByRole('checkbox', { name: /rows and records/ }) as HTMLInputElement).checked).toBe(false));
 
     tickAll();
@@ -197,13 +200,14 @@ describe('imports to sign off', () => {
     await pause();
     fireEvent.click(screen.getByRole('button', { name: 'Sign the reconciliation' }));
 
-    // The API's own words, not "the newest figures are shown", and the way out.
-    expect(await screen.findByText('Make it again, read it and sign that.')).toBeTruthy();
-    expect(screen.queryByText(/The newest figures are shown now/)).toBeNull();
+    // The API's own words, version 1 still on screen with nothing ticked, and the way out instead of signing it again.
+    expect(await screen.findByText(CHANGED)).toBeTruthy();
+    expect(screen.getByText(/Version 1, as at 1 Oct 2026/)).toBeTruthy();
+    await waitFor(() => expect((screen.getByRole('checkbox', { name: /rows and records/ }) as HTMLInputElement).checked).toBe(false));
     fireEvent.click(await screen.findByRole('button', { name: 'Make the reconciliation again' }));
     await waitFor(() => expect(remade).toBe(1));
     expect(await screen.findByText(/Version 2, as at 1 Oct 2026/)).toBeTruthy();
-    expect(screen.queryByText('Make it again, read it and sign that.')).toBeNull();
+    expect(screen.queryByText(CHANGED)).toBeNull();
   });
 
   it('shows a difference that is not explained and offers no way to sign', async () => {

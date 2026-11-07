@@ -328,7 +328,11 @@ class ReconciliationService implements ImportReconciliation {
                     "reconciliation_changed",
                     "Reconciliation changed",
                     "What the import brought in changed in the books since you opened it, so the reconciliation was"
-                            + " made again as version " + remade[0].version() + ". Read it and sign that.");
+                            + " made again as version " + remade[0].version() + ". Read it and sign that.",
+                    List.of(),
+                    Map.of(
+                            "reconciliation_id", remade[0].id().toString(),
+                            "version", remade[0].version()));
         }
         return signed;
     }
@@ -703,7 +707,7 @@ class ReconciliationService implements ImportReconciliation {
         List<String> unmeasuredKinds = new ArrayList<>();
         // The written rows under the template's rules as a whole, beside the sum of their parts row by row. A rule that
         // is not row by row (a stock balance below zero is not journalled, so an item's rows count together) makes the
-        // two differ, and the batch, not any row, explains that (review of 1ea73e5).
+        // two differ; the source takes the whole (review of 1ea73e5).
         ImportForecast whole = null;
         if (template != null) {
             whole = template.forecast(open);
@@ -875,26 +879,18 @@ class ReconciliationService implements ImportReconciliation {
                 break;
             }
         }
-        // JUSTIFICATION-A3: must-fix 2 of the review of 1ea73e5, the batch as a whole against its rows one by one.
+        // The written rows count together, as the forecast and the writer count them (Lead on the review of 1ea73e5):
+        // the source holds their parts measured as one, so each item's journal follows its net balance; the rows left
+        // out keep their own parts, which their items explain.
         if (whole != null && !writtenParts.isEmpty()) {
             Map<CheckId, BigDecimal> together = parts(whole);
             Set<CheckId> ids = new LinkedHashSet<>(writtenParts.keySet());
             ids.addAll(together.keySet());
             for (CheckId id : ids) {
-                BigDecimal d = writtenParts
-                        .getOrDefault(id, BigDecimal.ZERO)
-                        .subtract(together.getOrDefault(id, BigDecimal.ZERO));
+                BigDecimal d = together.getOrDefault(id, BigDecimal.ZERO)
+                        .subtract(writtenParts.getOrDefault(id, BigDecimal.ZERO));
                 if (d.signum() != 0) {
-                    sheet.item(
-                            id,
-                            new Item(
-                                    id.key(),
-                                    file,
-                                    0,
-                                    POLICY,
-                                    "the written rows counted together by the template's rules, not one by one (such as"
-                                            + " a stock balance below zero, which no journal holds)",
-                                    plain(d)));
+                    sheet.add(sheet.source, id, d);
                 }
             }
         }

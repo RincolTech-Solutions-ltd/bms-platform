@@ -157,8 +157,8 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
   }
   const problem = signOffProblem(r, ticked, name, date, today);
   const signed = r.signed;
-  // Refused because the figures changed, and the one on screen is still the one refused: never call it the newest; say
-  // what the API said and offer to make it again.
+  // Refused because the figures changed: the API's own words, which name the new version. Should the one on screen still be
+  // the one refused, offer to make it again rather than sign it once more.
   const moved = !signed && changed(sign.error);
   const stale = moved && refused !== null && refused === r.id;
 
@@ -196,11 +196,9 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
           </p>
         )
       )}
-      {moved && (
+      {moved && sign.error instanceof Error && (
         <p role="alert" className="alert alert-danger">
-          {stale && sign.error instanceof Error
-            ? sign.error.message
-            : 'The figures changed since you opened them. The newest figures are shown now. Check each section, tick it again and sign.'}
+          {sign.error.message}
         </p>
       )}
       {!signed && (!r.signable || stale) && remakeButton}

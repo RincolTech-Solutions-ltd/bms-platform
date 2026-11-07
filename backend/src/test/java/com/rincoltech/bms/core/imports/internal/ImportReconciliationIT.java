@@ -850,13 +850,15 @@ class ImportReconciliationIT extends IntegrationTest {
                         + " target_id) VALUES (?, ?, ?, ?, 'fab-extra|-|line:1', 'fab-extra|-|line:1#0', ?, ?)")
                 .params(UUID.randomUUID(), t.tenantId(), run, batch, "retail.stock_movement", extra)
                 .update();
-        assertThat(code(signOff(t, run, again, allSections(again), "Fabricated Signer", today(t))))
-                .isEqualTo("reconciliation_changed");
+        ResponseEntity<JsonNode> refused = signOff(t, run, again, allSections(again), "Fabricated Signer", today(t));
+        assertThat(code(refused)).isEqualTo("reconciliation_changed");
         assertThat(status(run)).isEqualTo("committed");
         assertThat(signoffs(run)).isZero();
-        // What it measured is stored as the next version, so the signer reads the books as they are, never the same
-        // version again (review of 1ea73e5): here the extra unit is a difference nothing explains.
+        // What it measured is stored as the next version, named in the refusal, so the signer reads the books as they
+        // are, never the same version again (review of 1ea73e5): here the extra unit is a difference nothing explains.
         Report next = as(t, () -> reconciliation.latest(run)).orElseThrow();
+        assertThat(refused.getBody().get("reconciliation_id").asString())
+                .isEqualTo(next.id().toString());
         assertThat(next.version()).isEqualTo(again.version() + 1);
         assertThat(next.sha256()).isNotEqualTo(again.sha256());
         assertThat(check(next, "stock_quantity", "HQ FAB-900").system()).isEqualTo("2.5");
@@ -955,44 +957,52 @@ class ImportReconciliationIT extends IntegrationTest {
         assertThat(status(run)).isEqualTo("signed_off");
     }
 
-    // JUSTIFICATION-A3: must-fix 2 of the review of 1ea73e5, an item counted on more than one row.
-    @Test
-    void anItemCountedOnTwoRowsOneOfThemNegativeTiesAndSigns() throws IOException {
-        // FAB-900: the golden 1.5 (1000) and a second count of -0.5 (-350), so 1 on hand worth 650, all journalled.
-        // FAB-901: 1 (700) and -3 (-2100), so 2 below zero worth -1400, which no journal holds. Row by row the rules
-        // journal 1000 and 700 and nothing for the negative rows; together they journal 650: the batch explains 1050.
+    // JUSTIFICATION-A3: ruling 2 of the Lead on the review of 1ea73e5, an item counted on two rows, both orders.
+    /**
+     * Commits the golden run with two counts of FAB-901 (each "qty,amount", at the fabricated cost of 700) and checks what
+     * must hold either way: it ties and signs, the HQ inventory journal ties with nothing to explain, and the stock value
+     * explains no more than the item's net balance below zero, if it has one.
+     */
+    Report twoCounts(String first, String second, String netQty, String journalled, List<String> negative)
+            throws IOException {
         new RetailTestSupport(http, t).product(FixtureShopTemplate.SHORT_ITEM, 700, 900);
-        extraTillRows = FixtureShopTemplate.EXISTING_ITEM + ",,16/09/2026 09:35,-0.5,-350,Stock take,\n"
-                + FixtureShopTemplate.SHORT_ITEM + ",,16/09/2026 09:40,1,700,Stock take,\n"
-                + FixtureShopTemplate.SHORT_ITEM + ",,16/09/2026 09:45,-3,-2100,Stock take,\n";
+        extraTillRows = FixtureShopTemplate.SHORT_ITEM + ",,16/09/2026 09:40," + first + ",Stock take,\n"
+                + FixtureShopTemplate.SHORT_ITEM + ",,16/09/2026 09:45," + second + ",Stock take,\n";
         UUID run = committedGoldenRun(null);
         Report r = as(t, () -> reconciliation.latest(run)).orElseThrow();
 
         assertThat(r.signable()).as(r.render()).isTrue();
-        assertThat(check(r, "stock_quantity", "HQ " + FixtureShopTemplate.EXISTING_ITEM)
-                        .system())
-                .isEqualTo("1");
         assertThat(check(r, "stock_quantity", "HQ " + FixtureShopTemplate.SHORT_ITEM)
                         .system())
-                .isEqualTo("-2");
+                .isEqualTo(netQty);
         Check value = check(r, "stock_value", "HQ");
-        assertThat(value.system()).isEqualTo("650");
+        assertThat(value.system()).isEqualTo(journalled);
         assertThat(value.unitemised()).as(r.render()).isEqualTo("0");
         assertThat(section(r, "stock_value").items())
                 .filteredOn(i -> i.reason().equals(ImportReconciliation.POLICY))
                 .extracting(Item::amount)
-                .containsExactly("-1400");
+                .containsExactlyElementsOf(negative);
         Check journal = check(r, "ledger", "journal HQ inventory");
-        assertThat(journal.system()).isEqualTo("650");
-        assertThat(journal.ties()).as(r.render()).isTrue();
-        assertThat(section(r, "ledger").items())
-                .filteredOn(i -> i.check().equals("journal HQ inventory"))
-                .extracting(Item::line, Item::reason, Item::amount)
-                .containsExactly(org.assertj.core.groups.Tuple.tuple(0, ImportReconciliation.POLICY, "1050"));
+        assertThat(journal.source()).as(r.render()).isEqualTo(journalled);
+        assertThat(journal.system()).isEqualTo(journalled);
+        assertThat(section(r, "ledger").items()).noneMatch(i -> i.check().equals("journal HQ inventory"));
 
         ResponseEntity<JsonNode> signed = signOff(t, run, r, allSections(r), "Fabricated Signer", today(t));
         assertThat(signed.getStatusCode()).as(String.valueOf(signed.getBody())).isEqualTo(HttpStatus.OK);
         assertThat(status(run)).isEqualTo("signed_off");
+        return r;
+    }
+
+    @Test
+    void countsOfFiveAndMinusTwoOfOneItemAreJournalledAsThreeAndSign() throws IOException {
+        // Net 3 on hand worth 2100, all journalled beside the golden FAB-900's 1000; nothing below zero.
+        twoCounts("5,3500", "-2,-1400", "3", "3100", List.of());
+    }
+
+    @Test
+    void countsOfMinusTwoAndOneOfOneItemAreListedApartAndSign() throws IOException {
+        // Net 1 below zero worth -700: no journal holds it, so the journal is the golden FAB-900's 1000 alone.
+        twoCounts("-2,-1400", "1,700", "-1", "1000", List.of("-700"));
     }
 
     @Test
