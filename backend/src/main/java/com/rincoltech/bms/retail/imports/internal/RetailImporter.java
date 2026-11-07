@@ -2,11 +2,15 @@ package com.rincoltech.bms.retail.imports.internal;
 
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.imports.BatchWriter;
-import com.rincoltech.bms.core.imports.CommitReport;
+import com.rincoltech.bms.core.imports.ImportCommandRuns;
+import com.rincoltech.bms.core.imports.ImportMappings;
+import com.rincoltech.bms.core.imports.ImportRefs;
+import com.rincoltech.bms.core.imports.ImportTemplate.Policy;
 import com.rincoltech.bms.core.jobs.TenantJobs;
 import com.rincoltech.bms.core.tenancy.BranchProvisioning;
 import com.rincoltech.bms.core.tenancy.Branches;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
+import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.retail.cashbook.CashBookHistory;
 import com.rincoltech.bms.retail.cashbook.CashBookHistory.ExpenseItem;
@@ -19,18 +23,12 @@ import com.rincoltech.bms.retail.imports.internal.ExportFile.RowProblem;
 import com.rincoltech.bms.retail.purchasing.PurchaseHistory;
 import com.rincoltech.bms.retail.sales.SaleHistory;
 import com.rincoltech.bms.retail.stock.Quantities;
-import com.rincoltech.bms.retail.stock.RetailBooks;
-import com.rincoltech.bms.retail.stock.RetailBooks.Leg;
-import com.rincoltech.bms.retail.stock.RetailBooks.Posting;
 import com.rincoltech.bms.retail.stock.RetailHistory;
 import com.rincoltech.bms.retail.stock.StockLedger;
 import com.rincoltech.bms.retail.stock.StockLedger.HistoricalMovement;
 import com.rincoltech.bms.retail.stock.StockLedger.Position;
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -49,10 +47,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.Consumer;
-import java.util.function.Predicate;
+import java.util.function.Function;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -60,17 +57,26 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * The {@code import-retail} command's work (FR-RET-12; ADR-020 decision 9; data dictionary rules
- * 1 to 6). Binds the tenant by slug through {@link TenantJobs}, then imports the files in
- * dependency order, each in its own transaction, through the retail modules' history ports. A dry
- * run wraps every file in one outer transaction that is rolled back, so it reads and writes
- * exactly as a real run and leaves nothing behind. A file that fails stops the run; the files
- * before it stay committed, and a re-run skips what they wrote.
+ * 1 to 6), and since issue #135 the loader of the canonical template {@code retail_v1}
+ * ({@link RetailV1Template}): one code for the command's export and for a business's sheets read
+ * by the import framework with a mapping.
+ *
+ * <p>The command binds the tenant by slug through {@link TenantJobs}, reads the export directory,
+ * and writes each file in dependency order as one batch of a run of the framework
+ * ({@link ImportCommandRuns}), each in its own transaction, through the retail modules' history
+ * ports: every record registered in {@code import_refs} (and, until the contract step, in
+ * {@code retail_import_refs}), the opening stock journal posted through the framework. A dry run
+ * wraps every file in one outer transaction that is rolled back, so it reads and writes exactly as
+ * a real run and leaves nothing behind, the run included. A file that fails stops the run; the
+ * files before it stay committed, and a re-run skips what they wrote.
  */
 @Service
 public class RetailImporter {
 
     static final String SOURCE_TYPE = "retail.import";
-    static final String OPENING = "retail.import_opening";
+
+    /** The business's name of the export's mapping (issue #135), stored in {@code import_mappings}. */
+    static final String MAPPING = "import-retail-export";
 
     static final List<String> FILES = List.of(
             "branches.jsonl",
@@ -219,8 +225,9 @@ public class RetailImporter {
     private final SaleHistory sales;
     private final RetailHistory history;
     private final StockLedger stock;
-    private final RetailBooks books;
     private final CashBookHistory cashBook;
+    private final ImportCommandRuns commandRuns;
+    private final ImportMappings mappings;
 
     RetailImporter(
             TenantJobs tenants,
@@ -236,8 +243,9 @@ public class RetailImporter {
             SaleHistory sales,
             RetailHistory history,
             StockLedger stock,
-            RetailBooks books,
-            CashBookHistory cashBook) {
+            CashBookHistory cashBook,
+            ImportCommandRuns commandRuns,
+            ImportMappings mappings) {
         this.tenants = tenants;
         this.transactions = new TransactionTemplate(transactionManager);
         this.jdbc = jdbc;
@@ -251,8 +259,9 @@ public class RetailImporter {
         this.sales = sales;
         this.history = history;
         this.stock = stock;
-        this.books = books;
         this.cashBook = cashBook;
+        this.commandRuns = commandRuns;
+        this.mappings = mappings;
     }
 
     /**
@@ -275,151 +284,85 @@ public class RetailImporter {
         return tenants.callAsTenant(tenantSlug, "retail", () -> {
             if (dryRun) {
                 transactions.executeWithoutResult(status -> {
-                    importAll(export, report, firstLiveDate);
+                    importAll(export, report, firstLiveDate, true);
                     status.setRollbackOnly();
                 });
             } else {
-                importAll(export, report, firstLiveDate);
+                importAll(export, report, firstLiveDate, false);
             }
             return report;
         });
     }
 
-    // JUSTIFICATION-A3: issue #132 runs this command's real path as a batch of the import framework, no second path.
+    // JUSTIFICATION-A3: issue #135 makes this command's code the loader of the retail_v1 template, no second path.
     /**
-     * This command's real path as the writer of one batch of the import framework (issue #132), until the retail template
-     * of #135 gives each file its own batch: it imports the whole export directory in the batch's transaction (each file's
-     * transaction joins it), for the business the framework bound, and tells the batch's report what this command's report
-     * holds, and the stock per branch the books hold. So the framework's dry run of a run is this path rolled back, and its
-     * report equals a real run's ({@link #toCommitReport(String, ImportReport)}). A file that fails throws, so the batch,
-     * or the dry run, stops there. The checkpoint's kill switch is not read between rows: the command never read it
-     * either. A template's loader for retail (#135) is this writer; until then a test-only template stands in.
+     * The loader of {@code retail_v1} for one entity set (issue #135): the batch's staged rows, read through the checkpoint
+     * in line order, written by this command's own code for the export file of the same name, as if the command read that
+     * file ({@link ExportFile#staged}). It keeps nothing from one batch to the next: what depends on the run's earlier
+     * batches (the stock the run put on hand, what it already journalled) it reads from the database, from the run's own
+     * records in {@code import_refs}. Every record it creates is registered there with the row's {@code source_ref}, and
+     * a row the business's imports already hold is counted existing and written again for nothing. It tells the batch's
+     * report the file's counts, its anomalies, the negative balances, the notes and, for the balances, the stock per
+     * branch and the checksum; the opening journals the framework tells as it posts them.
      */
-    public BatchWriter exportWriter(Path dir, LocalDate firstLiveDate) {
-        // JUSTIFICATION-A3: the review of #869 asks for the export's content in the writer's identity and the ledger's
-        // own totals in the report; both are the writer's, so they sit with it.
+    BatchWriter loader(String entitySet) {
+        if (!RetailV1Template.SETS.contains(entitySet)) {
+            throw new IllegalArgumentException("retail_v1 has no entity set " + entitySet);
+        }
+        String name = entitySet + ".jsonl";
         return new BatchWriter() {
             @Override
             public Map<String, Object> write(UUID runId, UUID batchId, int seq, Checkpoint checkpoint) {
-                ImportReport report = new ImportReport("", dir.toString(), false);
-                // The export read is the export identified (review of d8d1e5b): a file changed while it was read stops
-                // the batch. The window between the commit's check of the identity and this read closes with #135,
-                // whose staged files the run's stamp holds.
-                String identified = exportSha256(dir);
-                Map<String, ExportFile> export = readExport(dir);
-                if (!identified.equals(exportSha256(dir))) {
-                    throw new IllegalStateException("the retail export changed while it was read");
+                Map<Integer, ImportRefs.StagedRow> staged = new LinkedHashMap<>();
+                int after = 0;
+                while (true) {
+                    List<ImportRefs.StagedRow> chunk = checkpoint.rows(after, 1_000);
+                    if (chunk.isEmpty()) {
+                        break;
+                    }
+                    chunk.forEach(r -> staged.put(r.line(), r));
+                    after = chunk.getLast().line();
                 }
-                importAll(export, report, firstLiveDate);
-                if (report.failed()) {
-                    // The cause is in the command's own report; it may quote a row, so it is not the message.
-                    throw new IllegalStateException("the retail export stopped at a file");
+                // A reference or balance row the business's imports already hold with this content was written by an
+                // earlier run: counted existing, written again for nothing. A history row goes through its file's
+                // code, which counts it existing in its place (a restock's price history reads every row in order).
+                boolean history = RetailV1Template.BY_REFERENCE.contains(entitySet);
+                List<ImportRefs.StagedRow> toWrite = staged.values().stream()
+                        .filter(r -> history || r.status() != ImportRefs.Status.EXISTING)
+                        .toList();
+                ExportFile file = ExportFile.staged(
+                        name,
+                        toWrite.stream()
+                                .map(r -> Map.entry(r.line(), r.values()))
+                                .toList());
+                ImportReport report = new ImportReport("", "", false);
+                Run run = new Run(Map.of(name, file), report, runId, null, false);
+                run.attach(checkpoint, batchId, new StagedRefs(checkpoint, staged));
+                run.begin();
+                ImportReport.Counts counts = report.file(name);
+                counts.read = staged.size();
+                counts.existing = staged.size() - toWrite.size();
+                run.write(name, file);
+                if (name.equals("balances.jsonl")) {
+                    run.checksum(file);
                 }
-                report.into(checkpoint, RetailImporter.this::ledgerTotals);
-                branchStock(checkpoint);
-                return Map.of();
+                report.intoFile(checkpoint, name);
+                report.intoTail(checkpoint);
+                Map<String, Object> out = new LinkedHashMap<>();
+                out.put("read", counts.read);
+                out.put("written", counts.written);
+                out.put("existing", counts.existing);
+                out.put("skipped", counts.skipped);
+                return out;
             }
 
-            /**
-             * The export's own content is part of what this writer is (review of #869): the SHA-256 of every file it
-             * reads, so a dry run of one export never stands for a commit of files changed since, and the first live day.
-             * With none given, the command takes the business's today, so the identity names that day (review of
-             * d8d1e5b): a dry run on one day does not stand for a commit on the next, whose journals are dated otherwise.
-             */
+            /** The template, its version, the entity set and this class: what the dry run rehearsed (issue #132). */
             @Override
             public String identity() {
-                LocalDate firstLive = firstLiveDate != null
-                        ? firstLiveDate
-                        : clock.today(currentTenant.profile().timezone());
-                return "retail.import-retail export sha256:" + exportSha256(dir) + " first-live:" + firstLive;
+                return RetailV1Template.KEY + "_v" + RetailV1Template.VERSION + " " + entitySet + " "
+                        + RetailImporter.class.getName();
             }
         };
-    }
-
-    /**
-     * The command's report in the framework's shape, with each opening journal's debit and credit as the tenant's ledger
-     * holds them for its entry: the real run the framework's dry run is compared with (issue #132).
-     */
-    public CommitReport toCommitReport(String tenantSlug, ImportReport report) {
-        return tenants.callAsTenant(
-                tenantSlug,
-                "retail",
-                () -> transactions.execute(s -> {
-                    CommitReport.Builder builder = new CommitReport.Builder(null);
-                    report.into(builder, this::ledgerTotals);
-                    branchStock(builder);
-                    if (report.failed()) {
-                        builder.fail("the retail export stopped at a file");
-                    }
-                    return builder.build(CommitReport.COMMIT);
-                }));
-    }
-
-    // JUSTIFICATION-A3: the Lead's ruling 2 on #869: the stock per branch in the retail report, read from the books.
-    /**
-     * Tells the report the stock of every branch as the books hold it now (Lead ruling 2 on #869): the quantity on hand,
-     * summed over the branch's products from the stock ledger, and the value the inventory account holds for the branch.
-     * In a dry run that is what the import wrote, read before the rollback; after a real run, what it committed.
-     */
-    private void branchStock(CommitReport.Sink sink) {
-        Map<UUID, String> codes = new HashMap<>();
-        branches.all().forEach(b -> codes.put(b.id(), b.code().toUpperCase(Locale.ROOT)));
-        Map<String, BigDecimal> qty = new TreeMap<>();
-        stock.positions().forEach(p -> qty.merge(codes.getOrDefault(p.branchId(), "?"), p.balance(), BigDecimal::add));
-        Map<String, Long> value = new TreeMap<>();
-        jdbc.sql("""
-                        SELECT e.branch_id, coalesce(sum(l.debit - l.credit), 0) AS value
-                          FROM journal_lines l JOIN journal_entries e ON e.id = l.entry_id
-                          JOIN gl_accounts a ON a.id = l.account_id
-                         WHERE a.system_key = 'inventory'
-                         GROUP BY e.branch_id
-                        """)
-                .query((rs, n) -> value.merge(
-                        codes.getOrDefault(rs.getObject("branch_id", UUID.class), "?"), rs.getLong("value"), Long::sum))
-                .list();
-        Set<String> all = new TreeSet<>(qty.keySet());
-        all.addAll(value.keySet());
-        all.forEach(code -> sink.stock(
-                code, atLeastThreePlaces(qty.getOrDefault(code, BigDecimal.ZERO)), value.getOrDefault(code, 0L)));
-    }
-
-    /** Three places as the command prints a quantity, more when the books hold more: never rounded (review of d8d1e5b). */
-    static BigDecimal atLeastThreePlaces(BigDecimal qty) {
-        return qty.setScale(Math.max(3, qty.scale()));
-    }
-
-    /** An entry's debit and credit totals by its number, from its lines, in the caller's transaction. */
-    private long[] ledgerTotals(String entryNo) {
-        return jdbc.sql("""
-                        SELECT coalesce(sum(l.debit), 0), coalesce(sum(l.credit), 0)
-                          FROM journal_entries e JOIN journal_lines l ON l.entry_id = e.id
-                         WHERE e.entry_no = ?
-                        """)
-                .param(entryNo)
-                .query((rs, n) -> new long[] {rs.getLong(1), rs.getLong(2)})
-                .single();
-    }
-
-    /** The SHA-256 over the names and bytes of every file of the export the command reads, in a fixed order. */
-    static String exportSha256(Path dir) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            List<String> names = new ArrayList<>(FILES);
-            names.addAll(CASH_FILES);
-            for (String name : names) {
-                Path file = dir.resolve(name);
-                digest.update((name + "\n").getBytes(StandardCharsets.UTF_8));
-                if (Files.isRegularFile(file)) {
-                    digest.update(Files.readAllBytes(file));
-                }
-                digest.update((byte) 0);
-            }
-            return HexFormat.of().formatHex(digest.digest());
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        } catch (IOException e) {
-            throw new UncheckedIOException("the export could not be read", e);
-        }
     }
 
     /** Every file of the export directory, read once; an absent file is an empty one. */
@@ -437,10 +380,51 @@ public class RetailImporter {
         return export;
     }
 
-    private void importAll(Map<String, ExportFile> export, ImportReport report, LocalDate firstLiveDate) {
-        Run run = new Run(export, report, UUID.randomUUID(), firstLiveDate);
+    // JUSTIFICATION-A3: issue #135 runs the command on a run of the framework; opening it is the one new step.
+    /** The command's run of the framework and the export's mapping its batches record. */
+    private record CommandRun(UUID id, UUID mapping) {}
+
+    /** No person stored the export's mapping: the command runs on the host, as the platform operator's tool. */
+    static final UUID NO_PERSON = new UUID(0, 0);
+
+    /**
+     * Opens the command's run (issue #135) with the export's mapping, stored once per business under {@link #MAPPING} and
+     * reused while it is the same document. A refusal of the framework (another import committing, the kill switch) is
+     * the command's refusal: nothing is written.
+     */
+    private CommandRun openCommand(boolean dryRun) {
+        try {
+            return transactions.execute(s -> {
+                Map<String, Object> document =
+                        RetailV1Template.exportMapping(currentTenant.profile().timezone());
+                String hash = ImportRefs.contentHash(document);
+                UUID mapping = mappings.latest(MAPPING)
+                        .filter(m -> ImportRefs.contentHash(m.document()).equals(hash))
+                        .map(ImportMappings.Mapping::id)
+                        .orElseGet(() -> mappings.save(
+                                        MAPPING,
+                                        document,
+                                        NO_PERSON,
+                                        "the normalised export of the import-retail command")
+                                .id());
+                return new CommandRun(commandRuns.open(dryRun), mapping);
+            });
+        } catch (ApiException e) {
+            throw new IllegalArgumentException(e.getMessage(), e);
+        }
+    }
+
+    private void importAll(
+            Map<String, ExportFile> export, ImportReport report, LocalDate firstLiveDate, boolean dryRun) {
+        CommandRun command = openCommand(dryRun);
+        Run run = new Run(export, report, command.id(), firstLiveDate, true);
         // Refuse a first live day that moves the one already fixed, before anything is written.
-        transactions.executeWithoutResult(status -> run.begin());
+        try {
+            transactions.executeWithoutResult(status -> run.begin());
+        } catch (RuntimeException e) {
+            stopped(command, dryRun);
+            throw e;
+        }
         List<String> order = new ArrayList<>(FILES);
         order.addAll(CASH_ORDER);
         // The report lists the files in the export's order; an absent cash book file is not listed.
@@ -452,6 +436,7 @@ public class RetailImporter {
                 report.file(name);
             }
         }
+        int batches = 0;
         for (String name : order) {
             ExportFile file = export.get(name);
             if (!file.present && CASH_FILES.contains(name)) {
@@ -466,71 +451,119 @@ public class RetailImporter {
             if (!file.unknownFields.isEmpty()) {
                 report.anomaly(name, 0, "fields not in the export format, ignored: " + file.unknownFields);
             }
+            int seq = ++batches;
             try {
+                // One batch of the command's run per file (issue #135): the retail_v1 files record the export's
+                // mapping and its source of their entity set; the cash book files, outside retail_v1, none.
                 transactions.executeWithoutResult(status -> {
                     run.begin();
-                    switch (name) {
-                        case "branches.jsonl" -> run.branches(file);
-                        case "categories.jsonl" ->
-                            run.named(file, n -> catalogue.ensureCategory(n).created(), 100, run.namedCategories);
-                        case "units.jsonl" -> {
-                            // Issue #698: every unit key of the file locked first, in key order, as in the CSV import.
-                            catalogue.lockUnits(texts(file, "name"));
-                            run.named(file, n -> catalogue.ensureUnit(n).created(), 30, run.namedUnits);
-                        }
-                        case "products.jsonl" -> {
-                            catalogue.lockUnits(texts(file, "unit"));
-                            run.products(file);
-                        }
-                        case "suppliers.jsonl" ->
-                            run.named(file, n -> purchases.ensureSupplier(n).created(), 200, run.namedSuppliers);
-                        case "customers.jsonl" -> run.customers(file);
-                        case "purchases.jsonl" -> run.purchases(file);
-                        case "sales.jsonl" -> run.sales(file);
-                        case "usage.jsonl" -> run.usage(file);
-                        case "balances.jsonl" -> run.balances(file);
-                        case "cash_parties.jsonl" -> run.cashParties(file);
-                        case "expense_categories.jsonl" -> run.expenseCategories(file);
-                        case "savings.jsonl" -> run.savings(file);
-                        case "expenses.jsonl" -> run.expenses(file);
-                        case "banking.jsonl" -> run.banking(file);
-                        case "withdrawals.jsonl" -> run.withdrawals(file);
-                        case "advances.jsonl" -> run.advances(file);
-                        case "advance_payments.jsonl" -> run.advancePayments(file);
-                        case "cash_balances.jsonl" -> run.cashBalances(file);
-                        default -> throw new IllegalStateException(name);
-                    }
-                    Map<String, Object> after = new LinkedHashMap<>();
-                    after.put("file", name);
-                    after.put("written", counts.written);
-                    after.put("existing", counts.existing);
-                    after.put("skipped", counts.skipped);
-                    audit.record(
-                            AuditLog.Entry.created("retail.import.file_imported", "retail.import", run.id, null, after),
-                            null,
-                            "system");
+                    String set = name.substring(0, name.length() - ".jsonl".length());
+                    boolean mapped = RetailV1Template.SETS.contains(set);
+                    UUID batch = commandRuns.batch(
+                            command.id(), seq, name, mapped ? command.mapping() : null, mapped ? set : null);
+                    commandRuns.write(command.id(), batch, checkpoint -> {
+                        run.attach(checkpoint, batch, new CommandRefs(checkpoint));
+                        run.write(name, file);
+                        Map<String, Object> after = new LinkedHashMap<>();
+                        after.put("file", name);
+                        after.put("written", counts.written);
+                        after.put("existing", counts.existing);
+                        after.put("skipped", counts.skipped);
+                        audit.record(
+                                AuditLog.Entry.created(
+                                        "retail.import.file_imported", "retail.import", run.id, null, after),
+                                null,
+                                "system");
+                        report.intoFile(checkpoint, name);
+                        return after;
+                    });
                 });
             } catch (RuntimeException e) {
                 report.fail(name + ": " + e.getMessage());
+                stopped(command, dryRun);
                 return;
             }
         }
         if (export.get("advances.jsonl").present || export.get("cash_balances.jsonl").present) {
+            int seq = ++batches;
             try {
                 transactions.executeWithoutResult(status -> {
                     run.begin();
-                    run.advanceOpenings();
+                    UUID batch = commandRuns.batch(command.id(), seq, "advance openings", null, null);
+                    commandRuns.write(command.id(), batch, checkpoint -> {
+                        run.attach(checkpoint, batch, new CommandRefs(checkpoint));
+                        run.advanceOpenings();
+                        return Map.of();
+                    });
                 });
             } catch (RuntimeException e) {
                 report.fail("advance openings: " + e.getMessage());
+                stopped(command, dryRun);
                 return;
             }
         }
         transactions.executeWithoutResult(status -> {
             run.begin();
             run.checksum(export.get("balances.jsonl"));
+            commandRuns.finish(command.id(), false);
         });
         run.cashBookNotes();
+    }
+
+    /**
+     * Ends the command's run a file stopped. A dry run is rolled back whole, run and all, and its transaction may be
+     * aborted by the failure, so nothing more is sent to it.
+     */
+    private void stopped(CommandRun command, boolean dryRun) {
+        if (!dryRun) {
+            transactions.executeWithoutResult(status -> commandRuns.finish(command.id(), true));
+        }
+    }
+
+    /** One file's work in the batch the run is attached to: the command's and the loader's alike. */
+    private void writeFile(Run run, String name, ExportFile file) {
+        switch (name) {
+            case "branches.jsonl" -> run.branches(file);
+            case "categories.jsonl" ->
+                run.named(file, n -> made(catalogue.ensureCategory(n)), 100, run.namedCategories, "retail.category");
+            case "units.jsonl" -> {
+                // Issue #698: every unit key of the file locked first, in key order, as in the CSV import.
+                catalogue.lockUnits(texts(file, "name"));
+                run.named(file, n -> made(catalogue.ensureUnit(n)), 30, run.namedUnits, "retail.unit");
+            }
+            case "products.jsonl" -> {
+                catalogue.lockUnits(texts(file, "unit"));
+                run.products(file);
+            }
+            case "suppliers.jsonl" ->
+                run.named(file, n -> made(purchases.ensureSupplier(n)), 200, run.namedSuppliers, "retail.supplier");
+            case "customers.jsonl" -> run.customers(file);
+            case "purchases.jsonl" -> run.purchases(file);
+            case "sales.jsonl" -> run.sales(file);
+            case "usage.jsonl" -> run.usage(file);
+            case "balances.jsonl" -> run.balances(file);
+            case "cash_parties.jsonl" -> run.cashParties(file);
+            case "expense_categories.jsonl" -> run.expenseCategories(file);
+            case "savings.jsonl" -> run.savings(file);
+            case "expenses.jsonl" -> run.expenses(file);
+            case "banking.jsonl" -> run.banking(file);
+            case "withdrawals.jsonl" -> run.withdrawals(file);
+            case "advances.jsonl" -> run.advances(file);
+            case "advance_payments.jsonl" -> run.advancePayments(file);
+            case "cash_balances.jsonl" -> run.cashBalances(file);
+            default -> throw new IllegalStateException(name);
+        }
+    }
+
+    /** A record a file's row found or made: its id and whether this row made it. */
+    record Made(UUID id, boolean created) {}
+
+    static Made made(CatalogueHistory.Ensured e) {
+        return new Made(e.id(), e.created());
+    }
+
+    static Made made(PurchaseHistory.Ensured e) {
+        return new Made(e.id(), e.created());
     }
 
     private static final java.util.regex.Pattern TRAILING_NUMBER = java.util.regex.Pattern.compile("^(.*?)(\\d+)$");
@@ -593,12 +626,45 @@ public class RetailImporter {
         long feeMinor;
         final Set<String> companyNames = new HashSet<>();
 
-        Run(Map<String, ExportFile> export, ImportReport report, UUID id, LocalDate firstLiveDate) {
+        // JUSTIFICATION-A3: issue #135 runs one Run for the command and for the framework's batch of retail_v1.
+        /**
+         * The command, which reads the whole export and knows which names its reference files listed, or the framework's
+         * loader of one batch, which knows only its own rows and asks the catalogue (issue #135).
+         */
+        final boolean command;
+
+        /** The batch being written and the framework's side of it (issue #135); set by {@link #attach}. */
+        BatchWriter.Checkpoint checkpoint;
+
+        UUID batchId;
+        Refs refs;
+
+        Run(Map<String, ExportFile> export, ImportReport report, UUID id, LocalDate firstLiveDate, boolean command) {
             this.export = export;
             this.report = report;
             this.id = id;
             this.requestedFirstLive = firstLiveDate;
             this.firstLiveDate = firstLiveDate;
+            this.command = command;
+        }
+
+        /** The batch the next file is written in, and how its rows are known to the business's imports. */
+        void attach(BatchWriter.Checkpoint checkpoint, UUID batchId, Refs refs) {
+            this.checkpoint = checkpoint;
+            this.batchId = batchId;
+            this.refs = refs;
+        }
+
+        void write(String name, ExportFile file) {
+            writeFile(this, name, file);
+        }
+
+        /**
+         * Whether a name a row uses was listed: by the reference file the command read before (the command), or held by
+         * the catalogue before this row (a batch of the framework, which keeps nothing from an earlier batch).
+         */
+        boolean listed(Set<String> names, String name, java.util.function.BooleanSupplier createdNow) {
+            return command ? names.contains(name.toLowerCase(Locale.ROOT)) : !createdNow.getAsBoolean();
         }
 
         void begin() {
@@ -680,6 +746,9 @@ public class RetailImporter {
                 } catch (RowProblem p) {
                     report.skip(file.name, p.line, p.getMessage());
                 }
+                if (checkpoint != null) {
+                    checkpoint.rowWritten();
+                }
             }
         }
 
@@ -698,25 +767,32 @@ public class RetailImporter {
                     throw row.problem("duplicate branch code " + code);
                 }
                 if (branchByCode.containsKey(code)) {
+                    refs.matched(file.name, row, "core.branch", branchByCode.get(code));
                     c.existing++;
                     return;
                 }
-                branchByCode.put(code, branchProvisioning.create(code, name));
+                UUID created = branchProvisioning.create(code, name);
+                branchByCode.put(code, created);
+                refs.created(file.name, row, "core.branch", created);
                 c.written++;
             });
         }
 
         /** A file of names (categories, units, suppliers): created when no name matches ignoring case. */
-        void named(ExportFile file, Predicate<String> create, int maxLength, Set<String> names) {
+        void named(
+                ExportFile file, Function<String, Made> create, int maxLength, Set<String> names, String targetType) {
             ImportReport.Counts c = report.file(file.name);
             each(file, row -> {
                 String name = row.requiredText("name", maxLength);
                 if (!names.add(name.toLowerCase(Locale.ROOT))) {
                     throw row.problem("duplicate name " + name);
                 }
-                if (create.test(name)) {
+                Made made = create.apply(name);
+                if (made.created()) {
+                    refs.created(file.name, row, targetType, made.id());
                     c.written++;
                 } else {
+                    refs.matched(file.name, row, targetType, made.id());
                     c.existing++;
                 }
             });
@@ -744,16 +820,20 @@ public class RetailImporter {
                 long cost = row.money("cost_minor");
                 long sell = row.money("sell_minor");
                 boolean active = row.flag("active", true);
-                if (!namedCategories.contains(category.toLowerCase(Locale.ROOT))) {
+                if (!listed(
+                        namedCategories,
+                        category,
+                        () -> catalogue.ensureCategory(category).created())) {
                     report.anomaly(file.name, row.line(), "category " + category + " is not in categories.jsonl");
                 }
-                if (!namedUnits.contains(unit.toLowerCase(Locale.ROOT))) {
+                if (!listed(namedUnits, unit, () -> catalogue.ensureUnit(unit).created())) {
                     report.anomaly(file.name, row.line(), "unit " + unit + " is not in units.jsonl");
                 }
                 UUID unitId = catalogue.ensureUnit(unit).id();
                 Ensured product = catalogue.ensureProduct(
                         code, description, catalogue.ensureCategory(category).id(), unitId, cost, sell, active);
                 if (product.created()) {
+                    refs.created(file.name, row, "retail.product", product.id());
                     c.written++;
                     // Issue #352: a name is kept once per unit. History needs every code, so both rows are kept; the
                     // report tells the owner which items to look at.
@@ -765,6 +845,7 @@ public class RetailImporter {
                                     "product " + code + " has the same name as product " + other
                                             + " in the same unit; both were kept, check whether they are one item"));
                 } else {
+                    refs.matched(file.name, row, "retail.product", product.id());
                     c.existing++;
                     if (product.changed()) {
                         report.anomaly(
@@ -785,9 +866,12 @@ public class RetailImporter {
                 if (!seen.add(name.toLowerCase(Locale.ROOT))) {
                     throw row.problem("duplicate credit buyer name");
                 }
-                if (sales.ensureCustomer(name, contact).created()) {
+                SaleHistory.Ensured customer = sales.ensureCustomer(name, contact);
+                if (customer.created()) {
+                    refs.created(file.name, row, "retail.customer", customer.id());
                     c.written++;
                 } else {
+                    refs.matched(file.name, row, "retail.customer", customer.id());
                     c.existing++;
                 }
             });
@@ -800,19 +884,11 @@ public class RetailImporter {
             if (!inFile.add(ref)) {
                 throw row.problem("duplicate source_ref " + ref);
             }
-            return jdbc.sql("SELECT count(*) FROM retail_import_refs WHERE source_file = ? AND source_ref = ?")
-                            .params(file, ref)
-                            .query(Long.class)
-                            .single()
-                    > 0;
+            return refs.seen(file, row, ref);
         }
 
-        void remember(String file, String ref, String targetType, UUID targetId, String sourceUser) {
-            jdbc.sql("""
-                            INSERT INTO retail_import_refs (tenant_id, source_file, source_ref, target_type, target_id,
-                                source_user)
-                            VALUES (current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
-                            """).params(file, ref, targetType, targetId, sourceUser).update();
+        void remember(String file, Row row, String ref, String targetType, UUID targetId, String sourceUser) {
+            refs.remember(file, row, ref, targetType, targetId, sourceUser);
         }
 
         record PurchaseRow(
@@ -866,7 +942,9 @@ public class RetailImporter {
                     UUID supplier = null;
                     if (r.supplier() != null) {
                         PurchaseHistory.Ensured s = purchases.ensureSupplier(r.supplier());
-                        if (s.created() || !namedSuppliers.contains(r.supplier().toLowerCase(Locale.ROOT))) {
+                        if (s.created()
+                                || (command
+                                        && !namedSuppliers.contains(r.supplier().toLowerCase(Locale.ROOT)))) {
                             report.anomaly(file.name, r.row().line(), "supplier is not in suppliers.jsonl; created");
                             namedSuppliers.add(r.supplier().toLowerCase(Locale.ROOT));
                         }
@@ -915,7 +993,7 @@ public class RetailImporter {
                     target = stock.recordHistorical(r.on(), moves).getFirst();
                     targetType = "retail.stock_movement";
                 }
-                remember("purchases", r.ref(), targetType, target, r.user());
+                remember("purchases", r.row(), r.ref(), targetType, target, r.user());
                 c.written++;
             }
         }
@@ -1006,12 +1084,18 @@ public class RetailImporter {
                     creditSales++;
                     creditSalesMinor = Math.addExact(creditSalesMinor, Quantities.value(qty, price));
                 }
-                remember("sales", ref, "retail.sale", sale, row.optionalText("source_user", 200));
+                remember("sales", row, ref, "retail.sale", sale, row.optionalText("source_user", 200));
                 c.written++;
             });
             if (creditSales > 0) {
+                // The run's receivable decision (spec section 3.8): retail_v1 offers treat_as_settled and defer,
+                // neither of which opens a receivable. The command records none and keeps its own rule, the same.
+                String decision = checkpoint
+                        .policy(Policy.RECEIVABLE)
+                        .map(o -> " (receivable decision: " + o + ")")
+                        .orElse("");
                 report.note("credit sales imported unpaid (the source keeps no payments): " + creditSales + ", total "
-                        + creditSalesMinor + " minor units; no receivable is journalled for them");
+                        + creditSalesMinor + " minor units; no receivable is journalled for them" + decision);
             }
         }
 
@@ -1036,7 +1120,7 @@ public class RetailImporter {
                 Instant at = row.instant("reported_at", zone);
                 UUID report = history.importUsage(
                         branch, product.id(), kind, reason, qty, cost, at, LocalDate.ofInstant(at, zone));
-                remember("usage", ref, "retail.usage", report, row.optionalText("source_user", 200));
+                remember("usage", row, ref, "retail.usage", report, row.optionalText("source_user", 200));
                 c.written++;
             });
         }
@@ -1154,7 +1238,7 @@ public class RetailImporter {
                 UUID id = cashBook.importSavings(branch, date, amount, sold == null ? 0 : sold, dayStart(date))
                         .orElseThrow(() -> row.problem("branch " + row.text("branch")
                                 + " already has a savings record for " + date + "; a second one is never merged"));
-                remember("savings", ref, "retail.savings", id, row.optionalText("source_user", 200));
+                remember("savings", row, ref, "retail.savings", id, row.optionalText("source_user", 200));
                 c.written++;
             });
         }
@@ -1219,7 +1303,7 @@ public class RetailImporter {
                 UUID party = beneficiary == null ? null : partyByName(file, row, "beneficiary", beneficiary);
                 UUID id = cashBook.importExpense(
                         new CashBookHistory.Expense(branch, date, e, party, amount, explanation, dayStart(date)));
-                remember("expenses", ref, "retail.expense", id, row.optionalText("source_user", 200));
+                remember("expenses", row, ref, "retail.expense", id, row.optionalText("source_user", 200));
                 c.written++;
             });
         }
@@ -1237,7 +1321,7 @@ public class RetailImporter {
                 LocalDate date = date(row, "business_date");
                 long amount = positive(row, "amount_minor");
                 UUID id = cashBook.importWithdrawal(branch, date, amount, dayStart(date));
-                remember("withdrawals", ref, "retail.withdrawal", id, row.optionalText("source_user", 200));
+                remember("withdrawals", row, ref, "retail.withdrawal", id, row.optionalText("source_user", 200));
                 c.written++;
             });
         }
@@ -1293,6 +1377,7 @@ public class RetailImporter {
                     }
                     remember(
                             "advances",
+                            a.row(),
                             a.ref(),
                             "retail.advance",
                             advance.id(),
@@ -1384,6 +1469,7 @@ public class RetailImporter {
                     }
                     remember(
                             "advance_payments",
+                            p.row(),
                             p.ref(),
                             "retail.advance_repayment",
                             id,
@@ -1414,7 +1500,7 @@ public class RetailImporter {
                 }
                 refuseLive(row, "banked_at", LocalDate.ofInstant(bankedAt, zone));
                 CashBookHistory.Banked banked = cashBook.importBanking(branch, date, amount, bankedAt);
-                remember("banking", ref, "retail.banking", banked.id(), row.optionalText("source_user", 200));
+                remember("banking", row, ref, "retail.banking", banked.id(), row.optionalText("source_user", 200));
                 c.written++;
             });
         }
@@ -1459,7 +1545,8 @@ public class RetailImporter {
                     return;
                 }
                 CashBookHistory.OpeningPosted e = entry.get();
-                remember("cash_opening", branch.toString(), "journal", e.entryId(), null);
+                // A journal: the framework registers it in import_refs at the batch's end; the cash book reads this.
+                refs.journal("cash_opening", branch.toString(), "journal", e.entryId());
                 report.cashOpening(new ImportReport.CashOpening(
                         code,
                         day,
@@ -1574,6 +1661,9 @@ public class RetailImporter {
                     report.negative(b.branchCode() + " " + b.product().code() + " " + Quantities.format(b.qty()));
                 }
                 if (p != null && p.legacy()) {
+                    // The item whose balance an earlier import gave: what a framework run's row stands for.
+                    refs.matched(
+                            file.name, b.row(), "retail.product", b.product().id());
                     c.existing++;
                     if (balance.compareTo(b.qty()) != 0) {
                         report.anomaly(
@@ -1596,21 +1686,26 @@ public class RetailImporter {
                 BigDecimal legacy = b.qty().subtract(balance);
                 if (legacy.signum() == 0) {
                     // Nothing to write: the history already gives the source balance, on every run.
+                    refs.matched(
+                            file.name, b.row(), "retail.product", b.product().id());
                     c.existing++;
                 } else {
-                    stock.recordHistorical(
-                            importDate,
-                            List.of(new HistoricalMovement(
-                                    b.branch(),
-                                    b.product().id(),
-                                    "legacy_balance",
-                                    legacy,
-                                    b.product().costMinor(),
-                                    opening,
-                                    SOURCE_TYPE,
-                                    null,
-                                    null,
-                                    "Legacy balance from the import")));
+                    UUID movement = stock.recordHistorical(
+                                    importDate,
+                                    List.of(new HistoricalMovement(
+                                            b.branch(),
+                                            b.product().id(),
+                                            "legacy_balance",
+                                            legacy,
+                                            b.product().costMinor(),
+                                            opening,
+                                            SOURCE_TYPE,
+                                            null,
+                                            null,
+                                            "Legacy balance from the import")))
+                            .getFirst();
+                    // The run's own stock (issue #134): the books and the opening journal read it from import_refs.
+                    refs.created(file.name, b.row(), "retail.stock_movement", movement);
                     c.written++;
                 }
             }
@@ -1647,6 +1742,18 @@ public class RetailImporter {
             return rows;
         }
 
+        // JUSTIFICATION-A3: issue #135 moves the opening stock journal onto the framework's openingJournal.
+        /**
+         * Data dictionary rule 5 through the framework (issues #135, #872 and #873): one opening journal per branch of the
+         * batch's balances, through {@link BatchWriter.Checkpoint#openingJournal} against opening balance equity, of the
+         * change in what the run's items above zero are worth at their current cost: the run's own stock, from the
+         * movements it registered in {@code import_refs} (its history and its legacy balances, every batch of it), less
+         * what its own opening journals already hold, read from the ledger. So a negative balance is never journalled
+         * (the negative-stock rule: it is listed for the first stock-take), a resumed or a second batch journals only what
+         * changed, a fall is a journal the other way, and nothing is kept in memory. A branch that changes nothing and
+         * already has an opening journal from an earlier import (this one's, an earlier command's or one V145 copied) is
+         * reported as already posted, with what its balance rows are worth, as the command always reported it.
+         */
         private void openingJournals(List<Balance> rows, LocalDate today) {
             Map<String, long[]> byBranch = new TreeMap<>();
             Map<String, UUID> ids = new HashMap<>();
@@ -1659,53 +1766,117 @@ public class RetailImporter {
                 }
             }
             byBranch.forEach((code, v) -> {
-                String posted =
-                        jdbc.sql("""
-                                SELECT j.entry_no FROM retail_import_refs r JOIN journal_entries j ON j.id = r.target_id
-                                 WHERE r.source_file = 'opening' AND r.source_ref = ?
-                                """).param(code).query(String.class).optional().orElse(null);
-                if (posted != null) {
-                    report.opening(new ImportReport.Opening(code, v[0], posted, "already posted, not posted again:"));
-                    return;
-                }
                 UUID branch = ids.get(code);
-                var entry = books.post(new Posting(
-                        branch,
-                        today,
-                        "Opening stock",
-                        "Opening stock at current cost, from the import",
-                        OPENING,
-                        null,
-                        OPENING + ":" + branch,
-                        List.of(Leg.debit("inventory", v[0]), Leg.credit("opening_balance_equity", v[0]))));
-                if (entry.isEmpty()) {
-                    report.opening(new ImportReport.Opening(code, 0, null, "nothing to post"));
+                long[] stockNow = runStock(branch);
+                // What the stock of the branch is worth now, told to the report as the preview predicts it.
+                checkpoint.stock(code, BigDecimal.valueOf(stockNow[0], 3), stockNow[1]);
+                long change = Math.subtractExact(stockNow[2], runJournalled(branch));
+                if (change == 0) {
+                    String posted = earlierOpening(branch, code);
+                    report.opening(
+                            posted == null
+                                    ? new ImportReport.Opening(code, 0, null, "nothing to post")
+                                    : new ImportReport.Opening(
+                                            code, v[0], posted, "already posted, not posted again:"));
                     return;
                 }
-                remember("opening", code, "core.journal_entry", entry.get().entryId(), null);
-                report.opening(new ImportReport.Opening(code, v[0], entry.get().entryNo(), "posted"));
+                checkpoint.openingJournal(new ImportRefs.Opening(
+                        branch,
+                        code,
+                        "inventory",
+                        today,
+                        "inventory",
+                        change > 0,
+                        Math.abs(change),
+                        RetailV1Template.OPENING_TYPE));
+                Map<String, Object> entry =
+                        jdbc.sql("""
+                                SELECT e.id, e.entry_no FROM import_refs r JOIN journal_entries e ON e.id = r.target_id
+                                 WHERE r.batch_id = ? AND r.target_type = 'ledger.journal_entry'
+                                   AND r.source_key LIKE 'opening|inventory|%' AND e.branch_id = ?
+                                """).params(batchId, branch).query().singleRow();
+                refs.journal("opening", code, "core.journal_entry", (UUID) entry.get("id"));
+                report.opening(new ImportReport.Opening(code, change, (String) entry.get("entry_no"), "posted"));
             });
         }
 
-        /** One second before the earliest imported history, so the legacy balance precedes it. */
+        /**
+         * The run's own stock at a branch, from the movements it registered (issue #134): its quantity in thousandths, what
+         * it is worth at each item's current cost, and what its items above zero are worth.
+         */
+        private long[] runStock(UUID branch) {
+            long[] out = new long[3];
+            jdbc.sql("""
+                            SELECT sum(m.qty) AS qty, p.cost_minor
+                              FROM retail_stock_movements m JOIN retail_products p ON p.id = m.product_id
+                             WHERE m.branch_id = ?
+                               AND (m.id IN (SELECT r.target_id FROM import_refs r
+                                              WHERE r.run_id = ? AND r.target_type = 'retail.stock_movement')
+                                    OR m.source_id IN (SELECT r.target_id FROM import_refs r
+                                                        WHERE r.run_id = ?
+                                                          AND r.target_type IN ('retail.purchase', 'retail.sale',
+                                                                                'retail.usage')))
+                             GROUP BY m.product_id, p.cost_minor
+                            """)
+                    .params(branch, id, id)
+                    .query((rs, n) -> {
+                        BigDecimal qty = rs.getBigDecimal("qty");
+                        long value = Quantities.value(qty, rs.getLong("cost_minor"));
+                        out[0] = Math.addExact(out[0], qty.movePointRight(3).longValueExact());
+                        out[1] = Math.addExact(out[1], value);
+                        if (qty.signum() > 0) {
+                            out[2] = Math.addExact(out[2], value);
+                        }
+                        return null;
+                    })
+                    .list();
+            return out;
+        }
+
+        /** What the run's own opening journals already put on the branch's inventory account, from the ledger. */
+        private long runJournalled(UUID branch) {
+            return jdbc.sql("""
+                            SELECT coalesce(sum(l.debit - l.credit), 0)
+                              FROM import_refs r
+                              JOIN journal_entries e ON e.id = r.target_id
+                              JOIN journal_lines l ON l.entry_id = e.id
+                              JOIN gl_accounts a ON a.id = l.account_id
+                             WHERE r.run_id = ? AND r.target_type = 'ledger.journal_entry'
+                               AND r.source_key LIKE 'opening|inventory|%' AND a.system_key = 'inventory'
+                               AND e.branch_id = ?
+                            """).params(id, branch).query(Long.class).single();
+        }
+
+        /** The first opening stock journal of the branch any import posted, by its number; null when none did. */
+        private String earlierOpening(UUID branch, String code) {
+            return jdbc.sql("""
+                            SELECT min(entry_no) FROM (
+                                SELECT e.entry_no FROM import_refs r JOIN journal_entries e ON e.id = r.target_id
+                                 WHERE r.target_type = 'ledger.journal_entry' AND r.source_key LIKE 'opening|inventory|%'
+                                   AND e.branch_id = ?
+                                UNION ALL
+                                SELECT e.entry_no FROM retail_import_refs r JOIN journal_entries e ON e.id = r.target_id
+                                 WHERE r.source_file = 'opening' AND r.source_ref = ?) o
+                            """)
+                    .params(branch, code)
+                    .query(String.class)
+                    .optional()
+                    .orElse(null);
+        }
+
+        /**
+         * One second before the earliest imported history of the business, so the legacy balance precedes it: read from
+         * the stock ledger, since a batch of the framework holds only its own file (issue #135).
+         */
         private Instant openingInstant() {
-            Instant earliest = null;
-            for (String name : List.of("sales.jsonl", "purchases.jsonl", "usage.jsonl")) {
-                String field = switch (name) {
-                    case "sales.jsonl" -> "sold_at";
-                    case "purchases.jsonl" -> "purchased_on";
-                    default -> "reported_at";
-                };
-                for (Row row : export.get(name).rows) {
-                    try {
-                        Instant at = row.instant(field, zone);
-                        earliest = earliest == null || at.isBefore(earliest) ? at : earliest;
-                    } catch (RowProblem ignored) {
-                        // reported with its file
-                    }
-                }
-            }
-            return earliest == null ? clock.now() : earliest.minusSeconds(1);
+            return jdbc.sql("""
+                            SELECT min(occurred_at) FROM retail_stock_movements
+                             WHERE historical AND kind <> 'legacy_balance'
+                            """)
+                    .query(java.sql.Timestamp.class)
+                    .optional()
+                    .map(t -> t.toInstant().minusSeconds(1))
+                    .orElseGet(clock::now);
         }
 
         private String codeOf(UUID branchId) {
@@ -1733,7 +1904,7 @@ public class RetailImporter {
             List<Balance> rows = new ArrayList<>();
             int[] excluded = {0};
             ImportReport quiet = new ImportReport("", "", true);
-            Run reader = new Run(export, quiet, id, null);
+            Run reader = new Run(export, quiet, id, null, command);
             reader.begin();
             reader.each(file, row -> {
                 try {
@@ -1783,6 +1954,136 @@ public class RetailImporter {
             report.checksum("balances checksum: rows=" + source.size() + " total_qty=" + Quantities.format(total)
                     + " source_sha256=" + s + " derived_sha256=" + d + " match=" + (s.equals(d) ? "yes" : "NO")
                     + " excluded_no_goods=" + excluded[0]);
+        }
+    }
+
+    // JUSTIFICATION-A3: issue #135 keys the command's rows and the framework's staged rows in import_refs.
+    /** How a file's rows are known to the business's imports (issue #135): the command's export, or a framework batch. */
+    interface Refs {
+
+        /** Whether the business's imports already hold this history row: it is counted existing and not written. */
+        boolean seen(String file, Row row, String ref);
+
+        /** Registers the record a history row made. */
+        void remember(String file, Row row, String ref, String targetType, UUID targetId, String sourceUser);
+
+        /** Registers a record a reference row or a balance row made (a branch, an item, a legacy balance). */
+        void created(String file, Row row, String targetType, UUID targetId);
+
+        /**
+         * Registers the record the business already held that a row matched (an item of the same code, a balance the
+         * history already gives): a framework run registers every row it writes, so the reconciliation finds each in the
+         * books (issue #134). The command, which matches by name on every run, registers only what it made.
+         */
+        void matched(String file, Row row, String targetType, UUID targetId);
+
+        /** Keeps a journal the command posted in {@code retail_import_refs}, for the cash book and an earlier release. */
+        void journal(String file, String ref, String targetType, UUID entryId);
+    }
+
+    /** The key in {@code import_refs} of a history row of the export: what V145 and the export's mapping derive. */
+    static String historyKey(String file, String ref) {
+        return ImportRefs.sourceKey(file + ".jsonl", null, "ref:" + ref);
+    }
+
+    /**
+     * The command's export (issue #135): a history row is known by its key alone ({@link ImportRefs#BY_KEY}), as the
+     * command always knew it by its {@code source_ref} whatever its content, and found in {@code import_refs} (which V145
+     * filled from {@code retail_import_refs}) or, for a row a previous release wrote after the backfill, in the old table;
+     * a reference or balance row by its file and line. Every history row and journal is also written to
+     * {@code retail_import_refs}, the expand step's second write, so the previous release still recognises it after a
+     * rollback; that table goes in the contract step.
+     */
+    private final class CommandRefs implements Refs {
+
+        private final BatchWriter.Checkpoint checkpoint;
+
+        CommandRefs(BatchWriter.Checkpoint checkpoint) {
+            this.checkpoint = checkpoint;
+        }
+
+        @Override
+        public boolean seen(String file, Row row, String ref) {
+            return jdbc.sql("""
+                            SELECT EXISTS (SELECT 1 FROM import_refs WHERE source_key = ?)
+                                OR EXISTS (SELECT 1 FROM retail_import_refs WHERE source_file = ? AND source_ref = ?)
+                            """)
+                    .params(historyKey(file, ref), file, ref)
+                    .query(Boolean.class)
+                    .single();
+        }
+
+        @Override
+        public void remember(String file, Row row, String ref, String targetType, UUID targetId, String sourceUser) {
+            checkpoint.register(ImportRefs.byKey(historyKey(file, ref)), targetType, targetId);
+            legacy(file, ref, targetType, targetId, sourceUser);
+        }
+
+        @Override
+        public void created(String file, Row row, String targetType, UUID targetId) {
+            checkpoint.register(
+                    ImportRefs.byKey(ImportRefs.sourceKey(file, null, "line:" + row.line())), targetType, targetId);
+        }
+
+        @Override
+        public void matched(String file, Row row, String targetType, UUID targetId) {
+            // Matched again on every run, by name or code, as the command always did.
+        }
+
+        @Override
+        public void journal(String file, String ref, String targetType, UUID entryId) {
+            legacy(file, ref, targetType, entryId, null);
+        }
+    }
+
+    /** The old table's row, once: a key it already holds is the same row (the framework's table decides now). */
+    private void legacy(String file, String ref, String targetType, UUID targetId, String sourceUser) {
+        jdbc.sql("""
+                        INSERT INTO retail_import_refs (tenant_id, source_file, source_ref, target_type, target_id,
+                            source_user)
+                        VALUES (current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
+                        ON CONFLICT DO NOTHING
+                        """).params(file, ref, targetType, targetId, sourceUser).update();
+    }
+
+    /**
+     * A batch of the framework (issue #135): each row is the staged row of its line, known by its {@code source_ref} and
+     * whether the business's imports hold it, and every record it makes is registered under that reference.
+     */
+    private record StagedRefs(BatchWriter.Checkpoint checkpoint, Map<Integer, ImportRefs.StagedRow> rows)
+            implements Refs {
+
+        @Override
+        public boolean seen(String file, Row row, String ref) {
+            return staged(row).status() == ImportRefs.Status.EXISTING;
+        }
+
+        @Override
+        public void remember(String file, Row row, String ref, String targetType, UUID targetId, String sourceUser) {
+            checkpoint.register(staged(row).sourceRef(), targetType, targetId);
+        }
+
+        @Override
+        public void created(String file, Row row, String targetType, UUID targetId) {
+            checkpoint.register(staged(row).sourceRef(), targetType, targetId);
+        }
+
+        @Override
+        public void matched(String file, Row row, String targetType, UUID targetId) {
+            checkpoint.register(staged(row).sourceRef(), targetType, targetId);
+        }
+
+        @Override
+        public void journal(String file, String ref, String targetType, UUID entryId) {
+            // The framework registered the journal as it posted it.
+        }
+
+        private ImportRefs.StagedRow staged(Row row) {
+            ImportRefs.StagedRow s = rows.get(row.line());
+            if (s == null) {
+                throw new IllegalStateException("no staged row at line " + row.line());
+            }
+            return s;
         }
     }
 
