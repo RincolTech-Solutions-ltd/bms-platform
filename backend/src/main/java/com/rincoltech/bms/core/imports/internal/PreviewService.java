@@ -64,8 +64,9 @@ class PreviewService implements ImportPreview {
     /** Whether row {@code r} is excluded, blank or blocked: the three outcomes before {@code write}. */
     private static final String EXCLUDED = "r.excluded_by IS NOT NULL";
 
-    private static final String BLANK =
-            "EXISTS (SELECT 1 FROM import_issues i WHERE i.row_id = r.id AND i.code = 'BLANK_ROW')";
+    /** Blank, or left out by a row rule ({@code SUBHEADER_ROW}, issue #136): {@link ImportTemplates#LEFT_OUT_CODES}. */
+    private static final String BLANK = "EXISTS (SELECT 1 FROM import_issues i WHERE i.row_id = r.id AND i.code IN "
+            + ImportTemplates.leftOutSql() + ")";
 
     private static final String BLOCKED = """
             EXISTS (SELECT 1 FROM import_issues i WHERE i.row_id = r.id AND i.status = 'open' AND i.severity = 'blocking')""";
@@ -418,19 +419,29 @@ class PreviewService implements ImportPreview {
 
     /** The rows of a batch the commit writes, after a line, with their stored reference and typed values (issue #133). */
     List<StoredRow> rowsToWrite(UUID batchId, EntitySet set, int afterLine, int limit) {
-        return jdbc.sql("SELECT r.source_row_no, r.source_ref, r.normalised::text FROM import_rows r"
-                        + " WHERE r.batch_id = ? AND r.source_row_no > ? AND r.normalised IS NOT NULL AND " + WRITE
+        return jdbc.sql("SELECT r.source_row_no, r.source_ref, r.normalised::text, r.linked_member_id"
+                        + " FROM import_rows r WHERE r.batch_id = ? AND r.source_row_no > ?"
+                        + " AND r.normalised IS NOT NULL AND " + WRITE
                         + " ORDER BY r.source_row_no LIMIT ?")
                 .params(batchId, afterLine, Math.max(1, Math.min(limit, CHUNK)))
                 .query((rs, n) -> {
                     Map<String, Object> stored = JSON.readValue(rs.getString(3), OBJECT);
-                    return new StoredRow(rs.getInt(1), rs.getString(2), stored, typed(set, stored));
+                    return new StoredRow(
+                            rs.getInt(1), rs.getString(2), stored, typed(set, stored), rs.getObject(4, UUID.class));
                 })
                 .list();
     }
 
-    /** A staged row as stored: its line, the validation's reference, its values as stored and as typed. */
-    record StoredRow(int line, String validationRef, Map<String, Object> stored, Map<String, Object> typed) {}
+    /**
+     * A staged row as stored: its line, the validation's reference, its values as stored and as typed, and the record the
+     * review linked it to ({@code link_member}, issue #136), or null.
+     */
+    record StoredRow(
+            int line,
+            String validationRef,
+            Map<String, Object> stored,
+            Map<String, Object> typed,
+            UUID linkedMemberId) {}
 
     /** The one template the batches were read with, or null when none was read with a mapping. */
     private ImportTemplate template(List<BatchRow> batches) {
