@@ -190,6 +190,69 @@ class RetailImportRefsBackfillIT extends IntegrationTest {
                 .containsExactly("balances.jsonl|import-retail|line:1#by-key");
     }
 
+    // JUSTIFICATION-A3: the review of bf87e45 asks a test of must-fix 1 and of the later-run paths it found untested.
+    /**
+     * Review of bf87e45, must-fix 1: the first run writes TB-1's legacy balance to 0 (its 4 purchased are absent in the
+     * source) and journals nothing, so HQ is not opened. A second run sends TB-1 at 5: its legacy balance is already
+     * written, so it writes nothing for it, and the opening values the books' 0, not the file's 5. A third run, after HQ
+     * opened, takes the other two paths: TB-2, which the books hold with no legacy balance, differs and is listed, not
+     * written; TB-3, new at the branch, gets its legacy balance and is listed as not in the opening.
+     */
+    @Test
+    void theFirstJournalValuesWhatTheBooksHoldAndALaterRunListsItsDifferences(@TempDir Path dir) throws IOException {
+        TestDatabase.Fixture t = TestDatabase.tenant("retail-books", false, true);
+        RetailTestSupport retail = new RetailTestSupport(http, t);
+        retail.product("TB-1", 100, 150);
+        retail.product("TB-2", 200, 300);
+        retail.product("TB-3", 300, 450);
+        Files.writeString(dir.resolve("purchases.jsonl"), """
+                {"source_ref": "P-1", "product_code": "TB-1", "supplier": "Test Supplier 01", "kind": "purchase", "unit_cost_minor": 100, "unit_sell_minor": 150, "qty_by_branch": {"HQ": "4"}, "purchased_on": "2026-09-01", "source_user": "test.admin01"}
+                """);
+        Files.writeString(dir.resolve("balances.jsonl"), """
+                {"branch": "HQ", "product_code": "TB-1", "qty": "0"}
+                """);
+        ImportReport first = importer.run(t.slug(), dir, false);
+        assertThat(first.failed()).as(first.render()).isFalse();
+        assertThat(journalled(t)).as("nothing above zero").isZero();
+
+        Files.writeString(dir.resolve("purchases.jsonl"), """
+                {"source_ref": "P-1", "product_code": "TB-1", "supplier": "Test Supplier 01", "kind": "purchase", "unit_cost_minor": 100, "unit_sell_minor": 150, "qty_by_branch": {"HQ": "4"}, "purchased_on": "2026-09-01", "source_user": "test.admin01"}
+                {"source_ref": "P-2", "product_code": "TB-2", "supplier": "Test Supplier 01", "kind": "purchase", "unit_cost_minor": 200, "unit_sell_minor": 300, "qty_by_branch": {"HQ": "2"}, "purchased_on": "2026-09-01", "source_user": "test.admin01"}
+                """);
+        Files.writeString(dir.resolve("balances.jsonl"), """
+                {"branch": "HQ", "product_code": "TB-1", "qty": "5"}
+                {"branch": "HQ", "product_code": "TB-2", "qty": "2"}
+                """);
+        ImportReport second = importer.run(t.slug(), dir, false);
+
+        assertThat(second.failed()).as(second.render()).isFalse();
+        assertThat(journalled(t)).as("TB-1 at the books' 0, TB-2 at 2 x 200").isEqualTo(2 * 200);
+        assertThat(second.anomalies()).anyMatch(a -> a.contains("the opening values the balance"));
+
+        Files.writeString(dir.resolve("balances.jsonl"), """
+                {"branch": "HQ", "product_code": "TB-1", "qty": "0"}
+                {"branch": "HQ", "product_code": "TB-2", "qty": "1"}
+                {"branch": "HQ", "product_code": "TB-3", "qty": "3"}
+                """);
+        ImportReport third = importer.run(t.slug(), dir, false);
+
+        assertThat(third.failed()).as(third.render()).isFalse();
+        assertThat(journalled(t)).as("no second journal").isEqualTo(2 * 200);
+        assertThat(third.anomalies())
+                .anyMatch(a -> a.contains("product TB-2: the source says 1.000 and the books hold 2.000;"
+                        + " differs from the opening; correct it with a stock-take"))
+                .anyMatch(a -> a.contains("product TB-3 is new at the branch"));
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT p.code || ' ' || s.qty::text FROM retail_stock_balances s"
+                                + " JOIN retail_products p ON p.id = s.product_id WHERE s.tenant_id = ?"
+                                + " AND s.branch_id = ? ORDER BY p.code")
+                        .params(t.tenantId(), t.headOffice())
+                        .query(String.class)
+                        .list())
+                .as("TB-2 is left as the books hold it, TB-3 gets its balance")
+                .containsExactly("TB-1 0.000", "TB-2 2.000", "TB-3 3.000");
+    }
+
     /**
      * TB-2 has history and no balance row, so the one journal values TB-1 alone; the identical export run again posts no
      * second journal.
@@ -234,22 +297,25 @@ class RetailImportRefsBackfillIT extends IntegrationTest {
             }
         }
         JdbcClient owner = TestDatabase.owner();
-        owner.sql("""
-                CREATE FUNCTION test_refuse_savings() RETURNS trigger LANGUAGE plpgsql AS $$
-                BEGIN
-                    RAISE EXCEPTION 'fabricated refusal of a cash file';
-                END $$
-                """).update();
-        owner.sql("CREATE TRIGGER test_refuse_savings BEFORE INSERT ON retail_daily_savings FOR EACH ROW"
-                        + " WHEN (NEW.tenant_id = '" + t.tenantId() + "'::uuid) EXECUTE FUNCTION test_refuse_savings()")
-                .update();
+        // A refusal of this business's savings only, dropped whatever happens; the trigger's WHEN keeps every other
+        // business's rows, so a test running beside this one is not refused.
         ImportReport first;
         try {
+            owner.sql("""
+                    CREATE FUNCTION test_refuse_savings() RETURNS trigger LANGUAGE plpgsql AS $$
+                    BEGIN
+                        RAISE EXCEPTION 'fabricated refusal of a cash file';
+                    END $$
+                    """).update();
+            owner.sql("CREATE TRIGGER test_refuse_savings BEFORE INSERT ON retail_daily_savings FOR EACH ROW"
+                            + " WHEN (NEW.tenant_id = '" + t.tenantId() + "'::uuid)"
+                            + " EXECUTE FUNCTION test_refuse_savings()")
+                    .update();
             first = importer.run(t.slug(), dir, false);
         } finally {
-            owner.sql("DROP TRIGGER test_refuse_savings ON retail_daily_savings")
+            owner.sql("DROP TRIGGER IF EXISTS test_refuse_savings ON retail_daily_savings")
                     .update();
-            owner.sql("DROP FUNCTION test_refuse_savings()").update();
+            owner.sql("DROP FUNCTION IF EXISTS test_refuse_savings()").update();
         }
         assertThat(first.failed()).as(first.render()).isTrue();
         assertThat(first.render()).contains("FAILED: savings.jsonl");

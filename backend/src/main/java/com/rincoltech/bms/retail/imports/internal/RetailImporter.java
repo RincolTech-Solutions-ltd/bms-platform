@@ -1703,6 +1703,9 @@ public class RetailImporter {
             // One opening journal per branch, ever (Lead's rule on the review of 4af7a39): the branches an import
             // already journalled, where a row that differs from the books is listed for a stock-take, never journalled.
             Set<String> opened = new HashSet<>(RetailV1Template.openedBranches(jdbc, null));
+            // The books' balance of each item an earlier import already wrote a legacy balance for: this run writes
+            // nothing for it, so its opening values the books, not the file (review of bf87e45, must-fix 1).
+            Map<String, Map<String, BigDecimal>> legacyHeld = new HashMap<>();
             Set<String> covered = new HashSet<>();
             for (Balance b : rows) {
                 String key = b.branch() + "|" + b.product().id();
@@ -1717,6 +1720,9 @@ public class RetailImporter {
                     refs.matched(
                             file.name, b.row(), "retail.product", b.product().id());
                     c.existing++;
+                    legacyHeld
+                            .computeIfAbsent(b.branchCode(), k -> new HashMap<>())
+                            .put(b.product().code(), balance);
                     if (balance.compareTo(b.qty()) != 0) {
                         report.anomaly(
                                 file.name,
@@ -1724,7 +1730,9 @@ public class RetailImporter {
                                 "legacy balance already written; the balance is "
                                         + Quantities.format(balance) + " and the source says "
                                         + Quantities.format(b.qty())
-                                        + "; this differs from the opening; correct it with a stock-take");
+                                        + (opened.contains(RetailV1Template.compare(b.branchCode()))
+                                                ? "; differs from the opening; correct it with a stock-take"
+                                                : "; the opening values the balance; correct it with a stock-take"));
                     }
                     continue;
                 }
@@ -1750,7 +1758,7 @@ public class RetailImporter {
                             "branch " + b.branchCode() + " product "
                                     + b.product().code() + ": the source says "
                                     + Quantities.format(b.qty()) + " and the books hold " + Quantities.format(balance)
-                                    + "; this differs from the opening already posted; correct it with a stock-take");
+                                    + "; differs from the opening; correct it with a stock-take");
                     continue;
                 }
                 if (legacy.signum() != 0 && openedBranch) {
@@ -1800,7 +1808,7 @@ public class RetailImporter {
                                     + " is kept");
                 }
             }
-            openingJournals(rows, importDate, opened);
+            openingJournals(rows, importDate, opened, legacyHeld);
         }
 
         private List<Balance> parseBalances(ExportFile file) {
@@ -1834,7 +1842,11 @@ public class RetailImporter {
          * as already posted, as the command always reported it; its differences were listed by {@code balances} for a
          * stock-take.
          */
-        private void openingJournals(List<Balance> rows, LocalDate today, Set<String> opened) {
+        private void openingJournals(
+                List<Balance> rows,
+                LocalDate today,
+                Set<String> opened,
+                Map<String, Map<String, BigDecimal>> legacyHeld) {
             Map<String, Map<String, BigDecimal>> byBranch = new TreeMap<>();
             Map<String, Long> costs = new HashMap<>();
             Map<String, UUID> ids = new HashMap<>();
@@ -1850,7 +1862,8 @@ public class RetailImporter {
             }
             byBranch.forEach((code, items) -> {
                 UUID branch = ids.get(code);
-                RetailV1Template.BranchOpening opening = RetailV1Template.branchOpening(items, costs::get);
+                RetailV1Template.BranchOpening opening = RetailV1Template.branchOpening(
+                        RetailV1Template.openingQuantities(items, legacyHeld.getOrDefault(code, Map.of())), costs::get);
                 checkpoint.stock(code, opening.qty(), opening.valueMinor());
                 boolean earlier = opened.contains(RetailV1Template.compare(code));
                 long amount = opening.journal(earlier);

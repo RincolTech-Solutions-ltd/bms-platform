@@ -341,7 +341,7 @@ class ImportPreviewIT extends IntegrationTest {
 
     /**
      * Posts one opening journal through the framework (since #135 the only way a batch posts one, the retail stock opening
-     * included): debit the account, credit opening balance equity, or the other way for a fall. The framework reports it
+     * included): debit the account, credit opening balance equity. The framework reports it
      * with the totals its lines hold.
      */
     static void opening(

@@ -252,7 +252,7 @@ class RetailV1Template implements ImportTemplate {
         Set<String> out = new HashSet<>();
         jdbc.sql("""
                         SELECT b.code FROM journal_entries e JOIN branches b ON b.id = e.branch_id
-                         WHERE e.tenant_id = current_setting('app.tenant_id')::uuid
+                         WHERE e.tenant_id = current_setting('app.tenant_id')::uuid AND e.source_type = ?
                            AND (e.id IN (SELECT r.target_id FROM import_refs r
                                           WHERE r.tenant_id = e.tenant_id AND r.target_type = 'ledger.journal_entry'
                                             AND r.source_key LIKE 'opening|inventory|%'
@@ -264,7 +264,7 @@ class RetailV1Template implements ImportTemplate {
                                                                   AND r.target_id = o.target_id
                                                                   AND r.run_id = CAST(? AS uuid))))
                         """)
-                .params(runId, runId)
+                .params(OPENING_TYPE, runId, runId)
                 .query((rs, n) -> out.add(compare(rs.getString(1))))
                 .list();
         return out;
@@ -386,6 +386,7 @@ class RetailV1Template implements ImportTemplate {
             return costs;
         });
         Set<String> opened = readOnly.execute(s -> openedBranches(jdbc, runId));
+        Map<String, Map<String, BigDecimal>> legacy = readOnly.execute(s -> legacyHeld(jdbc, runId));
         // The ledger takes no entry at a closed branch, so the loader journals none there and none is predicted.
         Set<String> inactive = readOnly.execute(s -> branches.all().stream()
                 .filter(b -> !b.active())
@@ -394,7 +395,8 @@ class RetailV1Template implements ImportTemplate {
         return new StockForecast(
                 held == null ? Map.of() : held,
                 opened == null ? Set.of() : opened,
-                inactive == null ? Set.of() : inactive);
+                inactive == null ? Set.of() : inactive,
+                legacy == null ? Map.of() : legacy);
     }
 
     // JUSTIFICATION-A3: the Lead's steer for round 4 asks one function shared by the forecast and the loader.
@@ -418,6 +420,44 @@ class RetailV1Template implements ImportTemplate {
         long journal(boolean opened) {
             return opened ? 0 : aboveZeroMinor;
         }
+    }
+
+    // JUSTIFICATION-A3: the review of bf87e45 (must-fix 1) asks the loader and the forecast to value one quantity.
+    /**
+     * The quantity each balance row of a branch stands at for its opening (review of bf87e45, must-fix 1): the source's,
+     * which the legacy balance this run writes makes the books'; or, for an item whose legacy balance an earlier import
+     * already wrote there ({@code legacyHeld}, the books' balance), what the books hold, since this run writes nothing for
+     * it. So the first journal never values stock the books did not receive.
+     */
+    static Map<String, BigDecimal> openingQuantities(Map<String, BigDecimal> rows, Map<String, BigDecimal> legacyHeld) {
+        Map<String, BigDecimal> out = new LinkedHashMap<>();
+        rows.forEach((item, q) -> out.put(item, legacyHeld.getOrDefault(item, q)));
+        return out;
+    }
+
+    /**
+     * The books' balance of each item at each branch that already has a legacy balance there, by branch and item code in
+     * compare form, as the loader reads its positions; a legacy balance {@code runId} itself wrote is left out (null for
+     * none), so the forecast of a committed run values that run's rows as it did.
+     */
+    static Map<String, Map<String, BigDecimal>> legacyHeld(JdbcClient jdbc, UUID runId) {
+        Map<String, Map<String, BigDecimal>> out = new HashMap<>();
+        jdbc.sql("""
+                        SELECT b.code, p.code, s.qty FROM retail_stock_balances s
+                          JOIN branches b ON b.id = s.branch_id JOIN retail_products p ON p.id = s.product_id
+                         WHERE s.tenant_id = current_setting('app.tenant_id')::uuid
+                           AND EXISTS (SELECT 1 FROM retail_stock_movements m
+                                        WHERE m.tenant_id = s.tenant_id AND m.branch_id = s.branch_id
+                                          AND m.product_id = s.product_id AND m.kind = 'legacy_balance'
+                                          AND NOT EXISTS (SELECT 1 FROM import_refs r
+                                                           WHERE r.tenant_id = m.tenant_id AND r.target_id = m.id
+                                                             AND r.run_id = CAST(? AS uuid)))
+                        """)
+                .param(runId)
+                .query((rs, n) -> out.computeIfAbsent(compare(rs.getString(1)), k -> new HashMap<>())
+                        .put(compare(rs.getString(2)), rs.getBigDecimal(3)))
+                .list();
+        return out;
     }
 
     /** {@link BranchOpening} of a branch's balance rows, item to quantity, each item valued by {@code costMinor}. */
@@ -445,19 +485,33 @@ class RetailV1Template implements ImportTemplate {
         private final Set<String> opened = new HashSet<>();
         private final List<Journal> journals = new ArrayList<>();
         private final Set<String> inactive;
+        private final Map<String, Map<String, BigDecimal>> legacy;
 
         StockForecast(Map<String, Long> held) {
-            this(held, Set.of(), Set.of());
+            this(held, Set.of(), Set.of(), Map.of());
         }
 
         /**
          * {@code opened}: the branches another run already gave an opening stock journal ({@link #openedBranches});
-         * {@code inactive}: the closed branches, where no journal is posted; both in compare form.
+         * {@code inactive}: the closed branches, where no journal is posted; {@code legacy}: the books' balance of the
+         * items an earlier import already wrote a legacy balance for ({@link #legacyHeld}); all in compare form.
          */
-        StockForecast(Map<String, Long> held, Set<String> opened, Set<String> inactive) {
+        StockForecast(
+                Map<String, Long> held,
+                Set<String> opened,
+                Set<String> inactive,
+                Map<String, Map<String, BigDecimal>> legacy) {
             this.cost = new HashMap<>(held);
             this.opened.addAll(opened);
             this.inactive = Set.copyOf(inactive);
+            this.legacy = Map.copyOf(legacy);
+        }
+
+        /** The branch's opening, its rows at the quantities the loader values them at ({@link #openingQuantities}). */
+        private BranchOpening opening(String branch, Map<String, BigDecimal> items) {
+            return branchOpening(
+                    openingQuantities(items, legacy.getOrDefault(branch, Map.of())),
+                    product -> cost.getOrDefault(product, 0L));
         }
 
         @Override
@@ -498,8 +552,7 @@ class RetailV1Template implements ImportTemplate {
                 if (inactive.contains(branch)) {
                     return;
                 }
-                long amount = branchOpening(items, product -> cost.getOrDefault(product, 0L))
-                        .journal(opened.contains(branch));
+                long amount = opening(branch, items).journal(opened.contains(branch));
                 if (amount != 0) {
                     journals.add(new Journal(branch, "inventory", amount, amount));
                     opened.add(branch);
@@ -512,7 +565,7 @@ class RetailV1Template implements ImportTemplate {
             close();
             List<Stock> stock = new ArrayList<>();
             qty.forEach((branch, items) -> {
-                BranchOpening opening = branchOpening(items, product -> cost.getOrDefault(product, 0L));
+                BranchOpening opening = opening(branch, items);
                 stock.add(new Stock(branch, opening.qty(), opening.valueMinor()));
             });
             return new Balances(stock, List.of(), List.of(), List.of(), List.copyOf(journals));

@@ -146,7 +146,8 @@ Every issue has:
 | `NAME_MISSING` | blocking | The item on line {line} has no name or description. |
 | `NEGATIVE_BALANCE` | warning | The source shows a negative quantity for this item at {branch}; it is imported as it is and listed for the first stock-take. |
 | `PRICE_DIFFERS_EXISTING` | info | The item already exists with other prices; its prices are left unchanged. |
-| `CREDIT_SALE_UNPAID` | info | Credit sale imported without payment history; the receivable decision applies. || `CREDIT_DECISION_MISSING` | blocking (run) | Credit sales exist and no receivable decision is recorded. |
+| `CREDIT_SALE_UNPAID` | info | Credit sale imported without payment history; the receivable decision applies. |
+| `CREDIT_DECISION_MISSING` | blocking (run) | Credit sales exist and no receivable decision is recorded. |
 | `DATE_AFTER_CUTOVER` | blocking | {field} on {file} line {line} is after the agreed cutover moment. |
 | `TENANT_TRADING` | run refused | The tenant already has live transactions; an import needs the trading override. |
 | `IMPORT_IN_PROGRESS` | request refused | Another import is being committed for this business; wait for it or stop it. |
