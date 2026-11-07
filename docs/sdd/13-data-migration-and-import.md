@@ -518,6 +518,11 @@ Contents (FR-IMP-08):
 - Opening journal entry numbers per branch and their totals.
 - Every resolution with who, when, before, after and note.
 
+Not in the report #134 built, pending the Lead's confirmation on #873: the opening journal entry numbers (the report
+shows each opening journal's total per branch and kind, found through `import_refs`), and the list of resolutions with
+who, when, before, after and note (each is an audit row of the review, `core.import_issue.resolved`, and each left-out
+or overridden row is an item of the report, without who and when).
+
 As built for every template (#134, section 13.14.1 8/16; spec sections 3.9 and 3.10): the reconciliation is made by the
 commit as it finishes and stored as a document (`import_reconciliations`, append-only, migration `V144`), and made again
 on request as the next version until the customer signs it. "Stored as a document" is met by that row and not by a file
@@ -534,7 +539,7 @@ are:
 |---|---|---|
 | `counts` | rows per file and per entity set (not blank); facts per file: read, blank, left out, written by this import, already imported before, not found in the books; records created per target type | rows whose `source_ref` `import_refs` holds |
 | `stock_quantity` | per branch and product: the balances checksum | the stock ledger's movements the run registered (`ImportBooks.stock`), never the business's whole balance, so stock held before or moved after the import is not a difference |
-| `stock_value` | per branch | the run's journal lines on `inventory`; each negative balance listed separately as a `policy` item at its value, which is below zero like the difference it explains (source less system). Rule for every writer (spec section 3.9, the retail rule 5): the opening `inventory` journal holds the positive balances only, at the product's cost, so the source, which counts every balance, is the journal plus the negative ones. A writer that journals a negative value leaves it unexplained and the sign-off is refused. The fixture's negative stock take ties and signs (`ImportReconciliationIT`) |
+| `stock_value` | per branch | the run's journal lines on `inventory`; each negative balance listed separately as a `policy` item at its value, which is below zero like the difference it explains (source less system). Rule for every writer (spec section 3.9, the retail rule 5): the opening `inventory` journal holds the positive balances only, at the product's cost, so the source, which counts every balance, is the journal plus the negative ones. A writer that journals a negative value leaves it unexplained and the sign-off is refused. The item's value is the books' (quantity times the cost the writer recorded), so a writer whose cost differs from the sheet's amount leaves that gap unexplained too, on purpose: the sheet and the books disagree. Rows are measured one by one, but an item's rows count together in the journal (two counts of one item, one of them negative), so each batch also measures its written rows together under the template's rules and lists the gap as one `policy` item of the file, line 0 (`ImportReconciliationIT`: one negative count; two counts of one item, one negative) |
 | `receivables` | per branch, as if every credit sale were opened | the run's journal lines on `trade_debtors` |
 | `loan_principal` | per branch | the run's journal lines on `loans_receivable` |
 | `arrears` | loans and principal per branch and bucket, as at the cutover day | the template's loan book |
@@ -558,10 +563,15 @@ The **sign-off** (spec section 3.10, `core.imports.sign_off`, the tenant admin's
 reconciliation, ticks each section, types their name and today's date; the sign-off names the reconciliation and its
 SHA-256 as read (409 `reconciliation_changed` if it was made again), and inside its own transaction, which holds the run,
 measures the books again: when the text that measurement gives has another SHA-256 than the one read, what the import
-brought in changed since, and the sign-off is refused (409 `reconciliation_changed`; make it again and sign that; the
-screen says plainly that the figures changed, shows the newest and clears the ticks). That measurement runs with a
-60-second limit per statement, not a batch's 10 minutes, because it holds the run inside a request; a run too big for
-it is refused with 503 `sign_off_too_big` ("too big to sign at once, try again") and nothing is signed. A sign-off that
+brought in changed since: that measurement is stored as the next version (audited `core.import_run.reconciled` by the
+signer) and the sign-off is refused (409 `reconciliation_changed`, naming the new version), so the signer reads the
+books as they are now and never gets the same version back. The screen says plainly that the figures changed, shows the
+newest and clears the ticks; should a refetch still bring back the version refused, it shows the API's words instead and
+offers "Make the reconciliation again" to whoever holds `core.imports.manage`. Whether every section is ticked is checked
+before the measurement. That measurement runs with a 60-second limit per statement, not a batch's 10 minutes, because it
+holds the run inside a request; a run too big for it is refused with 503 `sign_off_too_big` ("too big to sign here at
+once, and nothing was signed; ask Rincol Tech to help you sign it"). The limit is per statement, so a run of many
+1,000-row chunks can still take longer in all; that and the wait for the run's lock behind a remake are what #874 removes. A sign-off that
 measures in the background for very large runs is #874. It is stored in
 `import_signoffs` (append-only, one per run), moves the run to `signed_off` and is audited `core.import_run.signed_off`
 without the name. The run reaches `signed_off` no other way. After it, no new reconciliation of the run is stored (the

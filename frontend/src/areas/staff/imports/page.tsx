@@ -84,6 +84,7 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
   const [name, setName] = useState('');
   const [date, setDate] = useState('');
   const [tried, setTried] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
 
   // success-screen: the signed reconciliation replaces the form, with who signed and when
   const sign = useMutation({
@@ -94,10 +95,12 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
       queryClient.setQueryData(reconciliationKey(runId), signed);
       await queryClient.invalidateQueries({ queryKey: RUNS });
     },
-    // The figures changed since they were read: show the newest ones, to be checked and ticked again (Lead on the review
-    // of 391e1dc, point 5).
-    onError: async (error) => {
+    // The figures changed since they were read: the API stores what it measured as the next version, so show the newest,
+    // to be checked and ticked again (Lead on the review of 391e1dc, point 5). The one refused is remembered, so a refetch
+    // that brings it back is never called the newest (review of 1ea73e5).
+    onError: async (error, refusedOne) => {
       if (!changed(error)) return;
+      setRefused(refusedOne.id ?? null);
       setTicked(new Set());
       await queryClient.invalidateQueries({ queryKey: reconciliationKey(runId) });
     },
@@ -115,6 +118,7 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
     onSuccess: async (made) => {
       queryClient.setQueryData(reconciliationKey(runId), made);
       setTicked(new Set());
+      sign.reset();
       await queryClient.invalidateQueries({ queryKey: RUNS });
     },
   });
@@ -153,6 +157,10 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
   }
   const problem = signOffProblem(r, ticked, name, date, today);
   const signed = r.signed;
+  // Refused because the figures changed, and the one on screen is still the one refused: never call it the newest; say
+  // what the API said and offer to make it again.
+  const moved = !signed && changed(sign.error);
+  const stale = moved && refused !== null && refused === r.id;
 
   function onSign(e: FormEvent) {
     e.preventDefault();
@@ -188,7 +196,14 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
           </p>
         )
       )}
-      {!signed && !r.signable && remakeButton}
+      {moved && (
+        <p role="alert" className="alert alert-danger">
+          {stale && sign.error instanceof Error
+            ? sign.error.message
+            : 'The figures changed since you opened them. The newest figures are shown now. Check each section, tick it again and sign.'}
+        </p>
+      )}
+      {!signed && (!r.signable || stale) && remakeButton}
       {(r.sections ?? []).map((s) => (
         <SectionCard
           key={s.key}
@@ -232,13 +247,9 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
             showError={tried}
           />
           {tried && problem && <p role="alert" className="field-error">{problem}</p>}
-          {sign.isError && (
+          {sign.isError && !moved && (
             <p role="alert" className="alert alert-danger">
-              {changed(sign.error)
-                ? 'The figures changed since you opened them. The newest figures are shown now. Check each section, tick it again and sign.'
-                : sign.error instanceof Error
-                  ? sign.error.message
-                  : 'Could not sign. Nothing was signed.'}
+              {sign.error instanceof Error ? sign.error.message : 'Could not sign. Nothing was signed.'}
             </p>
           )}
           <ActionBar>

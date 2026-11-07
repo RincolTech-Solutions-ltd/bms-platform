@@ -64,6 +64,8 @@ const sent: SignOffRequest[] = [];
 let remade = 0;
 // The code the next sign-off is refused with, after the figures moved to a version 2; null to sign.
 let refuse: string | null = null;
+// Whether that refusal leaves the same version stored, so the refetch brings back the one refused.
+let refuseSame = false;
 
 vi.mock('../../../api/imports', async (original) => {
   const real = await original<typeof import('../../../api/imports')>();
@@ -79,10 +81,10 @@ vi.mock('../../../api/imports', async (original) => {
   signOff: (_run: string, body: SignOffRequest) => {
     sent.push(body);
     if (refuse) {
-      view = { ...recon(true), id: 'rec-2', version: 2, sha256: 'b'.repeat(64) };
+      if (!refuseSame) view = { ...recon(true), id: 'rec-2', version: 2, sha256: 'b'.repeat(64) };
       const code = refuse;
       refuse = null;
-      return Promise.reject(new real.ImportError('Refused.', code));
+      return Promise.reject(new real.ImportError('Make it again, read it and sign that.', code));
     }
     view = { ...view, signed: { signed_at: '2026-10-02T09:00:00Z', signed_by: 'u-1', signed_name: body.name, signed_on: body.date, sections: body.sections } };
     return Promise.resolve(view);
@@ -115,6 +117,7 @@ beforeEach(() => {
   sent.length = 0;
   remade = 0;
   refuse = null;
+  refuseSame = false;
 });
 
 afterEach(() => cleanup());
@@ -177,6 +180,30 @@ describe('imports to sign off', () => {
     await waitFor(() => expect(sent).toHaveLength(2));
     expect(sent[1]).toMatchObject({ reconciliation_id: 'rec-2', sha256: 'b'.repeat(64) });
     expect(await screen.findByText(/Signed by Fabricated Signer/)).toBeTruthy();
+  });
+
+  // JUSTIFICATION-A3: must-fix 1 of the review of 1ea73e5, a refetch that brings back the version refused.
+  it('never calls the refused version the newest, and offers to make it again', async () => {
+    refuse = 'reconciliation_changed';
+    refuseSame = true;
+    const today = businessToday(new Date(), 'Africa/Kampala');
+    show({ ...admin, permissions: [...(admin.permissions ?? []), 'core.imports.manage'] } as Me);
+    fireEvent.click(await screen.findByRole('button', { name: /Imported on 1 Oct 2026/ }));
+    await screen.findByRole('heading', { name: 'Rows and records' });
+    fireEvent.click(screen.getByRole('checkbox', { name: /rows and records/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /stock value per branch/ }));
+    fireEvent.change(screen.getByLabelText(/Your name/), { target: { value: 'Fabricated Signer' } });
+    fireEvent.change(screen.getByLabelText(/Today's date/), { target: { value: today } });
+    await pause();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign the reconciliation' }));
+
+    // The API's own words, not "the newest figures are shown", and the way out.
+    expect(await screen.findByText('Make it again, read it and sign that.')).toBeTruthy();
+    expect(screen.queryByText(/The newest figures are shown now/)).toBeNull();
+    fireEvent.click(await screen.findByRole('button', { name: 'Make the reconciliation again' }));
+    await waitFor(() => expect(remade).toBe(1));
+    expect(await screen.findByText(/Version 2, as at 1 Oct 2026/)).toBeTruthy();
+    expect(screen.queryByText('Make it again, read it and sign that.')).toBeNull();
   });
 
   it('shows a difference that is not explained and offers no way to sign', async () => {

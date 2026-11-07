@@ -215,7 +215,8 @@ class ReconciliationService implements ImportReconciliation {
         if (signOff.date() == null || !signOff.date().equals(today)) {
             throw ApiException.rule("sign_off_date_not_today", "Type today's date, " + today + ", to sign.");
         }
-        return tx.execute(s -> {
+        Report[] remade = new Report[1];
+        Report signed = tx.execute(s -> {
             RunRow run = run(runId, true);
             if (!RunStates.COMMITTED.equals(run.status())) {
                 throw notCommitted(run.status());
@@ -247,6 +248,12 @@ class ReconciliationService implements ImportReconciliation {
             // the books no longer hold is refused (review of #873). JUSTIFICATION-A3: must-fix 2 of that review.
             // Inside a request and holding the run, so each statement gets 60 seconds, not a batch's 10 minutes (the
             // Lead on the review of 391e1dc); a run too big for that is refused plainly, and nothing is signed.
+            Set<String> wanted = new TreeSet<>();
+            newest.sections().forEach(sec -> wanted.add(sec.key()));
+            Set<String> ticked = new TreeSet<>(signOff.sections());
+            if (!ticked.equals(wanted)) {
+                throw ApiException.rule("sections_not_ticked", "Tick every section of the reconciliation to sign it.");
+            }
             Measured now;
             try {
                 now = measure(runId, run, signOffTimeout);
@@ -258,7 +265,8 @@ class ReconciliationService implements ImportReconciliation {
                         HttpStatus.SERVICE_UNAVAILABLE,
                         "sign_off_too_big",
                         "Too big to sign at once",
-                        "This import is too big to sign at once. Try again in a few minutes.");
+                        "This import is too big to sign here at once, and nothing was signed. Ask Rincol Tech to help"
+                                + " you sign it.");
             }
             String again = sha256(new Report(
                             newest.id(),
@@ -272,18 +280,11 @@ class ReconciliationService implements ImportReconciliation {
                             null)
                     .render());
             if (!again.equals(newest.sha256())) {
-                throw new ApiException(
-                        HttpStatus.CONFLICT,
-                        "reconciliation_changed",
-                        "Reconciliation changed",
-                        "What the import brought in changed in the books since this reconciliation was made; make it"
-                                + " again, read it and sign that.");
-            }
-            Set<String> wanted = new TreeSet<>();
-            newest.sections().forEach(sec -> wanted.add(sec.key()));
-            Set<String> ticked = new TreeSet<>(signOff.sections());
-            if (!ticked.equals(wanted)) {
-                throw ApiException.rule("sections_not_ticked", "Tick every section of the reconciliation to sign it.");
+                // The books moved: what was measured is stored as the next version, so the signer reads the figures
+                // the books hold now instead of the same version again (review of 1ea73e5, must-fix 1). Refused below,
+                // once this transaction has stored it.
+                remade[0] = store(runId, signOff.by(), now);
+                return null;
             }
             jdbc.sql("""
                             INSERT INTO import_signoffs (id, tenant_id, run_id, reconciliation_id, report_sha256, sections,
@@ -321,6 +322,15 @@ class ReconciliationService implements ImportReconciliation {
                     after));
             return newest(runId).orElseThrow();
         });
+        if (remade[0] != null) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "reconciliation_changed",
+                    "Reconciliation changed",
+                    "What the import brought in changed in the books since you opened it, so the reconciliation was"
+                            + " made again as version " + remade[0].version() + ". Read it and sign that.");
+        }
+        return signed;
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -443,7 +453,11 @@ class ReconciliationService implements ImportReconciliation {
         if (!RunStates.COMMITTED.equals(run.status())) {
             throw notCommitted(run.status());
         }
-        Measured m = measure(runId, run, "10min");
+        return store(runId, by, measure(runId, run, "10min"));
+    }
+
+    /** Stores a measurement as the run's next version, audited; inside the caller's transaction, which holds the run. */
+    private Report store(UUID runId, UUID by, Measured m) {
         LocalDate asAt = m.asAt();
         boolean signable = m.signable();
         List<Section> sections = m.sections();
@@ -687,6 +701,15 @@ class ReconciliationService implements ImportReconciliation {
         int unmeasured = 0;
         // The kinds of failure of the written rows the rules could not measure, one entry per row.
         List<String> unmeasuredKinds = new ArrayList<>();
+        // The written rows under the template's rules as a whole, beside the sum of their parts row by row. A rule that
+        // is not row by row (a stock balance below zero is not journalled, so an item's rows count together) makes the
+        // two differ, and the batch, not any row, explains that (review of 1ea73e5).
+        ImportForecast whole = null;
+        if (template != null) {
+            whole = template.forecast(open);
+            whole.batch(b.seq());
+        }
+        Map<CheckId, BigDecimal> writtenParts = new LinkedHashMap<>();
         int after = 0;
         while (true) {
             record Staged(
@@ -811,6 +834,10 @@ class ReconciliationService implements ImportReconciliation {
                 if (unmeasurable != null) {
                     unmeasuredKinds.add(unmeasurable);
                 }
+                if (part != null && whole != null) {
+                    whole.row(b.set().key(), PreviewService.typed(b.set(), stored.get(s.line())));
+                    part.forEach((id, v) -> writtenParts.merge(id, v, BigDecimal::add));
+                }
                 if (s.overridden() != null) {
                     sheet.item(
                             batchRows,
@@ -846,6 +873,29 @@ class ReconciliationService implements ImportReconciliation {
             }
             if (chunk.size() < 1000) {
                 break;
+            }
+        }
+        // JUSTIFICATION-A3: must-fix 2 of the review of 1ea73e5, the batch as a whole against its rows one by one.
+        if (whole != null && !writtenParts.isEmpty()) {
+            Map<CheckId, BigDecimal> together = parts(whole);
+            Set<CheckId> ids = new LinkedHashSet<>(writtenParts.keySet());
+            ids.addAll(together.keySet());
+            for (CheckId id : ids) {
+                BigDecimal d = writtenParts
+                        .getOrDefault(id, BigDecimal.ZERO)
+                        .subtract(together.getOrDefault(id, BigDecimal.ZERO));
+                if (d.signum() != 0) {
+                    sheet.item(
+                            id,
+                            new Item(
+                                    id.key(),
+                                    file,
+                                    0,
+                                    POLICY,
+                                    "the written rows counted together by the template's rules, not one by one (such as"
+                                            + " a stock balance below zero, which no journal holds)",
+                                    plain(d)));
+                }
             }
         }
         sheet.fact(COUNTS, file + ": rows read", read);
@@ -892,6 +942,11 @@ class ReconciliationService implements ImportReconciliation {
         ImportForecast f = template.forecast(policy);
         f.batch(b.seq());
         f.row(b.set().key(), PreviewService.typed(b.set(), stored));
+        return parts(f);
+    }
+
+    /** What a forecast fed one row or many gives, per check. */
+    private static Map<CheckId, BigDecimal> parts(ImportForecast f) {
         ImportForecast.Balances balances = f.balances();
         Map<CheckId, BigDecimal> out = new LinkedHashMap<>();
         for (ImportForecast.ProductStock p : f.productStock()) {

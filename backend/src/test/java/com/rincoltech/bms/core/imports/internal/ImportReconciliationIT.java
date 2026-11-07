@@ -854,6 +854,13 @@ class ImportReconciliationIT extends IntegrationTest {
                 .isEqualTo("reconciliation_changed");
         assertThat(status(run)).isEqualTo("committed");
         assertThat(signoffs(run)).isZero();
+        // What it measured is stored as the next version, so the signer reads the books as they are, never the same
+        // version again (review of 1ea73e5): here the extra unit is a difference nothing explains.
+        Report next = as(t, () -> reconciliation.latest(run)).orElseThrow();
+        assertThat(next.version()).isEqualTo(again.version() + 1);
+        assertThat(next.sha256()).isNotEqualTo(again.sha256());
+        assertThat(check(next, "stock_quantity", "HQ FAB-900").system()).isEqualTo("2.5");
+        assertThat(next.signable()).isFalse();
     }
 
     // JUSTIFICATION-A3: the new test case must-fix 1 of the review of 391e1dc asks for.
@@ -942,6 +949,46 @@ class ImportReconciliationIT extends IntegrationTest {
                 .containsExactly("-1400");
         assertThat(check(r, "ledger", "journal HQ inventory").system()).isEqualTo("1000");
         assertThat(check(r, "ledger", "journal HQ inventory").ties()).isTrue();
+
+        ResponseEntity<JsonNode> signed = signOff(t, run, r, allSections(r), "Fabricated Signer", today(t));
+        assertThat(signed.getStatusCode()).as(String.valueOf(signed.getBody())).isEqualTo(HttpStatus.OK);
+        assertThat(status(run)).isEqualTo("signed_off");
+    }
+
+    // JUSTIFICATION-A3: must-fix 2 of the review of 1ea73e5, an item counted on more than one row.
+    @Test
+    void anItemCountedOnTwoRowsOneOfThemNegativeTiesAndSigns() throws IOException {
+        // FAB-900: the golden 1.5 (1000) and a second count of -0.5 (-350), so 1 on hand worth 650, all journalled.
+        // FAB-901: 1 (700) and -3 (-2100), so 2 below zero worth -1400, which no journal holds. Row by row the rules
+        // journal 1000 and 700 and nothing for the negative rows; together they journal 650: the batch explains 1050.
+        new RetailTestSupport(http, t).product(FixtureShopTemplate.SHORT_ITEM, 700, 900);
+        extraTillRows = FixtureShopTemplate.EXISTING_ITEM + ",,16/09/2026 09:35,-0.5,-350,Stock take,\n"
+                + FixtureShopTemplate.SHORT_ITEM + ",,16/09/2026 09:40,1,700,Stock take,\n"
+                + FixtureShopTemplate.SHORT_ITEM + ",,16/09/2026 09:45,-3,-2100,Stock take,\n";
+        UUID run = committedGoldenRun(null);
+        Report r = as(t, () -> reconciliation.latest(run)).orElseThrow();
+
+        assertThat(r.signable()).as(r.render()).isTrue();
+        assertThat(check(r, "stock_quantity", "HQ " + FixtureShopTemplate.EXISTING_ITEM)
+                        .system())
+                .isEqualTo("1");
+        assertThat(check(r, "stock_quantity", "HQ " + FixtureShopTemplate.SHORT_ITEM)
+                        .system())
+                .isEqualTo("-2");
+        Check value = check(r, "stock_value", "HQ");
+        assertThat(value.system()).isEqualTo("650");
+        assertThat(value.unitemised()).as(r.render()).isEqualTo("0");
+        assertThat(section(r, "stock_value").items())
+                .filteredOn(i -> i.reason().equals(ImportReconciliation.POLICY))
+                .extracting(Item::amount)
+                .containsExactly("-1400");
+        Check journal = check(r, "ledger", "journal HQ inventory");
+        assertThat(journal.system()).isEqualTo("650");
+        assertThat(journal.ties()).as(r.render()).isTrue();
+        assertThat(section(r, "ledger").items())
+                .filteredOn(i -> i.check().equals("journal HQ inventory"))
+                .extracting(Item::line, Item::reason, Item::amount)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(0, ImportReconciliation.POLICY, "1050"));
 
         ResponseEntity<JsonNode> signed = signOff(t, run, r, allSections(r), "Fabricated Signer", today(t));
         assertThat(signed.getStatusCode()).as(String.valueOf(signed.getBody())).isEqualTo(HttpStatus.OK);

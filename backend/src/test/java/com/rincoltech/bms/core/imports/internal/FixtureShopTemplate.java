@@ -409,9 +409,10 @@ class FixtureShopTemplate implements ImportTemplate {
             BigDecimal qty = BigDecimal.ZERO;
             long value;
             long owed;
-            long batchValue;
             long batchOwed;
             final ProductStocks products = new ProductStocks();
+            // The batch's items, so its inventory journal holds the items counted above zero only (ImportBooks.stock).
+            ProductStocks batchProducts = new ProductStocks();
 
             @Override
             public void batch(int seq) {
@@ -424,13 +425,14 @@ class FixtureShopTemplate implements ImportTemplate {
             }
 
             private void close() {
+                long batchValue = batchProducts.journalled();
                 if (batchValue != 0) {
                     journals.add(new Journal(HEAD_OFFICE, "inventory", batchValue, batchValue));
                 }
                 if (batchOwed != 0) {
                     journals.add(new Journal(HEAD_OFFICE, "trade_debtors", batchOwed, batchOwed));
                 }
-                batchValue = 0;
+                batchProducts = new ProductStocks();
                 batchOwed = 0;
             }
 
@@ -443,7 +445,7 @@ class FixtureShopTemplate implements ImportTemplate {
                 if ("adjustment".equals(values.get("kind"))) {
                     qty = qty.add((BigDecimal) values.get("qty"));
                     value = Math.addExact(value, amount);
-                    batchValue = Math.addExact(batchValue, amount);
+                    batchProducts.add(values, amount);
                     products.add(values, amount);
                 } else if (open && RECEIVABLE.neededBy().test(values)) {
                     owed = Math.addExact(owed, amount);
