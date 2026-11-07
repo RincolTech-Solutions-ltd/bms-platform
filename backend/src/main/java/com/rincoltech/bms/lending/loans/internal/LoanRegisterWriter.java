@@ -353,7 +353,8 @@ class LoanRegisterWriter {
                 member,
                 product.versionId(),
                 officer,
-                status,
+                // A draft first: a pledge is added only to a draft (the trigger lending_loan_collateral_guard, V8).
+                "draft",
                 "import",
                 "other",
                 r.purpose(),
@@ -381,10 +382,26 @@ class LoanRegisterWriter {
                 null,
                 1);
         loans.insert(loan);
-        // 13.8 row 15, the run's decision: the requested principal was disbursed in full.
-        jdbc.sql("UPDATE lending_loans SET approved_principal_minor = ?, approved_term_count = ? WHERE id = ?")
-                .params(r.principal(), r.termCount(), loanId)
-                .update();
+        // JUSTIFICATION-A3: the pledge insert moved up from below, while the loan is still a draft.
+        if (item != null) {
+            jdbc.sql("""
+                            INSERT INTO lending_loan_collateral (id, tenant_id, loan_id, collateral_id, pledged_value_minor,
+                                released_at)
+                            VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, CASE WHEN ? THEN now() END)
+                            """)
+                    .params(
+                            UUID.randomUUID(),
+                            loanId,
+                            item,
+                            r.principal(),
+                            predicted.position().settled())
+                    .update();
+        }
+        // 13.8 row 15, the run's decision: the requested principal was disbursed in full; the loan leaves the draft.
+        jdbc.sql("""
+                        UPDATE lending_loans SET status = ?, approved_principal_minor = ?, approved_term_count = ?
+                         WHERE id = ?
+                        """).params(status, r.principal(), r.termCount(), loanId).update();
         jdbc.sql("""
                         INSERT INTO lending_loan_status_history (id, tenant_id, loan_id, from_status, to_status, changed_by,
                             reason)
@@ -410,20 +427,6 @@ class LoanRegisterWriter {
         servicing.receipts(loanId, plan.totalPaidMinor(), plan.lastRepaymentOn(), LoanRegister.credit(plan));
         if (plan.position().settled()) {
             servicing.closedOn(loanId, plan.settledOn());
-        }
-        if (item != null) {
-            jdbc.sql("""
-                            INSERT INTO lending_loan_collateral (id, tenant_id, loan_id, collateral_id, pledged_value_minor,
-                                released_at)
-                            VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, CASE WHEN ? THEN now() END)
-                            """)
-                    .params(
-                            UUID.randomUUID(),
-                            loanId,
-                            item,
-                            r.principal(),
-                            plan.position().settled())
-                    .update();
         }
         if (r.remarks() != null && officerIsStaff) {
             jdbc.sql("""
