@@ -154,7 +154,8 @@ class MemberImportWriter implements MemberImports {
                 .query(UUID.class)
                 .optional()
                 .orElse(null);
-        boolean primary = jdbc.sql("SELECT EXISTS (SELECT 1 FROM lending_next_of_kin WHERE member_id = ? AND is_primary)")
+        boolean primary = jdbc.sql(
+                        "SELECT EXISTS (SELECT 1 FROM lending_next_of_kin WHERE member_id = ? AND is_primary)")
                 .param(memberId)
                 .query(Boolean.class)
                 .single();
