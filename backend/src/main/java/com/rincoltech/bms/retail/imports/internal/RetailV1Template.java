@@ -22,6 +22,7 @@ import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -86,14 +87,19 @@ class RetailV1Template implements ImportTemplate {
 
     private static final BigDecimal MAX_AMOUNT = BigDecimal.valueOf(RetailCatalogue.MAX_AMOUNT_MINOR);
 
-    private final RetailImporter importer;
+    /**
+     * Found when a loader is asked for, not when the template is made: the importer runs the command on the framework,
+     * whose registry holds this template, so a constructor dependency would be a cycle.
+     */
+    private final ObjectProvider<RetailImporter> importer;
+
     private final CatalogueHistory catalogue;
     private final Branches branches;
     private final JdbcClient jdbc;
     private final TransactionTemplate readOnly;
 
     RetailV1Template(
-            RetailImporter importer,
+            ObjectProvider<RetailImporter> importer,
             CatalogueHistory catalogue,
             Branches branches,
             JdbcClient jdbc,
@@ -310,7 +316,7 @@ class RetailV1Template implements ImportTemplate {
 
     @Override
     public BatchWriter loader(String entitySet) {
-        return importer.loader(entitySet);
+        return importer.getObject().loader(entitySet);
     }
 
     // ---------------------------------------------------------------------------------------------

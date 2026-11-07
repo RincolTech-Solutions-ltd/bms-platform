@@ -34,7 +34,9 @@
 -- sales, stock or ledger, so a shop's requests never wait on it, and each batch of 5,000 is one bounded statement. Every
 -- lock is taken under lock_timeout 5s, so the migration fails fast behind a long transaction instead of queueing requests
 -- behind it. The tables have FORCE ROW LEVEL SECURITY and no app.tenant_id is bound here: as in V103 and V115, bms_owner
--- has BYPASSRLS (deploy/postgres/initdb/01-roles.sh), and every statement names the business it reads or writes.
+-- has BYPASSRLS (deploy/postgres/initdb/01-roles.sh), every statement names the business it reads or writes, and an owner
+-- without it drops FORCE on the six tables for this transaction only (ACCESS EXCLUSIVE on each, in a database that has
+-- no such owner in production).
 
 SET LOCAL lock_timeout = '5s';
 
@@ -132,14 +134,33 @@ $$;
 -- application.
 REVOKE ALL ON FUNCTION bms_backfill_retail_import_refs(integer) FROM PUBLIC;
 
+-- As in V103: an owner without BYPASSRLS drops FORCE on the tables the backfill reads and writes for this transaction
+-- only, and puts it back after (staging and production run as bms_owner with BYPASSRLS, where no toggle runs).
 DO $$
 DECLARE
     copied integer;
+    bypass boolean := (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user);
 BEGIN
+    IF NOT bypass THEN
+        ALTER TABLE tenants NO FORCE ROW LEVEL SECURITY;
+        ALTER TABLE branches NO FORCE ROW LEVEL SECURITY;
+        ALTER TABLE retail_import_refs NO FORCE ROW LEVEL SECURITY;
+        ALTER TABLE import_runs NO FORCE ROW LEVEL SECURITY;
+        ALTER TABLE import_batches NO FORCE ROW LEVEL SECURITY;
+        ALTER TABLE import_refs NO FORCE ROW LEVEL SECURITY;
+    END IF;
     LOOP
         copied := bms_backfill_retail_import_refs(5000);
         EXIT WHEN copied = 0;
     END LOOP;
+    IF NOT bypass THEN
+        ALTER TABLE tenants FORCE ROW LEVEL SECURITY;
+        ALTER TABLE branches FORCE ROW LEVEL SECURITY;
+        ALTER TABLE retail_import_refs FORCE ROW LEVEL SECURITY;
+        ALTER TABLE import_runs FORCE ROW LEVEL SECURITY;
+        ALTER TABLE import_batches FORCE ROW LEVEL SECURITY;
+        ALTER TABLE import_refs FORCE ROW LEVEL SECURITY;
+    END IF;
 END
 $$;
 
