@@ -26,8 +26,11 @@ public interface ImportBooks {
      * balances, the source holds all of them, and the difference is the negative ones. Every side nets each product over
      * the whole run (the Lead on #873): this answer over all the run's movements, the source over all its written rows,
      * and the writer's journal of each batch as the change in what the run's products above zero are worth (a fall is a
-     * journal the other way). A writer that journals a negative value leaves that value unexplained, and the sign-off is
-     * refused (review of 391e1dc). None by default, for a template that keeps no stock.
+     * journal the other way). The writer derives both sides of that change from the database, never from memory: what the
+     * run's products are worth from its earlier batches' written rows, and what is already journalled from the run's own
+     * opening journals in {@code import_refs}, so a run resumed after a killed process journals what an unbroken one would
+     * (the Lead on the review of 5b32682). A writer that journals a negative value leaves that value unexplained, and the
+     * sign-off is refused (review of 391e1dc). None by default, for a template that keeps no stock.
      */
     default List<ImportForecast.ProductStock> stock(Scope scope) {
         return List.of();

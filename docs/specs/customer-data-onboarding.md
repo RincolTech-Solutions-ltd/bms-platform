@@ -309,8 +309,9 @@ A difference that is not itemised blocks sign-off.
 
 Built in #134 (SDD chapter 13 sections 13.11 and 13.14.1 8/16; migration V144): the commit makes the reconciliation as it
 finishes and stores it in `import_reconciliations`, append-only, versioned per run; it is made again on request until it is
-signed. The source is the staged rows (every row not blank, the rows left out included), each measured alone by the
-template's own forecast; the system is the books (the run's journals through the ledger's port, the business's ledger, and
+signed. The source is the staged rows (every row not blank, the rows left out included), measured by the template's own
+forecast: the rows written netted per product over the whole run, each row left out alone, keeping its own part; the
+system is the books (the run's journals through the ledger's port, the business's ledger, and
 the stock ledger and loan book through the template's `ImportBooks`), never the commit's report. Every check shows source,
 system, difference, itemised and not itemised, as exact decimals with money in minor units; the items are the rows left
 out or held back (`excluded`, by file and line), the written rows with an overridden warning (`overridden`, no amount) and

@@ -377,15 +377,16 @@ Every value is an exact decimal string, money in minor units, never rounded. Per
 `source`, `system`, `difference = source - system`, `itemised` (the sum of the items that name it) and
 `unitemised = difference - itemised`; a check ties when `unitemised = 0`.
 
-| Section | Source (the staged rows, each measured alone by the template's forecast) | System (the books) |
+| Section | Source (the staged rows by the template's forecast: the rows written netted per product over the whole run, each row left out alone with its own part) | System (the books) |
 |---|---|---|
 | Rows and records | per file and per entity set: rows that are not blank | rows whose `source_ref` is in `import_refs` |
-| Stock quantity | per branch and product: the sum of each row's stock | the stock ledger's movements the run registered (`ImportBooks.stock`) |
-| Stock value | per branch: the sum of each row's stock value | `D - C` of the run's journal lines on `inventory`, plus each negative balance listed at its value |
-| Money owed by customers | per branch: each row's receivable as if opened (`open_from_list`) | `D - C` of the run's journal lines on `trade_debtors` |
-| Loan principal outstanding | per branch: each row's principal | `D - C` of the run's journal lines on `loans_receivable` |
+| Stock quantity | per branch and product: the run's stock | the stock ledger's movements the run registered (`ImportBooks.stock`, netted over the run) |
+| Stock value | per branch: the run's stock value | `D - C` of the run's journal lines on `inventory`, plus each product's net balance below zero over the run, listed at its value |
+| Money owed by customers | per branch: the run's receivables as if opened (`open_from_list`) | `D - C` of the run's journal lines on `trade_debtors` |
+| Loan principal outstanding | per branch: the run's principal | `D - C` of the run's journal lines on `loans_receivable` |
 | Loans by days past due | per branch and bucket, as at the cutover day: loans and principal | the loan book (`ImportBooks.arrears`) |
-| Journals and trial balance | per branch and kind: each row's opening journal debit | the debits of the run's journals of that kind; then the run's debits against its credits, its entries out of balance and not opening journals (both 0), and the business's debits less credits and its entries out of balance (both 0) |
+| Journals and trial balance | per branch and kind: the debits of the opening journals the forecast gives for the run, batch by batch (a fall in a later batch is a journal the other way) | the debits of the run's journals of that kind; then the run's debits against its credits, its entries out of balance and not opening journals (both 0), and the business's debits less credits and its entries out of balance (both 0); facts: each opening journal by its entry number |
+| Decisions made in the review | no check; facts: every resolution with who, when, before, after and note, personal values not shown | `import_issue_resolutions` |
 
 Items: one per row left out (`excluded`, with its file, line and codes and its own part of each check), per written row
 with an overridden warning (`overridden`, amount 0), per check the receivable decision changes (`policy`, the option and

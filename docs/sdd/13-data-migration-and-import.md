@@ -521,9 +521,11 @@ Contents (FR-IMP-08):
 Both of the last two are in the report #134 built (the Lead's ruling on #873): the `ledger` section lists each opening
 journal by its entry number, in the ledger's order, with its branch, kind, debits and credits (`LedgerAccounts.lines`
 gives the number), and the `review` section lists every resolution of the run in the order made: the file and line, the
-code and field, what was decided, who (the user's id), when, before, after and the note. A value of a personal field is
-never shown ("a personal value, not shown"), and a before, after or note that names a personal value of the run is
-hidden, as the resolution's audit row keeps them out.
+code and field, what was decided, who (the user's id), when, before, after and the note. A before or after is shown
+only for a field the committed batch's set knows and does not mark personal; one of a personal field, a field the set
+does not know, a resolution of the whole row, or a batch that is not among the run's committed ones (a replaced upload)
+fails closed as "a personal value, not shown". A before, after or note that names a personal value of the run is hidden
+too, as the resolution's audit row keeps them out.
 
 As built for every template (#134, section 13.14.1 8/16; spec sections 3.9 and 3.10): the reconciliation is made by the
 commit as it finishes and stored as a document (`import_reconciliations`, append-only, migration `V144`), and made again
@@ -532,7 +534,9 @@ in `core.documents` (the Lead's decision on #134, ADR-027 note of 7 November 202
 JSONB with the SHA-256 of its plain text, the text is rendered from it byte for byte, the database refuses any change to
 it, and the download is that same text, so a stored file would only be a second copy that could drift. Each check shows a **source value**, a **system value** and the
 **difference** (source less system). The source is the run's staged rows: every row that is not blank, the rows left out
-included, each measured alone by the template's own forecast, so a row's part in every check is known. The system is the
+included, measured by the template's own forecast: the rows written are netted per product over the whole run (one
+forecast fed every written row of every batch), and each row left out is measured alone, so its own part in every check
+is known and its item explains exactly that. The system is the
 books, never the commit's report: the run's journals (found in `import_refs`) read line by line through the ledger's port,
 the ledger of the whole business, and the stock ledger and loan book through the template's `ImportBooks`. The sections
 are:
@@ -541,7 +545,7 @@ are:
 |---|---|---|
 | `counts` | rows per file and per entity set (not blank); facts per file: read, blank, left out, written by this import, already imported before, not found in the books; records created per target type | rows whose `source_ref` `import_refs` holds |
 | `stock_quantity` | per branch and product: the balances checksum | the stock ledger's movements the run registered (`ImportBooks.stock`), never the business's whole balance, so stock held before or moved after the import is not a difference |
-| `stock_value` | per branch | the run's journal lines on `inventory`; each negative balance listed separately as a `policy` item at its value, which is below zero like the difference it explains (source less system). Rule for every writer (spec section 3.9, the retail rule 5): the opening `inventory` journal holds the positive balances only, at the product's cost, so the source, which counts every balance, is the journal plus the negative ones. A writer that journals a negative value leaves it unexplained and the sign-off is refused. The item's value is the books' (quantity times the cost the writer recorded), so a writer whose cost differs from the sheet's amount leaves that gap unexplained too, on purpose: the sheet and the books disagree. An item's rows count together over the whole run, on all three sides (the Lead's ruling on #873): the source holds the run's written rows measured as one under the template's rules, every batch included; the writer journals per batch the change in what the run's items counted above zero are worth, so a fall in a later batch is a journal the other way (credit inventory) and the run's journals net to its positive balances; and `ImportBooks.stock` nets each item over the run's movements. A row left out keeps its own part, which its item explains (`ImportReconciliationIT`: one count of -2; counts of 5 and -2, and of -2 and 1, in one batch and in two) |
+| `stock_value` | per branch | the run's journal lines on `inventory`; each negative balance listed separately as a `policy` item at its value, which is below zero like the difference it explains (source less system). Rule for every writer (spec section 3.9, the retail rule 5): the opening `inventory` journal holds the positive balances only, at the product's cost, so the source, which counts every balance, is the journal plus the negative ones. A writer that journals a negative value leaves it unexplained and the sign-off is refused. The item's value is the books' (quantity times the cost the writer recorded), so a writer whose cost differs from the sheet's amount leaves that gap unexplained too, on purpose: the sheet and the books disagree. An item's rows count together over the whole run, on all three sides (the Lead's ruling on #873): the source holds the run's written rows measured as one under the template's rules, every batch included; the writer journals per batch the change in what the run's items counted above zero are worth, so a fall in a later batch is a journal the other way (credit inventory) and the run's journals net to its positive balances, deriving both what the items are worth and what is already journalled from the database (its earlier batches' written rows and its own journals in `import_refs`), never from memory, so a resumed run journals what an unbroken one would (`BatchWriter`); and `ImportBooks.stock` nets each item over the run's movements. A row left out keeps its own part, which its item explains (`ImportReconciliationIT`: one count of -2; counts of 5 and -2, and of -2 and 1, in one batch and in two; and a run killed after the batch of 5 and resumed with -2) |
 | `receivables` | per branch, as if every credit sale were opened | the run's journal lines on `trade_debtors` |
 | `loan_principal` | per branch | the run's journal lines on `loans_receivable` |
 | `arrears` | loans and principal per branch and bucket, as at the cutover day | the template's loan book |
@@ -1351,7 +1355,8 @@ sign-off screen (chapter 7 section 7.11.9). What each check reads and how differ
   again on request (`core.imports.manage`, audited `core.import_run.reconciled` with the version, whether it can be signed
   and how many checks do not tie).
 - **Independent of the writer.** Neither the commit's stored report nor a writer's counts are read: the source is the
-  staged rows measured by the template's own forecast, one row at a time, and the system is what the ledger, the stock
+  staged rows measured by the template's own forecast (the rows written netted per product over the whole run, each row
+  left out alone, keeping its own part), and the system is what the ledger, the stock
   ledger, the loan book and `import_refs` hold. A writer that posts more or less than it reported, or registers no record
   for a row, shows as a difference no item explains.
 - **Stored as a document, signed once.** `import_reconciliations` (one row per version: the whole report as JSON, its

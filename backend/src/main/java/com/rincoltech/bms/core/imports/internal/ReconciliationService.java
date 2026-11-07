@@ -54,8 +54,9 @@ import tools.jackson.databind.json.JsonMapper;
  * spec sections 3.9 and 3.10).
  *
  * <p>The <b>source</b> side is the run's committed batches as staged: every row that is not blank, read 1,000 at a time,
- * measured one row at a time by its template's own forecast ({@link ImportTemplate#forecast(Map)} given that one row), so a
- * row's part in each check is known and a row the review left out is itemised by exactly its own part. Under a receivable
+ * measured by its template's own forecast ({@link ImportTemplate#forecast(Map)}): the rows written are netted per product
+ * over the whole run (one forecast fed every written row of every batch, as the writer posts them), and each row left out
+ * is measured alone (the forecast given that one row), so it is itemised by exactly its own part. Under a receivable
  * decision the source is measured as if every credit sale were opened ({@code open_from_list}), so the decision's effect is
  * itemised as {@code policy}. The <b>system</b> side is the books: the run's journals, found in {@code import_refs} and read
  * through the ledger's port line by line; the ledger of the whole business; and the stock ledger and the loan book through
@@ -555,8 +556,9 @@ class ReconciliationService implements ImportReconciliation {
                 .list();
         ImportBooks.Scope scope = new ImportBooks.Scope(runId, targets);
 
-        // The source, row by row; and the rows written, together over the whole run, as the forecast and the writer
-        // count them (Lead on the review of 4105c2a): an item counted in two batches nets to one balance.
+        // The source: each row left out alone, with its own part, and the rows written netted together over the whole
+        // run, as the forecast and the writer count them (Lead on the review of 4105c2a): an item counted in two
+        // batches nets to one balance.
         ImportForecast whole = template == null ? null : template.forecast(open);
         Map<CheckId, BigDecimal> writtenParts = new LinkedHashMap<>();
         for (BatchInfo b : batches) {
