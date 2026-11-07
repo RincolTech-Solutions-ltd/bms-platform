@@ -91,7 +91,7 @@ const reconciliation: Reconciliation = {
       title: 'Journals and trial balance',
       facts: [],
       checks: [
-        { key: 'trial balance', label: 'Trial balance of the business: debits (source) and credits (system)', unit: 'minor', source: '9876543210987', system: '9876543210987', difference: '0', itemised: '0', unitemised: '0', ties: true },
+        { key: 'trial balance', label: 'Trial balance of the business: debits less credits', unit: 'minor', source: '0', system: '0', difference: '0', itemised: '0', unitemised: '0', ties: true },
       ],
       items: [],
     },

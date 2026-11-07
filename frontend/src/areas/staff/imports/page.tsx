@@ -90,6 +90,8 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
       queryClient.setQueryData(reconciliationKey(runId), signed);
       await queryClient.invalidateQueries({ queryKey: RUNS });
     },
+    // A refusal may mean the figures changed since they were read: show the newest ones (review of 391e1dc, point 5).
+    onError: () => queryClient.invalidateQueries({ queryKey: reconciliationKey(runId) }),
   });
   // busy-exempt: the download button says Downloading the report itself and is disabled meanwhile
   // toast-exempt: saves nothing: a download changes nothing, and the device shows the saved file

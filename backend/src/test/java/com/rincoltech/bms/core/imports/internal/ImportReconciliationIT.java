@@ -836,6 +836,45 @@ class ImportReconciliationIT extends IntegrationTest {
         assertThat(signoffs(run)).isZero();
     }
 
+    // JUSTIFICATION-A3: the new test case must-fix 1 of the review of 391e1dc asks for.
+    @Test
+    void aSaleBetweenReadingAndSigningLeavesTheRunSignable() throws IOException {
+        UUID run = committedGoldenRun(null);
+        Report read = as(t, () -> reconciliation.latest(run)).orElseThrow();
+        assertThat(read.signable()).as(read.render()).isTrue();
+
+        // The till sells one unit of the imported stock through the retail sale path: a stock movement and the sale's
+        // revenue and cost journals, none of them the run's. The sign-off measures again and gets the same text.
+        UUID product = as(t, () -> new TransactionTemplate(transactionManager).execute(s -> catalogue.productsByCode()))
+                .get(FixtureShopTemplate.EXISTING_ITEM.toLowerCase(Locale.ROOT))
+                .id();
+        String journals =
+                "SELECT count(*) FROM journal_entries WHERE tenant_id = ? AND source_module <> 'core.imports'";
+        long before = TestDatabase.owner()
+                .sql(journals)
+                .param(t.tenantId())
+                .query(Long.class)
+                .single();
+        ResponseEntity<JsonNode> sale = new RetailTestSupport(http, t).sell(t.headOffice(), "cash", product, "1");
+        assertThat(sale.getStatusCode().is2xxSuccessful())
+                .as(String.valueOf(sale.getBody()))
+                .isTrue();
+        assertThat(TestDatabase.owner()
+                        .sql(journals)
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isGreaterThan(before);
+
+        ResponseEntity<JsonNode> signed = signOff(t, run, read, allSections(read), "Fabricated Signer", today(t));
+        assertThat(signed.getStatusCode()).as(String.valueOf(signed.getBody())).isEqualTo(HttpStatus.OK);
+        assertThat(status(run)).isEqualTo("signed_off");
+        assertThat(signoffs(run)).isOne();
+        Report after = as(t, () -> reconciliation.latest(run)).orElseThrow();
+        assertThat(after.id()).isEqualTo(read.id());
+        assertThat(after.sha256()).isEqualTo(read.sha256());
+    }
+
     @Test
     void aRowLeftOutThatAnEarlierRunImportedIsNotADifference() throws IOException {
         UUID first = committedGoldenRun(null);

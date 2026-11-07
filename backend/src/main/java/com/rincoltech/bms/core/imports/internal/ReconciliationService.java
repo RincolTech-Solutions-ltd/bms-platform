@@ -811,7 +811,9 @@ class ReconciliationService implements ImportReconciliation {
                     try {
                         asDecided = part(template, actual, b, stored.get(s.line()));
                     } catch (RuntimeException e) {
+                        // Named like any other row the rules cannot measure (review of 391e1dc, point 3).
                         unmeasured++;
+                        unmeasuredKinds.add("decision:" + e.getClass().getSimpleName());
                     }
                     if (asDecided != null) {
                         Set<CheckId> keys = new HashSet<>(part.keySet());

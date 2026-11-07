@@ -531,7 +531,7 @@ are:
 |---|---|---|
 | `counts` | rows per file and per entity set (not blank); facts per file: read, blank, left out, written by this import, already imported before, not found in the books; records created per target type | rows whose `source_ref` `import_refs` holds |
 | `stock_quantity` | per branch and product: the balances checksum | the stock ledger's movements the run registered (`ImportBooks.stock`), never the business's whole balance, so stock held before or moved after the import is not a difference |
-| `stock_value` | per branch | the run's journal lines on `inventory`; each negative balance listed separately as a `policy` item at its value |
+| `stock_value` | per branch | the run's journal lines on `inventory`; each negative balance listed separately as a `policy` item at its value, which ties only because a writer never journals a negative balance (the journal holds the positive ones; `ImportBooks.stock`), so a writer that does leaves it unexplained and the sign-off is refused |
 | `receivables` | per branch, as if every credit sale were opened | the run's journal lines on `trade_debtors` |
 | `loan_principal` | per branch | the run's journal lines on `loans_receivable` |
 | `arrears` | loans and principal per branch and bucket, as at the cutover day | the template's loan book |
@@ -541,8 +541,9 @@ Every difference is itemised: `excluded` (a row left out in the review or held b
 file, line, codes and its own part of each check; a row is counted once, left out decided first, and a left-out row adds
 nothing to the system side even when an earlier run holds it; a row an earlier run imported and this one writes nothing
 for is itemised for the values and stock this run did not post; a left-out row the template's rules cannot measure is
-named so in its item with the kind of failure, while a written one is a check nothing explains, named the same way, which
-holds the sign-off), `overridden` (a written row whose warning was overridden, listed with no amount for the signer to see) and `policy`
+named so in its item with the kind of failure, while a written one, or one whose recorded receivable decision the rules
+cannot measure (named `decision:` and the kind), is a check nothing explains, named the same way, which holds the
+sign-off), `overridden` (a written row whose warning was overridden, listed with no amount for the signer to see) and `policy`
 (the receivable decision's effect, as the source measured under `open_from_list` less the books under the decision, with
 the option and the day the customer confirmed it; a negative stock balance). A check whose difference the items do not
 explain does not tie, and a reconciliation with such a check is not signable: the sign-off is refused (409
