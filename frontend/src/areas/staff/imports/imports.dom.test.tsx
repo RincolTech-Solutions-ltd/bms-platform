@@ -203,11 +203,47 @@ describe('imports to sign off', () => {
     // The API's own words, version 1 still on screen with nothing ticked, and the way out instead of signing it again.
     expect(await screen.findByText(CHANGED)).toBeTruthy();
     expect(screen.getByText(/Version 1, as at 1 Oct 2026/)).toBeTruthy();
-    await waitFor(() => expect((screen.getByRole('checkbox', { name: /rows and records/ }) as HTMLInputElement).checked).toBe(false));
-    fireEvent.click(await screen.findByRole('button', { name: 'Make the reconciliation again' }));
+    // JUSTIFICATION-A3: ruling 2 of the Lead on the review of 4105c2a, the form absent while the refused version shows.
+    const remakeIt = await screen.findByRole('button', { name: 'Make the reconciliation again' });
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    expect(screen.queryByLabelText(/Your name/)).toBeNull();
+    expect(screen.queryByLabelText(/Today's date/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Sign the reconciliation' })).toBeNull();
+    fireEvent.click(remakeIt);
     await waitFor(() => expect(remade).toBe(1));
     expect(await screen.findByText(/Version 2, as at 1 Oct 2026/)).toBeTruthy();
     expect(screen.queryByText(CHANGED)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Sign the reconciliation' })).toBeTruthy();
+  });
+
+  it('offers a signer who cannot make it again only the new figures, never the refused version to sign', async () => {
+    refuse = 'reconciliation_changed';
+    refuseSame = true;
+    const today = businessToday(new Date(), 'Africa/Kampala');
+    show(admin);
+    fireEvent.click(await screen.findByRole('button', { name: /Imported on 1 Oct 2026/ }));
+    await screen.findByRole('heading', { name: 'Rows and records' });
+    fireEvent.click(screen.getByRole('checkbox', { name: /rows and records/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /stock value per branch/ }));
+    fireEvent.change(screen.getByLabelText(/Your name/), { target: { value: 'Fabricated Signer' } });
+    fireEvent.change(screen.getByLabelText(/Today's date/), { target: { value: today } });
+    await pause();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign the reconciliation' }));
+
+    expect(await screen.findByText(CHANGED)).toBeTruthy();
+    const show2 = await screen.findByRole('button', { name: 'Show the new figures' });
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    expect(screen.queryByLabelText(/Your name/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Sign the reconciliation' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Make the reconciliation again' })).toBeNull();
+
+    // The new version is there by now: showing it brings the form back for it.
+    view = { ...recon(true), id: 'rec-2', version: 2, sha256: 'b'.repeat(64) };
+    await pause();
+    fireEvent.click(show2);
+    expect(await screen.findByText(/Version 2, as at 1 Oct 2026/)).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Sign the reconciliation' })).toBeTruthy();
+    expect(sent).toHaveLength(1);
   });
 
   it('shows a difference that is not explained and offers no way to sign', async () => {

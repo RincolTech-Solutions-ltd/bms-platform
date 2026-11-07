@@ -160,7 +160,10 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
   // Refused because the figures changed: the API's own words, which name the new version. Should the one on screen still be
   // the one refused, offer to make it again rather than sign it once more.
   const moved = !signed && changed(sign.error);
-  const stale = moved && refused !== null && refused === r.id;
+  // Settled only once the refetch is done, so the normal path never flashes the remake button (review of 4105c2a).
+  const stale = moved && !reconciliation.isFetching && refused !== null && refused === r.id;
+  // The refused version is never offered for signing again: no ticks and no form while it is on screen.
+  const signing = !signed && r.signable === true && !stale;
 
   function onSign(e: FormEvent) {
     e.preventDefault();
@@ -202,13 +205,18 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
         </p>
       )}
       {!signed && (!r.signable || stale) && remakeButton}
+      {stale && !canRemake && (
+        <BusyButton type="button" className="btn" busy={reconciliation.isFetching} onClick={() => void reconciliation.refetch()}>
+          Show the new figures
+        </BusyButton>
+      )}
       {(r.sections ?? []).map((s) => (
         <SectionCard
           key={s.key}
           section={s}
           currency={currency}
           ticked={ticked.has(s.key ?? '')}
-          canTick={!signed && r.signable === true}
+          canTick={signing}
           onTick={(on) => toggle(s.key ?? '', on)}
         />
       ))}
@@ -223,7 +231,7 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
         {download.isPending ? 'Downloading the report' : 'Download the report'}
       </button>
       {download.isError && <p role="alert">{download.error instanceof Error ? download.error.message : 'Could not download the report.'}</p>}
-      {!signed && r.signable && (
+      {signing && (
         <form className="stack" onSubmit={onSign} noValidate data-tour="imports-sign">
           <h2>Sign for the business</h2>
           <Field
