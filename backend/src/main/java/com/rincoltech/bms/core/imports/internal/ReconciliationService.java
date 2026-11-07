@@ -257,8 +257,8 @@ class ReconciliationService implements ImportReconciliation {
             if (!again.equals(newest.sha256())) {
                 throw new ApiException(
                         HttpStatus.CONFLICT,
-                        "books_changed",
-                        "The books changed",
+                        "reconciliation_changed",
+                        "Reconciliation changed",
                         "What the import brought in changed in the books since this reconciliation was made; make it"
                                 + " again, read it and sign that.");
             }
@@ -667,6 +667,8 @@ class ReconciliationService implements ImportReconciliation {
         int earlier = 0;
         int missing = 0;
         int unmeasured = 0;
+        // The kinds of failure of the written rows the rules could not measure, one entry per row.
+        List<String> unmeasuredKinds = new ArrayList<>();
         int after = 0;
         while (true) {
             record Staged(
@@ -739,10 +741,6 @@ class ReconciliationService implements ImportReconciliation {
                 sheet.add(sheet.source, setRows, BigDecimal.ONE);
                 String ref = refs.get(s.line());
                 Boolean held = ref == null ? null : byThisRun.get(ref);
-                if (held != null) {
-                    sheet.add(sheet.system, batchRows, BigDecimal.ONE);
-                    sheet.add(sheet.system, setRows, BigDecimal.ONE);
-                }
                 // The row's part in every check by the template's own rules. A row the rules cannot measure (a value
                 // they need is missing) is counted and named, never dropped without a trace (review of #873).
                 Map<CheckId, BigDecimal> part = null;
@@ -767,17 +765,19 @@ class ReconciliationService implements ImportReconciliation {
                             + (unmeasurable == null
                                     ? ""
                                     : "; the template's rules could not measure its values (" + unmeasurable + ")");
-                    if (held == null) {
-                        // Not in the books: one row fewer there, explained.
-                        sheet.item(batchRows, new Item(batchRows.key(), file, s.line(), EXCLUDED, why, "1"));
-                        sheet.item(setRows, new Item(setRows.key(), file, s.line(), EXCLUDED, why, "1"));
-                    }
-                    // A row an earlier run imported is in the books as a record, not in this run's postings or stock.
-                    // A row this run holds after all is in both, so nothing of it is a difference.
+                    // Left out is decided first and counted once (Lead on #873): the row adds nothing to the system
+                    // side, whatever an earlier run holds, and is one explained row. Its values are not in this run's
+                    // postings or stock either, unless this run holds it after all.
+                    sheet.item(batchRows, new Item(batchRows.key(), file, s.line(), EXCLUDED, why, "1"));
+                    sheet.item(setRows, new Item(setRows.key(), file, s.line(), EXCLUDED, why, "1"));
                     if (!Boolean.TRUE.equals(held)) {
                         itemise(sheet, part, file, s.line(), held == null ? why : why + "; imported by an earlier run");
                     }
                     continue;
+                }
+                if (held != null) {
+                    sheet.add(sheet.system, batchRows, BigDecimal.ONE);
+                    sheet.add(sheet.system, setRows, BigDecimal.ONE);
                 }
                 if (held == null) {
                     // Meant to be written and not in the books: never itemised, so it holds the sign-off.
@@ -790,6 +790,9 @@ class ReconciliationService implements ImportReconciliation {
                     continue;
                 }
                 written++;
+                if (unmeasurable != null) {
+                    unmeasuredKinds.add(unmeasurable);
+                }
                 if (s.overridden() != null) {
                     sheet.item(
                             batchRows,
@@ -832,6 +835,17 @@ class ReconciliationService implements ImportReconciliation {
         sheet.fact(COUNTS, file + ": rows already imported before", earlier);
         sheet.fact(COUNTS, file + ": rows not found in the books", missing);
         sheet.fact(COUNTS, file + ": rows the template's rules could not measure", unmeasured);
+        if (!unmeasuredKinds.isEmpty()) {
+            // A written row whose part the rules could not measure is a difference nothing explains (Lead on #873): its
+            // values are in the books and not in the source, so it holds the sign-off, named with the kind of failure.
+            CheckId failed = new CheckId(
+                    COUNTS,
+                    "unmeasured " + b.seq(),
+                    "Rows of " + file + " written that the rules could not measure ("
+                            + String.join(" ", new TreeSet<>(unmeasuredKinds)) + ")",
+                    "rows");
+            sheet.add(sheet.source, failed, BigDecimal.valueOf(unmeasuredKinds.size()));
+        }
         if (unmeasured > 0) {
             log.warn("import run {}: {} rows of batch {} could not be measured", runId, unmeasured, b.seq());
         }

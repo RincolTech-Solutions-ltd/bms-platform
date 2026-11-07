@@ -538,9 +538,11 @@ are:
 | `ledger` | each opening journal per branch and kind; the run's journals balanced, none out of balance, none other than opening journals; the business's trial balance (debits less credits) zero, no entry out of balance | the ledger |
 
 Every difference is itemised: `excluded` (a row left out in the review or held back by an open blocking issue, with its
-file, line, codes and its own part of each check; a row an earlier run already imported, for the values and stock this run
-did not post, its record counted as held; a row the template's rules cannot measure is named so in its item and counted in
-the facts), `overridden` (a written row whose warning was overridden, listed with no amount for the signer to see) and `policy`
+file, line, codes and its own part of each check; a row is counted once, left out decided first, and a left-out row adds
+nothing to the system side even when an earlier run holds it; a row an earlier run imported and this one writes nothing
+for is itemised for the values and stock this run did not post; a left-out row the template's rules cannot measure is
+named so in its item with the kind of failure, while a written one is a check nothing explains, named the same way, which
+holds the sign-off), `overridden` (a written row whose warning was overridden, listed with no amount for the signer to see) and `policy`
 (the receivable decision's effect, as the source measured under `open_from_list` less the books under the decision, with
 the option and the day the customer confirmed it; a negative stock balance). A check whose difference the items do not
 explain does not tie, and a reconciliation with such a check is not signable: the sign-off is refused (409
@@ -552,12 +554,14 @@ The **sign-off** (spec section 3.10, `core.imports.sign_off`, the tenant admin's
 reconciliation, ticks each section, types their name and today's date; the sign-off names the reconciliation and its
 SHA-256 as read (409 `reconciliation_changed` if it was made again), and inside its own transaction, which holds the run,
 measures the books again: when the text that measurement gives has another SHA-256 than the one read, what the import
-brought in changed since, and the sign-off is refused (409 `books_changed`; make it again and sign that). It is stored in
+brought in changed since, and the sign-off is refused (409 `reconciliation_changed`; make it again and sign that). It is stored in
 `import_signoffs` (append-only, one per run), moves the run to `signed_off` and is audited `core.import_run.signed_off`
 without the name. The run reaches `signed_off` no other way. After it, no new reconciliation of the run is stored (the
 trigger takes the run `FOR UPDATE` in both cases, so a reconciliation and a sign-off never pass each other), so the signed
 document stays the run's newest for good. The removal of a closed business replaces the typed name with "Removed"
-(`imports_erase_personal_data`); the download of the signed text carries the date of the sign-off, never the name.
+(`imports_erase_personal_data`). The downloaded text (`reconciliation.txt`) is the signed document, so it carries the name
+the signer typed and the date; that name is the only personal value of the reconciliation, it is never written to a log,
+and the audit row of the sign-off does not hold it.
 
 ## 13.12 Golden fixture and expected outcome
 
@@ -1343,10 +1347,12 @@ sign-off screen (chapter 7 section 7.11.9). What each check reads and how differ
 - **Not in this step.** The certificate of deletion and the purge that sign-off starts are #139; the operator's screens
   are #141.
 - **Review of #873.** The stock quantity reads only the movements the run registered; the sign-off measures the books
-  again; a row left out that an earlier run imported is counted as held and itemised for what this run did not post; the
-  trigger takes the run in both branches; stock values are exact decimals; a row the rules cannot measure is named; the
-  measurement runs under a 10 minute statement timeout; the signer's name is erased with the business and kept out of the
-  download; the screen offers "Make the reconciliation again" to whoever holds `core.imports.manage`.
+  again (409 `reconciliation_changed` on a mismatch); a row is counted once, left out decided first, and a left-out row
+  adds nothing to the system side, whatever an earlier run holds; the trigger takes the run in both branches; stock values
+  are exact decimals; a left-out row the rules cannot measure is named with the kind of failure, and a written one is a
+  difference nothing explains, named the same way; the measurement runs under a 10 minute statement timeout; the signer's
+  name is erased with the business and never logged; the screen offers "Make the reconciliation again" to whoever holds
+  `core.imports.manage`.
 - **Proven by** `ImportReconciliationIT` (on the golden files every check ties and every difference is exactly the rows left
   out, by file and line, the system values worked out by hand from the books; a receivable decision is one `policy` item;
   a deliberately broken balance does not tie and the sign-off is refused by the service and by the database; the sign-off

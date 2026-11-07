@@ -831,7 +831,7 @@ class ImportReconciliationIT extends IntegrationTest {
                 .params(UUID.randomUUID(), t.tenantId(), run, batch, "retail.stock_movement", extra)
                 .update();
         assertThat(code(signOff(t, run, again, allSections(again), "Fabricated Signer", today(t))))
-                .isEqualTo("books_changed");
+                .isEqualTo("reconciliation_changed");
         assertThat(status(run)).isEqualTo("committed");
         assertThat(signoffs(run)).isZero();
     }
@@ -883,15 +883,17 @@ class ImportReconciliationIT extends IntegrationTest {
         Report r = as(t, () -> reconciliation.latest(second)).orElseThrow();
 
         assertThat(r.signable()).as(r.render()).isTrue();
-        // Nine rows that are not blank, four of them in the books (three written before, and line 4 that the first run
-        // wrote): the five left out and not in the books are the difference; line 4 is not itemised as a missing row.
+        // A row is counted once, left out decided first (Lead on #873): nine rows that are not blank, three on the
+        // system side (written by the first run and recognised now), and the six left out, line 4 among them although
+        // the first run holds it, are the difference, each once.
         Check rows = check(r, "counts", "set items");
-        assertThat(List.of(rows.source(), rows.system(), rows.difference(), rows.unitemised()))
-                .containsExactly("9", "4", "5", "0");
+        assertThat(List.of(rows.source(), rows.system(), rows.difference(), rows.itemised(), rows.unitemised()))
+                .containsExactly("9", "3", "6", "6", "0");
         assertThat(section(r, "counts").items())
-                .filteredOn(i -> i.reason().equals(ImportReconciliation.EXCLUDED))
+                .filteredOn(i -> i.reason().equals(ImportReconciliation.EXCLUDED)
+                        && i.check().equals("set items"))
                 .extracting(Item::line)
-                .doesNotContain(4);
+                .containsExactlyInAnyOrder(4, 5, 6, 7, 8, 10);
     }
 
     @Test

@@ -228,9 +228,11 @@ class ReconciliationController {
         StringBuilder out = new StringBuilder(r.render());
         out.append("sha256: ").append(r.sha256()).append('\n');
         if (r.signed() != null) {
-            // The signer's typed name is a personal value: it stays with the sign-off in the app, not in a file that
-            // travels (review of #873).
-            out.append("signed for the business on ")
+            // The downloaded text is the signed document, so it carries the name the signer typed (Lead on #873). The
+            // name is never logged, and the audit row of the sign-off does not hold it.
+            out.append("signed by: ")
+                    .append(r.signed().signedName())
+                    .append(" on ")
                     .append(r.signed().signedOn())
                     .append(", sections ticked: ")
                     .append(String.join(", ", r.signed().sections()))
