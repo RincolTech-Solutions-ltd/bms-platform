@@ -75,6 +75,7 @@ class ReconciliationService implements ImportReconciliation {
     static final String LOAN_PRINCIPAL = "loan_principal";
     static final String ARREARS = "arrears";
     static final String LEDGER = "ledger";
+    static final String REVIEW = "review";
 
     /** Each statement's limit while the sign-off measures again; a test shortens it to reach the refusal. */
     static volatile String signOffTimeout = "60s";
@@ -90,6 +91,7 @@ class ReconciliationService implements ImportReconciliation {
         TITLES.put(LOAN_PRINCIPAL, "Loan principal outstanding");
         TITLES.put(ARREARS, "Loans by days past due");
         TITLES.put(LEDGER, "Journals and trial balance");
+        TITLES.put(REVIEW, "Decisions made in the review");
     }
 
     /** What an opening journal is registered as in import_refs. */
@@ -233,7 +235,10 @@ class ReconciliationService implements ImportReconciliation {
                         HttpStatus.CONFLICT,
                         "reconciliation_changed",
                         "Reconciliation changed",
-                        "The reconciliation was made again since you opened it; read the new one and sign that.");
+                        "The reconciliation was made again since you opened it, as version " + newest.version()
+                                + ". Read it and sign that.",
+                        List.of(),
+                        Map.of("reconciliation_id", newest.id().toString(), "version", newest.version()));
             }
             if (!newest.signable()) {
                 throw new ApiException(
@@ -550,10 +555,18 @@ class ReconciliationService implements ImportReconciliation {
                 .list();
         ImportBooks.Scope scope = new ImportBooks.Scope(runId, targets);
 
-        // The source, row by row.
+        // The source, row by row; and the rows written, together over the whole run, as the forecast and the writer
+        // count them (Lead on the review of 4105c2a): an item counted in two batches nets to one balance.
+        ImportForecast whole = template == null ? null : template.forecast(open);
+        Map<CheckId, BigDecimal> writtenParts = new LinkedHashMap<>();
         for (BatchInfo b : batches) {
-            rows(runId, b, template, open, actual, sameDecision, privacy, sheet);
+            if (whole != null) {
+                whole.batch(b.seq());
+            }
+            rows(runId, b, template, open, actual, sameDecision, privacy, whole, writtenParts, sheet);
         }
+        together(whole, writtenParts, sheet);
+        resolutions(runId, batches, privacy, sheet);
         targets.forEach((type, ids) -> {
             if (!JOURNAL.equals(type)) {
                 sheet.fact(COUNTS, "Records created as " + type, ids.size());
@@ -691,6 +704,8 @@ class ReconciliationService implements ImportReconciliation {
             Map<String, String> actual,
             boolean sameDecision,
             PreviewService.RunPrivacy privacy,
+            ImportForecast whole,
+            Map<CheckId, BigDecimal> writtenParts,
             Sheet sheet) {
         String file = screen(b.file(), privacy);
         CheckId batchRows = new CheckId(COUNTS, "batch " + b.seq(), "Rows of " + file, "rows");
@@ -705,15 +720,6 @@ class ReconciliationService implements ImportReconciliation {
         int unmeasured = 0;
         // The kinds of failure of the written rows the rules could not measure, one entry per row.
         List<String> unmeasuredKinds = new ArrayList<>();
-        // The written rows under the template's rules as a whole, beside the sum of their parts row by row. A rule that
-        // is not row by row (a stock balance below zero is not journalled, so an item's rows count together) makes the
-        // two differ; the source takes the whole (review of 1ea73e5).
-        ImportForecast whole = null;
-        if (template != null) {
-            whole = template.forecast(open);
-            whole.batch(b.seq());
-        }
-        Map<CheckId, BigDecimal> writtenParts = new LinkedHashMap<>();
         int after = 0;
         while (true) {
             record Staged(
@@ -879,21 +885,6 @@ class ReconciliationService implements ImportReconciliation {
                 break;
             }
         }
-        // The written rows count together, as the forecast and the writer count them (Lead on the review of 1ea73e5):
-        // the source holds their parts measured as one, so each item's journal follows its net balance; the rows left
-        // out keep their own parts, which their items explain.
-        if (whole != null && !writtenParts.isEmpty()) {
-            Map<CheckId, BigDecimal> together = parts(whole);
-            Set<CheckId> ids = new LinkedHashSet<>(writtenParts.keySet());
-            ids.addAll(together.keySet());
-            for (CheckId id : ids) {
-                BigDecimal d = together.getOrDefault(id, BigDecimal.ZERO)
-                        .subtract(writtenParts.getOrDefault(id, BigDecimal.ZERO));
-                if (d.signum() != 0) {
-                    sheet.add(sheet.source, id, d);
-                }
-            }
-        }
         sheet.fact(COUNTS, file + ": rows read", read);
         sheet.fact(COUNTS, file + ": blank rows", blank);
         sheet.fact(COUNTS, file + ": rows left out", excluded);
@@ -914,6 +905,78 @@ class ReconciliationService implements ImportReconciliation {
         }
         if (unmeasured > 0) {
             log.warn("import run {}: {} rows of batch {} could not be measured", runId, unmeasured, b.seq());
+        }
+    }
+
+    // JUSTIFICATION-A3: FR-IMP-08, the Lead's ruling 3 on the review of 4105c2a: every resolution in the signed report.
+    /**
+     * Every resolution of the run's review, in the order made (FR-IMP-08): the file and line, the code and field, what was
+     * decided, who (the user's id) and when, before and after, and the note. A value of a personal field is never shown,
+     * and any text that names a personal value of the run is hidden, as in the resolution's audit row.
+     */
+    private void resolutions(UUID runId, List<BatchInfo> batches, PreviewService.RunPrivacy privacy, Sheet sheet) {
+        Map<UUID, BatchInfo> byId = new HashMap<>();
+        batches.forEach(b -> byId.put(b.id(), b));
+        jdbc.sql("""
+                        SELECT batch_id, source_row_no, code, field, resolution, before_value::text, after_value::text,
+                               note, resolved_by, created_at
+                          FROM import_issue_resolutions
+                         WHERE run_id = ?
+                         ORDER BY seq
+                        """)
+                .param(runId)
+                .query((rs, n) -> {
+                    BatchInfo b = byId.get(rs.getObject(1, UUID.class));
+                    String file = b == null ? "-" : screen(b.file(), privacy);
+                    String field = rs.getString(4);
+                    boolean personal = b != null
+                            && field != null
+                            && b.set().fields().stream().anyMatch(f -> f.name().equals(field) && f.personal());
+                    String note = rs.getString(8);
+                    String value = rs.getString(5)
+                            + " by " + rs.getObject(9, UUID.class)
+                            + " at " + rs.getTimestamp(10).toInstant()
+                            + "; before " + shown(rs.getString(6), personal, privacy)
+                            + "; after " + shown(rs.getString(7), personal, privacy)
+                            + (note == null ? "" : "; note: " + screen(note, privacy));
+                    sheet.fact(
+                            REVIEW,
+                            file + " line " + rs.getInt(2) + ", " + rs.getString(3)
+                                    + (field == null ? "" : " on " + field),
+                            value);
+                    return null;
+                })
+                .list();
+    }
+
+    /** A resolution's before or after as the report shows it: none, hidden for a personal field, or its text screened. */
+    private static String shown(String json, boolean personal, PreviewService.RunPrivacy privacy) {
+        if (json == null) {
+            return "none";
+        }
+        return personal ? "a personal value, not shown" : screen(json, privacy);
+    }
+
+    // JUSTIFICATION-A3: the block moved out of rows() so it runs once for the run (Lead on the review of 4105c2a).
+    /**
+     * The run's written rows counted together, as the forecast and the writer count them (Lead on the reviews of 1ea73e5
+     * and 4105c2a): the source holds their parts measured as one over the whole run, in place of the sum of their parts
+     * row by row, so each item's inventory journal follows its net balance over every batch. The rows left out keep their
+     * own parts, which their items explain.
+     */
+    private static void together(ImportForecast whole, Map<CheckId, BigDecimal> writtenParts, Sheet sheet) {
+        if (whole == null || writtenParts.isEmpty()) {
+            return;
+        }
+        Map<CheckId, BigDecimal> together = parts(whole);
+        Set<CheckId> ids = new LinkedHashSet<>(writtenParts.keySet());
+        ids.addAll(together.keySet());
+        for (CheckId id : ids) {
+            BigDecimal d =
+                    together.getOrDefault(id, BigDecimal.ZERO).subtract(writtenParts.getOrDefault(id, BigDecimal.ZERO));
+            if (d.signum() != 0) {
+                sheet.add(sheet.source, id, d);
+            }
         }
     }
 
@@ -1000,6 +1063,7 @@ class ReconciliationService implements ImportReconciliation {
         }
         Map<UUID, long[]> perEntry = new LinkedHashMap<>();
         Map<UUID, UUID> entryBranch = new HashMap<>();
+        Map<UUID, String> entryNo = new HashMap<>();
         for (LedgerAccounts.EntryLine l : ledger.lines(journalKinds.keySet())) {
             String branch = branchCodes.getOrDefault(l.branchId(), "-");
             long net = Math.subtractExact(l.debitMinor(), l.creditMinor());
@@ -1015,11 +1079,19 @@ class ReconciliationService implements ImportReconciliation {
             dc[0] = Math.addExact(dc[0], l.debitMinor());
             dc[1] = Math.addExact(dc[1], l.creditMinor());
             entryBranch.put(l.entryId(), l.branchId());
+            entryNo.put(l.entryId(), l.entryNo());
         }
-        perEntry.forEach((entry, dc) -> sheet.add(
-                sheet.system,
-                journalId(branchCodes.getOrDefault(entryBranch.get(entry), "-"), journalKinds.get(entry)),
-                BigDecimal.valueOf(dc[0])));
+        perEntry.forEach((entry, dc) -> {
+            String branch = branchCodes.getOrDefault(entryBranch.get(entry), "-");
+            String kind = journalKinds.get(entry) == null ? "opening" : journalKinds.get(entry);
+            sheet.add(sheet.system, journalId(branch, kind), BigDecimal.valueOf(dc[0]));
+            // Each opening journal by its entry number, in the ledger's order (FR-IMP-08, Lead on the review of
+            // 4105c2a).
+            sheet.fact(
+                    LEDGER,
+                    "Opening journal " + entryNo.get(entry),
+                    branch + ", " + kind.replace('_', ' ') + ": debits " + dc[0] + ", credits " + dc[1]);
+        });
     }
 
     /**

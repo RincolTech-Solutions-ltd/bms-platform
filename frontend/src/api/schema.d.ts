@@ -10535,7 +10535,7 @@ export interface components {
             checks?: components["schemas"]["ImportReconciliationCheck"][];
             facts?: components["schemas"]["ImportReconciliationFact"][];
             items?: components["schemas"]["ImportReconciliationItem"][];
-            /** @description counts, stock_quantity, stock_value, receivables, loan_principal, arrears or ledger */
+            /** @description counts, stock_quantity, stock_value, receivables, loan_principal, arrears, ledger or review */
             key?: string;
             title?: string;
         };

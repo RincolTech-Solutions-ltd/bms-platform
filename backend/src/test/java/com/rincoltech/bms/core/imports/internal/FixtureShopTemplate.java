@@ -165,6 +165,12 @@ class FixtureShopTemplate implements ImportTemplate {
             long lent;
             final Map<String, long[]> buckets = new TreeMap<>();
             final ProductStocks products = new ProductStocks();
+            final List<Journal> inventory = new ArrayList<>();
+
+            @Override
+            public void batch(int seq) {
+                products.closeBatch(inventory);
+            }
 
             @Override
             public void row(String entitySet, Map<String, Object> values) {
@@ -196,11 +202,10 @@ class FixtureShopTemplate implements ImportTemplate {
                 if (value != 0 || qty.signum() != 0) {
                     stock.add(new Stock(HEAD_OFFICE, qty, value));
                 }
-                // The journal holds the positive balances only; a negative one is listed apart (ImportBooks.stock).
-                long journalled = products.journalled();
-                if (journalled != 0) {
-                    journals.add(new Journal(HEAD_OFFICE, "inventory", journalled, journalled));
-                }
+                // The journals hold the positive balances only, netted over the whole run; a negative one is listed
+                // apart (ImportBooks.stock).
+                products.closeBatch(inventory);
+                journals.addAll(inventory);
                 if (lent != 0) {
                     loans.add(new Amount(HEAD_OFFICE, lent));
                     buckets.forEach((bucket, b) ->
@@ -233,7 +238,24 @@ class FixtureShopTemplate implements ImportTemplate {
             value.merge(item, amount, Math::addExact);
         }
 
-        /** The value of the items counted above zero: what the opening inventory journal holds. */
+        private long journalledSoFar;
+
+        /**
+         * Closes a batch (Lead on the review of 4105c2a): its inventory journal is what the run's items counted above zero
+         * are worth now less what the earlier batches journalled, so the journals of the run add up to the items netted
+         * over every batch. A fall is a journal the other way (credit inventory), listed by its amount.
+         */
+        void closeBatch(List<ImportForecast.Journal> journals) {
+            long now = journalled();
+            long change = Math.subtractExact(now, journalledSoFar);
+            if (change != 0) {
+                long amount = Math.abs(change);
+                journals.add(new ImportForecast.Journal(HEAD_OFFICE, "inventory", amount, amount));
+            }
+            journalledSoFar = now;
+        }
+
+        /** The value of the items counted above zero: what the opening inventory journals hold. */
         long journalled() {
             long sum = 0;
             for (Map.Entry<String, BigDecimal> e : qty.entrySet()) {
@@ -410,9 +432,9 @@ class FixtureShopTemplate implements ImportTemplate {
             long value;
             long owed;
             long batchOwed;
+            // The run's items: each batch's inventory journal is the change in what its items counted above zero are
+            // worth, netted over the whole run (ImportBooks.stock).
             final ProductStocks products = new ProductStocks();
-            // The batch's items, so its inventory journal holds the items counted above zero only (ImportBooks.stock).
-            ProductStocks batchProducts = new ProductStocks();
 
             @Override
             public void batch(int seq) {
@@ -425,14 +447,10 @@ class FixtureShopTemplate implements ImportTemplate {
             }
 
             private void close() {
-                long batchValue = batchProducts.journalled();
-                if (batchValue != 0) {
-                    journals.add(new Journal(HEAD_OFFICE, "inventory", batchValue, batchValue));
-                }
+                products.closeBatch(journals);
                 if (batchOwed != 0) {
                     journals.add(new Journal(HEAD_OFFICE, "trade_debtors", batchOwed, batchOwed));
                 }
-                batchProducts = new ProductStocks();
                 batchOwed = 0;
             }
 
@@ -445,7 +463,6 @@ class FixtureShopTemplate implements ImportTemplate {
                 if ("adjustment".equals(values.get("kind"))) {
                     qty = qty.add((BigDecimal) values.get("qty"));
                     value = Math.addExact(value, amount);
-                    batchProducts.add(values, amount);
                     products.add(values, amount);
                 } else if (open && RECEIVABLE.neededBy().test(values)) {
                     owed = Math.addExact(owed, amount);

@@ -22,10 +22,12 @@ public interface ImportBooks {
      * ({@link Scope#targets}), never the business's whole balance, so stock held before the import or sold after it is not
      * a difference of the import (review of #873). A negative result is answered as it is: the reconciliation lists it
      * separately (spec section 3.9) as a {@code policy} item of its value, which explains the stock value difference only
-     * because the writer never puts a negative balance in the opening {@code inventory} journal: the journal holds the
-     * positive balances, the source holds all of them, and the difference is the negative ones. A writer that journals a
-     * negative value leaves that value unexplained, and the sign-off is refused (review of 391e1dc). None by default, for a
-     * template that keeps no stock.
+     * because the writer never puts a negative balance in the opening {@code inventory} journals: they hold the positive
+     * balances, the source holds all of them, and the difference is the negative ones. Every side nets each product over
+     * the whole run (the Lead on #873): this answer over all the run's movements, the source over all its written rows,
+     * and the writer's journal of each batch as the change in what the run's products above zero are worth (a fall is a
+     * journal the other way). A writer that journals a negative value leaves that value unexplained, and the sign-off is
+     * refused (review of 391e1dc). None by default, for a template that keeps no stock.
      */
     default List<ImportForecast.ProductStock> stock(Scope scope) {
         return List.of();

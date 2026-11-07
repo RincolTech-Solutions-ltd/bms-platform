@@ -518,10 +518,12 @@ Contents (FR-IMP-08):
 - Opening journal entry numbers per branch and their totals.
 - Every resolution with who, when, before, after and note.
 
-Not in the report #134 built, pending the Lead's confirmation on #873: the opening journal entry numbers (the report
-shows each opening journal's total per branch and kind, found through `import_refs`), and the list of resolutions with
-who, when, before, after and note (each is an audit row of the review, `core.import_issue.resolved`, and each left-out
-or overridden row is an item of the report, without who and when).
+Both of the last two are in the report #134 built (the Lead's ruling on #873): the `ledger` section lists each opening
+journal by its entry number, in the ledger's order, with its branch, kind, debits and credits (`LedgerAccounts.lines`
+gives the number), and the `review` section lists every resolution of the run in the order made: the file and line, the
+code and field, what was decided, who (the user's id), when, before, after and the note. A value of a personal field is
+never shown ("a personal value, not shown"), and a before, after or note that names a personal value of the run is
+hidden, as the resolution's audit row keeps them out.
 
 As built for every template (#134, section 13.14.1 8/16; spec sections 3.9 and 3.10): the reconciliation is made by the
 commit as it finishes and stored as a document (`import_reconciliations`, append-only, migration `V144`), and made again
@@ -539,11 +541,12 @@ are:
 |---|---|---|
 | `counts` | rows per file and per entity set (not blank); facts per file: read, blank, left out, written by this import, already imported before, not found in the books; records created per target type | rows whose `source_ref` `import_refs` holds |
 | `stock_quantity` | per branch and product: the balances checksum | the stock ledger's movements the run registered (`ImportBooks.stock`), never the business's whole balance, so stock held before or moved after the import is not a difference |
-| `stock_value` | per branch | the run's journal lines on `inventory`; each negative balance listed separately as a `policy` item at its value, which is below zero like the difference it explains (source less system). Rule for every writer (spec section 3.9, the retail rule 5): the opening `inventory` journal holds the positive balances only, at the product's cost, so the source, which counts every balance, is the journal plus the negative ones. A writer that journals a negative value leaves it unexplained and the sign-off is refused. The item's value is the books' (quantity times the cost the writer recorded), so a writer whose cost differs from the sheet's amount leaves that gap unexplained too, on purpose: the sheet and the books disagree. An item's rows count together, as the forecast and the writer count them: the source holds each batch's written rows measured as one under the template's rules, so the journal follows each item's net balance, while a row left out keeps its own part, which its item explains (`ImportReconciliationIT`: one count of -2; counts of 5 and -2; counts of -2 and 1) |
+| `stock_value` | per branch | the run's journal lines on `inventory`; each negative balance listed separately as a `policy` item at its value, which is below zero like the difference it explains (source less system). Rule for every writer (spec section 3.9, the retail rule 5): the opening `inventory` journal holds the positive balances only, at the product's cost, so the source, which counts every balance, is the journal plus the negative ones. A writer that journals a negative value leaves it unexplained and the sign-off is refused. The item's value is the books' (quantity times the cost the writer recorded), so a writer whose cost differs from the sheet's amount leaves that gap unexplained too, on purpose: the sheet and the books disagree. An item's rows count together over the whole run, on all three sides (the Lead's ruling on #873): the source holds the run's written rows measured as one under the template's rules, every batch included; the writer journals per batch the change in what the run's items counted above zero are worth, so a fall in a later batch is a journal the other way (credit inventory) and the run's journals net to its positive balances; and `ImportBooks.stock` nets each item over the run's movements. A row left out keeps its own part, which its item explains (`ImportReconciliationIT`: one count of -2; counts of 5 and -2, and of -2 and 1, in one batch and in two) |
 | `receivables` | per branch, as if every credit sale were opened | the run's journal lines on `trade_debtors` |
 | `loan_principal` | per branch | the run's journal lines on `loans_receivable` |
 | `arrears` | loans and principal per branch and bucket, as at the cutover day | the template's loan book |
-| `ledger` | each opening journal per branch and kind; the run's journals balanced, none out of balance, none other than opening journals; the business's trial balance (debits less credits) zero, no entry out of balance | the ledger |
+| `ledger` | each opening journal per branch and kind (its debits); the run's journals balanced, none out of balance, none other than opening journals; the business's trial balance (debits less credits) zero, no entry out of balance; facts: each opening journal by its entry number | the ledger |
+| `review` | no check; facts: every resolution of the review, in the order made, with who, when, before, after and note | `import_issue_resolutions` |
 
 Every difference is itemised: `excluded` (a row left out in the review or held back by an open blocking issue, with its
 file, line, codes and its own part of each check; a row is counted once, left out decided first, and a left-out row adds

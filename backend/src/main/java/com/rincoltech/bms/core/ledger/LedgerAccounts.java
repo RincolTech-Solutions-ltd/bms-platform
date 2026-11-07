@@ -55,7 +55,8 @@ public interface LedgerAccounts {
     /**
      * The lines of these entries as the ledger holds them (issue #134, the import reconciliation): each with its entry, the
      * entry's branch, day and source, the account's {@code system_key} (null for an account without one), and its debit and
-     * credit in minor units. Entries of another business are not seen (row-level security).
+     * credit in minor units, and the entry's number (the signed report lists it, FR-IMP-08). Entries of another business
+     * are not seen (row-level security).
      */
     List<EntryLine> lines(Collection<UUID> entryIds);
 
@@ -73,7 +74,8 @@ public interface LedgerAccounts {
             String sourceType,
             String accountKey,
             long debitMinor,
-            long creditMinor) {}
+            long creditMinor,
+            String entryNo) {}
 
     record TrialBalanceCheck(long debitMinor, long creditMinor, long unbalancedEntries) {}
 

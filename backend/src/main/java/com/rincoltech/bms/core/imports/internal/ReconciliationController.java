@@ -103,7 +103,9 @@ class ReconciliationController {
 
     @Schema(name = "ImportReconciliationSection")
     record SectionResponse(
-            @Schema(description = "counts, stock_quantity, stock_value, receivables, loan_principal, arrears or ledger")
+            @Schema(
+                    description =
+                            "counts, stock_quantity, stock_value, receivables, loan_principal, arrears, ledger or review")
             String key,
 
             String title,

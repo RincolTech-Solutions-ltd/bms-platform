@@ -153,12 +153,19 @@ class ImportReconciliationIT extends IntegrationTest {
         FixtureShopTemplate.POLICIES = List.of();
         extra = 0;
         extraTillRows = "";
+        secondTillRoll = "";
         FixtureShopTemplate.SLOW_BOOKS = false;
         ReconciliationService.signOffTimeout = "60s";
     }
 
     /** Rows a test adds to the end of the golden till roll, in its columns; none by default. */
     volatile String extraTillRows = "";
+
+    /** The rows of a second till roll, uploaded as a batch of its own after the golden files; none by default. */
+    volatile String secondTillRoll = "";
+
+    static final String TILL_HEADER =
+            "Fab Item Code,Fab Buyer No,Fab When,Fab Count,Fab Paid,Fab Entry Type,Fab Cashier\n";
 
     <T> T as(TestDatabase.Fixture f, Supplier<T> work) {
         return TenantContext.callAs(f.tenantId(), work);
@@ -202,6 +209,22 @@ class ImportReconciliationIT extends IntegrationTest {
                                     operator,
                                     mappings.parseOptions(mapping.id(), g.source()))));
             assertThat(batch.status()).as(g.file()).isEqualTo("parsed");
+            batches.add(batch.id());
+        }
+        if (!secondTillRoll.isEmpty()) {
+            // A second till roll after the golden files: a batch of its own (the cross-batch cases).
+            byte[] bytes = (TILL_HEADER + secondTillRoll).getBytes(StandardCharsets.UTF_8);
+            Batch batch = as(
+                    t,
+                    () -> uploads.upload(
+                            runId,
+                            new Upload(
+                                    "fab-till-roll-2.csv",
+                                    new ByteArrayInputStream(bytes),
+                                    bytes.length,
+                                    operator,
+                                    mappings.parseOptions(mapping.id(), "till_roll"))));
+            assertThat(batch.status()).isEqualTo("parsed");
             batches.add(batch.id());
         }
         TestDatabase.owner()
@@ -269,6 +292,12 @@ class ImportReconciliationIT extends IntegrationTest {
      * Each opening journal posts through the framework and its balance is told to the report, as the forecast predicts.
      */
     BatchWriter writer(TestDatabase.Fixture f) {
+        // The run's items so far, over every batch: each batch's inventory journal is the change in what the items
+        // counted above zero are worth (Lead on the review of 4105c2a).
+        Map<String, BigDecimal> itemQty = new TreeMap<>();
+        Map<String, Long> itemValue = new TreeMap<>();
+        long[] journalledSoFar = {0};
+        int[] lastSeq = {Integer.MIN_VALUE};
         return (runId, batchId, seq, checkpoint) -> {
             String source = jdbc.sql("SELECT mapping_source FROM import_batches WHERE id = ?")
                     .param(batchId)
@@ -286,8 +315,13 @@ class ImportReconciliationIT extends IntegrationTest {
             long lent = 0;
             LocalDate lentOn = null;
             Map<String, long[]> buckets = new TreeMap<>();
-            Map<String, BigDecimal> itemQty = new TreeMap<>();
-            Map<String, Long> itemValue = new TreeMap<>();
+            if (seq <= lastSeq[0]) {
+                // The commit after the dry run's rehearsal starts the run again from its first batch.
+                itemQty.clear();
+                itemValue.clear();
+                journalledSoFar[0] = 0;
+            }
+            lastSeq[0] = seq;
             int after = 0;
             while (true) {
                 List<ImportRefs.StagedRow> rows = checkpoint.rows(after, 1_000);
@@ -364,14 +398,17 @@ class ImportReconciliationIT extends IntegrationTest {
                     break;
                 }
             }
-            // The opening inventory journal holds the items counted above zero; a negative balance is listed apart.
+            // The opening inventory journals hold the items counted above zero, netted over the run; a negative balance
+            // is listed apart. A fall since the earlier batches is a journal the other way.
             long journalled = itemQty.entrySet().stream()
                     .filter(e -> e.getValue().signum() > 0)
                     .mapToLong(e -> itemValue.get(e.getKey()))
                     .sum();
-            if (journalled != 0) {
+            long change = journalled - journalledSoFar[0];
+            journalledSoFar[0] = journalled;
+            if (change != 0) {
                 checkpoint.openingJournal(new ImportRefs.Opening(
-                        f.headOffice(), HQ, "inventory", DAY, "inventory", true, journalled + extra));
+                        f.headOffice(), HQ, "inventory", DAY, "inventory", change > 0, Math.abs(change) + extra));
             }
             if (value != 0 || qty.signum() != 0) {
                 checkpoint.stock(HQ, qty, value);
@@ -447,7 +484,33 @@ class ImportReconciliationIT extends IntegrationTest {
                         "receivables",
                         "loan_principal",
                         "arrears",
-                        "ledger");
+                        "ledger",
+                        "review");
+        // FR-IMP-08 (Lead on the review of 4105c2a): each opening journal by its entry number, and every resolution of
+        // the review with who, when, before, after and note. JUSTIFICATION-A3: the assertions the ruling asks for.
+        List<String> entryNos = TestDatabase.owner()
+                .sql("""
+                        SELECT e.entry_no FROM journal_entries e JOIN import_refs r ON r.target_id = e.id
+                         WHERE r.run_id = ? AND r.target_type = 'ledger.journal_entry' ORDER BY e.entry_no
+                        """)
+                .param(run)
+                .query(String.class)
+                .list();
+        assertThat(entryNos).isNotEmpty();
+        assertThat(section(r, "ledger").facts())
+                .extracting(ImportReconciliation.Fact::label)
+                .containsAll(
+                        entryNos.stream().map(no -> "Opening journal " + no).toList());
+        long resolutions = TestDatabase.owner()
+                .sql("SELECT count(*) FROM import_issue_resolutions WHERE run_id = ?")
+                .param(run)
+                .query(Long.class)
+                .single();
+        assertThat(resolutions).isPositive();
+        assertThat(section(r, "review").facts()).hasSize((int) resolutions).allSatisfy(fact -> {
+            assertThat(fact.label()).matches("fab-[a-z-]+\\.csv line \\d+, [A-Z0-9_]+.*");
+            assertThat(fact.value()).contains(" by " + operator, " at ", "; before ", "; after ");
+        });
         List<Check> notTied = r.sections().stream()
                 .flatMap(s -> s.checks().stream())
                 .filter(c -> !c.ties())
@@ -959,15 +1022,26 @@ class ImportReconciliationIT extends IntegrationTest {
 
     // JUSTIFICATION-A3: ruling 2 of the Lead on the review of 1ea73e5, an item counted on two rows, both orders.
     /**
-     * Commits the golden run with two counts of FAB-901 (each "qty,amount", at the fabricated cost of 700) and checks what
-     * must hold either way: it ties and signs, the HQ inventory journal ties with nothing to explain, and the stock value
-     * explains no more than the item's net balance below zero, if it has one.
+     * Commits the golden run with two counts of FAB-901 (each "qty,amount", at the fabricated cost of 700), both in the
+     * golden till roll or the second in a till roll of its own (a second batch), and checks what must hold either way: it
+     * ties and signs, the HQ inventory journals tie with nothing to explain (their debits, a fall in a later batch being
+     * a journal the other way), the stock value is the journals' net, and it explains no more than the item's net balance
+     * below zero over the whole run, if it has one.
      */
-    Report twoCounts(String first, String second, String netQty, String journalled, List<String> negative)
+    Report twoCounts(
+            String first,
+            String second,
+            boolean twoBatches,
+            String netQty,
+            String journalled,
+            String journalDebits,
+            List<String> negative)
             throws IOException {
         new RetailTestSupport(http, t).product(FixtureShopTemplate.SHORT_ITEM, 700, 900);
-        extraTillRows = FixtureShopTemplate.SHORT_ITEM + ",,16/09/2026 09:40," + first + ",Stock take,\n"
-                + FixtureShopTemplate.SHORT_ITEM + ",,16/09/2026 09:45," + second + ",Stock take,\n";
+        String one = FixtureShopTemplate.SHORT_ITEM + ",,16/09/2026 09:40," + first + ",Stock take,\n";
+        String two = FixtureShopTemplate.SHORT_ITEM + ",,16/09/2026 09:45," + second + ",Stock take,\n";
+        extraTillRows = twoBatches ? one : one + two;
+        secondTillRoll = twoBatches ? two : "";
         UUID run = committedGoldenRun(null);
         Report r = as(t, () -> reconciliation.latest(run)).orElseThrow();
 
@@ -983,8 +1057,8 @@ class ImportReconciliationIT extends IntegrationTest {
                 .extracting(Item::amount)
                 .containsExactlyElementsOf(negative);
         Check journal = check(r, "ledger", "journal HQ inventory");
-        assertThat(journal.source()).as(r.render()).isEqualTo(journalled);
-        assertThat(journal.system()).isEqualTo(journalled);
+        assertThat(journal.source()).as(r.render()).isEqualTo(journalDebits);
+        assertThat(journal.system()).isEqualTo(journalDebits);
         assertThat(section(r, "ledger").items()).noneMatch(i -> i.check().equals("journal HQ inventory"));
 
         ResponseEntity<JsonNode> signed = signOff(t, run, r, allSections(r), "Fabricated Signer", today(t));
@@ -996,13 +1070,27 @@ class ImportReconciliationIT extends IntegrationTest {
     @Test
     void countsOfFiveAndMinusTwoOfOneItemAreJournalledAsThreeAndSign() throws IOException {
         // Net 3 on hand worth 2100, all journalled beside the golden FAB-900's 1000; nothing below zero.
-        twoCounts("5,3500", "-2,-1400", "3", "3100", List.of());
+        twoCounts("5,3500", "-2,-1400", false, "3", "3100", "3100", List.of());
     }
 
     @Test
     void countsOfMinusTwoAndOneOfOneItemAreListedApartAndSign() throws IOException {
         // Net 1 below zero worth -700: no journal holds it, so the journal is the golden FAB-900's 1000 alone.
-        twoCounts("-2,-1400", "1,700", "-1", "1000", List.of("-700"));
+        twoCounts("-2,-1400", "1,700", false, "-1", "1000", "1000", List.of("-700"));
+    }
+
+    @Test
+    void countsOfMinusTwoAndThenOneInTwoBatchesAreNettedOverTheRunAndSign() throws IOException {
+        // Batch 3 journals FAB-900's 1000 and nothing for -2; batch 4's +1 leaves the item 1 below zero, so it journals
+        // nothing either. The -700 is the run's net, listed apart (Lead on the review of 4105c2a).
+        twoCounts("-2,-1400", "1,700", true, "-1", "1000", "1000", List.of("-700"));
+    }
+
+    @Test
+    void countsOfFiveAndThenMinusTwoInTwoBatchesAreNettedOverTheRunAndSign() throws IOException {
+        // Batch 3 journals 1000 + 3500 = 4500; batch 4's -2 brings the item to 3, worth 2100, so it journals the fall
+        // of 1400 the other way: the journals' debits are 5900 and their net on inventory is 3100.
+        twoCounts("5,3500", "-2,-1400", true, "3", "3100", "5900", List.of());
     }
 
     @Test

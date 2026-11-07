@@ -118,7 +118,7 @@ class JdbcLedgerAccounts implements LedgerAccounts {
         }
         return jdbc.sql("""
                         SELECT e.id, e.branch_id, e.entry_date, e.source_module, e.source_type, a.system_key, l.debit,
-                               l.credit
+                               l.credit, e.entry_no
                           FROM journal_lines l
                           JOIN journal_entries e ON e.id = l.entry_id
                           JOIN gl_accounts a ON a.id = l.account_id
@@ -134,7 +134,8 @@ class JdbcLedgerAccounts implements LedgerAccounts {
                         rs.getString(5),
                         rs.getString(6),
                         rs.getLong(7),
-                        rs.getLong(8)))
+                        rs.getLong(8),
+                        rs.getString(9)))
                 .list();
     }
 
