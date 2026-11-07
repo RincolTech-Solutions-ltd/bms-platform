@@ -252,6 +252,8 @@ class RetailV1TemplateIT extends IntegrationTest {
         UUID run = reviewed(t, "retail-export-buyer", exportMapping(), dir, exportFiles());
         committed(t, run);
 
+        String report = as(t, () -> runs.commitReport(run)).render();
+        assertThat(report).contains("credit buyer is not in customers.jsonl; kept as entered");
         assertThat(owner("SELECT count(*) FROM retail_customers WHERE tenant_id = ?", t))
                 .as("no customer is created by a sales row")
                 .isZero();

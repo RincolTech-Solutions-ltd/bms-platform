@@ -1813,12 +1813,29 @@ public class RetailImporter {
                     .filter(b -> !b.active())
                     .map(Branches.Branch::id)
                     .collect(java.util.stream.Collectors.toSet());
+            Map<String, Set<UUID>> listed = new HashMap<>();
             for (Balance b : rows) {
                 byBranch.computeIfAbsent(b.branchCode(), k -> new LinkedHashMap<>())
                         .putIfAbsent(b.product().code(), b.qty());
                 costs.put(b.product().code(), b.product().costMinor());
                 ids.put(b.branchCode(), b.branch());
+                listed.computeIfAbsent(b.branchCode(), k -> new HashSet<>())
+                        .add(b.product().id());
             }
+            // A branch an earlier import already journalled takes only a full balances file: one that leaves out an
+            // item the imported stock holds would value the branch without it and journal it away (review of 6205617,
+            // must-fix 2; Lead's note). The batch is refused before anything is posted.
+            byBranch.keySet().forEach(code -> {
+                UUID branch = ids.get(code);
+                if (importJournalled(branch) != 0) {
+                    List<String> missing = heldNotListed(branch, listed.get(code));
+                    if (!missing.isEmpty()) {
+                        throw new IllegalArgumentException("balances.jsonl must list every item at " + code
+                                + ", which an earlier import already journalled; missing: " + String.join(", ", missing)
+                                + ". Correct one item with a stock-take, not a re-import.");
+                    }
+                }
+            });
             byBranch.forEach((code, items) -> {
                 UUID branch = ids.get(code);
                 // The one rule the forecast predicts by (Lead's steer on the review of 51cfb70): the balance rows.
@@ -1869,6 +1886,32 @@ public class RetailImporter {
                         entry.map(e -> (String) e.get("entry_no")).orElse(null),
                         change > 0 ? "posted" : ImportReport.FALL));
             });
+        }
+
+        // JUSTIFICATION-A3: the Lead's note on the review of 6205617 asks the refusal to name the items left out.
+        /**
+         * The items the business's imported stock holds at the branch (every import's historical movements, above zero)
+         * that the balances file does not list, by code.
+         */
+        private List<String> heldNotListed(UUID branch, Set<UUID> listedItems) {
+            List<Map<String, Object>> held =
+                    jdbc.sql("""
+                            SELECT p.id, p.code FROM retail_stock_movements m JOIN retail_products p ON p.id = m.product_id
+                             WHERE m.tenant_id = current_setting('app.tenant_id')::uuid AND m.branch_id = ?
+                               AND m.historical
+                               AND (m.source_type = ?
+                                    OR EXISTS (SELECT 1 FROM import_refs r
+                                                WHERE r.tenant_id = m.tenant_id AND r.target_id = m.source_id)
+                                    OR EXISTS (SELECT 1 FROM retail_import_refs o
+                                                WHERE o.tenant_id = m.tenant_id AND o.target_id = m.source_id))
+                             GROUP BY p.id, p.code
+                            HAVING sum(m.qty) > 0
+                             ORDER BY p.code
+                            """).params(branch, SOURCE_TYPE).query().listOfRows();
+            return held.stream()
+                    .filter(h -> !listedItems.contains((UUID) h.get("id")))
+                    .map(h -> (String) h.get("code"))
+                    .toList();
         }
 
         /**

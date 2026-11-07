@@ -188,6 +188,46 @@ class RetailImportRefsBackfillIT extends IntegrationTest {
                 .containsExactly("balances.jsonl|import-retail|line:1#by-key");
     }
 
+    // JUSTIFICATION-A3: the Lead's note on the review of 6205617 asks this test of the refused partial file.
+    /**
+     * Review of 6205617, must-fix 2 (Lead's note): after the command imported the sample, a balances file with one KLA row
+     * would value KLA without its other items and journal them away. It is refused, naming what it leaves out, and
+     * nothing is posted or written.
+     */
+    @Test
+    void aPartialBalancesFileAtABranchAlreadyJournalledIsRefusedAndPostsNothing(@TempDir Path dir) throws IOException {
+        TestDatabase.Fixture t = TestDatabase.tenant("retail-part", false, true);
+        ImportReport first = importer.run(t.slug(), RetailImportIT.SAMPLE, false);
+        assertThat(first.failed()).as(first.render()).isFalse();
+        String kla = Files.readAllLines(RetailImportIT.SAMPLE.resolve("balances.jsonl")).stream()
+                .filter(l -> l.contains("\"KLA\""))
+                .findFirst()
+                .orElseThrow();
+        Files.writeString(
+                dir.resolve("balances.jsonl"), kla.replaceFirst("\"qty\": \"[^\"]*\"", "\"qty\": \"1\"") + "\n");
+        String counts = "SELECT (SELECT count(*) FROM journal_entries WHERE tenant_id = ?) || ' '"
+                + " || (SELECT count(*) FROM retail_stock_movements WHERE tenant_id = ?)";
+        String before = TestDatabase.owner()
+                .sql(counts)
+                .params(t.tenantId(), t.tenantId())
+                .query(String.class)
+                .single();
+
+        ImportReport partial = importer.run(t.slug(), dir, false);
+
+        assertThat(partial.failed()).isTrue();
+        assertThat(partial.render())
+                .contains("balances.jsonl must list every item at KLA")
+                .contains("missing: ");
+        assertThat(TestDatabase.owner()
+                        .sql(counts)
+                        .params(t.tenantId(), t.tenantId())
+                        .query(String.class)
+                        .single())
+                .as("no journal, no legacy balance")
+                .isEqualTo(before);
+    }
+
     private static String status(UUID run) {
         return TestDatabase.owner()
                 .sql("SELECT status FROM import_runs WHERE id = ?")

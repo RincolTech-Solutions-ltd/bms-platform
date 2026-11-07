@@ -299,7 +299,15 @@ The import is idempotent for the data it imports:
 - The journal is posted only for the branches the run's `balances.jsonl` names. Imported history
   at a branch with no balance rows (for example purchases at a shop the balances leave out) is not
   journalled; the report lists each such item (`no balance row for branch ... its derived balance
-  ... is kept`). Add that branch's balance rows and re-run to journal it.
+  ... is kept`). Import a branch's balances whole, in one file, the first time.
+- Once an import has journalled a branch's opening stock, a later balances file must list every
+  item the imported stock holds there. One that leaves an item out is refused before anything is
+  posted (`balances.jsonl must list every item at KLA, which an earlier import already journalled;
+  missing: ...`), from the command and from the screens alike. Correct one item with a stock-take
+  in the app, not by a re-import. Two sources mapped onto `balances` for the same branch in one
+  upload are refused the same way at the second; give the balances as one source.
+- A dry run of the command holds the business's import key for its whole run: a real command or
+  a screens commit started meanwhile is refused (`IMPORT_IN_PROGRESS`); run it after the dry run.
 - The same export uploaded through the import screens after the command (mapping onto
   `retail_v1`) is previewed net of what the command already journalled, so the preview predicts
   no journal where the loader posts none. The preview reads only the balance rows, so where the
