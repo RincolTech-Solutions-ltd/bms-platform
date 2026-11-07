@@ -25,6 +25,24 @@ and a different `--first-live-date` is refused with exit status 1, so a re-run n
 Exit status 0 means every file was imported (anomalies are reported, not fatal); 1 means a file
 failed, or the tenant or directory was refused; 2 is a usage error.
 
+**On the import framework (issue #135).** The command's interface, its reading of the export and
+its report are unchanged; underneath, each file is one batch of a run of customer data onboarding
+(SDD chapter 13 section 13.14), written by the loader of the canonical template `retail_v1` with the
+framework's guards. What that means for the operator:
+
+- The run shows in `import_runs` with origin `import_retail`, one batch per file recording the
+  export's mapping `import-retail-export` (stored once for the business). It is not listed under
+  Imports to sign off: the command's runs are not reconciled in the app, the report below is the
+  record.
+- The command is refused, with nothing written, while an import of the screens is being committed
+  for the business (`IMPORT_IN_PROGRESS`), and a real run is refused while the platform's import
+  kill switch is off (`imports_disabled`). A dry run is not stopped by the switch.
+- A command killed part way leaves its run `committing`; the next run of the command cancels it
+  and, as before, skips what its committed files wrote.
+- The next retail customer does not need an export script: their sheet is uploaded through the
+  import screens with a mapping onto `retail_v1` (spec `docs/specs/customer-data-onboarding.md`
+  Appendix A). The cash book files stay this command's.
+
 **Real data never enters the repository.** The export lives only on the host, readable by the
 operator, and is deleted when the import is signed off. Staging gets fabricated data only; the real
 export goes to production.
@@ -251,8 +269,11 @@ legacy balances the import date, which is also the date of the opening journals.
 
 The import is idempotent for the data it imports:
 
-- History rows are keyed by `source_ref` in `retail_import_refs`; a reference already imported is
-  counted as `existing` and skipped.
+- History rows are keyed by `source_ref` in `import_refs` (issue #135: the key
+  `<file>.jsonl|-|ref:<source_ref>`, held by key alone), and still written to `retail_import_refs`
+  beside it until that table is retired; a reference already imported, by this command before or
+  after the upgrade (migration V145 copied every earlier reference), is counted as `existing` and
+  skipped.
 - Catalogue, suppliers, credit buyers and branches are matched by code or name.
 - **An existing product's prices are never changed by a re-run** (issue #73). A product that
   already exists keeps its cost and sell price and gets no price history row, so a price edited in
@@ -265,7 +286,10 @@ The import is idempotent for the data it imports:
   equals the source is reported (`legacy balance already written ... correct it with a stock-take`),
   never silently changed.
 - The opening journal is posted once per branch (`already posted, not posted again`), and so is
-  the cash opening journal of each shop (`retail.cash_opening:<branch>`).
+  the cash opening journal of each shop (`retail.cash_opening:<branch>`). Since issue #135 the stock
+  opening journal is posted by the import framework for what the run's own stock above zero is
+  worth, so a re-run that adds history (new `source_ref` values) posts a journal for that stock;
+  one that adds nothing posts none.
 - Cash book rows are keyed by `source_ref` per file (`savings`, `expenses`, `banking`,
   `withdrawals`, `advances`, `advance_payments`); a re-run takes no advance number and adds no row.
   A banked row keeps the expected amount it was computed with; a savings, expense or advance added
