@@ -346,8 +346,10 @@ class RetailV1Template implements ImportTemplate {
             return costs;
         });
         // JUSTIFICATION-A3: the re-review of 0bb283a (must-fix 3) asks the forecast to net what the loader nets.
-        // What earlier imports' opening stock journals already hold per branch, as the loader nets them: the same
-        // export uploaded after the command predicts no journal, as the loader posts none.
+        // What the command's imports' opening stock journals already hold per branch (its runs, V145's and the old
+        // table's), as the loader nets them: the same export uploaded after the command predicts no journal, as the
+        // loader posts none. A framework run's own journals are left out: the reconciliation forecasts a committed run
+        // with this too, and must predict what that run posted.
         Map<String, Long> journalled = readOnly.execute(s -> {
             Map<String, Long> out = new HashMap<>();
             jdbc.sql("""
@@ -357,12 +359,17 @@ class RetailV1Template implements ImportTemplate {
                               JOIN gl_accounts a ON a.id = l.account_id
                               JOIN branches b ON b.id = e.branch_id
                              WHERE e.tenant_id = current_setting('app.tenant_id')::uuid AND a.system_key = 'inventory'
-                               AND e.id IN (SELECT r.target_id FROM import_refs r
+                               AND e.id IN (SELECT r.target_id FROM import_refs r JOIN import_runs u ON u.id = r.run_id
                                              WHERE r.tenant_id = e.tenant_id AND r.target_type = 'ledger.journal_entry'
-                                               AND r.source_key LIKE 'opening|inventory|%'
+                                               AND r.source_key LIKE 'opening|inventory|%' AND u.origin <> 'framework'
                                             UNION
                                             SELECT o.target_id FROM retail_import_refs o
-                                             WHERE o.tenant_id = e.tenant_id AND o.source_file = 'opening')
+                                             WHERE o.tenant_id = e.tenant_id AND o.source_file = 'opening'
+                                               AND NOT EXISTS (SELECT 1 FROM import_refs f
+                                                                 JOIN import_runs fu ON fu.id = f.run_id
+                                                                WHERE f.tenant_id = e.tenant_id
+                                                                  AND f.target_id = o.target_id
+                                                                  AND fu.origin = 'framework'))
                              GROUP BY b.code
                             """)
                     .query((rs, n) -> out.put(compare(rs.getString("code")), rs.getLong("held")))

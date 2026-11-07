@@ -304,7 +304,9 @@ The import is idempotent for the data it imports:
   `retail_v1`) is previewed net of what the command already journalled, so the preview predicts
   no journal where the loader posts none. The preview reads only the balance rows, so where the
   business's imported stock and the balances differ (sales made in the app since), run the
-  re-import through the command instead.
+  re-import through the command instead. A second upload through the screens after an earlier
+  one is previewed without the earlier upload's journals; re-import such a business through the
+  command too.
 - Only one command runs per business. A second one started while the first is writing, or within
   15 minutes of its last file, is refused (`Another import is being written for this business`);
   wait and run it again. A run left `committing` for longer by a killed process is cancelled by
