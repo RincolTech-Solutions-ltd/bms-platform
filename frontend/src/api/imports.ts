@@ -31,6 +31,13 @@ export async function reconciliationOf(runId: string): Promise<Reconciliation> {
   return data;
 }
 
+/** Makes the reconciliation again from the source and the books (core.imports.manage): after a correction, or when none was made. */
+export async function reconcileAgain(runId: string): Promise<Reconciliation> {
+  const { data, error } = await api.POST('/api/v1/imports/runs/{run_id}/reconciliation', { params: { path: { run_id: runId } } });
+  if (error || !data) fail(error, 'Could not make the reconciliation. Try again.');
+  return data;
+}
+
 export async function signOff(runId: string, body: SignOffRequest): Promise<Reconciliation> {
   const { data, error } = await api.POST('/api/v1/imports/runs/{run_id}/sign-off', { params: { path: { run_id: runId } }, body });
   if (error || !data) fail(error, 'Could not sign. Nothing was signed.');

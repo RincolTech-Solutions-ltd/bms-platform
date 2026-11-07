@@ -223,7 +223,8 @@ class FixtureShopTemplate implements ImportTemplate {
 
         List<ImportForecast.ProductStock> list() {
             List<ImportForecast.ProductStock> out = new ArrayList<>();
-            qty.forEach((item, q) -> out.add(new ImportForecast.ProductStock(HEAD_OFFICE, item, q, value.get(item))));
+            qty.forEach((item, q) -> out.add(
+                    new ImportForecast.ProductStock(HEAD_OFFICE, item, q, BigDecimal.valueOf(value.get(item)))));
             return out;
         }
     }
@@ -233,9 +234,10 @@ class FixtureShopTemplate implements ImportTemplate {
     JdbcClient jdbc;
 
     /**
-     * The fixture's books (issue #134), read inside the reconciliation's transaction as the business: the stock on hand
-     * per branch and item from the retail stock ledger the test writers post to, valued at each movement's unit cost (the
-     * value matters only for a negative balance, listed separately), and the run's loans from its {@code loans_receivable}
+     * The fixture's books (issue #134), read inside the reconciliation's transaction as the business: the stock the run's
+     * registered movements put on hand per branch and item, from the retail stock ledger the test writers post to, valued
+     * exactly at each movement's unit cost (the value matters only for a negative balance, listed separately), and the
+     * run's loans from its {@code loans_receivable}
      * opening journals, one loan per line, aged from the entry's day to the day asked (the fixture has no loan book of its
      * own until the lending template of #136).
      */
@@ -248,22 +250,24 @@ class FixtureShopTemplate implements ImportTemplate {
         return new ImportBooks() {
             @Override
             public List<ImportForecast.ProductStock> stock(Scope scope) {
+                List<UUID> movements = scope.of("retail.stock_movement");
+                if (movements.isEmpty()) {
+                    return List.of();
+                }
+                // Only the movements the run registered: stock held before or moved after the import is not the
+                // import's.
                 return db.sql("""
                                 SELECT b.code, p.code, sum(m.qty), sum(m.qty * m.unit_cost_minor)
                                   FROM retail_stock_movements m
                                   JOIN branches b ON b.id = m.branch_id
                                   JOIN retail_products p ON p.id = m.product_id
+                                 WHERE m.id = ANY(?)
                                  GROUP BY b.code, p.code
-                                HAVING sum(m.qty) <> 0
                                  ORDER BY b.code, p.code
                                 """)
+                        .param(movements.toArray(UUID[]::new))
                         .query((rs, n) -> new ImportForecast.ProductStock(
-                                rs.getString(1),
-                                rs.getString(2),
-                                rs.getBigDecimal(3),
-                                rs.getBigDecimal(4)
-                                        .setScale(0, java.math.RoundingMode.HALF_UP)
-                                        .longValueExact()))
+                                rs.getString(1), rs.getString(2), rs.getBigDecimal(3), rs.getBigDecimal(4)))
                         .list();
             }
 

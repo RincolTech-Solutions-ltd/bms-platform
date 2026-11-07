@@ -228,9 +228,9 @@ class ReconciliationController {
         StringBuilder out = new StringBuilder(r.render());
         out.append("sha256: ").append(r.sha256()).append('\n');
         if (r.signed() != null) {
-            out.append("signed by: ")
-                    .append(r.signed().signedName())
-                    .append(" on ")
+            // The signer's typed name is a personal value: it stays with the sign-off in the app, not in a file that
+            // travels (review of #873).
+            out.append("signed for the business on ")
                     .append(r.signed().signedOn())
                     .append(", sections ticked: ")
                     .append(String.join(", ", r.signed().sections()))

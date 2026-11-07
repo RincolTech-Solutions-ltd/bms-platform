@@ -380,12 +380,12 @@ Every value is an exact decimal string, money in minor units, never rounded. Per
 | Section | Source (the staged rows, each measured alone by the template's forecast) | System (the books) |
 |---|---|---|
 | Rows and records | per file and per entity set: rows that are not blank | rows whose `source_ref` is in `import_refs` |
-| Stock quantity | per branch and product: the sum of each row's stock | the stock ledger's balance (`ImportBooks.stock`) |
+| Stock quantity | per branch and product: the sum of each row's stock | the stock ledger's movements the run registered (`ImportBooks.stock`) |
 | Stock value | per branch: the sum of each row's stock value | `D - C` of the run's journal lines on `inventory`, plus each negative balance listed at its value |
 | Money owed by customers | per branch: each row's receivable as if opened (`open_from_list`) | `D - C` of the run's journal lines on `trade_debtors` |
 | Loan principal outstanding | per branch: each row's principal | `D - C` of the run's journal lines on `loans_receivable` |
 | Loans by days past due | per branch and bucket, as at the cutover day: loans and principal | the loan book (`ImportBooks.arrears`) |
-| Journals and trial balance | per branch and kind: each row's opening journal debit | the debits of the run's journals of that kind; then the run's debits against its credits, its entries out of balance and not opening journals (both 0), and the business's total debits against total credits and its entries out of balance (0) |
+| Journals and trial balance | per branch and kind: each row's opening journal debit | the debits of the run's journals of that kind; then the run's debits against its credits, its entries out of balance and not opening journals (both 0), and the business's debits less credits and its entries out of balance (both 0) |
 
 Items: one per row left out (`excluded`, with its file, line and codes and its own part of each check), per written row
 with an overridden warning (`overridden`, amount 0), per check the receivable decision changes (`policy`, the option and

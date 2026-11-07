@@ -1484,8 +1484,8 @@ export const importsSignOffPage: Tour = {
       body: 'Each row is one import and says whether it is ready to sign. Tap it to compare your sheet with BMS, check by check. Each difference shows why: a row left out, a warning accepted or your decision.',
     },
     {
+      // A card in the middle of the page: the signing happens on an import, which the list opens.
       id: 'sign',
-      target: 'imports-list',
       title: 'Tick, type and sign',
       body: 'Tick each section once you have checked it, type your name and today\'s date, and tap Sign the reconciliation. A difference that is not explained cannot be signed.',
     },

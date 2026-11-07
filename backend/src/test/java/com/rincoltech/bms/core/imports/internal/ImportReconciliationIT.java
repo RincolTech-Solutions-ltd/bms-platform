@@ -777,6 +777,123 @@ class ImportReconciliationIT extends IntegrationTest {
                 : response.getBody().get("code").asString();
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // The review of #873: stock moved after the commit, books changed before the sign-off, a row left out that an
+    // earlier run imported.
+    // JUSTIFICATION-A3: three new test cases the review's must-fix points 1, 2 and 3 ask for.
+    // ---------------------------------------------------------------------------------------------
+
+    /** A stock movement of the fabricated item at the head office, recorded as the business, outside any import. */
+    UUID moveStock(BigDecimal qty) {
+        UUID product = as(t, () -> new TransactionTemplate(transactionManager).execute(s -> catalogue.productsByCode()))
+                .get(FixtureShopTemplate.EXISTING_ITEM.toLowerCase(Locale.ROOT))
+                .id();
+        return as(
+                t,
+                () -> new TransactionTemplate(transactionManager)
+                        .execute(s -> stock.recordHistorical(
+                                        DAY,
+                                        List.of(new HistoricalMovement(
+                                                t.headOffice(),
+                                                product,
+                                                "legacy_balance",
+                                                qty,
+                                                700,
+                                                Instant.parse("2026-09-29T08:00:00Z"),
+                                                "test_after_import",
+                                                null,
+                                                null,
+                                                "Fabricated stock change after the import")))
+                                .getFirst()));
+    }
+
+    @Test
+    void stockMovedAfterTheCommitIsNotADifferenceButBooksChangedBeforeTheSignOffAreRefused() throws IOException {
+        UUID run = committedGoldenRun(null);
+
+        // Stock the business moves after the import is not the import's: the check reads the run's own movements.
+        moveStock(BigDecimal.ONE);
+        Report again = as(t, () -> reconciliation.reconcile(run, operator));
+        assertThat(again.signable()).as(again.render()).isTrue();
+        assertThat(check(again, "stock_quantity", "HQ FAB-900").system()).isEqualTo("1.5");
+
+        // What the run brought in changes after the admin read it (a movement registered as the run's): the sign-off
+        // measures again in its own transaction and refuses the figures it was shown.
+        UUID extra = moveStock(BigDecimal.ONE);
+        UUID batch = TestDatabase.owner()
+                .sql("SELECT id FROM import_batches WHERE run_id = ? ORDER BY seq LIMIT 1")
+                .param(run)
+                .query(UUID.class)
+                .single();
+        TestDatabase.owner()
+                .sql("INSERT INTO import_refs (id, tenant_id, run_id, batch_id, source_key, source_ref, target_type,"
+                        + " target_id) VALUES (?, ?, ?, ?, 'fab-extra|-|line:1', 'fab-extra|-|line:1#0', ?, ?)")
+                .params(UUID.randomUUID(), t.tenantId(), run, batch, "retail.stock_movement", extra)
+                .update();
+        assertThat(code(signOff(t, run, again, allSections(again), "Fabricated Signer", today(t))))
+                .isEqualTo("books_changed");
+        assertThat(status(run)).isEqualTo("committed");
+        assertThat(signoffs(run)).isZero();
+    }
+
+    @Test
+    void aRowLeftOutThatAnEarlierRunImportedIsNotADifference() throws IOException {
+        UUID first = committedGoldenRun(null);
+        assertThat(status(first)).isEqualTo("committed");
+
+        // A second run of the same item list: every row the first run wrote is already imported; line 4 (a twin of line
+        // 2, written by the first run under an overridden warning) is now left out in the review.
+        Mapping mapping = as(t, () -> mappings.latest("fab-shop").orElseThrow());
+        UUID second = as(t, () -> runs.open(operator).id());
+        byte[] bytes = Files.readAllBytes(GoldenRun.DIR.resolve("fab-item-list.csv"));
+        UUID batch = as(
+                        t,
+                        () -> uploads.upload(
+                                second,
+                                new Upload(
+                                        "fab-item-list.csv",
+                                        new ByteArrayInputStream(bytes),
+                                        bytes.length,
+                                        operator,
+                                        mappings.parseOptions(mapping.id(), "item_list"))))
+                .id();
+        TestDatabase.owner()
+                .sql("UPDATE import_runs SET cutover_at = ? WHERE id = ?")
+                .params(Timestamp.from(GoldenRun.CUTOVER), second)
+                .update();
+        as(t, () -> validation.validate(second));
+        Issue twin = as(t, () -> validation.issues(batch)).stream()
+                .filter(i -> i.line() == 4 && "CODE_DUPLICATE".equals(i.code()))
+                .findFirst()
+                .orElseThrow();
+        as(
+                t,
+                () -> review.resolve(
+                        twin.id(),
+                        new Resolution("exclude_row", twin.version(), null, null, null, "Fabricated twin left out"),
+                        operator));
+        reviewEverything(List.of(batch));
+        FixtureShopTemplate.SCRIPT = writer(t);
+        as(t, () -> runs.dryRun(second, operator));
+        as(t, () -> runs.transition(second, "ready"));
+        as(t, () -> runs.recordPreImportDump(second, "pre-import-fabricated-2.dump", Instant.now(), SHA));
+        CommitApproval.readyToCommit(http, t, runs, second, SHA);
+        assertThat(as(t, () -> runs.commit(second))).isEqualTo(ImportRuns.CommitOutcome.COMMITTED);
+
+        Report r = as(t, () -> reconciliation.latest(second)).orElseThrow();
+
+        assertThat(r.signable()).as(r.render()).isTrue();
+        // Nine rows that are not blank, four of them in the books (three written before, and line 4 that the first run
+        // wrote): the five left out and not in the books are the difference; line 4 is not itemised as a missing row.
+        Check rows = check(r, "counts", "set items");
+        assertThat(List.of(rows.source(), rows.system(), rows.difference(), rows.unitemised()))
+                .containsExactly("9", "4", "5", "0");
+        assertThat(section(r, "counts").items())
+                .filteredOn(i -> i.reason().equals(ImportReconciliation.EXCLUDED))
+                .extracting(Item::line)
+                .doesNotContain(4);
+    }
+
     @Test
     void theSignedReportNeverChangesAndAnotherBusinessReachesNoneOfIt() throws IOException {
         UUID run = committedGoldenRun(null);

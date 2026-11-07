@@ -442,7 +442,7 @@ export const router = createRouter({
     forgotPasswordRoute,
     resetPasswordRoute,
     acceptInvitationRoute,
-    staffRoute.addChildren([staffHomeRoute, staffMoneyRoute, staffMoreRoute, staffKitRoute, staffApprovalsRoute, staffSetupRoute, staffBranchesRoute, staffTwoStepPolicyRoute, staffApprovalRulesRoute, staffBusinessNotificationsRoute, staffBillingRoute, staffCloseRoute, staffReferralsRoute, staffImportsSignOffRoute,staffOwnTwoStepRoute, staffRetailRoute.addChildren([
+    staffRoute.addChildren([staffHomeRoute, staffMoneyRoute, staffMoreRoute, staffKitRoute, staffApprovalsRoute, staffSetupRoute, staffBranchesRoute, staffTwoStepPolicyRoute, staffApprovalRulesRoute, staffBusinessNotificationsRoute, staffBillingRoute, staffCloseRoute, staffReferralsRoute, staffImportsSignOffRoute, staffOwnTwoStepRoute, staffRetailRoute.addChildren([
         retailHomeRoute,
         retailSaleRoute,
         retailCreditSalesRoute,

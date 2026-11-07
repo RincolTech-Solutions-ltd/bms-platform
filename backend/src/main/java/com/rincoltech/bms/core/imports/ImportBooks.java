@@ -17,8 +17,10 @@ import java.util.UUID;
 public interface ImportBooks {
 
     /**
-     * Stock on hand per branch and product as the vertical's stock ledger holds it now, quantity and value at current cost,
-     * for every product the business holds stock of. A negative balance is answered as it is: the reconciliation lists it
+     * The stock the run's own records put on hand, per branch and product, as the vertical's stock ledger holds those
+     * records: the quantity and its value at cost of the stock movements the run registered in {@code import_refs}
+     * ({@link Scope#targets}), never the business's whole balance, so stock held before the import or sold after it is not
+     * a difference of the import (review of #873). A negative result is answered as it is: the reconciliation lists it
      * separately (spec section 3.9). None by default, for a template that keeps no stock.
      */
     default List<ImportForecast.ProductStock> stock(Scope scope) {

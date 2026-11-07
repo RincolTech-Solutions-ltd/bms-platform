@@ -4,6 +4,7 @@ import { type FormEvent, useState } from 'react';
 import { businessToday } from '../../../api/retail';
 import {
   downloadReconciliation,
+  reconcileAgain,
   reconciliationOf,
   signOff,
   signOffRuns,
@@ -94,6 +95,27 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
   // toast-exempt: saves nothing: a download changes nothing, and the device shows the saved file
   const download = useMutation({ mutationFn: (r: Reconciliation) => downloadReconciliation(runId, r.version ?? 1) });
 
+  // Made again from the source and the books, by whoever runs imports (core.imports.manage): when the commit could not make
+  // it, or after a correction (review of #873). The new version replaces the one on screen; nothing is ticked any more.
+  const canRemake = (me.permissions ?? []).includes('core.imports.manage');
+  const remake = useMutation({
+    meta: { success: 'Reconciliation made again' },
+    mutationFn: () => reconcileAgain(runId),
+    onSuccess: async (made) => {
+      queryClient.setQueryData(reconciliationKey(runId), made);
+      setTicked(new Set());
+      await queryClient.invalidateQueries({ queryKey: RUNS });
+    },
+  });
+  const remakeButton = canRemake && (
+    <>
+      <BusyButton type="button" className="btn" busy={remake.isPending} onClick={() => remake.mutate()} data-tour="imports-remake">
+        Make the reconciliation again
+      </BusyButton>
+      {remake.isError && <p role="alert">{remake.error instanceof Error ? remake.error.message : 'Could not make the reconciliation.'}</p>}
+    </>
+  );
+
   const back = (
     <button type="button" /* busy-exempt: goes back to the list, sends nothing */ className="btn" onClick={onBack}>
       All imports to sign off
@@ -103,7 +125,8 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
     return (
       <main className="stack">
         <h1>Sign off the import</h1>
-        <p role="alert">Could not load the reconciliation of this import.</p>
+        <p role="alert">This import has no reconciliation to show yet.</p>
+        {remakeButton}
         {back}
       </main>
     );
@@ -154,6 +177,7 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
           </p>
         )
       )}
+      {!signed && !r.signable && remakeButton}
       {(r.sections ?? []).map((s) => (
         <SectionCard
           key={s.key}

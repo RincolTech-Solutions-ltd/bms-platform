@@ -61,11 +61,17 @@ const recon = (signable: boolean): Reconciliation => ({
 let runs: SignOffRun[] = [];
 let view: Reconciliation = recon(true);
 const sent: SignOffRequest[] = [];
+let remade = 0;
 
 vi.mock('../../../api/imports', async (original) => ({
   ...(await original<typeof import('../../../api/imports')>()),
   signOffRuns: () => Promise.resolve(runs),
   reconciliationOf: () => Promise.resolve(view),
+  reconcileAgain: () => {
+    remade += 1;
+    view = { ...recon(true), id: 'rec-2', version: 2 };
+    return Promise.resolve(view);
+  },
   signOff: (_run: string, body: SignOffRequest) => {
     sent.push(body);
     view = { ...view, signed: { signed_at: '2026-10-02T09:00:00Z', signed_by: 'u-1', signed_name: body.name, signed_on: body.date, sections: body.sections } };
@@ -96,6 +102,7 @@ beforeEach(() => {
   runs = [{ run_id: RUN, status: 'committed', committed_at: '2026-10-01T07:00:00Z', version: 1, signable: true }];
   view = recon(true);
   sent.length = 0;
+  remade = 0;
 });
 
 afterEach(() => cleanup());
@@ -142,6 +149,24 @@ describe('imports to sign off', () => {
     expect(screen.getByText(/\(not explained\)/)).toBeTruthy();
     expect(screen.queryByRole('checkbox')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Sign the reconciliation' })).toBeNull();
+  });
+
+  it('lets whoever runs imports make the reconciliation again once a difference is corrected', async () => {
+    view = recon(false);
+    show({ ...admin, permissions: [...(admin.permissions ?? []), 'core.imports.manage'] } as Me);
+    fireEvent.click(await screen.findByRole('button', { name: /Imported on/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Make the reconciliation again' }));
+    await waitFor(() => expect(remade).toBe(1));
+    expect(await screen.findByText(/Version 2, as at 1 Oct 2026/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Sign the reconciliation' })).toBeTruthy();
+  });
+
+  it('offers the admin who only signs no way to make it again', async () => {
+    view = recon(false);
+    show(admin);
+    fireEvent.click(await screen.findByRole('button', { name: /Imported on/ }));
+    expect(await screen.findByText(/cannot be signed yet/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Make the reconciliation again' })).toBeNull();
   });
 
   it('lists the explained differences in plain words, by file and line', async () => {

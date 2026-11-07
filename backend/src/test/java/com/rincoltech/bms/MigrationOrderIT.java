@@ -3782,14 +3782,28 @@ class MigrationOrderIT {
                         .as(table)
                         .hasStackTraceContaining("append-only");
             }
+            // A run that is not committed is neither reconciled nor signed: one reconciled while committed and then
+            // moved back by hand (as only the owner can) still refuses the sign-off.
             UUID draft = UUID.randomUUID();
             owner.sql("INSERT INTO import_runs (id, tenant_id, created_by, status) VALUES (?, ?, ?, 'ready')")
                     .params(draft, tenant, UUID.randomUUID())
+                    .update();
+            assertThatThrownBy(() -> owner.sql("INSERT INTO import_reconciliations (id, tenant_id, run_id, version,"
+                                    + " as_at, report, sha256, signable) VALUES (?, ?, ?, 1, DATE '2026-10-01', '{}', ?,"
+                                    + " true)")
+                            .params(UUID.randomUUID(), tenant, draft, sha)
+                            .update())
+                    .hasStackTraceContaining("only a committed import is reconciled");
+            owner.sql("UPDATE import_runs SET status = 'committed' WHERE id = ?")
+                    .param(draft)
                     .update();
             UUID ofDraft = UUID.randomUUID();
             owner.sql("INSERT INTO import_reconciliations (id, tenant_id, run_id, version, as_at, report, sha256,"
                             + " signable) VALUES (?, ?, ?, 1, DATE '2026-10-01', '{}', ?, true)")
                     .params(ofDraft, tenant, draft, sha)
+                    .update();
+            owner.sql("UPDATE import_runs SET status = 'ready' WHERE id = ?")
+                    .param(draft)
                     .update();
             assertThatThrownBy(() -> owner.sql(signOff)
                             .params(UUID.randomUUID(), tenant, draft, ofDraft, sha, UUID.randomUUID())

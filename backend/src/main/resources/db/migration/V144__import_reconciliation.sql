@@ -21,7 +21,11 @@
 -- forced row-level security, so the signed report never changes after the sign-off. The trigger
 -- `import_signoff_rules` refuses, for every role, a sign-off of a run that is not `committed`, of a reconciliation that is
 -- not the run's newest, of one with an unitemised difference, of a sha256 that is not the stored one, and any new
--- reconciliation of a run already signed (the signed document stays the newest for good).
+-- reconciliation of a run that is not committed or is already signed (the signed document stays the newest for good). It
+-- takes the run FOR UPDATE in both cases, so the two never race past each other.
+--
+-- `imports_erase_personal_data()` is this module's part of removing a closed business (ADR-090): the typed name of a
+-- sign-off becomes "Removed"; the signed document holds no personal value and stays for the purge.
 --
 -- Personal data: the name the signer typed in `import_signoffs.signed_name`, the signature itself; nowhere else.
 --
@@ -93,14 +97,20 @@ DECLARE
     v_rec      import_reconciliations%ROWTYPE;
     v_newest   integer;
 BEGIN
+    -- Both branches take the run FOR UPDATE first, so a reconciliation and a sign-off of one run never pass each other
+    -- unseen (review of #873): the second waits for the first and then sees its row.
+    SELECT status INTO v_status FROM import_runs WHERE id = NEW.run_id FOR UPDATE;
     IF TG_TABLE_NAME = 'import_reconciliations' THEN
         IF EXISTS (SELECT 1 FROM import_signoffs s WHERE s.run_id = NEW.run_id) THEN
             RAISE EXCEPTION 'the reconciliation of a signed off import never changes'
                 USING ERRCODE = 'check_violation', CONSTRAINT = 'import_reconciliation_after_sign_off';
         END IF;
+        IF v_status IS DISTINCT FROM 'committed' THEN
+            RAISE EXCEPTION 'only a committed import is reconciled'
+                USING ERRCODE = 'check_violation', CONSTRAINT = 'import_reconciliation_run_committed';
+        END IF;
         RETURN NEW;
     END IF;
-    SELECT status INTO v_status FROM import_runs WHERE id = NEW.run_id FOR UPDATE;
     IF v_status IS DISTINCT FROM 'committed' THEN
         RAISE EXCEPTION 'only a committed import is signed off'
             USING ERRCODE = 'check_violation', CONSTRAINT = 'import_signoff_run_committed';
@@ -127,3 +137,20 @@ CREATE TRIGGER import_signoff_rules BEFORE INSERT ON import_signoffs
     FOR EACH ROW EXECUTE FUNCTION import_signoff_rules();
 CREATE TRIGGER import_signoff_rules BEFORE INSERT ON import_reconciliations
     FOR EACH ROW EXECUTE FUNCTION import_signoff_rules();
+
+-- The removal of a closed business (V102): the signer's typed name goes; the rest of the sign-off stays for the purge. Runs
+-- as bms_owner inside the removal the operator confirmed (bms_removing_tenant), which reject_mutation lets through
+-- (bms_erasing).
+CREATE FUNCTION imports_erase_personal_data() RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE
+    v_tenant uuid := bms_removing_tenant();
+    v_rows   integer;
+BEGIN
+    UPDATE import_signoffs SET signed_name = 'Removed' WHERE tenant_id = v_tenant AND signed_name <> 'Removed';
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    RETURN v_rows;
+END
+$$;
+REVOKE ALL ON FUNCTION imports_erase_personal_data() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION imports_erase_personal_data() TO bms_app;

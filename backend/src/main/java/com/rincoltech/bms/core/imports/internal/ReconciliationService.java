@@ -240,6 +240,28 @@ class ReconciliationService implements ImportReconciliation {
                                 + " decision, so it cannot be signed. Find and correct it, then make the reconciliation"
                                 + " again.");
             }
+            // The books as they are now, measured again in this transaction, which holds the run: a sign-off of figures
+            // the books no longer hold is refused (review of #873). JUSTIFICATION-A3: must-fix 2 of that review.
+            Measured now = measure(runId, run);
+            String again = sha256(new Report(
+                            newest.id(),
+                            runId,
+                            newest.version(),
+                            newest.generatedAt(),
+                            now.asAt(),
+                            "",
+                            now.signable(),
+                            now.sections(),
+                            null)
+                    .render());
+            if (!again.equals(newest.sha256())) {
+                throw new ApiException(
+                        HttpStatus.CONFLICT,
+                        "books_changed",
+                        "The books changed",
+                        "What the import brought in changed in the books since this reconciliation was made; make it"
+                                + " again, read it and sign that.");
+            }
             Set<String> wanted = new TreeSet<>();
             newest.sections().forEach(sec -> wanted.add(sec.key()));
             Set<String> ticked = new TreeSet<>(signOff.sections());
@@ -398,11 +420,61 @@ class ReconciliationService implements ImportReconciliation {
         }
     }
 
+    // JUSTIFICATION-A3: the review of #873 (must-fix 2): the measurement is split out so the sign-off measures again.
     private Report generate(UUID runId, UUID by) {
         RunRow run = run(runId, true);
         if (!RunStates.COMMITTED.equals(run.status())) {
             throw notCommitted(run.status());
         }
+        Measured m = measure(runId, run);
+        LocalDate asAt = m.asAt();
+        boolean signable = m.signable();
+        List<Section> sections = m.sections();
+        int version = jdbc.sql("SELECT coalesce(max(version), 0) + 1 FROM import_reconciliations WHERE run_id = ?")
+                .param(runId)
+                .query(Integer.class)
+                .single();
+        UUID id = UUID.randomUUID();
+        Instant now = clock.now();
+        String sha256 = sha256(new Report(id, runId, version, now, asAt, "", signable, sections, null).render());
+        Report report = new Report(id, runId, version, now, asAt, sha256, signable, sections, null);
+        jdbc.sql("""
+                        INSERT INTO import_reconciliations (id, tenant_id, run_id, version, generated_by, as_at, report,
+                                                            sha256, signable)
+                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, CAST(? AS jsonb), ?, ?)
+                        """)
+                .params(id, runId, version, by, Date.valueOf(asAt), mapper.writeValueAsString(report), sha256, signable)
+                .update();
+        long notTied = sections.stream()
+                .flatMap(sec -> sec.checks().stream())
+                .filter(c -> !c.ties())
+                .count();
+        Map<String, Object> after = new LinkedHashMap<>();
+        after.put("version", version);
+        after.put("signable", signable);
+        after.put("checks_not_tied", notTied);
+        after.put("sha256", sha256);
+        audit.record(AuditLog.Entry.created("core.import_run.reconciled", "import_run", runId, null, after));
+        log.info(
+                "import run {}: reconciliation {} made, signable {}, {} checks not tied",
+                runId,
+                version,
+                signable,
+                notTied);
+        return report;
+    }
+
+    /** What a measurement of the run against the books found: the day it is as at, whether it can be signed, and why. */
+    private record Measured(LocalDate asAt, boolean signable, List<Section> sections) {}
+
+    /**
+     * Measures the run's source against the books, inside the caller's transaction (which holds the run). It reads every
+     * staged row of the run, so it runs under a statement timeout like a batch's (review of #873).
+     */
+    private Measured measure(UUID runId, RunRow run) {
+        jdbc.sql("SELECT set_config('statement_timeout', '10min', true)")
+                .query()
+                .singleRow();
         ZoneId zone = tenant.profile().timezone();
         Instant asAtMoment = run.cutoverAt() != null ? run.cutoverAt() : run.committedAt();
         LocalDate asAt = asAtMoment == null ? clock.today(zone) : LocalDate.ofInstant(asAtMoment, zone);
@@ -517,40 +589,7 @@ class ReconciliationService implements ImportReconciliation {
             }
             sections.add(new Section(key, title.getValue(), facts, checks, items));
         }
-
-        int version = jdbc.sql("SELECT coalesce(max(version), 0) + 1 FROM import_reconciliations WHERE run_id = ?")
-                .param(runId)
-                .query(Integer.class)
-                .single();
-        UUID id = UUID.randomUUID();
-        Instant now = clock.now();
-        Report unsigned = new Report(id, runId, version, now, asAt, "", signable, sections, null);
-        String sha256 = sha256(unsigned.render());
-        Report report = new Report(id, runId, version, now, asAt, sha256, signable, sections, null);
-        jdbc.sql("""
-                        INSERT INTO import_reconciliations (id, tenant_id, run_id, version, generated_by, as_at, report,
-                                                            sha256, signable)
-                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, CAST(? AS jsonb), ?, ?)
-                        """)
-                .params(id, runId, version, by, Date.valueOf(asAt), mapper.writeValueAsString(report), sha256, signable)
-                .update();
-        long notTied = sections.stream()
-                .flatMap(sec -> sec.checks().stream())
-                .filter(c -> !c.ties())
-                .count();
-        Map<String, Object> after = new LinkedHashMap<>();
-        after.put("version", version);
-        after.put("signable", signable);
-        after.put("checks_not_tied", notTied);
-        after.put("sha256", sha256);
-        audit.record(AuditLog.Entry.created("core.import_run.reconciled", "import_run", runId, null, after));
-        log.info(
-                "import run {}: reconciliation {} made, signable {}, {} checks not tied",
-                runId,
-                version,
-                signable,
-                notTied);
-        return report;
+        return new Measured(asAt, signable, sections);
     }
 
     /** The run's committed batches in the commit's order, and the one template they were read with (or null). */
@@ -627,6 +666,7 @@ class ReconciliationService implements ImportReconciliation {
         int written = 0;
         int earlier = 0;
         int missing = 0;
+        int unmeasured = 0;
         int after = 0;
         while (true) {
             record Staged(
@@ -703,20 +743,40 @@ class ReconciliationService implements ImportReconciliation {
                     sheet.add(sheet.system, batchRows, BigDecimal.ONE);
                     sheet.add(sheet.system, setRows, BigDecimal.ONE);
                 }
-                Map<CheckId, BigDecimal> part = template == null || !stored.containsKey(s.line())
-                        ? null
-                        : part(template, open, b, stored.get(s.line()));
+                // The row's part in every check by the template's own rules. A row the rules cannot measure (a value
+                // they need is missing) is counted and named, never dropped without a trace (review of #873).
+                Map<CheckId, BigDecimal> part = null;
+                String unmeasurable = null;
+                if (template != null && stored.containsKey(s.line())) {
+                    try {
+                        part = part(template, open, b, stored.get(s.line()));
+                    } catch (RuntimeException e) {
+                        unmeasured++;
+                        unmeasurable = e.getClass().getSimpleName();
+                    }
+                }
                 if (part != null) {
                     part.forEach((id, v) -> sheet.add(sheet.source, id, v));
                 }
                 if (s.excluded() || s.blocked() != null) {
                     excluded++;
-                    String why = s.excluded()
-                            ? "left out in the review" + (s.excludedCode() == null ? "" : " (" + s.excludedCode() + ")")
-                            : "held back by an open blocking issue (" + s.blocked() + ")";
-                    sheet.item(batchRows, new Item(batchRows.key(), file, s.line(), EXCLUDED, why, "1"));
-                    sheet.item(setRows, new Item(setRows.key(), file, s.line(), EXCLUDED, why, "1"));
-                    itemise(sheet, part, file, s.line(), EXCLUDED, why, false);
+                    String why = (s.excluded()
+                                    ? "left out in the review"
+                                            + (s.excludedCode() == null ? "" : " (" + s.excludedCode() + ")")
+                                    : "held back by an open blocking issue (" + s.blocked() + ")")
+                            + (unmeasurable == null
+                                    ? ""
+                                    : "; the template's rules could not measure its values (" + unmeasurable + ")");
+                    if (held == null) {
+                        // Not in the books: one row fewer there, explained.
+                        sheet.item(batchRows, new Item(batchRows.key(), file, s.line(), EXCLUDED, why, "1"));
+                        sheet.item(setRows, new Item(setRows.key(), file, s.line(), EXCLUDED, why, "1"));
+                    }
+                    // A row an earlier run imported is in the books as a record, not in this run's postings or stock.
+                    // A row this run holds after all is in both, so nothing of it is a difference.
+                    if (!Boolean.TRUE.equals(held)) {
+                        itemise(sheet, part, file, s.line(), held == null ? why : why + "; imported by an earlier run");
+                    }
                     continue;
                 }
                 if (held == null) {
@@ -726,7 +786,7 @@ class ReconciliationService implements ImportReconciliation {
                 }
                 if (!held) {
                     earlier++;
-                    itemise(sheet, part, file, s.line(), EXCLUDED, "already imported by an earlier run", true);
+                    itemise(sheet, part, file, s.line(), "already imported by an earlier run");
                     continue;
                 }
                 written++;
@@ -742,16 +802,22 @@ class ReconciliationService implements ImportReconciliation {
                                     "0"));
                 }
                 if (part != null && !sameDecision) {
-                    Map<CheckId, BigDecimal> asDecided = part(template, actual, b, stored.get(s.line()));
-                    Set<CheckId> keys = new HashSet<>(part.keySet());
-                    if (asDecided != null) {
-                        keys.addAll(asDecided.keySet());
+                    // The same rules under the recorded decision. If they cannot measure the row, its decision is not
+                    // itemised, so its difference stays unexplained and holds the sign-off.
+                    Map<CheckId, BigDecimal> asDecided = null;
+                    try {
+                        asDecided = part(template, actual, b, stored.get(s.line()));
+                    } catch (RuntimeException e) {
+                        unmeasured++;
                     }
-                    for (CheckId id : keys) {
-                        BigDecimal o = part.getOrDefault(id, BigDecimal.ZERO);
-                        BigDecimal d =
-                                asDecided == null ? BigDecimal.ZERO : asDecided.getOrDefault(id, BigDecimal.ZERO);
-                        sheet.policy.merge(id, o.subtract(d), BigDecimal::add);
+                    if (asDecided != null) {
+                        Set<CheckId> keys = new HashSet<>(part.keySet());
+                        keys.addAll(asDecided.keySet());
+                        for (CheckId id : keys) {
+                            BigDecimal o = part.getOrDefault(id, BigDecimal.ZERO);
+                            BigDecimal d = asDecided.getOrDefault(id, BigDecimal.ZERO);
+                            sheet.policy.merge(id, o.subtract(d), BigDecimal::add);
+                        }
                     }
                 }
             }
@@ -765,66 +831,56 @@ class ReconciliationService implements ImportReconciliation {
         sheet.fact(COUNTS, file + ": rows written by this import", written);
         sheet.fact(COUNTS, file + ": rows already imported before", earlier);
         sheet.fact(COUNTS, file + ": rows not found in the books", missing);
+        sheet.fact(COUNTS, file + ": rows the template's rules could not measure", unmeasured);
+        if (unmeasured > 0) {
+            log.warn("import run {}: {} rows of batch {} could not be measured", runId, unmeasured, b.seq());
+        }
     }
 
-    /** Lists a row's part in each value check as one item; a stock quantity is not, when the stock ledger holds it. */
-    private static void itemise(
-            Sheet sheet,
-            Map<CheckId, BigDecimal> part,
-            String file,
-            int line,
-            String reason,
-            String why,
-            boolean inTheStockLedger) {
+    /** Lists a row's part in each check as one item, left out of this run's books, with why. */
+    private static void itemise(Sheet sheet, Map<CheckId, BigDecimal> part, String file, int line, String why) {
         if (part == null) {
             return;
         }
         part.forEach((id, v) -> {
-            if (v.signum() == 0 || (inTheStockLedger && STOCK_QUANTITY.equals(id.section()))) {
-                return;
+            if (v.signum() != 0) {
+                sheet.item(id, new Item(id.key(), file, line, EXCLUDED, why, plain(v)));
             }
-            sheet.item(id, new Item(id.key(), file, line, reason, why, plain(v)));
         });
     }
 
     /**
-     * One row's part in every check, by the template's own rules: a fresh forecast given only that row. Null when the
-     * forecast cannot measure it (a row left out for a value the rules need), so the row is listed without an amount.
+     * One row's part in every check, by the template's own rules: a fresh forecast given only that row. Throws when the
+     * rules cannot measure it (a row left out for a value they need); the caller counts and names that row.
      */
     private static Map<CheckId, BigDecimal> part(
             ImportTemplate template, Map<String, String> policy, BatchInfo b, Map<String, Object> stored) {
-        try {
-            ImportForecast f = template.forecast(policy);
-            f.batch(b.seq());
-            f.row(b.set().key(), PreviewService.typed(b.set(), stored));
-            ImportForecast.Balances balances = f.balances();
-            Map<CheckId, BigDecimal> out = new LinkedHashMap<>();
-            for (ImportForecast.ProductStock p : f.productStock()) {
-                out.merge(stockId(p.branch(), p.product()), p.qty(), BigDecimal::add);
-            }
-            for (ImportForecast.Stock s : balances.stock()) {
-                out.merge(valueId(STOCK_VALUE, s.branch()), BigDecimal.valueOf(s.valueMinor()), BigDecimal::add);
-            }
-            for (ImportForecast.Amount a : balances.receivables()) {
-                out.merge(valueId(RECEIVABLES, a.branch()), BigDecimal.valueOf(a.amountMinor()), BigDecimal::add);
-            }
-            for (ImportForecast.Amount a : balances.loanPrincipal()) {
-                out.merge(valueId(LOAN_PRINCIPAL, a.branch()), BigDecimal.valueOf(a.amountMinor()), BigDecimal::add);
-            }
-            for (ImportForecast.ArrearsBucket a : balances.arrears()) {
-                out.merge(arrearsId(a.branch(), a.bucket(), true), BigDecimal.valueOf(a.loans()), BigDecimal::add);
-                out.merge(
-                        arrearsId(a.branch(), a.bucket(), false),
-                        BigDecimal.valueOf(a.principalMinor()),
-                        BigDecimal::add);
-            }
-            for (ImportForecast.Journal j : balances.journals()) {
-                out.merge(journalId(j.branch(), j.kind()), BigDecimal.valueOf(j.debitMinor()), BigDecimal::add);
-            }
-            return out;
-        } catch (RuntimeException e) {
-            return null;
+        ImportForecast f = template.forecast(policy);
+        f.batch(b.seq());
+        f.row(b.set().key(), PreviewService.typed(b.set(), stored));
+        ImportForecast.Balances balances = f.balances();
+        Map<CheckId, BigDecimal> out = new LinkedHashMap<>();
+        for (ImportForecast.ProductStock p : f.productStock()) {
+            out.merge(stockId(p.branch(), p.product()), p.qty(), BigDecimal::add);
         }
+        for (ImportForecast.Stock s : balances.stock()) {
+            out.merge(valueId(STOCK_VALUE, s.branch()), BigDecimal.valueOf(s.valueMinor()), BigDecimal::add);
+        }
+        for (ImportForecast.Amount a : balances.receivables()) {
+            out.merge(valueId(RECEIVABLES, a.branch()), BigDecimal.valueOf(a.amountMinor()), BigDecimal::add);
+        }
+        for (ImportForecast.Amount a : balances.loanPrincipal()) {
+            out.merge(valueId(LOAN_PRINCIPAL, a.branch()), BigDecimal.valueOf(a.amountMinor()), BigDecimal::add);
+        }
+        for (ImportForecast.ArrearsBucket a : balances.arrears()) {
+            out.merge(arrearsId(a.branch(), a.bucket(), true), BigDecimal.valueOf(a.loans()), BigDecimal::add);
+            out.merge(
+                    arrearsId(a.branch(), a.bucket(), false), BigDecimal.valueOf(a.principalMinor()), BigDecimal::add);
+        }
+        for (ImportForecast.Journal j : balances.journals()) {
+            out.merge(journalId(j.branch(), j.kind()), BigDecimal.valueOf(j.debitMinor()), BigDecimal::add);
+        }
+        return out;
     }
 
     /** The system side: the stock ledger and the loan book through the template, the run's journals through the ledger. */
@@ -850,7 +906,7 @@ class ReconciliationService implements ImportReconciliation {
                                 0,
                                 POLICY,
                                 screen("negative balance of " + p.product() + " listed separately", privacy),
-                                Long.toString(p.valueMinor())));
+                                plain(p.valueMinor())));
             }
         }
         for (ImportForecast.ArrearsBucket a : books.arrears(scope, asAt)) {
@@ -920,11 +976,13 @@ class ReconciliationService implements ImportReconciliation {
                 0,
                 notOpening));
         out.add(compare(
+                // Debits less credits, not the totals, which move with every sale: the sign-off measures again (review
+                // of #873) and must only stop for a change that matters.
                 "trial balance",
-                "Trial balance of the business: debits (source) and credits (system)",
+                "Trial balance of the business: debits less credits",
                 "minor",
-                tb.debitMinor(),
-                tb.creditMinor()));
+                0,
+                Math.subtractExact(tb.debitMinor(), tb.creditMinor())));
         out.add(compare(
                 "entries out of balance",
                 "Entries of the business that do not balance",

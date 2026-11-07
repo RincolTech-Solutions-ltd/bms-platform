@@ -1422,8 +1422,11 @@ expand only:
   `report_sha256` (as read), `sections text[]` (the sections ticked), `signed_name varchar(120)` (the name typed: the only
   personal value of these tables), `signed_on date` (the date typed) and `signed_by` (the staff user).
 - **`import_signoff_rules()`**, a `BEFORE INSERT` trigger on both tables, for every role: a sign-off needs the run
-  `committed`, the run's newest reconciliation, `signable` true and the stored SHA-256; a reconciliation of a run already
-  signed is refused, so the signed document stays the newest for good.
+  `committed`, the run's newest reconciliation, `signable` true and the stored SHA-256; a reconciliation needs the run
+  `committed` and not signed. Both take the run `FOR UPDATE` first, so the two never pass each other and the signed
+  document stays the newest for good.
+- **`imports_erase_personal_data()`** (definer, the removal of a closed business, ADR-090): the typed name of every
+  sign-off of the business becomes "Removed".
 
 ## 6.6 General ledger (RLS)
 

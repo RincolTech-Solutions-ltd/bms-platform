@@ -530,16 +530,17 @@ are:
 | Section | Checks | System side |
 |---|---|---|
 | `counts` | rows per file and per entity set (not blank); facts per file: read, blank, left out, written by this import, already imported before, not found in the books; records created per target type | rows whose `source_ref` `import_refs` holds |
-| `stock_quantity` | per branch and product: the balances checksum | the template's stock ledger |
+| `stock_quantity` | per branch and product: the balances checksum | the stock ledger's movements the run registered (`ImportBooks.stock`), never the business's whole balance, so stock held before or moved after the import is not a difference |
 | `stock_value` | per branch | the run's journal lines on `inventory`; each negative balance listed separately as a `policy` item at its value |
 | `receivables` | per branch, as if every credit sale were opened | the run's journal lines on `trade_debtors` |
 | `loan_principal` | per branch | the run's journal lines on `loans_receivable` |
 | `arrears` | loans and principal per branch and bucket, as at the cutover day | the template's loan book |
-| `ledger` | each opening journal per branch and kind; the run's journals balanced, none out of balance, none other than opening journals; the business's trial balance balanced, no entry out of balance | the ledger |
+| `ledger` | each opening journal per branch and kind; the run's journals balanced, none out of balance, none other than opening journals; the business's trial balance (debits less credits) zero, no entry out of balance | the ledger |
 
 Every difference is itemised: `excluded` (a row left out in the review or held back by an open blocking issue, with its
-file, line, codes and its own part of each check; a row an earlier run already imported, for the values this run did not
-post), `overridden` (a written row whose warning was overridden, listed with no amount for the signer to see) and `policy`
+file, line, codes and its own part of each check; a row an earlier run already imported, for the values and stock this run
+did not post, its record counted as held; a row the template's rules cannot measure is named so in its item and counted in
+the facts), `overridden` (a written row whose warning was overridden, listed with no amount for the signer to see) and `policy`
 (the receivable decision's effect, as the source measured under `open_from_list` less the books under the decision, with
 the option and the day the customer confirmed it; a negative stock balance). A check whose difference the items do not
 explain does not tie, and a reconciliation with such a check is not signable: the sign-off is refused (409
@@ -549,10 +550,14 @@ a personal value of the run is hidden.
 
 The **sign-off** (spec section 3.10, `core.imports.sign_off`, the tenant admin's): the admin opens the newest
 reconciliation, ticks each section, types their name and today's date; the sign-off names the reconciliation and its
-SHA-256 as read (409 `reconciliation_changed` if it was made again), is stored in `import_signoffs` (append-only, one per
-run), moves the run to `signed_off` and is audited `core.import_run.signed_off` without the name. The run reaches
-`signed_off` no other way. After it, no new reconciliation of the run is stored (a trigger refuses it), so the signed
-document stays the run's newest for good.
+SHA-256 as read (409 `reconciliation_changed` if it was made again), and inside its own transaction, which holds the run,
+measures the books again: when the text that measurement gives has another SHA-256 than the one read, what the import
+brought in changed since, and the sign-off is refused (409 `books_changed`; make it again and sign that). It is stored in
+`import_signoffs` (append-only, one per run), moves the run to `signed_off` and is audited `core.import_run.signed_off`
+without the name. The run reaches `signed_off` no other way. After it, no new reconciliation of the run is stored (the
+trigger takes the run `FOR UPDATE` in both cases, so a reconciliation and a sign-off never pass each other), so the signed
+document stays the run's newest for good. The removal of a closed business replaces the typed name with "Removed"
+(`imports_erase_personal_data`); the download of the signed text carries the date of the sign-off, never the name.
 
 ## 13.12 Golden fixture and expected outcome
 
@@ -1336,8 +1341,12 @@ sign-off screen (chapter 7 section 7.11.9). What each check reads and how differ
   journals aged from their day; `retail_v1` (#135) and `lending_loans_v1` (#136) give their own `ImportBooks` and
   `productStock` and run the same reconciliation on their golden files.
 - **Not in this step.** The certificate of deletion and the purge that sign-off starts are #139; the operator's screens
-  are #141. A business that already held stock before the import (a top-up under the trading override) shows that stock in
-  the quantity check, which the operator explains before the customer signs.
+  are #141.
+- **Review of #873.** The stock quantity reads only the movements the run registered; the sign-off measures the books
+  again; a row left out that an earlier run imported is counted as held and itemised for what this run did not post; the
+  trigger takes the run in both branches; stock values are exact decimals; a row the rules cannot measure is named; the
+  measurement runs under a 10 minute statement timeout; the signer's name is erased with the business and kept out of the
+  download; the screen offers "Make the reconciliation again" to whoever holds `core.imports.manage`.
 - **Proven by** `ImportReconciliationIT` (on the golden files every check ties and every difference is exactly the rows left
   out, by file and line, the system values worked out by hand from the books; a receivable decision is one `policy` item;
   a deliberately broken balance does not tie and the sign-off is refused by the service and by the database; the sign-off

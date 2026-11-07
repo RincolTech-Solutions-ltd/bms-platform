@@ -37,8 +37,11 @@ public interface ImportForecast {
         return List.of();
     }
 
-    /** Stock of one product at one branch: the quantity on hand and its value at cost, in minor units (issue #134). */
-    record ProductStock(String branch, String product, BigDecimal qty, long valueMinor) {}
+    /**
+     * Stock of one product at one branch: the quantity and its value at cost in minor units (issue #134), an exact decimal,
+     * since a fractional quantity at a whole unit cost need not be whole: never rounded.
+     */
+    record ProductStock(String branch, String product, BigDecimal qty, BigDecimal valueMinor) {}
 
     /** A forecast that predicts nothing: the default of a template that posts no opening balance. */
     ImportForecast NONE = new ImportForecast() {
