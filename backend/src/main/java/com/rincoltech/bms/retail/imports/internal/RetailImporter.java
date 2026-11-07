@@ -980,7 +980,7 @@ public class RetailImporter {
                         PurchaseHistory.Ensured s = purchases.ensureSupplier(r.supplier());
                         if (s.created() && !command) {
                             // A framework batch registers every record it writes (re-review of 0bb283a, must-fix 2).
-                            refs.created(file.name, r.row(), "retail.supplier", s.id());
+                            this.refs.created(file.name, r.row(), "retail.supplier", s.id());
                         }
                         if (s.created()
                                 || (command
