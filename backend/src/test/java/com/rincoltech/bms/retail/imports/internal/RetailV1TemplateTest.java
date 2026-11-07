@@ -110,6 +110,22 @@ class RetailV1TemplateTest {
                 .containsExactly(tuple("TS-001", new BigDecimal("8750")), tuple("TS-009", new BigDecimal("-27000")));
     }
 
+    /** Re-review of 0bb283a, must-fix 3: what earlier imports journalled is netted, as the loader nets it. */
+    @Test
+    void theForecastNetsWhatAnEarlierImportJournalled() {
+        ImportForecast f = new RetailV1Template.StockForecast(
+                Map.of(), Map.of(RetailV1Template.compare("KLA"), 8_750L, RetailV1Template.compare("ENT"), 1_000L));
+        f.batch(1);
+        f.row("products", Map.of("code", "TS-001", "cost_minor", 700L));
+        f.batch(2);
+        f.row("balances", Map.of("branch", "KLA", "product_code", "TS-001", "qty", new BigDecimal("12.5")));
+        f.row("balances", Map.of("branch", "ENT", "product_code", "TS-001", "qty", new BigDecimal("2")));
+
+        // KLA: 12.5 x 700 is already journalled, nothing more; ENT: 1,400 less the 1,000 held.
+        assertThat(f.balances().journals())
+                .containsExactly(new ImportForecast.Journal(RetailV1Template.compare("ENT"), "inventory", 400, 400));
+    }
+
     @Test
     void theExportsMappingNamesEveryFieldAndKnowsTheHistoryByItsReference() {
         Map<String, Object> mapping = RetailV1Template.exportMapping(ZoneId.of("Africa/Kampala"));

@@ -178,6 +178,14 @@ class RetailImportRefsBackfillIT extends IntegrationTest {
 
         assertThat(report.failed()).as(report.render()).isFalse();
         assertThat(status(live)).as("left by a killed process").isEqualTo("cancelled");
+        // Re-review of 0bb283a, must-fix 1: the command's balance row is keyed under its own tab, never the key a
+        // screens upload of balances.jsonl derives, so a corrected row uploaded later is not taken for it.
+        assertThat(owner.sql("SELECT source_ref FROM import_refs WHERE tenant_id = ?"
+                                + " AND target_type = 'retail.stock_movement'")
+                        .param(t.tenantId())
+                        .query(String.class)
+                        .list())
+                .containsExactly("balances.jsonl|import-retail|line:1#by-key");
     }
 
     private static String status(UUID run) {

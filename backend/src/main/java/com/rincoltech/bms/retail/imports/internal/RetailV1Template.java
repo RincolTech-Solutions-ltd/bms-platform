@@ -345,7 +345,31 @@ class RetailV1Template implements ImportTemplate {
             catalogue.productsByCode().values().forEach(p -> costs.put(compare(p.code()), p.costMinor()));
             return costs;
         });
-        return new StockForecast(held == null ? Map.of() : held);
+        // JUSTIFICATION-A3: the re-review of 0bb283a (must-fix 3) asks the forecast to net what the loader nets.
+        // What earlier imports' opening stock journals already hold per branch, as the loader nets them: the same
+        // export uploaded after the command predicts no journal, as the loader posts none.
+        Map<String, Long> journalled = readOnly.execute(s -> {
+            Map<String, Long> out = new HashMap<>();
+            jdbc.sql("""
+                            SELECT b.code, coalesce(sum(l.debit - l.credit), 0) AS held
+                              FROM journal_entries e
+                              JOIN journal_lines l ON l.entry_id = e.id
+                              JOIN gl_accounts a ON a.id = l.account_id
+                              JOIN branches b ON b.id = e.branch_id
+                             WHERE e.tenant_id = current_setting('app.tenant_id')::uuid AND a.system_key = 'inventory'
+                               AND e.id IN (SELECT r.target_id FROM import_refs r
+                                             WHERE r.tenant_id = e.tenant_id AND r.target_type = 'ledger.journal_entry'
+                                               AND r.source_key LIKE 'opening|inventory|%'
+                                            UNION
+                                            SELECT o.target_id FROM retail_import_refs o
+                                             WHERE o.tenant_id = e.tenant_id AND o.source_file = 'opening')
+                             GROUP BY b.code
+                            """)
+                    .query((rs, n) -> out.put(compare(rs.getString("code")), rs.getLong("held")))
+                    .list();
+            return out;
+        });
+        return new StockForecast(held == null ? Map.of() : held, journalled == null ? Map.of() : journalled);
     }
 
     /** The forecast of one run or one row: see {@link #forecast(Map)}. */
@@ -357,7 +381,13 @@ class RetailV1Template implements ImportTemplate {
         private final List<Journal> journals = new ArrayList<>();
 
         StockForecast(Map<String, Long> held) {
+            this(held, Map.of());
+        }
+
+        /** {@code journalledBefore}: what earlier imports' opening stock journals hold per branch (compare form). */
+        StockForecast(Map<String, Long> held, Map<String, Long> journalledBefore) {
             this.cost = new HashMap<>(held);
+            this.journalled.putAll(journalledBefore);
         }
 
         @Override

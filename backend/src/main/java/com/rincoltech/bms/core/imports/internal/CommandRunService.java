@@ -191,7 +191,8 @@ class CommandRunService implements ImportCommandRuns {
         String status = stopped ? "cancelled" : "committed";
         int changed = jdbc.sql("UPDATE import_runs SET status = ?, " + (stopped ? "cancelled_at" : "committed_at")
                         + " = now(), updated_at = now(), version = version + 1"
-                        + " WHERE id = ? AND origin = ? AND status = 'committing'")
+                        + " WHERE id = ? AND tenant_id = current_setting('app.tenant_id')::uuid AND origin = ?"
+                        + " AND status = 'committing'")
                 .params(status, runId, IMPORT_RETAIL)
                 .update();
         if (changed != 1 && stopped) {
@@ -205,7 +206,8 @@ class CommandRunService implements ImportCommandRuns {
     }
 
     private void requireCommitting(UUID runId) {
-        boolean open = jdbc.sql("SELECT EXISTS (SELECT 1 FROM import_runs WHERE id = ? AND origin = ?"
+        boolean open = jdbc.sql("SELECT EXISTS (SELECT 1 FROM import_runs WHERE id = ?"
+                        + " AND tenant_id = current_setting('app.tenant_id')::uuid AND origin = ?"
                         + " AND status = 'committing')")
                 .params(runId, IMPORT_RETAIL)
                 .query(Boolean.class)

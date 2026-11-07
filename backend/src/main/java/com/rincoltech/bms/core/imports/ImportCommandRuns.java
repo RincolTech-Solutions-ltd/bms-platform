@@ -10,7 +10,8 @@ import java.util.function.Function;
  * the framework, through the same template loader code a run of the import screens commits with. What it shares with a
  * commit: the run and its batches in {@code import_runs} and {@code import_batches} (origin {@code import_retail}), the
  * business's import key taken without waiting (409 {@code IMPORT_IN_PROGRESS}), one committing run per business, the kill
- * switch, {@code app.import_commit} so nothing the batch writes sends a message, starts a task or raises an approval, the
+ * switch (read once, when the run opens: switching it off between two files does not stop a run already writing),
+ * {@code app.import_commit} so nothing the batch writes sends a message, starts a task or raises an approval, the
  * events marked imported, every record registered in {@code import_refs}, the opening journals through
  * {@link BatchWriter.Checkpoint#openingJournal}, and the refusal of any other journal at the batch's end. What it does not:
  * the upload, the review, the preview, the stored dry run and the maker and checker of {@code import_commit}, which belong
@@ -28,10 +29,11 @@ public interface ImportCommandRuns {
 
     /**
      * Opens a run of the command, {@code committing}, created by no person (the nil id), audited
-     * {@code core.import_run.opened}. A run of the command the business still has {@code committing} is one a killed
-     * process left behind (the command holds no run between its own invocations): it becomes {@code cancelled} first,
-     * audited, and its committed batches stay. Refused with 409 {@code IMPORT_IN_PROGRESS} while a run of the import
-     * screens is committing, and, for a real run ({@code dryRun} false), 409 {@code imports_disabled} with the kill switch
+     * {@code core.import_run.opened}. Refused with 409 {@code IMPORT_IN_PROGRESS} while a batch of any import holds the
+     * business's import key, while a run of the command wrote a batch within its lease of 15 minutes, and while a run of
+     * the import screens is committing (the unique index {@code import_runs_one_committing}, V127). A run of the command
+     * left {@code committing} past its lease is one a killed process left behind: it becomes {@code cancelled} first,
+     * audited, and its committed batches stay. And, for a real run ({@code dryRun} false), 409 {@code imports_disabled} with the kill switch
      * off; a dry run writes nothing, so the switch, which guards writes, does not stop it, as it does not stop the
      * framework's.
      */

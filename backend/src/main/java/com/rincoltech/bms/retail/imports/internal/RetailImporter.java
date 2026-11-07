@@ -506,11 +506,18 @@ public class RetailImporter {
                 return;
             }
         }
-        transactions.executeWithoutResult(status -> {
-            run.begin();
-            run.checksum(export.get("balances.jsonl"));
-            commandRuns.finish(command.id(), false);
-        });
+        try {
+            transactions.executeWithoutResult(status -> {
+                run.begin();
+                run.checksum(export.get("balances.jsonl"));
+                commandRuns.finish(command.id(), false);
+            });
+        } catch (RuntimeException e) {
+            // The run's end is reported as a file's failure is (re-review of 0bb283a, nice-to-have 5).
+            report.fail("finish: " + e.getMessage());
+            stopped(command, dryRun);
+            return;
+        }
         run.cashBookNotes();
     }
 
@@ -971,6 +978,10 @@ public class RetailImporter {
                     UUID supplier = null;
                     if (r.supplier() != null) {
                         PurchaseHistory.Ensured s = purchases.ensureSupplier(r.supplier());
+                        if (s.created() && !command) {
+                            // A framework batch registers every record it writes (re-review of 0bb283a, must-fix 2).
+                            refs.created(file.name, r.row(), "retail.supplier", s.id());
+                        }
                         if (s.created()
                                 || (command
                                         && !namedSuppliers.contains(r.supplier().toLowerCase(Locale.ROOT)))) {
@@ -1857,7 +1868,7 @@ public class RetailImporter {
                         code,
                         Math.abs(change),
                         entry.map(e -> (String) e.get("entry_no")).orElse(null),
-                        change > 0 ? "posted" : "posted the other way (credit inventory, debit equity)"));
+                        change > 0 ? "posted" : ImportReport.FALL));
             });
         }
 
@@ -2083,6 +2094,9 @@ public class RetailImporter {
         void journal(String file, String ref, String targetType, UUID entryId);
     }
 
+    /** The tab of the keys of the command's reference and balance rows, a tab no upload has. */
+    static final String COMMAND_TAB = "import-retail";
+
     /** The key in {@code import_refs} of a history row of the export: what V145 and the export's mapping derive. */
     static String historyKey(String file, String ref) {
         return ImportRefs.sourceKey(file + ".jsonl", null, "ref:" + ref);
@@ -2124,10 +2138,18 @@ public class RetailImporter {
             legacy(file, ref, targetType, targetId, sourceUser);
         }
 
+        /**
+         * A reference or balance row of the command is known by its position in the command's own export, under the tab
+         * {@link #COMMAND_TAB}: never a key a screens upload derives ({@code balances.jsonl|-|line:12}), so a corrected
+         * row uploaded later is not taken for this one whatever its content (re-review of 0bb283a, must-fix 1). Only
+         * history rows share a key with the screens, by their {@code source_ref}.
+         */
         @Override
         public void created(String file, Row row, String targetType, UUID targetId) {
             checkpoint.register(
-                    ImportRefs.byKey(ImportRefs.sourceKey(file, null, "line:" + row.line())), targetType, targetId);
+                    ImportRefs.byKey(ImportRefs.sourceKey(file, COMMAND_TAB, "line:" + row.line())),
+                    targetType,
+                    targetId);
         }
 
         @Override

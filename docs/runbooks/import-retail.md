@@ -296,6 +296,15 @@ The import is idempotent for the data it imports:
   earlier import, a re-run posts that difference too, said in its report line. At a branch that
   is now inactive nothing is journalled: the report lists the change (`branch BR2 is inactive; its
   opening stock change of ... is not journalled`) for the owner to post by hand.
+- The journal is posted only for the branches the run's `balances.jsonl` names. Imported history
+  at a branch with no balance rows (for example purchases at a shop the balances leave out) is not
+  journalled; the report lists each such item (`no balance row for branch ... its derived balance
+  ... is kept`). Add that branch's balance rows and re-run to journal it.
+- The same export uploaded through the import screens after the command (mapping onto
+  `retail_v1`) is previewed net of what the command already journalled, so the preview predicts
+  no journal where the loader posts none. The preview reads only the balance rows, so where the
+  business's imported stock and the balances differ (sales made in the app since), run the
+  re-import through the command instead.
 - Only one command runs per business. A second one started while the first is writing, or within
   15 minutes of its last file, is refused (`Another import is being written for this business`);
   wait and run it again. A run left `committing` for longer by a killed process is cancelled by

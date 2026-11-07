@@ -23,6 +23,9 @@ public final class ImportReport {
 
     record Opening(String branch, long debitMinor, String entryNo, String status) {}
 
+    /** The status of an opening journal for a fall in stock: its amount credits inventory and debits equity. */
+    static final String FALL = "posted the other way (credit inventory, debit equity)";
+
     /** One branch's cash book opening entry: the carried balances and the outstanding advances. */
     record CashOpening(
             String branch,
@@ -161,7 +164,10 @@ public final class ImportReport {
         }
         long total = 0;
         for (Opening o : openings) {
-            total = Math.addExact(total, o.debitMinor());
+            // A fall is a journal the other way: it is netted out of the total, not added as a debit.
+            total = FALL.equals(o.status())
+                    ? Math.subtractExact(total, o.debitMinor())
+                    : Math.addExact(total, o.debitMinor());
             out.append(String.format(
                     "  %-10s debit %15d  credit %15d  %s%s%n",
                     o.branch(),

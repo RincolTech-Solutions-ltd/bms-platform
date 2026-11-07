@@ -2908,7 +2908,8 @@ as `bms_app` under the tenant's row-level security:
   command) written by the same code. Each record it makes (a branch, category, unit, item, supplier, credit buyer, sale,
   restock, adjustment or return movement, usage report, legacy balance movement) is registered in `import_refs`: the
   command's history rows by their export key alone, `<file>.jsonl|-|ref:<source_ref>#by-key`, and its other rows by file
-  and line; a framework batch's rows by the `source_ref` of the mapping, the records a row matched included.
+  and line under a tab of their own, `<file>.jsonl|import-retail|line:<n>#by-key`, a key no upload derives, so a
+  corrected reference or balance row uploaded later through the screens is never taken for the command's; a framework batch's rows by the `source_ref` of the mapping, the records a row matched included.
 
 ### `retail_import_refs` (RLS; append-only, `bms_app` SELECT, INSERT)
 

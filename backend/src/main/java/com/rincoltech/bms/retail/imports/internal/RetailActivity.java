@@ -29,10 +29,12 @@ class RetailActivity implements LiveRecordProbe {
     public boolean hasLiveRecords() {
         return jdbc.sql("""
                         SELECT EXISTS (SELECT 1 FROM retail_sales s
-                                        WHERE NOT EXISTS (SELECT 1 FROM import_refs r WHERE r.target_id = s.id))
+                                        WHERE NOT EXISTS (SELECT 1 FROM import_refs r WHERE r.target_id = s.id)
+                                          AND NOT EXISTS (SELECT 1 FROM retail_import_refs o WHERE o.target_id = s.id))
                             OR EXISTS (SELECT 1 FROM journal_entries e
                                         WHERE e.source_module = 'retail'
-                                          AND NOT EXISTS (SELECT 1 FROM import_refs r WHERE r.target_id = e.id))
+                                          AND NOT EXISTS (SELECT 1 FROM import_refs r WHERE r.target_id = e.id)
+                                          AND NOT EXISTS (SELECT 1 FROM retail_import_refs o WHERE o.target_id = e.id))
                         """).query(Boolean.class).single();
     }
 }
