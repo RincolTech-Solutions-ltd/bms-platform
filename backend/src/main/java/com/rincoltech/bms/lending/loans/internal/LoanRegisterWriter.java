@@ -115,9 +115,9 @@ class LoanRegisterWriter {
             String key) {}
 
     Map<String, Object> write(UUID runId, BatchWriter.Checkpoint checkpoint) {
-        if (checkpoint.policy(LendingLoansV1Template.DISBURSED).isEmpty()) {
-            throw new IllegalStateException("the run has no decision on the disbursed principal");
-        }
+        // 13.8 row 15: the requested principal is taken as disbursed in full. The run records the customer's decision
+        // (DISBURSED_POLICY); ready, the commit's request and the commit refuse a run without it, so the loader only
+        // writes by it.
         LocalDate asAt = cutoverDay(jdbc, runId, tenant);
         if (asAt == null) {
             throw new IllegalStateException("the run has no cutover moment to age the loans to");
@@ -568,7 +568,9 @@ class LoanRegisterWriter {
                 .query(Timestamp.class)
                 .optional()
                 .orElse(null);
-        return at == null ? null : LocalDate.ofInstant(at.toInstant(), tenant.profile().timezone());
+        return at == null
+                ? null
+                : LocalDate.ofInstant(at.toInstant(), tenant.profile().timezone());
     }
 
     /**

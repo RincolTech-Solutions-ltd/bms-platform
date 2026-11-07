@@ -1,0 +1,736 @@
+package com.rincoltech.bms.lending.loans.internal;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.rincoltech.bms.IntegrationTest;
+import com.rincoltech.bms.TestDatabase;
+import com.rincoltech.bms.core.imports.CommitApproval;
+import com.rincoltech.bms.core.imports.CommitReport;
+import com.rincoltech.bms.core.imports.ImportForecast;
+import com.rincoltech.bms.core.imports.ImportMappings;
+import com.rincoltech.bms.core.imports.ImportPreview;
+import com.rincoltech.bms.core.imports.ImportReconciliation;
+import com.rincoltech.bms.core.imports.ImportReview;
+import com.rincoltech.bms.core.imports.ImportRuns;
+import com.rincoltech.bms.core.imports.ImportRuns.DryRun;
+import com.rincoltech.bms.core.imports.ImportRuns.PolicyDecision;
+import com.rincoltech.bms.core.imports.ImportUploads;
+import com.rincoltech.bms.core.imports.ImportUploads.Upload;
+import com.rincoltech.bms.core.imports.ImportValidation;
+import com.rincoltech.bms.core.imports.ImportValidation.Issue;
+import com.rincoltech.bms.core.imports.internal.CommitTestSeams;
+import com.rincoltech.bms.core.imports.internal.EngineRun;
+import com.rincoltech.bms.core.imports.internal.TestFiles;
+import com.rincoltech.bms.kernel.ApiException;
+import com.rincoltech.bms.kernel.TenantContext;
+import com.rincoltech.bms.testsupport.Api;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.UUID;
+import java.util.function.Supplier;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.resttestclient.TestRestTemplate;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.json.JsonMapper;
+
+/**
+ * {@code lending_loans_v1} on the framework (issue #136, chapter 13 sections 13.10 to 13.12, ADR-027): the fabricated pilot
+ * register at the head office and a fabricated register of a second branch, read with the pilot register's fixture mapping,
+ * through the upload, validation, review (the standard resolutions of 13.12), the disbursement decision, the preview, the dry
+ * run, the maker and checker commit and the reconciliation, on PostgreSQL as {@code bms_app}. The preview's loan principal
+ * per branch and its loans and principal per days-past-due bucket at the cutover day are proven against the loan book after
+ * the commit, read from the lending tables and the {@code loans_receivable} lines, never from the report, and each opening
+ * journal's debit and credit against its {@code journal_lines} (the Lead's notes on #136). The same register as a workbook
+ * gives the same books; a re-run and a resume post no second journal and write nothing twice; a business that already has
+ * members and loans keeps them and has its borrowers linked to them. Fabricated values only.
+ */
+class LendingLoansV1TemplateIT extends IntegrationTest {
+
+    static final Path PILOT = Path.of("../fixtures/pilot_loan_register_sample.csv");
+
+    static final Path BRANCH_TWO = Path.of("../fixtures/imports/lending/fab-register-branch-two.csv");
+
+    static final Path MAPPING = Path.of("../fixtures/imports/lending_loans_v1.pilot_register.mapping.json");
+
+    static final String SHA = "d".repeat(64);
+
+    /** The batch business date of 13.12, 30 June 2026, as the run's cutover moment (21:00 in Kampala). */
+    static final Instant CUTOVER = Instant.parse("2026-06-30T18:00:00Z");
+
+    private static final JsonMapper JSON = JsonMapper.builder().build();
+
+    @Autowired
+    ImportRuns runs;
+
+    @Autowired
+    ImportMappings mappings;
+
+    @Autowired
+    ImportUploads uploads;
+
+    @Autowired
+    ImportValidation validation;
+
+    @Autowired
+    ImportReview review;
+
+    @Autowired
+    ImportPreview preview;
+
+    @Autowired
+    ImportReconciliation reconciliation;
+
+    @Autowired
+    CommitTestSeams seams;
+
+    @Autowired
+    TestRestTemplate http;
+
+    TestDatabase.Fixture t;
+    TestDatabase.Fixture other;
+    UUID officer;
+    UUID otherOfficer;
+    final UUID operator = UUID.randomUUID();
+
+    @BeforeEach
+    void setUp() {
+        t = TestDatabase.tenant("lending-v1", true);
+        other = TestDatabase.tenant("lending-v1-b", true);
+        officer = Api.staff(t, Api.email("loans-officer"));
+        otherOfficer = Api.staff(other, Api.email("loans-officer-b"));
+        product(t, officer);
+        product(other, otherOfficer);
+    }
+
+    @AfterEach
+    void tearDown() {
+        seams.killAfter = 0;
+    }
+
+    <T> T as(TestDatabase.Fixture f, Supplier<T> work) {
+        return TenantContext.callAs(f.tenantId(), work);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The golden run of 13.12, at two branches.
+    // ---------------------------------------------------------------------------------------------
+
+    @Test
+    void theGoldenRegisterAtTwoBranchesCommitsAsSection1312SaysAndTheBooksEqualThePreview() throws IOException {
+        UUID run = reviewed(t, officer, csvFiles());
+        ImportPreview.Preview predicted = as(t, () -> preview.preview(run));
+        Map<String, Long> before = TestDatabase.rowCounts(t.tenantId());
+
+        DryRun dry = as(t, () -> runs.dryRun(run, operator));
+
+        assertThat(TestDatabase.rowCounts(t.tenantId()))
+                .as("the dry run writes nothing")
+                .isEqualTo(before);
+        assertThat(dry.report().failure()).as(dry.report().render()).isNull();
+        assertThat(dry.previewMatches()).as(dry.report().render()).isTrue();
+        committed(t, run);
+
+        // 13.12: 6 members (rows 3 and 12 one), 6 next of kin (2 linked), 7 loans (6 active, 1 closed), 7 items, 2
+        // historic repayments with no journal; and the second branch's 3 of each, 2 loans active.
+        assertThat(count(t, "SELECT count(*) FROM lending_members WHERE tenant_id = ? AND source = 'import'"))
+                .isEqualTo(9);
+        assertThat(count(t, "SELECT count(*) FROM lending_next_of_kin WHERE tenant_id = ?"))
+                .isEqualTo(9);
+        assertThat(count(
+                        t,
+                        "SELECT count(*) FROM lending_next_of_kin WHERE tenant_id = ? AND link_status = 'confirmed'"
+                                + " AND link_method = 'nin'"))
+                .isEqualTo(2);
+        assertThat(lines(
+                        t,
+                        "SELECT b.code || '|' || l.status || '|' || count(*) FROM lending_loans l JOIN branches b ON"
+                                + " b.id = l.branch_id WHERE l.tenant_id = ? AND l.channel = 'import' GROUP BY b.code,"
+                                + " l.status"))
+                .containsExactlyInAnyOrder("HQ|active|6", "HQ|closed|1", "BR2|active|2", "BR2|closed|1");
+        assertThat(count(t, "SELECT count(*) FROM lending_collateral_items WHERE tenant_id = ?"))
+                .isEqualTo(10);
+        assertThat(count(
+                        t,
+                        "SELECT count(*) FROM lending_loan_transactions WHERE tenant_id = ? AND txn_type = 'repayment'"
+                                + " AND is_historic AND journal_entry_id IS NULL"))
+                .isEqualTo(4);
+        assertThat(lines(
+                        t,
+                        "SELECT l.approved_principal_minor || '|' || l.requested_principal_minor || '|'"
+                                + " || l.principal_disbursed_minor FROM lending_loans l WHERE l.tenant_id = ?"))
+                .allSatisfy(s -> assertThat(s.split("\\|")).containsOnly(s.split("\\|")[0]));
+
+        // The days past due of 13.12 as at 30 June 2026, in the loan book.
+        assertThat(lines(
+                        t,
+                        "SELECT l.principal_outstanding_minor || '|' || l.days_past_due FROM lending_loans l"
+                                + " JOIN branches b ON b.id = l.branch_id WHERE l.tenant_id = ? AND b.code = 'HQ'"
+                                + " AND l.status = 'active'"))
+                .containsExactlyInAnyOrder(
+                        "500000|75", "300000|86", "200000|88", "1000000|67", "560000|16", "250000|54");
+
+        // One opening journal per branch: debit loans_receivable one line per open loan, credit equity the total.
+        assertThat(lines(t, """
+                        SELECT b.code || '|' || a.system_key || '|' || l.debit || '|' || l.credit FROM journal_lines l
+                          JOIN journal_entries e ON e.id = l.entry_id JOIN gl_accounts a ON a.id = l.account_id
+                          JOIN branches b ON b.id = e.branch_id
+                         WHERE l.tenant_id = ?
+                        """))
+                .containsExactlyInAnyOrder(
+                        "HQ|loans_receivable|500000|0",
+                        "HQ|loans_receivable|300000|0",
+                        "HQ|loans_receivable|200000|0",
+                        "HQ|loans_receivable|1000000|0",
+                        "HQ|loans_receivable|560000|0",
+                        "HQ|loans_receivable|250000|0",
+                        "HQ|opening_balance_equity|0|2810000",
+                        "BR2|loans_receivable|400000|0",
+                        "BR2|loans_receivable|260000|0",
+                        "BR2|opening_balance_equity|0|660000");
+        assertThat(count(
+                        t,
+                        "SELECT count(*) FROM journal_lines l WHERE l.tenant_id = ? AND l.debit > 0"
+                                + " AND (l.subledger_type <> 'lending.loan' OR l.subledger_id IS NULL"
+                                + "      OR NOT EXISTS (SELECT 1 FROM lending_loans x WHERE x.id = l.subledger_id))"))
+                .as("each debit line names its loan")
+                .isZero();
+
+        // The Lead's notes on #136: the preview against the loan book, never the report.
+        assertThat(sumByBranch(predicted.balances().loanPrincipal()))
+                .isEqualTo(Map.of("BR2", 660_000L, "HQ", 2_810_000L))
+                .isEqualTo(bookPrincipal(t))
+                .isEqualTo(receivableLines(t));
+        assertThat(buckets(predicted.balances().arrears()))
+                .containsExactlyInAnyOrderEntriesOf(Map.of(
+                        "HQ|61-90", "4|2000000",
+                        "HQ|31-60", "1|250000",
+                        "HQ|1-30", "1|560000",
+                        "BR2|1-30", "1|400000",
+                        "BR2|current", "1|260000"))
+                .isEqualTo(bookBuckets(t));
+        Map<String, String> journalLines = journalTotals(t);
+        assertThat(journalLines).isEqualTo(Map.of("HQ", "2810000|2810000", "BR2", "660000|660000"));
+        CommitReport real = as(t, () -> runs.commitReport(run));
+        for (CommitReport.Journal j : real.journals()) {
+            assertThat(j.debitMinor() + "|" + j.creditMinor()).isEqualTo(journalLines.get(j.branch()));
+        }
+        for (ImportForecast.Journal j : predicted.balances().journals()) {
+            assertThat(j.debitMinor() + "|" + j.creditMinor()).isEqualTo(journalLines.get(j.branch()));
+        }
+        assertThat(real.sameAs(dry.report()))
+                .as("real:%n%s%ndry:%n%s", real.render(), dry.report().render())
+                .isTrue();
+
+        // Every record the run wrote is in import_refs; the reconciliation ties; another business has nothing.
+        assertThat(count(
+                        t,
+                        "SELECT count(*) FROM lending_loans l WHERE l.tenant_id = ?"
+                                + " AND NOT EXISTS (SELECT 1 FROM import_refs r WHERE r.target_id = l.id)"))
+                .isZero();
+        assertThat(count(
+                        t,
+                        "SELECT count(*) FROM lending_members m WHERE m.tenant_id = ?"
+                                + " AND NOT EXISTS (SELECT 1 FROM import_refs r WHERE r.target_id = m.id)"))
+                .isZero();
+        ImportReconciliation.Report r = as(t, () -> reconciliation.latest(run)).orElseThrow();
+        assertThat(r.signable()).as(r.render()).isTrue();
+        assertThat(count(other, "SELECT count(*) FROM lending_members WHERE tenant_id = ?"))
+                .isZero();
+        String stored = TestDatabase.owner()
+                .sql("SELECT dry_run_report::text FROM import_runs WHERE id = ?")
+                .param(run)
+                .query(String.class)
+                .single();
+        for (String value : List.of("Test Borrower 01", "CMTEST0000001A", "700000001")) {
+            assertThat(stored).as("the stored report names %s", value).doesNotContain(value);
+        }
+    }
+
+    @Test
+    void theRegisterAsAWorkbookGivesTheBooksTheCsvGives() throws IOException {
+        Map<String, byte[]> xlsx = new LinkedHashMap<>();
+        xlsx.put("register|pilot_loan_register_sample.xlsx", workbook(PILOT));
+        UUID run = reviewed(t, officer, xlsx);
+        committed(t, run);
+        Map<String, byte[]> csv = new LinkedHashMap<>();
+        csv.put("register|pilot_loan_register_sample.csv", Files.readAllBytes(PILOT));
+        UUID otherRun = reviewed(other, otherOfficer, csv);
+        committed(other, otherRun);
+
+        assertThat(state(t)).isNotEmpty().isEqualTo(state(other));
+        assertThat(state(t))
+                .contains("journal|HQ|loans_receivable|2810000|0", "journal|HQ|opening_balance_equity|0|2810000");
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // A re-run, a resume, a business that already has members and loans, and the run's decision.
+    // ---------------------------------------------------------------------------------------------
+
+    @Test
+    void aReRunOfTheSameRegistersPostsNoSecondJournalAndWritesNothingTwice() throws IOException {
+        committed(t, reviewed(t, officer, csvFiles()));
+        List<String> before = state(t);
+
+        UUID again = reviewed(t, officer, csvFiles());
+        DryRun dry = as(t, () -> runs.dryRun(again, operator));
+        assertThat(dry.report().journals()).as(dry.report().render()).isEmpty();
+        committed(t, again);
+
+        assertThat(state(t)).as("no duplicates and no second journal").isEqualTo(before);
+        assertThat(count(t, "SELECT count(*) FROM journal_entries WHERE tenant_id = ?"))
+                .isEqualTo(2);
+    }
+
+    @Test
+    void aRunKilledAfterItsFirstBatchResumesWithNoDuplicateAndNoSecondJournal() throws IOException {
+        UUID run = reviewed(t, officer, csvFiles());
+        DryRun dry = as(t, () -> runs.dryRun(run, operator));
+        assertThat(dry.previewMatches()).as(dry.report().render()).isTrue();
+        as(t, () -> runs.transition(run, "ready"));
+        as(t, () -> runs.recordPreImportDump(run, "pre-import-fabricated.dump", Instant.now(), SHA));
+        CommitApproval.readyToCommit(http, t, runs, run, SHA);
+        seams.killAfter = 1;
+        assertThatThrownBy(() -> as(t, () -> runs.commit(run))).isInstanceOf(CommitTestSeams.Killed.class);
+
+        assertThat(as(t, () -> runs.get(run)).status()).isEqualTo("committing");
+        assertThat(count(t, "SELECT count(*) FROM lending_loans WHERE tenant_id = ?"))
+                .isEqualTo(7);
+        assertThat(count(t, "SELECT count(*) FROM journal_entries WHERE tenant_id = ?"))
+                .isEqualTo(1);
+
+        assertThat(as(t, () -> runs.resume(run))).isEqualTo(ImportRuns.CommitOutcome.COMMITTED);
+
+        assertThat(count(t, "SELECT count(*) FROM lending_loans WHERE tenant_id = ?"))
+                .isEqualTo(10);
+        assertThat(count(t, "SELECT count(*) FROM lending_members WHERE tenant_id = ?"))
+                .isEqualTo(9);
+        assertThat(journalTotals(t)).isEqualTo(Map.of("HQ", "2810000|2810000", "BR2", "660000|660000"));
+        assertThat(count(
+                        t,
+                        "SELECT count(*) - count(DISTINCT (source_ref, target_type, target_id)) FROM import_refs"
+                                + " WHERE tenant_id = ?"))
+                .isZero();
+        assertThat(as(t, () -> runs.commitReport(run)).sameAs(dry.report())).isTrue();
+    }
+
+    @Test
+    void aBusinessWithMembersAndLoansKeepsThemAndHasItsBorrowersLinked() throws IOException {
+        UUID existing = existingMemberWithLoan(t, "CMTEST0000001A", "+256700000001");
+        Map<String, byte[]> files = new LinkedHashMap<>();
+        files.put("register|pilot_loan_register_sample.csv", Files.readAllBytes(PILOT));
+        UUID run = uploaded(t, officer, files);
+        assertThat(as(t, () -> codesOn(run, 3))).contains("MEMBER_MATCHED_EXISTING");
+        assertThat(as(t, () -> codesOn(run, 4))).contains("KIN_IS_MEMBER");
+        settle(t, run);
+        committed(t, run);
+
+        assertThat(count(t, "SELECT count(*) FROM lending_members WHERE tenant_id = ? AND source = 'import'"))
+                .as("rows 3 and 12 are the member the business has")
+                .isEqualTo(5);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT full_name FROM lending_members WHERE id = ?")
+                        .param(existing)
+                        .query(String.class)
+                        .single())
+                .as("an existing member's details are never changed")
+                .isEqualTo("Test Existing Member");
+        assertThat(count(
+                        t, "SELECT count(*) FROM lending_loans WHERE tenant_id = ? AND member_id = '" + existing + "'"))
+                .isEqualTo(3);
+        assertThat(count(
+                        t,
+                        "SELECT count(*) FROM lending_next_of_kin WHERE tenant_id = ? AND linked_member_id = '"
+                                + existing + "'"))
+                .isEqualTo(1);
+        // The business's own loan is not in the opening journal: only the imported loans are.
+        assertThat(journalTotals(t)).isEqualTo(Map.of("HQ", "2810000|2810000"));
+        assertThat(count(
+                        t,
+                        "SELECT count(*) FROM lending_loans WHERE tenant_id = ? AND loan_no = 'LIVE-1'"
+                                + " AND principal_outstanding_minor = 700000"))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void theRunIsNotReadyWithoutTheDecisionThatTheRequestedPrincipalWasDisbursed() throws IOException {
+        Map<String, byte[]> files = new LinkedHashMap<>();
+        files.put("register|pilot_loan_register_sample.csv", Files.readAllBytes(PILOT));
+        UUID run = uploaded(t, officer, files);
+        settleWithoutDecision(t, run);
+        DryRun dry = as(t, () -> runs.dryRun(run, operator));
+        assertThat(dry.report().failure()).as(dry.report().render()).isNull();
+
+        ApiException refused = null;
+        try {
+            as(t, () -> runs.transition(run, "ready"));
+        } catch (ApiException e) {
+            refused = e;
+        }
+        assertThat(refused).isNotNull();
+        assertThat(refused.code()).isEqualTo("DISBURSEMENT_DECISION_MISSING");
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The run.
+    // ---------------------------------------------------------------------------------------------
+
+    /** The pilot register at the head office and the second branch's register, by mapping source and file name. */
+    static Map<String, byte[]> csvFiles() throws IOException {
+        Map<String, byte[]> files = new LinkedHashMap<>();
+        files.put("register|pilot_loan_register_sample.csv", Files.readAllBytes(PILOT));
+        files.put("register_br2|fab-register-branch-two.csv", Files.readAllBytes(BRANCH_TWO));
+        return files;
+    }
+
+    /** A run opened by the loans officer, its cutover the 13.12 business date, every file uploaded and validated. */
+    UUID uploaded(TestDatabase.Fixture f, UUID opener, Map<String, byte[]> files) throws IOException {
+        Map<String, Object> document = JSON.readValue(Files.readString(MAPPING), new TypeReference<>() {});
+        return as(f, () -> {
+            UUID mapping = mappings.latest("pilot-register")
+                    .orElseGet(() -> mappings.save("pilot-register", document, operator, null))
+                    .id();
+            UUID run = runs.open(opener).id();
+            TestDatabase.owner()
+                    .sql("UPDATE import_runs SET cutover_at = ? WHERE id = ?")
+                    .params(Timestamp.from(CUTOVER), run)
+                    .update();
+            files.forEach((key, content) -> {
+                String source = key.substring(0, key.indexOf('|'));
+                String name = key.substring(key.indexOf('|') + 1);
+                ImportUploads.Batch batch = uploads.upload(
+                        run,
+                        new Upload(
+                                name,
+                                new ByteArrayInputStream(content),
+                                content.length,
+                                operator,
+                                mappings.parseOptions(mapping, source)));
+                assertThat(batch.status()).as(name).isEqualTo("parsed");
+            });
+            validation.validate(run);
+            return run;
+        });
+    }
+
+    /** Uploaded and reviewed with the standard resolutions of 13.12, the decision recorded. */
+    UUID reviewed(TestDatabase.Fixture f, UUID opener, Map<String, byte[]> files) throws IOException {
+        UUID run = uploaded(f, opener, files);
+        settle(f, run);
+        return run;
+    }
+
+    void settle(TestDatabase.Fixture f, UUID run) {
+        settleWithoutDecision(f, run);
+        as(
+                f,
+                () -> runs.recordPolicy(
+                        run,
+                        LendingLoansV1Template.DISBURSED,
+                        new PolicyDecision(
+                                LendingLoansV1Template.REQUESTED_AS_DISBURSED,
+                                LocalDate.now(),
+                                "Question list item 1, signed",
+                                operator,
+                                null,
+                                null)));
+    }
+
+    /**
+     * The standard resolutions of 13.12: a suggestion is accepted (rows 4, 6 and 11), a blocking issue without one leaves
+     * its row out (rows 7, 9 and 13), any other warning is overridden with a note.
+     */
+    void settleWithoutDecision(TestDatabase.Fixture f, UUID run) {
+        for (int pass = 0; pass < 100; pass++) {
+            Issue next = as(f, () -> openIssue(run));
+            if (next == null) {
+                return;
+            }
+            boolean suggested = next.suggestion() != null && next.suggestion().containsKey("value");
+            String kind =
+                    suggested ? "accept_suggestion" : "blocking".equals(next.severity()) ? "exclude_row" : "override";
+            as(
+                    f,
+                    () -> review.resolve(
+                            next.id(),
+                            new ImportReview.Resolution(
+                                    kind, next.version(), null, null, null, "Fabricated review note"),
+                            operator));
+        }
+        throw new AssertionError("the review did not settle");
+    }
+
+    Issue openIssue(UUID run) {
+        for (ImportUploads.Batch b : uploads.batches(run)) {
+            for (Issue i : validation.issues(b.id())) {
+                if ("open".equals(i.status())) {
+                    return i;
+                }
+            }
+        }
+        return null;
+    }
+
+    List<String> codesOn(UUID run, int line) {
+        List<String> out = new ArrayList<>();
+        for (ImportUploads.Batch b : uploads.batches(run)) {
+            for (Issue i : validation.issues(b.id())) {
+                if (i.line() == line) {
+                    out.add(i.code());
+                }
+            }
+        }
+        return out;
+    }
+
+    /** From a dry run that predicts the preview to the commit: ready, the verified dump, maker and checker. */
+    void committed(TestDatabase.Fixture f, UUID run) {
+        DryRun dry = as(f, () -> runs.dryRun(run, operator));
+        assertThat(dry.report().failure()).as(dry.report().render()).isNull();
+        assertThat(dry.previewMatches()).as(dry.report().render()).isTrue();
+        as(f, () -> runs.transition(run, "ready"));
+        as(f, () -> runs.recordPreImportDump(run, "pre-import-fabricated.dump", Instant.now(), SHA));
+        CommitApproval.readyToCommit(http, f, runs, run, SHA);
+        assertThat(as(f, () -> runs.commit(run))).isEqualTo(ImportRuns.CommitOutcome.COMMITTED);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The business and its books, read from the tables.
+    // ---------------------------------------------------------------------------------------------
+
+    /** The fabricated loan product TEST-REG the mapping names: flat, per term, bullet, interest before principal. */
+    static void product(TestDatabase.Fixture f, UUID user) {
+        UUID product = UUID.randomUUID();
+        UUID version = UUID.randomUUID();
+        TestDatabase.owner()
+                .sql("INSERT INTO lending_loan_products (id, tenant_id, code, name, status)"
+                        + " VALUES (?, ?, 'TEST-REG', 'Test Register Product', 'active')")
+                .params(product, f.tenantId())
+                .update();
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO lending_loan_product_versions (id, tenant_id, product_id, version_no, currency,
+                            interest_method, interest_rate_bp, rate_unit, term_unit, min_term_count, max_term_count,
+                            default_term_count, repayment_pattern, min_principal_minor, max_principal_minor, created_by)
+                        VALUES (?, ?, ?, 1, 'UGX', 'flat', 2000, 'per_term', 'month', 1, 12, 1, 'bullet', 1000, 100000000, ?)
+                        """)
+                .params(version, f.tenantId(), product, user)
+                .update();
+        TestDatabase.owner()
+                .sql("UPDATE lending_loan_products SET current_version_id = ? WHERE id = ?")
+                .params(version, product)
+                .update();
+    }
+
+    /** A member the business already has (fabricated) and one loan of theirs with no transaction yet. */
+    static UUID existingMemberWithLoan(TestDatabase.Fixture f, String nin, String phone) {
+        UUID member = UUID.randomUUID();
+        var owner = TestDatabase.owner();
+        owner.sql("""
+                        INSERT INTO lending_members (id, tenant_id, branch_id, member_no, full_name, phone_e164, id_type,
+                                                     national_id, currency, kyc_status, status, source)
+                        VALUES (?, ?, ?, 'LIVE-M1', 'Test Existing Member', ?, 'nin', ?, 'UGX', 'incomplete', 'active',
+                                'staff')
+                        """).params(member, f.tenantId(), f.headOffice(), phone, nin).update();
+        owner.sql("""
+                        INSERT INTO lending_loans (id, tenant_id, branch_id, loan_no, member_id, product_version_id,
+                            officer_user_id, status, channel, purpose_category, currency, requested_principal_minor,
+                            requested_term_count, term_unit, interest_method, interest_rate_bp, rate_unit, repayment_pattern,
+                            disbursed_on, principal_disbursed_minor, principal_outstanding_minor, maturity_date)
+                        SELECT ?, ?, ?, 'LIVE-1', ?, p.current_version_id, ?, 'active', 'staff', 'business', 'UGX', 700000,
+                               1, 'month', 'flat', 2000, 'per_term', 'bullet', DATE '2026-05-02', 700000, 700000,
+                               DATE '2026-06-02'
+                          FROM lending_loan_products p WHERE p.tenant_id = ? AND p.code = 'TEST-REG'
+                        """)
+                .params(UUID.randomUUID(), f.tenantId(), f.headOffice(), member, UUID.randomUUID(), f.tenantId())
+                .update();
+        return member;
+    }
+
+    /** Principal outstanding of the business's imported loans per branch, from {@code lending_loans}. */
+    static Map<String, Long> bookPrincipal(TestDatabase.Fixture f) {
+        Map<String, Long> out = new TreeMap<>();
+        TestDatabase.owner()
+                .sql("""
+                        SELECT b.code, sum(l.principal_outstanding_minor) FROM lending_loans l
+                          JOIN branches b ON b.id = l.branch_id
+                         WHERE l.tenant_id = ? AND l.channel = 'import' GROUP BY b.code
+                        """)
+                .param(f.tenantId())
+                .query((rs, n) -> out.put(rs.getString(1), rs.getLong(2)))
+                .list();
+        return out;
+    }
+
+    /** The debit lines on {@code loans_receivable} per branch, from {@code journal_lines}. */
+    static Map<String, Long> receivableLines(TestDatabase.Fixture f) {
+        Map<String, Long> out = new TreeMap<>();
+        TestDatabase.owner()
+                .sql("""
+                        SELECT b.code, sum(l.debit) - sum(l.credit) FROM journal_lines l
+                          JOIN journal_entries e ON e.id = l.entry_id JOIN branches b ON b.id = e.branch_id
+                          JOIN gl_accounts a ON a.id = l.account_id
+                         WHERE l.tenant_id = ? AND a.system_key = 'loans_receivable' GROUP BY b.code
+                        """)
+                .param(f.tenantId())
+                .query((rs, n) -> out.put(rs.getString(1), rs.getLong(2)))
+                .list();
+        return out;
+    }
+
+    /** Each branch's journal debit and credit totals, from {@code journal_lines}. */
+    static Map<String, String> journalTotals(TestDatabase.Fixture f) {
+        Map<String, String> out = new TreeMap<>();
+        TestDatabase.owner()
+                .sql("""
+                        SELECT b.code, sum(l.debit), sum(l.credit) FROM journal_lines l
+                          JOIN journal_entries e ON e.id = l.entry_id JOIN branches b ON b.id = e.branch_id
+                         WHERE l.tenant_id = ? GROUP BY b.code
+                        """)
+                .param(f.tenantId())
+                .query((rs, n) -> out.put(rs.getString(1), rs.getLong(2) + "|" + rs.getLong(3)))
+                .list();
+        return out;
+    }
+
+    /** Loans and principal per branch and days-past-due bucket as at the cutover day, from {@code lending_loans}. */
+    static Map<String, String> bookBuckets(TestDatabase.Fixture f) {
+        Map<String, long[]> sums = new TreeMap<>();
+        TestDatabase.owner()
+                .sql("""
+                        SELECT b.code, l.days_past_due, l.principal_outstanding_minor FROM lending_loans l
+                          JOIN branches b ON b.id = l.branch_id
+                         WHERE l.tenant_id = ? AND l.channel = 'import' AND l.principal_outstanding_minor > 0
+                        """)
+                .param(f.tenantId())
+                .query((rs, n) -> {
+                    long[] s = sums.computeIfAbsent(
+                            rs.getString(1) + "|" + LoanRegister.bucket(rs.getInt(2)), k -> new long[2]);
+                    s[0]++;
+                    s[1] += rs.getLong(3);
+                    return null;
+                })
+                .list();
+        Map<String, String> out = new TreeMap<>();
+        sums.forEach((k, s) -> out.put(k, s[0] + "|" + s[1]));
+        return out;
+    }
+
+    static Map<String, Long> sumByBranch(List<ImportForecast.Amount> amounts) {
+        Map<String, Long> out = new TreeMap<>();
+        amounts.forEach(a -> out.merge(a.branch(), a.amountMinor(), Long::sum));
+        return out;
+    }
+
+    static Map<String, String> buckets(List<ImportForecast.ArrearsBucket> arrears) {
+        Map<String, String> out = new TreeMap<>();
+        arrears.forEach(a -> out.put(a.branch() + "|" + a.bucket(), a.loans() + "|" + a.principalMinor()));
+        return out;
+    }
+
+    /** A register as a workbook (13.12): ISO dates as date cells, plain numbers as number cells, the rest as text. */
+    static byte[] workbook(Path csv) throws IOException {
+        List<String> lines = Files.readAllLines(csv, StandardCharsets.UTF_8);
+        List<List<Object>> rows = new ArrayList<>();
+        for (String line : lines.subList(1, lines.size())) {
+            List<Object> cells = new ArrayList<>();
+            for (String c : EngineRun.cells(line)) {
+                if (c.isEmpty()) {
+                    cells.add(null);
+                } else if (c.matches("^\\d{4}-\\d{2}-\\d{2}$")) {
+                    cells.add(LocalDate.parse(c));
+                } else if (c.matches("^(0|[1-9]\\d*)(\\.\\d+)?$")) {
+                    cells.add(new BigDecimal(c));
+                } else {
+                    cells.add(c);
+                }
+            }
+            rows.add(cells);
+        }
+        return TestFiles.xlsx(EngineRun.cells(lines.getFirst()), rows);
+    }
+
+    /** What the business holds after an import, as sorted lines without ids or times of writing. */
+    static List<String> state(TestDatabase.Fixture f) {
+        List<String> out = new ArrayList<>();
+        add(out, f, "member", MEMBER_STATE);
+        add(out, f, "kin", KIN_STATE);
+        add(out, f, "collateral", COLLATERAL_STATE);
+        add(out, f, "loan", LOAN_STATE);
+        add(out, f, "txn", TXN_STATE);
+        add(out, f, "journal", JOURNAL_STATE);
+        return out.stream().sorted().toList();
+    }
+
+    private static void add(List<String> out, TestDatabase.Fixture f, String kind, String sql) {
+        lines(f, sql).forEach(l -> out.add(kind + "|" + l));
+    }
+
+    static List<String> lines(TestDatabase.Fixture f, String sql) {
+        return TestDatabase.owner()
+                .sql(sql)
+                .param(f.tenantId())
+                .query(String.class)
+                .list();
+    }
+
+    static long count(TestDatabase.Fixture f, String sql) {
+        return TestDatabase.owner()
+                .sql(sql)
+                .param(f.tenantId())
+                .query(Long.class)
+                .single();
+    }
+
+    // JUSTIFICATION-A3: the state queries of the workbook test, as text blocks the formatter keeps as written.
+    private static final String MEMBER_STATE = """
+            SELECT member_no || '|' || full_name || '|' || phone_e164 || '|' || id_type || '|'
+                   || coalesce(national_id, '-') || '|' || marital_status
+              FROM lending_members WHERE tenant_id = ?
+            """;
+
+    private static final String KIN_STATE = """
+            SELECT full_name || '|' || coalesce(phone_e164, '-') || '|' || relationship || '|' || link_status
+              FROM lending_next_of_kin WHERE tenant_id = ?
+            """;
+
+    private static final String COLLATERAL_STATE = """
+            SELECT collateral_type || '|' || coalesce(reference_no_normalised, '-')
+              FROM lending_collateral_items WHERE tenant_id = ?
+            """;
+
+    private static final String LOAN_STATE = """
+            SELECT l.loan_no || '|' || b.code || '|' || l.status || '|' || l.requested_principal_minor || '|'
+                   || l.interest_rate_bp || '|' || l.approved_term_count || l.term_unit || '|' || l.disbursed_on
+                   || '|' || l.maturity_date || '|' || l.principal_outstanding_minor || '|'
+                   || l.interest_outstanding_minor || '|' || l.days_past_due || '|' || l.credit_balance_minor
+              FROM lending_loans l JOIN branches b ON b.id = l.branch_id WHERE l.tenant_id = ?
+            """;
+
+    private static final String TXN_STATE = """
+            SELECT t.txn_type || '|' || t.amount_minor || '|' || t.value_date || '|' || t.is_historic
+              FROM lending_loan_transactions t WHERE t.tenant_id = ?
+            """;
+
+    private static final String JOURNAL_STATE = """
+            SELECT b.code || '|' || a.system_key || '|' || sum(l.debit) || '|' || sum(l.credit)
+              FROM journal_lines l JOIN journal_entries e ON e.id = l.entry_id
+              JOIN gl_accounts a ON a.id = l.account_id JOIN branches b ON b.id = e.branch_id
+             WHERE l.tenant_id = ? GROUP BY b.code, a.system_key
+            """;
+}
