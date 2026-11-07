@@ -117,7 +117,7 @@ class RetailV1TemplateTest {
     @Test
     void theForecastPredictsOneOpeningJournalPerBranchEver() {
         ImportForecast f = new RetailV1Template.StockForecast(
-                Map.of(), Set.of(RetailV1Template.compare("KLA")), Set.of(RetailV1Template.compare("JJA")));
+                Map.of(), Set.of(RetailV1Template.compare("KLA")), Set.of(RetailV1Template.compare("JJA")), Map.of());
         f.batch(1);
         f.row("products", Map.of("code", "TS-001", "cost_minor", 700L));
         f.batch(2);
@@ -150,6 +150,11 @@ class RetailV1TemplateTest {
         assertThat(o.aboveZeroMinor()).isEqualTo(8_750);
         assertThat(o.journal(false)).as("the first journal of the branch").isEqualTo(8_750);
         assertThat(o.journal(true)).as("a branch already opened takes none").isZero();
+
+        // An item whose legacy balance an earlier import wrote stands at the books' balance (review of bf87e45).
+        assertThat(RetailV1Template.openingQuantities(rows, Map.of("TS-001", BigDecimal.ZERO)))
+                .containsEntry("TS-001", BigDecimal.ZERO)
+                .containsEntry("TS-009", new BigDecimal("-3"));
     }
 
     @Test
