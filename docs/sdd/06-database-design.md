@@ -1414,13 +1414,6 @@ expand only:
   or cancelled at its end, no upload, review or maker and checker, never reconciled or listed for sign-off) or
   `retail_import_refs` (the backfill's run, at most one per business: the plain partial unique index
   `import_runs_one_backfill (tenant_id) WHERE origin = 'retail_import_refs'`).
-- **`retail_import_opening_items`** (V145, #135): the items each import opening stock journal valued, one row per item
-  above zero of the branch's balances when the journal was posted: `tenant_id`, `created_at`, `ref_id` (the journal's
-  `import_refs` row), `branch_id`, `product_id`; primary key `(tenant_id, ref_id, product_id)`, the plain index
-  `retail_import_opening_items_by_branch (tenant_id, branch_id)`, forced row-level security, `SELECT, INSERT` for the
-  application, append-only. A later balances file of the branch must list every item of the union of these sets (and,
-  for the old command's journals, which have none, every item with an unregistered legacy balance movement there), or
-  it is refused: `BALANCES_INCOMPLETE` at validation, and by the loader. No personal value.
 - **`bms_refuse_during_import_commit()`**, a `BEFORE INSERT` trigger on `notification_outbox`, `sms_deliveries`,
   `approval_requests` and `scheduled_tasks`: while the transaction has set `app.import_commit` to `on` (an import batch
   does, with `SET LOCAL`), a new row is refused, so an imported record sends no message, starts no task and raises no
@@ -2908,8 +2901,10 @@ as `bms_app` under the tenant's row-level security:
   consecutive restocks of a product carried different prices.
 - **The opening journal**: one per branch (section 6.11.2), for the positive balances only. Since #135 it is posted
   through the import framework's `openingJournal` (source module `core.imports`, ledger type `retail.import_opening`),
-  registered in `import_refs` as `ledger.journal_entry`, for what the branch's balance rows above zero are worth less
-  what every import's opening stock journals hold.
+  registered in `import_refs` as `ledger.journal_entry`, for what the branch's balance rows above zero are worth. One per
+  branch, ever: a later run, command or screens, for a branch that already has an import opening journal (the
+  framework's, the command's or the old command's, in either table) posts none for it, reports it already posted, and
+  lists each difference of its rows against the books for a stock-take; the forecast applies the same rule.
 - **On the framework (#135).** Every file the command reads, and every batch of a run of the import screens read with a
   mapping onto the canonical template `retail_v1`, is one batch of a run in `import_runs` (`origin` `import_retail` for the
   command) written by the same code. Each record it makes (a branch, category, unit, item, supplier, credit buyer, sale,

@@ -146,9 +146,7 @@ Every issue has:
 | `NAME_MISSING` | blocking | The item on line {line} has no name or description. |
 | `NEGATIVE_BALANCE` | warning | The source shows a negative quantity for this item at {branch}; it is imported as it is and listed for the first stock-take. |
 | `PRICE_DIFFERS_EXISTING` | info | The item already exists with other prices; its prices are left unchanged. |
-| `CREDIT_SALE_UNPAID` | info | Credit sale imported without payment history; the receivable decision applies. |
-| `BALANCES_INCOMPLETE` | blocking | An earlier import journalled the opening stock at {branch} with {limit} items this file does not list; list every item at {branch}, or correct one item with a stock-take, not a re-import. (#135; on the branch's first balances row, from a rule over the whole set) |
-| `CREDIT_DECISION_MISSING` | blocking (run) | Credit sales exist and no receivable decision is recorded. |
+| `CREDIT_SALE_UNPAID` | info | Credit sale imported without payment history; the receivable decision applies. || `CREDIT_DECISION_MISSING` | blocking (run) | Credit sales exist and no receivable decision is recorded. |
 | `DATE_AFTER_CUTOVER` | blocking | {field} on {file} line {line} is after the agreed cutover moment. |
 | `TENANT_TRADING` | run refused | The tenant already has live transactions; an import needs the trading override. |
 | `IMPORT_IN_PROGRESS` | request refused | Another import is being committed for this business; wait for it or stop it. |
@@ -173,7 +171,7 @@ Every issue has:
 | `NIN_DUPLICATE` | warning | {field} on {file} line {line} is the same national ID number as line {other}; check whether they are one person. (#130) |
 
 The shared codes of this table are `ImportTemplates.SHARED_CODES` in `core.imports` (#129, #130); the retail
-codes (`NAME_MISSING`, `NEGATIVE_BALANCE`, `PRICE_DIFFERS_EXISTING`, `CREDIT_SALE_UNPAID`, `BALANCES_INCOMPLETE`, `CREDIT_DECISION_MISSING`)
+codes (`NAME_MISSING`, `NEGATIVE_BALANCE`, `PRICE_DIFFERS_EXISTING`, `CREDIT_SALE_UNPAID`, `CREDIT_DECISION_MISSING`)
 are listed by `retail_v1` itself (#135). `CODE_DUPLICATE` and `CODE_CONTROL_CHAR` were planned as retail codes; the
 validation engine of #130 finds them for the key field of any template, so they are shared, with the same names and
 meanings. A message may hold only the placeholders `{field}`, `{file}`, `{line}`, `{other}`, `{row}`, `{column}`,

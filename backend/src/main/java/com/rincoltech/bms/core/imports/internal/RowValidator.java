@@ -138,17 +138,6 @@ final class RowValidator {
     private final Map<UUID, Plan> plans = new HashMap<>();
     private final Map<String, Map<String, Location>> firstKey = new HashMap<>();
     private final Map<String, Map<String, Location>> firstRef = new HashMap<>();
-    // JUSTIFICATION-A3: issue #135's whole-set rule (ImportTemplate.SetCheck), one per entity set of this validation.
-    private final Map<String, ImportTemplate.SetCheck> setChecks = new HashMap<>();
-    private static final ImportTemplate.SetCheck NO_SET_CHECK = new ImportTemplate.SetCheck() {
-        @Override
-        public void see(String row, Map<String, Object> values) {}
-
-        @Override
-        public List<RowFinding> check(String row, Map<String, Object> values) {
-            return List.of();
-        }
-    };
     private final Map<String, Map<String, Location>> firstNin = new HashMap<>();
     private final Map<String, Set<String>> wanted = new TreeMap<>();
     private final Map<String, Set<String>> existing = new HashMap<>();
@@ -188,19 +177,6 @@ final class RowValidator {
         if (t.sourceRef != null) {
             firstRef.computeIfAbsent(p.set.key(), k -> new HashMap<>()).putIfAbsent(t.sourceRef, here);
         }
-        setCheck(p.set.key()).see(rowName(batch, row), Collections.unmodifiableMap(new LinkedHashMap<>(t.values)));
-    }
-
-    /** The template's whole-set rule of an entity set, made once for this validation (a no-op when it has none). */
-    private ImportTemplate.SetCheck setCheck(String entitySet) {
-        return setChecks.computeIfAbsent(entitySet, k -> {
-            ImportTemplate.SetCheck check = template.setCheck(k);
-            return check == null ? NO_SET_CHECK : check;
-        });
-    }
-
-    private static String rowName(BatchInput batch, SourceRow row) {
-        return batch.batchId() + ":" + row.line();
     }
 
     /** Between the passes: per entity set, in key order, the codes references name that no row of the run holds. */
@@ -274,15 +250,12 @@ final class RowValidator {
         // One that is not is shown as HIDDEN rather than stopping the run on ordinary data (second review of #867).
         // JUSTIFICATION-A3: the Lead's ruling 6 and the second review's item 3.
         List<String> personal = personalValues(p, t);
-        List<RowFinding> ruled = new ArrayList<>();
         for (RowCheck check : template.rowChecks(p.set.key())) {
-            ruled.addAll(check.check(values));
-        }
-        ruled.addAll(setCheck(p.set.key()).check(rowName(batch, row), values));
-        for (RowFinding finding : ruled) {
-            Map<String, String> params = new LinkedHashMap<>();
-            finding.params().forEach((k, v) -> params.put(k, safeParam(v) && !holds(v, personal) ? v : HIDDEN));
-            t.add(finding.code(), finding.field(), params, null);
+            for (RowFinding finding : check.check(values)) {
+                Map<String, String> params = new LinkedHashMap<>();
+                finding.params().forEach((k, v) -> params.put(k, safeParam(v) && !holds(v, personal) ? v : HIDDEN));
+                t.add(finding.code(), finding.field(), params, null);
+            }
         }
         List<Finding> findings = new ArrayList<>(t.pending.size());
         for (Pending pending : t.pending) {

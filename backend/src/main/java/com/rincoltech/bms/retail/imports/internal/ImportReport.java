@@ -23,9 +23,6 @@ public final class ImportReport {
 
     record Opening(String branch, long debitMinor, String entryNo, String status) {}
 
-    /** The status of an opening journal for a fall in stock: its amount credits inventory and debits equity. */
-    static final String FALL = "posted the other way (credit inventory, debit equity)";
-
     /** One branch's cash book opening entry: the carried balances and the outstanding advances. */
     record CashOpening(
             String branch,
@@ -163,15 +160,8 @@ public final class ImportReport {
             out.append("  none\n");
         }
         long total = 0;
-        long falls = 0;
         for (Opening o : openings) {
-            // A fall is a journal the other way: totalled on a line of its own, never added to or netted from the
-            // debits of the total (re-review of 51cfb70, nice-to-have 3).
-            if (FALL.equals(o.status())) {
-                falls = Math.addExact(falls, o.debitMinor());
-            } else {
-                total = Math.addExact(total, o.debitMinor());
-            }
+            total = Math.addExact(total, o.debitMinor());
             out.append(String.format(
                     "  %-10s debit %15d  credit %15d  %s%s%n",
                     o.branch(),
@@ -180,14 +170,7 @@ public final class ImportReport {
                     o.status(),
                     o.entryNo() == null ? "" : " " + o.entryNo()));
         }
-        if (falls == 0) {
-            out.append(String.format("  %-10s debit %15d  credit %15d%n%n", "total", total, total));
-        } else {
-            out.append(String.format("  %-10s debit %15d  credit %15d%n", "total", total, total));
-            out.append(String.format(
-                    "  %-10s credit inventory %15d, debit opening balance equity %15d%n%n",
-                    "the other way", falls, falls));
-        }
+        out.append(String.format("  %-10s debit %15d  credit %15d%n%n", "total", total, total));
         if (!cashOpenings.isEmpty()) {
             out.append("cash book opening journals (debit cash on hand, bank, savings reserve and one owner advances "
                     + "line per outstanding advance, credit opening balance equity):\n");

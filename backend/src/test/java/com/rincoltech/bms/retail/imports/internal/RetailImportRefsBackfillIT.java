@@ -113,11 +113,11 @@ class RetailImportRefsBackfillIT extends IntegrationTest {
 
     // JUSTIFICATION-A3: the review of 97cb1be asks a test of findings 1 and 2; each is a test of its own.
     /**
-     * Review of 97cb1be, finding 1: the opening stock journal nets every import of the business, not the run alone. The
-     * first run writes the purchases and stops before any balance (no balances file); the second sees every purchase as
-     * existing and writes only the legacy balances: TB-1 has 10 from history and 7 in the source (a legacy movement of
-     * -3, registered by the second run), TB-2 has 4 from history and 4 in the source (no movement). The journal is what
-     * the imported stock above zero is worth, 7 x 100 + 4 x 200, and a third run posts nothing more.
+     * (d) of the Lead's rule on the review of 4af7a39 (and the review of 97cb1be, finding 1): a first run writes the
+     * purchases and stops before any balance (no balances file), as a run that failed before journalling does; the re-run
+     * sees every purchase as existing and writes only the legacy balances: TB-1 has 10 from history and 7 in the source
+     * (a legacy movement of -3), TB-2 has 4 and 4 (none). Its one journal values everything imported, 7 x 100 + 4 x 200,
+     * and a third run posts no second one.
      */
     @Test
     void theOpeningJournalCountsTheHistoryAnEarlierRunWrote(@TempDir Path dir) throws IOException {
@@ -190,50 +190,9 @@ class RetailImportRefsBackfillIT extends IntegrationTest {
                 .containsExactly("balances.jsonl|import-retail|line:1#by-key");
     }
 
-    // JUSTIFICATION-A3: the Lead's note on the review of 6205617 asks this test of the refused partial file.
     /**
-     * Review of 6205617, must-fix 2 (Lead's note): after the command imported the sample, a balances file with one KLA row
-     * would value KLA without its other items and journal them away. It is refused, naming what it leaves out, and
-     * nothing is posted or written.
-     */
-    @Test
-    void aPartialBalancesFileAtABranchAlreadyJournalledIsRefusedAndPostsNothing(@TempDir Path dir) throws IOException {
-        TestDatabase.Fixture t = TestDatabase.tenant("retail-part", false, true);
-        ImportReport first = importer.run(t.slug(), RetailImportIT.SAMPLE, false);
-        assertThat(first.failed()).as(first.render()).isFalse();
-        String kla = Files.readAllLines(RetailImportIT.SAMPLE.resolve("balances.jsonl")).stream()
-                .filter(l -> l.contains("\"KLA\""))
-                .findFirst()
-                .orElseThrow();
-        Files.writeString(
-                dir.resolve("balances.jsonl"), kla.replaceFirst("\"qty\": \"[^\"]*\"", "\"qty\": \"1\"") + "\n");
-        String counts = "SELECT (SELECT count(*) FROM journal_entries WHERE tenant_id = ?) || ' '"
-                + " || (SELECT count(*) FROM retail_stock_movements WHERE tenant_id = ?)";
-        String before = TestDatabase.owner()
-                .sql(counts)
-                .params(t.tenantId(), t.tenantId())
-                .query(String.class)
-                .single();
-
-        ImportReport partial = importer.run(t.slug(), dir, false);
-
-        assertThat(partial.failed()).isTrue();
-        assertThat(partial.render())
-                .contains("balances.jsonl must list every item at KLA")
-                .contains("missing: ");
-        assertThat(TestDatabase.owner()
-                        .sql(counts)
-                        .params(t.tenantId(), t.tenantId())
-                        .query(String.class)
-                        .single())
-                .as("no journal, no legacy balance")
-                .isEqualTo(before);
-    }
-
-    // JUSTIFICATION-A3: the Lead's note on the review of 7f42ea3 asks tests (a) and (b), one each.
-    /**
-     * (a) of the Lead's note on the review of 7f42ea3: TB-2 has history and no balance row, so the journal values TB-1
-     * alone and records only TB-1 as valued; the identical export run again is not refused and posts nothing more.
+     * TB-2 has history and no balance row, so the one journal values TB-1 alone; the identical export run again posts no
+     * second journal.
      */
     @Test
     void aHistoryOnlyItemDoesNotStopAnIdenticalReRun(@TempDir Path dir) throws IOException {
@@ -258,15 +217,15 @@ class RetailImportRefsBackfillIT extends IntegrationTest {
         assertThat(journalled(t)).isEqualTo(7 * 100);
     }
 
+    // JUSTIFICATION-A3: the Lead's rule on the review of 4af7a39 asks test (c), a real failure at a cash file.
     /**
-     * (b) of the Lead's note: a run that stopped after balances.jsonl (here, one whose export had no cash book yet) is run
-     * again with its cash files; its balances pass and the cash files are imported.
+     * (c) of the Lead's rule on the review of 4af7a39: the first run fails at a cash file after balances.jsonl committed (a
+     * fabricated refusal of the daily savings, for this business only); its run ends stopped. The re-run finishes the cash
+     * files, posts no second opening journal, and its run commits.
      */
     @Test
-    void aRunStoppedAfterTheBalancesFinishesItsCashFilesOnARerun(@TempDir Path dir) throws IOException {
+    void aRunThatFailsAtACashFileIsFinishedByARerunWithNoSecondJournal(@TempDir Path dir) throws IOException {
         TestDatabase.Fixture t = TestDatabase.tenant("retail-cash", false, true);
-        ImportReport first = importer.run(t.slug(), RetailImportIT.SAMPLE, false);
-        assertThat(first.failed()).as(first.render()).isFalse();
         for (Path source : List.of(RetailImportIT.SAMPLE, RetailImportIT.SAMPLE.resolve("cashbook"))) {
             try (Stream<Path> files = Files.list(source)) {
                 for (Path f : files.filter(p -> p.toString().endsWith(".jsonl")).toList()) {
@@ -274,12 +233,52 @@ class RetailImportRefsBackfillIT extends IntegrationTest {
                 }
             }
         }
+        JdbcClient owner = TestDatabase.owner();
+        owner.sql("""
+                CREATE FUNCTION test_refuse_savings() RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN
+                    RAISE EXCEPTION 'fabricated refusal of a cash file';
+                END $$
+                """).update();
+        owner.sql("CREATE TRIGGER test_refuse_savings BEFORE INSERT ON retail_daily_savings FOR EACH ROW"
+                        + " WHEN (NEW.tenant_id = '" + t.tenantId() + "'::uuid) EXECUTE FUNCTION test_refuse_savings()")
+                .update();
+        ImportReport first;
+        try {
+            first = importer.run(t.slug(), dir, false);
+        } finally {
+            owner.sql("DROP TRIGGER test_refuse_savings ON retail_daily_savings")
+                    .update();
+            owner.sql("DROP FUNCTION test_refuse_savings()").update();
+        }
+        assertThat(first.failed()).as(first.render()).isTrue();
+        assertThat(first.render()).contains("FAILED: savings.jsonl");
+        long journals = owner.sql("SELECT count(*) FROM journal_entries WHERE tenant_id = ?"
+                        + " AND source_module = 'core.imports'")
+                .param(t.tenantId())
+                .query(Long.class)
+                .single();
+        assertThat(journals).as("the stock openings of the balances file").isEqualTo(3L);
 
         ImportReport again = importer.run(t.slug(), dir, false);
 
         assertThat(again.failed()).as(again.render()).isFalse();
         assertThat(again.counts("balances.jsonl")).containsExactly(60, 0, 60, 0);
         assertThat(again.counts("savings.jsonl")[1]).as(again.render()).isPositive();
+        assertThat(owner.sql("SELECT count(*) FROM journal_entries WHERE tenant_id = ?"
+                                + " AND source_module = 'core.imports'")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .as("no second stock opening journal")
+                .isEqualTo(3L);
+        assertThat(owner.sql("SELECT status FROM import_runs WHERE tenant_id = ? AND origin = 'import_retail'"
+                                + " ORDER BY created_at")
+                        .param(t.tenantId())
+                        .query(String.class)
+                        .list())
+                .as("the stopped run, then the one that finished")
+                .containsExactly("cancelled", "committed");
     }
 
     private static String status(UUID run) {

@@ -67,7 +67,6 @@ class RetailV1Template implements ImportTemplate {
     static final String NEGATIVE_BALANCE = "NEGATIVE_BALANCE";
     static final String PRICE_DIFFERS_EXISTING = "PRICE_DIFFERS_EXISTING";
     static final String CREDIT_SALE_UNPAID = "CREDIT_SALE_UNPAID";
-    static final String BALANCES_INCOMPLETE = "BALANCES_INCOMPLETE";
 
     /**
      * The receivable decision (spec section 3.8) of a source with credit sales and no payments. {@code open_from_list} is
@@ -238,97 +237,37 @@ class RetailV1Template implements ImportTemplate {
                 new IssueCode(
                         CREDIT_SALE_UNPAID,
                         Severity.INFO,
-                        "Credit sale imported without payment history; the receivable decision applies."),
-                new IssueCode(
-                        BALANCES_INCOMPLETE,
-                        Severity.BLOCKING,
-                        "An earlier import journalled the opening stock at {branch} with {limit} items this file does"
-                                + " not list; list every item at {branch}, or correct one item with a stock-take, not a"
-                                + " re-import."));
+                        "Credit sale imported without payment history; the receivable decision applies."));
     }
 
-    // JUSTIFICATION-A3: the Lead's note on the review of 7f42ea3 asks the refusal at validation, on the rows.
+    // JUSTIFICATION-A3: the Lead's rule on the review of 4af7a39 (one opening journal per branch) needs this one read.
     /**
-     * The balances rule over the whole set (Lead's note on the review of 7f42ea3): at a branch an earlier import journalled,
-     * the first row of the branch carries {@link #BALANCES_INCOMPLETE} when the rows the run holds there leave out an item
-     * that journal valued ({@link #missing}), so the review shows it and no commit is possible. Rows imported before and
-     * unchanged are rows of the run, so a full file with one changed row lists everything.
+     * The branches that already have an import opening stock journal, by code in compare form: the framework's and the
+     * command's ({@code opening|inventory|...} in {@code import_refs}, V145's copies of the old command's included) and the
+     * old command's in {@code retail_import_refs}. A journal of {@code runId} itself is left out (null for none), so the
+     * forecast of a committed run still predicts the journal that run posted. The one read the forecast and the loader
+     * apply the rule by: a branch in this set takes no second journal (Lead's rule on the review of 4af7a39).
      */
-    @Override
-    public SetCheck setCheck(String entitySet) {
-        if (!"balances".equals(entitySet)) {
-            return null;
-        }
-        return new SetCheck() {
-            private final Map<String, Set<String>> listed = new HashMap<>();
-            private final Map<String, String> first = new HashMap<>();
-            private Map<String, Set<String>> valued;
-
-            @Override
-            public void see(String row, Map<String, Object> values) {
-                if (values.get("branch") instanceof String branch
-                        && values.get("product_code") instanceof String item) {
-                    listed.computeIfAbsent(compare(branch), k -> new HashSet<>())
-                            .add(compare(item));
-                    first.putIfAbsent(compare(branch), row);
-                }
-            }
-
-            @Override
-            public List<RowFinding> check(String row, Map<String, Object> values) {
-                if (!(values.get("branch") instanceof String branch) || !row.equals(first.get(compare(branch)))) {
-                    return List.of();
-                }
-                if (valued == null) {
-                    valued = valuedItems(jdbc);
-                }
-                List<String> missing =
-                        missing(valued.getOrDefault(compare(branch), Set.of()), listed.get(compare(branch)));
-                return missing.isEmpty()
-                        ? List.of()
-                        : List.of(new RowFinding(
-                                BALANCES_INCOMPLETE,
-                                "branch",
-                                Map.of("branch", branch, "limit", String.valueOf(missing.size()))));
-            }
-        };
-    }
-
-    /**
-     * The items each branch's import opening stock journals valued, by branch code and item code (compare form): the sets
-     * recorded when each was posted ({@code retail_import_opening_items}), and for the old command's journals, which
-     * recorded none, the items with an unregistered legacy balance movement there. The one read the validation, the
-     * forecast and the loader refuse by.
-     */
-    static Map<String, Set<String>> valuedItems(JdbcClient jdbc) {
-        Map<String, Set<String>> out = new HashMap<>();
+    static Set<String> openedBranches(JdbcClient jdbc, UUID runId) {
+        Set<String> out = new HashSet<>();
         jdbc.sql("""
-                        SELECT b.code AS branch, p.code AS item
-                          FROM retail_import_opening_items i
-                          JOIN branches b ON b.id = i.branch_id JOIN retail_products p ON p.id = i.product_id
-                         WHERE i.tenant_id = current_setting('app.tenant_id')::uuid
-                        UNION
-                        SELECT b.code, p.code
-                          FROM retail_stock_movements m
-                          JOIN branches b ON b.id = m.branch_id JOIN retail_products p ON p.id = m.product_id
-                         WHERE m.tenant_id = current_setting('app.tenant_id')::uuid AND m.historical
-                           AND m.kind = 'legacy_balance' AND m.source_type = ?
-                           AND NOT EXISTS (SELECT 1 FROM import_refs r
-                                            WHERE r.tenant_id = m.tenant_id AND r.target_id = m.id)
+                        SELECT b.code FROM journal_entries e JOIN branches b ON b.id = e.branch_id
+                         WHERE e.tenant_id = current_setting('app.tenant_id')::uuid
+                           AND (e.id IN (SELECT r.target_id FROM import_refs r
+                                          WHERE r.tenant_id = e.tenant_id AND r.target_type = 'ledger.journal_entry'
+                                            AND r.source_key LIKE 'opening|inventory|%'
+                                            AND r.run_id IS DISTINCT FROM CAST(? AS uuid))
+                                OR e.id IN (SELECT o.target_id FROM retail_import_refs o
+                                             WHERE o.tenant_id = e.tenant_id AND o.source_file = 'opening'
+                                               AND NOT EXISTS (SELECT 1 FROM import_refs r
+                                                                WHERE r.tenant_id = o.tenant_id
+                                                                  AND r.target_id = o.target_id
+                                                                  AND r.run_id = CAST(? AS uuid))))
                         """)
-                .param(RetailImporter.SOURCE_TYPE)
-                .query((rs, n) -> out.computeIfAbsent(compare(rs.getString(1)), k -> new HashSet<>())
-                        .add(compare(rs.getString(2))))
+                .params(runId, runId)
+                .query((rs, n) -> out.add(compare(rs.getString(1))))
                 .list();
         return out;
-    }
-
-    /** The valued items a branch's rows leave out, in order: empty when the rows list every one (compare form). */
-    static List<String> missing(Set<String> valued, Set<String> listed) {
-        return valued.stream()
-                .filter(item -> listed == null || !listed.contains(item))
-                .sorted()
-                .toList();
     }
 
     /**
@@ -426,69 +365,44 @@ class RetailV1Template implements ImportTemplate {
      * the source's current quantity of an item at a branch, which the legacy balance makes the derived balance, whatever the
      * history before it; the first row of an item and branch counts (a second is refused). Each is valued at the item's
      * cost: an item the business already holds keeps its own prices (issue #73), a new one takes its first products row's.
-     * The opening inventory journal of each batch is the change in what the run's items above zero are worth per branch,
+     * The opening inventory journal is one per branch, ever, for what the branch's rows above zero are worth,
      * so a negative balance is never in it (the negative-stock rule of #134). No receivable is opened under either option
      * of the decision. History rows put nothing in the forecast: the legacy balance absorbs them.
      */
     @Override
     public ImportForecast forecast(Map<String, String> policy) {
+        return forecast(policy, null);
+    }
+
+    /**
+     * {@link #forecast(Map)} of one run: a branch another run already gave an opening stock journal is predicted none,
+     * as the loader posts none there (one opening journal per branch, ever: Lead's rule on the review of 4af7a39).
+     */
+    @Override
+    public ImportForecast forecast(Map<String, String> policy, UUID runId) {
         Map<String, Long> held = readOnly.execute(s -> {
             Map<String, Long> costs = new HashMap<>();
             catalogue.productsByCode().values().forEach(p -> costs.put(compare(p.code()), p.costMinor()));
             return costs;
         });
-        // JUSTIFICATION-A3: the re-review of 0bb283a (must-fix 3) asks the forecast to net what the loader nets.
-        // What the command's imports' opening stock journals already hold per branch (its runs, V145's and the old
-        // table's), as the loader nets them: the same export uploaded after the command predicts no journal, as the
-        // loader posts none. A framework run's own journals are left out: the reconciliation forecasts a committed run
-        // with this too, and must predict what that run posted.
-        Map<String, Long> journalled = readOnly.execute(s -> {
-            Map<String, Long> out = new HashMap<>();
-            jdbc.sql("""
-                            SELECT b.code, coalesce(sum(l.debit - l.credit), 0) AS held
-                              FROM journal_entries e
-                              JOIN journal_lines l ON l.entry_id = e.id
-                              JOIN gl_accounts a ON a.id = l.account_id
-                              JOIN branches b ON b.id = e.branch_id
-                             WHERE e.tenant_id = current_setting('app.tenant_id')::uuid AND a.system_key = 'inventory'
-                               AND e.id IN (SELECT r.target_id FROM import_refs r JOIN import_runs u ON u.id = r.run_id
-                                             WHERE r.tenant_id = e.tenant_id AND r.target_type = 'ledger.journal_entry'
-                                               AND r.source_key LIKE 'opening|inventory|%' AND u.origin <> 'framework'
-                                            UNION
-                                            SELECT o.target_id FROM retail_import_refs o
-                                             WHERE o.tenant_id = e.tenant_id AND o.source_file = 'opening'
-                                               AND NOT EXISTS (SELECT 1 FROM import_refs f
-                                                                 JOIN import_runs fu ON fu.id = f.run_id
-                                                                WHERE f.tenant_id = e.tenant_id
-                                                                  AND f.target_id = o.target_id
-                                                                  AND fu.origin = 'framework'))
-                             GROUP BY b.code
-                            """)
-                    .query((rs, n) -> out.put(compare(rs.getString("code")), rs.getLong("held")))
-                    .list();
-            return out;
-        });
+        Set<String> opened = readOnly.execute(s -> openedBranches(jdbc, runId));
         // The ledger takes no entry at a closed branch, so the loader journals none there and none is predicted.
         Set<String> inactive = readOnly.execute(s -> branches.all().stream()
                 .filter(b -> !b.active())
                 .map(b -> compare(b.code()))
                 .collect(Collectors.toSet()));
-        // A file that leaves out an item an earlier journal valued is refused at validation and by the loader: none is
-        // predicted for its branch either.
-        Map<String, Set<String>> valued = readOnly.execute(s -> valuedItems(jdbc));
         return new StockForecast(
                 held == null ? Map.of() : held,
-                journalled == null ? Map.of() : journalled,
-                inactive == null ? Set.of() : inactive,
-                valued == null ? Map.of() : valued);
+                opened == null ? Set.of() : opened,
+                inactive == null ? Set.of() : inactive);
     }
 
-    // JUSTIFICATION-A3: the Lead's steer for round 4 asks one netting function shared by the forecast and the loader.
+    // JUSTIFICATION-A3: the Lead's steer for round 4 asks one function shared by the forecast and the loader.
     /**
      * One branch's opening stock by data dictionary rule 5, the one rule the loader posts and the forecast predicts (Lead's
-     * steer on the review of 51cfb70): the branch's balance rows, the source's quantity of each item (which the legacy
-     * balance makes the derived one), valued at each item's current cost. Only items with a balance row count, as the old
-     * command journalled them; an item with history and no balance row is not journalled.
+     * steer on the review of 51cfb70, and his rule on the review of 4af7a39): the branch's balance rows, the source's
+     * quantity of each item (which the legacy balance makes the derived one, whatever run wrote the history), valued at each
+     * item's current cost. Only items with a balance row count, as the old command journalled them.
      *
      * @param qty the quantity of the branch's rows, the negatives included
      * @param valueMinor what those rows are worth
@@ -496,9 +410,13 @@ class RetailV1Template implements ImportTemplate {
      */
     record BranchOpening(BigDecimal qty, long valueMinor, long aboveZeroMinor) {
 
-        /** The journal to post on what import journals already hold; zero is none, below zero a journal the other way. */
-        long change(long journalledMinor) {
-            return Math.subtractExact(aboveZeroMinor, journalledMinor);
+        /**
+         * The opening journal to post: what the rows above zero are worth, once per branch, ever. A branch that already
+         * has an import opening journal ({@code opened}) takes none, as the old command answered "already posted"; its
+         * differences are listed for a stock-take instead.
+         */
+        long journal(boolean opened) {
+            return opened ? 0 : aboveZeroMinor;
         }
     }
 
@@ -524,29 +442,22 @@ class RetailV1Template implements ImportTemplate {
 
         private final Map<String, Long> cost;
         private final Map<String, Map<String, BigDecimal>> qty = new TreeMap<>();
-        private final Map<String, Long> journalled = new TreeMap<>();
+        private final Set<String> opened = new HashSet<>();
         private final List<Journal> journals = new ArrayList<>();
         private final Set<String> inactive;
-        private final Map<String, Set<String>> valued;
 
         StockForecast(Map<String, Long> held) {
-            this(held, Map.of(), Set.of(), Map.of());
+            this(held, Set.of(), Set.of());
         }
 
         /**
-         * {@code journalledBefore}: what earlier imports' opening stock journals hold per branch; {@code inactive}: the
-         * closed branches, where no journal is posted; {@code valued}: the items those journals valued ({@link
-         * #valuedItems}); all in compare form.
+         * {@code opened}: the branches another run already gave an opening stock journal ({@link #openedBranches});
+         * {@code inactive}: the closed branches, where no journal is posted; both in compare form.
          */
-        StockForecast(
-                Map<String, Long> held,
-                Map<String, Long> journalledBefore,
-                Set<String> inactive,
-                Map<String, Set<String>> valued) {
+        StockForecast(Map<String, Long> held, Set<String> opened, Set<String> inactive) {
             this.cost = new HashMap<>(held);
-            this.journalled.putAll(journalledBefore);
+            this.opened.addAll(opened);
             this.inactive = Set.copyOf(inactive);
-            this.valued = Map.copyOf(valued);
         }
 
         @Override
@@ -578,21 +489,21 @@ class RetailV1Template implements ImportTemplate {
             return Quantities.value(q, cost.getOrDefault(product, 0L));
         }
 
-        /** Closes a batch: its journal per branch is the loader's, {@link #branchOpening} netted on what is journalled. */
+        /**
+         * Closes a batch: each branch with rows takes the loader's journal, {@link BranchOpening#journal}, once; a branch
+         * already opened (by another run, or by an earlier batch of this one) takes none.
+         */
         private void close() {
             qty.forEach((branch, items) -> {
-                if (inactive.contains(branch)
-                        || !missing(valued.getOrDefault(branch, Set.of()), items.keySet())
-                                .isEmpty()) {
+                if (inactive.contains(branch)) {
                     return;
                 }
-                BranchOpening opening = branchOpening(items, product -> cost.getOrDefault(product, 0L));
-                long change = opening.change(journalled.getOrDefault(branch, 0L));
-                if (change != 0) {
-                    long amount = Math.abs(change);
+                long amount = branchOpening(items, product -> cost.getOrDefault(product, 0L))
+                        .journal(opened.contains(branch));
+                if (amount != 0) {
                     journals.add(new Journal(branch, "inventory", amount, amount));
+                    opened.add(branch);
                 }
-                journalled.put(branch, opening.aboveZeroMinor());
             });
         }
 

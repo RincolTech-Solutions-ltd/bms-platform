@@ -110,25 +110,28 @@ class RetailV1TemplateTest {
                 .containsExactly(tuple("TS-001", new BigDecimal("8750")), tuple("TS-009", new BigDecimal("-27000")));
     }
 
-    /** Re-review of 0bb283a, must-fix 3: what earlier imports journalled is netted, as the loader nets it. */
+    /**
+     * One opening journal per branch, ever (Lead's rule on the review of 4af7a39): a branch another run already opened is
+     * predicted none, as the loader posts none there; a closed branch none either; a branch is opened once in a run.
+     */
     @Test
-    void theForecastNetsWhatAnEarlierImportJournalled() {
+    void theForecastPredictsOneOpeningJournalPerBranchEver() {
         ImportForecast f = new RetailV1Template.StockForecast(
-                Map.of(),
-                Map.of(RetailV1Template.compare("KLA"), 8_750L, RetailV1Template.compare("ENT"), 1_000L),
-                Set.of(RetailV1Template.compare("JJA")),
-                Map.of(RetailV1Template.compare("ENT"), Set.of(RetailV1Template.compare("TS-001"))));
+                Map.of(), Set.of(RetailV1Template.compare("KLA")), Set.of(RetailV1Template.compare("JJA")));
         f.batch(1);
         f.row("products", Map.of("code", "TS-001", "cost_minor", 700L));
         f.batch(2);
         f.row("balances", Map.of("branch", "KLA", "product_code", "TS-001", "qty", new BigDecimal("12.5")));
         f.row("balances", Map.of("branch", "ENT", "product_code", "TS-001", "qty", new BigDecimal("2")));
         f.row("balances", Map.of("branch", "JJA", "product_code", "TS-001", "qty", new BigDecimal("1")));
+        f.batch(3);
+        f.row("balances", Map.of("branch", "ENT", "product_code", "TS-002", "qty", new BigDecimal("5")));
 
-        // KLA: 12.5 x 700 is already journalled, nothing more; ENT: 1,400 less the 1,000 held; JJA is closed, so the
-        // loader posts none there and none is predicted.
+        // KLA is already opened; ENT is opened by batch 2 alone (2 x 700), so batch 3 adds no second journal; JJA is
+        // closed.
         assertThat(f.balances().journals())
-                .containsExactly(new ImportForecast.Journal(RetailV1Template.compare("ENT"), "inventory", 400, 400));
+                .containsExactly(
+                        new ImportForecast.Journal(RetailV1Template.compare("ENT"), "inventory", 1_400, 1_400));
     }
 
     // JUSTIFICATION-A3: the Lead's steer for round 4 asks the shared netting function to be shown; a test of its own.
@@ -145,16 +148,8 @@ class RetailV1TemplateTest {
         assertThat(o.qty()).isEqualByComparingTo("9.5");
         assertThat(o.valueMinor()).isEqualTo(8_750 - 27_000);
         assertThat(o.aboveZeroMinor()).isEqualTo(8_750);
-        assertThat(o.change(0)).isEqualTo(8_750);
-        assertThat(o.change(8_750)).as("already journalled").isZero();
-        assertThat(o.change(10_000)).as("a fall, the other way").isEqualTo(-1_250);
-
-        // What an earlier journal valued must be listed (Lead's note on the review of 7f42ea3).
-        assertThat(RetailV1Template.missing(Set.of("TS-001", "TS-002", "TS-009"), Set.of("TS-001")))
-                .containsExactly("TS-002", "TS-009");
-        assertThat(RetailV1Template.missing(Set.of("TS-001"), Set.of("TS-001", "TS-005")))
-                .isEmpty();
-        assertThat(RetailV1Template.missing(Set.of(), null)).isEmpty();
+        assertThat(o.journal(false)).as("the first journal of the branch").isEqualTo(8_750);
+        assertThat(o.journal(true)).as("a branch already opened takes none").isZero();
     }
 
     @Test

@@ -148,7 +148,7 @@ class PreviewService implements ImportPreview {
         Map<String, Integer> records = new LinkedHashMap<>();
         order.forEach(set -> records.put(set, 0));
         List<BatchOutcome> outcomes = new ArrayList<>();
-        ImportForecast forecast = template == null ? ImportForecast.NONE : template.forecast(policy(runId));
+        ImportForecast forecast = template == null ? ImportForecast.NONE : template.forecast(policy(runId), runId);
         for (BatchRow b : ordered) {
             String set = sets.get(b.id());
             BatchOutcome outcome = outcome(b, set);

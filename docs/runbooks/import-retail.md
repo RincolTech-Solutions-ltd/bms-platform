@@ -285,43 +285,25 @@ The import is idempotent for the data it imports:
 - The legacy balance is written once per branch and product. On a re-run, a balance that no longer
   equals the source is reported (`legacy balance already written ... correct it with a stock-take`),
   never silently changed.
-- The opening journal is posted once per branch (`already posted, not posted again`), and so is
-  the cash opening journal of each shop (`retail.cash_opening:<branch>`). Since issue #135 the stock
-  opening journal is posted by the import framework for what the branch's balance rows above zero
-  are worth (the source's quantities, which the legacy balances make the derived ones), less what
-  every import's opening journals already hold (an earlier or stopped run's and the old
-  command's included). So a run resumed after a stop journals what the stopped run did not, a
-  re-run whose balances changed posts the difference, and one whose balances are unchanged posts
-  none. Stock is valued at each item's current cost: if a cost was changed in the app since the
-  earlier import, a re-run posts that difference too, said in its report line. At a branch that
-  is now inactive nothing is journalled: the report lists the change (`branch BR2 is inactive; its
-  opening stock change of ... is not journalled`) for the owner to post by hand.
-- The journal is posted only for the branches the run's `balances.jsonl` names. Imported history
-  at a branch with no balance rows (for example purchases at a shop the balances leave out) is not
-  journalled; the report lists each such item (`no balance row for branch ... its derived balance
-  ... is kept`). Import a branch's balances whole, in one file, the first time.
-- Once an import has journalled a branch's opening stock, a later balances file must list every
-  item that journal valued (each journal records its items; for the old command's journals, the
-  items it wrote a legacy balance for). An item with history and no balance row was never valued,
-  so it is not required, and a re-run of the same export passes. A file that leaves a valued item
-  out is refused before anything is posted: the command fails at `balances.jsonl` (`balances.jsonl
-  must list every item at KLA, which an earlier import already journalled; missing: ...`), and the
-  screens raise `BALANCES_INCOMPLETE` (blocking) on the branch's first balances row, and the dry
-  run fails, so the import cannot be made ready. Rows imported before and unchanged count as
-  listed, so a full re-upload with one changed row passes. The check is per file: when one branch
-  fails, the other branches of the same file are not journalled either. Correct one item with a
-  stock-take in the app, not by a re-import. Give a branch's balances as one source.
+- **One opening stock journal per branch, ever** (issue #135). The first run that commits balances
+  for a branch, through the command or the screens, posts that branch's opening journal: debit
+  `inventory`, credit opening balance equity, for what its balance rows above zero are worth at
+  each item's current cost. The legacy balances make each row's derived balance the source's,
+  whatever run wrote the history, so the first journal after a stopped or killed run still values
+  everything imported. Any later run for a branch that already has an import opening journal
+  (the framework's, this command's or the old command's) posts none for it (`already posted, not
+  posted again`). Its balance rows still go through: a new item gets its legacy balance, and
+  each row that differs from the books is listed (`... this differs from the opening; correct it
+  with a stock-take`), never journalled. So a partial file, a corrected row or a full re-upload
+  can never journal stock away; correct a difference with a stock-take in the app. The preview
+  applies the same rule, so it always agrees with the commit. Only the branches the balances name
+  are journalled: imported history at a branch with no balance rows is listed (`no balance row
+  for branch ... its derived balance ... is kept`), so give a branch's balances whole the first
+  time. At a branch that is inactive nothing is journalled; the report gives the amount for the
+  owner to post by hand. The cash opening journal of each shop (`retail.cash_opening:<branch>`)
+  is posted once too.
 - A dry run of the command holds the business's import key for its whole run: a real command or
   a screens commit started meanwhile is refused (`IMPORT_IN_PROGRESS`); run it after the dry run.
-- The same export uploaded through the import screens after the command (mapping onto
-  `retail_v1`) is previewed net of what the command already journalled, so the preview predicts
-  no journal where the loader posts none. The preview reads only the balance rows, so where the
-  business's imported stock and the balances differ (sales made in the app since), run the
-  re-import through the command instead. A second upload through the screens after an earlier
-  one is previewed without the earlier upload's journals; re-import such a business through the
-  command too. For the same reason a command run after a screens upload changes what that
-  upload's reconciliation predicts if it is computed again: reconcile and sign an upload before
-  running the command on the business.
 - A history row (`source_ref`) is imported once. Uploaded again, through the command or the
   screens, it is counted existing whatever its content, with no issue raised: a corrected sale or
   restock is corrected in the app, not by import.

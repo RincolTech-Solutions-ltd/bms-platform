@@ -342,18 +342,6 @@ public class RetailImporter {
                 ImportReport report = new ImportReport("", "", false);
                 Run run = new Run(Map.of(name, file), report, runId, null, false);
                 run.attach(checkpoint, batchId, new StagedRefs(checkpoint, staged));
-                Map<String, Set<String>> unchanged = new HashMap<>();
-                staged.values().stream()
-                        .filter(r -> !history && r.status() == ImportRefs.Status.EXISTING)
-                        .forEach(r -> {
-                            if (r.values().get("branch") instanceof String b
-                                    && r.values().get("product_code") instanceof String item) {
-                                unchanged
-                                        .computeIfAbsent(RetailV1Template.compare(b), k -> new HashSet<>())
-                                        .add(RetailV1Template.compare(item));
-                            }
-                        });
-                run.unchangedBalances = unchanged;
                 run.begin();
                 ImportReport.Counts counts = report.file(name);
                 counts.read = staged.size();
@@ -668,8 +656,6 @@ public class RetailImporter {
 
         UUID batchId;
         Refs refs;
-        /** A framework batch's balances rows imported before unchanged, by branch and item (compare form). */
-        Map<String, Set<String>> unchangedBalances = Map.of();
 
         Run(Map<String, ExportFile> export, ImportReport report, UUID id, LocalDate firstLiveDate, boolean command) {
             this.export = export;
@@ -1714,6 +1700,9 @@ public class RetailImporter {
             // zone, so a valuation as_of an earlier date reads the imported history alone, on the
             // same basis as the inventory account (review F4).
             LocalDate importDate = clock.today(zone);
+            // One opening journal per branch, ever (Lead's rule on the review of 4af7a39): the branches an import
+            // already journalled, where a row that differs from the books is listed for a stock-take, never journalled.
+            Set<String> opened = new HashSet<>(RetailV1Template.openedBranches(jdbc, null));
             Set<String> covered = new HashSet<>();
             for (Balance b : rows) {
                 String key = b.branch() + "|" + b.product().id();
@@ -1735,7 +1724,7 @@ public class RetailImporter {
                                 "legacy balance already written; the balance is "
                                         + Quantities.format(balance) + " and the source says "
                                         + Quantities.format(b.qty())
-                                        + "; correct it with a stock-take");
+                                        + "; this differs from the opening; correct it with a stock-take");
                     }
                     continue;
                 }
@@ -1747,6 +1736,33 @@ public class RetailImporter {
                                     + b.product().code() + " has movements recorded outside the import");
                 }
                 BigDecimal legacy = b.qty().subtract(balance);
+                // JUSTIFICATION-A3: the Lead's rule on the review of 4af7a39 lists each difference at an opened branch.
+                boolean openedBranch = opened.contains(RetailV1Template.compare(b.branchCode()));
+                if (legacy.signum() != 0 && openedBranch && p != null) {
+                    // The branch's opening is posted and the books hold this item there: the difference is the owner's
+                    // to correct with a stock-take, not a second journal.
+                    refs.matched(
+                            file.name, b.row(), "retail.product", b.product().id());
+                    c.existing++;
+                    report.anomaly(
+                            file.name,
+                            b.row().line(),
+                            "branch " + b.branchCode() + " product "
+                                    + b.product().code() + ": the source says "
+                                    + Quantities.format(b.qty()) + " and the books hold " + Quantities.format(balance)
+                                    + "; this differs from the opening already posted; correct it with a stock-take");
+                    continue;
+                }
+                if (legacy.signum() != 0 && openedBranch) {
+                    report.anomaly(
+                            file.name,
+                            b.row().line(),
+                            "branch " + b.branchCode() + " product "
+                                    + b.product().code() + " is new at the branch: its"
+                                    + " balance " + Quantities.format(b.qty()) + " is imported and is not in the"
+                                    + " opening already posted; it differs from the opening; correct it with a"
+                                    + " stock-take if it is wrong");
+                }
                 if (legacy.signum() == 0) {
                     // Nothing to write: the history already gives the source balance, on every run.
                     refs.matched(
@@ -1784,7 +1800,7 @@ public class RetailImporter {
                                     + " is kept");
                 }
             }
-            openingJournals(rows, importDate);
+            openingJournals(rows, importDate, opened);
         }
 
         private List<Balance> parseBalances(ExportFile file) {
@@ -1807,19 +1823,18 @@ public class RetailImporter {
 
         // JUSTIFICATION-A3: issue #135 moves the opening stock journal onto the framework's openingJournal.
         /**
-         * Data dictionary rule 5 through the framework (issues #135, #872 and #873): one opening journal per branch of the
-         * batch's balances, through {@link BatchWriter.Checkpoint#openingJournal} against opening balance equity, of what
-         * the branch's balance rows above zero are worth at each item's current cost (the source's quantity, which the
-         * legacy balance makes the derived one, whichever run wrote the history: review of 97cb1be, finding 1), less what
-         * every import's opening stock journal already holds, read from the ledger. That is the value the old command
-         * journalled and the forecast predicts (re-review of 51cfb70, must-fix A): an item with history and no balance
-         * row is not journalled. So a negative balance is never journalled (the negative-stock rule: it is listed for the
-         * first stock-take), a resumed or a second batch or run journals only what changed, a fall is a journal the
-         * other way, and nothing is kept in memory. A branch that changes nothing and
-         * already has an opening journal from an earlier import (this one's, an earlier command's or one V145 copied) is
-         * reported as already posted, with what its balance rows are worth, as the command always reported it.
+         * Data dictionary rule 5 through the framework (issues #135, #872 and #873), one opening journal per branch, ever
+         * (Lead's rule on the review of 4af7a39): the first run that commits balances for a branch posts it, through
+         * {@link BatchWriter.Checkpoint#openingJournal} against opening balance equity, for what the branch's balance rows
+         * above zero are worth at each item's current cost ({@link RetailV1Template.BranchOpening#journal}, the function the
+         * forecast predicts by). The legacy balance makes each row's derived balance the source's, whatever run wrote the
+         * history, so a first journal after a stopped or killed run still values everything imported. A negative balance is
+         * never journalled (the negative-stock rule: it is listed for the first stock-take). A branch that already has an
+         * import opening journal ({@code opened}: the framework's, the command's or the old command's) takes none, reported
+         * as already posted, as the command always reported it; its differences were listed by {@code balances} for a
+         * stock-take.
          */
-        private void openingJournals(List<Balance> rows, LocalDate today) {
+        private void openingJournals(List<Balance> rows, LocalDate today, Set<String> opened) {
             Map<String, Map<String, BigDecimal>> byBranch = new TreeMap<>();
             Map<String, Long> costs = new HashMap<>();
             Map<String, UUID> ids = new HashMap<>();
@@ -1827,99 +1842,52 @@ public class RetailImporter {
                     .filter(b -> !b.active())
                     .map(Branches.Branch::id)
                     .collect(java.util.stream.Collectors.toSet());
-            Map<String, UUID> productIds = new HashMap<>();
-            // The rows of the file at each branch, those imported before unchanged included (Lead's note on the review
-            // of 7f42ea3, point 3), by item code in compare form.
-            Map<String, Set<String>> listed = new HashMap<>();
-            unchangedBalances.forEach((code, items) ->
-                    listed.computeIfAbsent(code, k -> new HashSet<>()).addAll(items));
             for (Balance b : rows) {
                 byBranch.computeIfAbsent(b.branchCode(), k -> new LinkedHashMap<>())
                         .putIfAbsent(b.product().code(), b.qty());
                 costs.put(b.product().code(), b.product().costMinor());
-                productIds.put(b.product().code(), b.product().id());
                 ids.put(b.branchCode(), b.branch());
-                listed.computeIfAbsent(RetailV1Template.compare(b.branchCode()), k -> new HashSet<>())
-                        .add(RetailV1Template.compare(b.product().code()));
             }
-            // A branch an earlier import journalled takes only a file that lists every item that journal valued (Lead's
-            // note on the review of 7f42ea3): one that leaves one out would value the branch without it and journal it
-            // away. The validation refuses it on the branch's first row and the forecast predicts nothing; the loader
-            // refuses it too, before anything is posted.
-            Map<String, Set<String>> valued = RetailV1Template.valuedItems(jdbc);
-            byBranch.keySet().forEach(code -> {
-                List<String> missing = RetailV1Template.missing(
-                        valued.getOrDefault(RetailV1Template.compare(code), Set.of()),
-                        listed.get(RetailV1Template.compare(code)));
-                if (!missing.isEmpty()) {
-                    throw new IllegalArgumentException("balances.jsonl must list every item at " + code
-                            + ", which an earlier import already journalled; missing: " + String.join(", ", missing)
-                            + ". Correct one item with a stock-take, not a re-import.");
-                }
-            });
             byBranch.forEach((code, items) -> {
                 UUID branch = ids.get(code);
-                // The one rule the forecast predicts by (Lead's steer on the review of 51cfb70): the balance rows.
                 RetailV1Template.BranchOpening opening = RetailV1Template.branchOpening(items, costs::get);
                 checkpoint.stock(code, opening.qty(), opening.valueMinor());
-                // The journal nets every import of the business, not this run alone (review of 97cb1be, finding 1).
-                long journalled = importJournalled(branch);
-                long change = opening.change(journalled);
-                if (change != 0 && inactive.contains(branch)) {
-                    // The ledger takes no entry at a closed branch: the change is told, for the owner to post by hand.
+                boolean earlier = opened.contains(RetailV1Template.compare(code));
+                long amount = opening.journal(earlier);
+                if (earlier) {
+                    report.opening(new ImportReport.Opening(
+                            code,
+                            importJournalled(branch),
+                            earlierOpening(branch, code),
+                            "already posted, not posted again:"));
+                    return;
+                }
+                if (amount != 0 && inactive.contains(branch)) {
+                    // The ledger takes no entry at a closed branch: the amount is told, for the owner to post by hand.
                     report.anomaly(
                             "balances.jsonl",
                             0,
-                            "branch " + code + " is inactive; its opening stock change of " + change
+                            "branch " + code + " is inactive; its opening stock of " + amount
                                     + " minor units is not journalled");
                     return;
                 }
-                if (change == 0) {
-                    String posted = earlierOpening(branch, code);
-                    report.opening(
-                            posted == null
-                                    ? new ImportReport.Opening(code, 0, null, "nothing to post")
-                                    : new ImportReport.Opening(
-                                            code, journalled, posted, "already posted, not posted again:"));
+                if (amount == 0) {
+                    report.opening(new ImportReport.Opening(code, 0, null, "nothing to post"));
                     return;
                 }
                 checkpoint.openingJournal(new ImportRefs.Opening(
-                        branch,
-                        code,
-                        "inventory",
-                        today,
-                        "inventory",
-                        change > 0,
-                        Math.abs(change),
-                        RetailV1Template.OPENING_TYPE));
-                Optional<Map<String, Object>> entry =
-                        jdbc.sql("""
-                                SELECT r.id AS ref_id, e.id, e.entry_no
-                                  FROM import_refs r JOIN journal_entries e ON e.id = r.target_id
+                        branch, code, "inventory", today, "inventory", true, amount, RetailV1Template.OPENING_TYPE));
+                Map<String, Object> entry = jdbc.sql("""
+                                SELECT e.id, e.entry_no FROM import_refs r JOIN journal_entries e ON e.id = r.target_id
                                  WHERE r.batch_id = ? AND r.target_type = 'ledger.journal_entry'
                                    AND r.source_key LIKE 'opening|inventory|%' AND e.branch_id = ?
                                 """).params(batchId, branch).query().listOfRows().stream()
-                                .findFirst();
-                entry.ifPresent(e -> refs.journal("opening", code, "core.journal_entry", (UUID) e.get("id")));
-                // The items this journal valued, for a later balances file of the branch to list (Lead's note on the
-                // review of 7f42ea3).
-                entry.ifPresent(e -> items.forEach((item, q) -> {
-                    if (q.signum() > 0) {
-                        jdbc.sql("""
-                                        INSERT INTO retail_import_opening_items (tenant_id, ref_id, branch_id, product_id)
-                                        VALUES (current_setting('app.tenant_id')::uuid, ?, ?, ?)
-                                        ON CONFLICT DO NOTHING
-                                        """)
-                                .params((UUID) e.get("ref_id"), branch, productIds.get(item))
-                                .update();
-                    }
-                }));
-                // A fall is a journal the other way: its amount, and the status says it credits inventory.
-                report.opening(new ImportReport.Opening(
-                        code,
-                        Math.abs(change),
-                        entry.map(e -> (String) e.get("entry_no")).orElse(null),
-                        change > 0 ? "posted" : ImportReport.FALL));
+                        .findFirst()
+                        .orElseThrow(() ->
+                                new IllegalStateException("the opening journal of " + code + " is not registered"));
+                refs.journal("opening", code, "core.journal_entry", (UUID) entry.get("id"));
+                opened.add(RetailV1Template.compare(code));
+                report.opening(new ImportReport.Opening(code, amount, (String) entry.get("entry_no"), "posted"));
             });
         }
 

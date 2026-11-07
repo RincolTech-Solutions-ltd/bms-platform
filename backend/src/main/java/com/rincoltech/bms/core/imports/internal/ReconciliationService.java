@@ -563,7 +563,7 @@ class ReconciliationService implements ImportReconciliation {
         // The source: each row left out alone, with its own part, and the rows written netted together over the whole
         // run, as the forecast and the writer count them (Lead on the review of 4105c2a): an item counted in two
         // batches nets to one balance.
-        ImportForecast whole = template == null ? null : template.forecast(open);
+        ImportForecast whole = template == null ? null : template.forecast(open, runId);
         Map<CheckId, BigDecimal> writtenParts = new LinkedHashMap<>();
         for (BatchInfo b : batches) {
             if (whole != null) {
@@ -804,7 +804,7 @@ class ReconciliationService implements ImportReconciliation {
                 String unmeasurable = null;
                 if (template != null && stored.containsKey(s.line())) {
                     try {
-                        part = part(template, open, b, stored.get(s.line()));
+                        part = part(template, open, runId, b, stored.get(s.line()));
                     } catch (RuntimeException e) {
                         unmeasured++;
                         unmeasurable = e.getClass().getSimpleName();
@@ -870,7 +870,7 @@ class ReconciliationService implements ImportReconciliation {
                     // itemised, so its difference stays unexplained and holds the sign-off.
                     Map<CheckId, BigDecimal> asDecided = null;
                     try {
-                        asDecided = part(template, actual, b, stored.get(s.line()));
+                        asDecided = part(template, actual, runId, b, stored.get(s.line()));
                     } catch (RuntimeException e) {
                         // Named like any other row the rules cannot measure (review of 391e1dc, point 3).
                         unmeasured++;
@@ -1007,8 +1007,8 @@ class ReconciliationService implements ImportReconciliation {
      * rules cannot measure it (a row left out for a value they need); the caller counts and names that row.
      */
     private static Map<CheckId, BigDecimal> part(
-            ImportTemplate template, Map<String, String> policy, BatchInfo b, Map<String, Object> stored) {
-        ImportForecast f = template.forecast(policy);
+            ImportTemplate template, Map<String, String> policy, UUID runId, BatchInfo b, Map<String, Object> stored) {
+        ImportForecast f = template.forecast(policy, runId);
         f.batch(b.seq());
         f.row(b.set().key(), PreviewService.typed(b.set(), stored));
         return parts(f);

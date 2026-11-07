@@ -1,7 +1,6 @@
 package com.rincoltech.bms.retail.imports.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
 import com.rincoltech.bms.IntegrationTest;
@@ -268,45 +267,69 @@ class RetailV1TemplateIT extends IntegrationTest {
         assertThat(r.signable()).as(r.render()).isTrue();
     }
 
-    // JUSTIFICATION-A3: the Lead's note on the review of 7f42ea3 asks the screens-path test of (c).
+    // JUSTIFICATION-A3: the Lead's rule on the review of 4af7a39 asks tests (a) and (b) through the screens.
     /**
-     * (c) through the screens (Lead's note on the review of 7f42ea3): after the command imported the sample, a balances
-     * file with two KLA rows is refused at validation on its first KLA row ({@code BALANCES_INCOMPLETE}, blocking), and the
-     * dry run, which writes the other row, refuses the file too, so the run cannot be made ready; nothing is posted.
+     * (a) of the Lead's rule on the review of 4af7a39 (one opening journal per branch, ever): after the command imported
+     * the sample, a balances file with one KLA row, its quantity changed, goes through the screens. It commits, posts no
+     * journal, and lists the difference for a stock-take.
      */
     @Test
-    void aPartialBalancesFileThroughTheScreensIsRefusedAtValidationAndCannotCommit(@TempDir Path dir)
+    void aOneRowBalancesFileAfterTheCommandCommitsWithNoJournalAndListsTheDifference(@TempDir Path dir)
             throws IOException {
         ImportReport command = importer.run(t.slug(), RetailImportIT.SAMPLE, false);
         assertThat(command.failed()).as(command.render()).isFalse();
-        List<String> kla = Files.readAllLines(RetailImportIT.SAMPLE.resolve("balances.jsonl")).stream()
-                .filter(l -> l.contains("\"KLA\""))
-                .limit(2)
-                .toList();
-        Files.writeString(dir.resolve("balances.jsonl"), String.join("\n", kla) + "\n");
+        Files.writeString(dir.resolve("balances.jsonl"), changedKlaRow() + "\n");
 
-        UUID run = uploaded(t, "retail-partial", exportMapping(), dir, Map.of("balances", "balances.jsonl"));
+        UUID run = reviewed(t, "retail-one-row", exportMapping(), dir, exportFiles());
+        committed(t, run);
 
-        List<Issue> issues = as(
-                t,
-                () -> uploads.batches(run).stream()
-                        .flatMap(b -> validation.issues(b.id()).stream())
-                        .toList());
-        assertThat(issues)
-                .filteredOn(i -> "BALANCES_INCOMPLETE".equals(i.code()))
-                .singleElement()
-                .satisfies(i -> {
-                    assertThat(i.severity()).isEqualTo("blocking");
-                    assertThat(i.status()).isEqualTo("open");
-                });
-        DryRun dry = as(t, () -> runs.dryRun(run, operator));
-        // A dry run's failure names the batch and the kind of failure, never the message; the issue above names it.
-        assertThat(dry.report().failure())
-                .as(dry.report().render())
-                .isEqualTo("batch 1 failed (IllegalArgumentException)");
-        assertThatThrownBy(() -> as(t, () -> runs.transition(run, "ready"))).isInstanceOf(ApiException.class);
         assertThat(owner("SELECT count(*) FROM journal_entries WHERE tenant_id = ?", t))
+                .as("no second opening journal")
                 .isEqualTo(3L);
+        assertThat(as(t, () -> runs.commitReport(run)).render())
+                .contains("differs from the opening")
+                .contains("correct it with a stock-take");
+    }
+
+    /**
+     * (b) of the Lead's rule: the whole export again through the screens after the command, one KLA row changed. It
+     * commits, posts no journal, and lists the one difference for a stock-take.
+     */
+    @Test
+    void aFullReUploadWithOneChangedRowCommitsWithNoJournalAndListsTheDifference(@TempDir Path dir) throws IOException {
+        ImportReport command = importer.run(t.slug(), RetailImportIT.SAMPLE, false);
+        assertThat(command.failed()).as(command.render()).isFalse();
+        try (java.util.stream.Stream<Path> files = Files.list(RetailImportIT.SAMPLE)) {
+            for (Path f : files.filter(p -> p.toString().endsWith(".jsonl")).toList()) {
+                Files.copy(f, dir.resolve(f.getFileName().toString()));
+            }
+        }
+        String first = Files.readAllLines(RetailImportIT.SAMPLE.resolve("balances.jsonl")).stream()
+                .filter(l -> l.contains("\"KLA\""))
+                .findFirst()
+                .orElseThrow();
+        Files.writeString(
+                dir.resolve("balances.jsonl"),
+                Files.readString(dir.resolve("balances.jsonl")).replace(first, changedKlaRow()));
+
+        UUID run = reviewed(t, "retail-changed-row", exportMapping(), dir, exportFiles());
+        committed(t, run);
+
+        assertThat(owner("SELECT count(*) FROM journal_entries WHERE tenant_id = ?", t))
+                .as("no second opening journal")
+                .isEqualTo(3L);
+        assertThat(as(t, () -> runs.commitReport(run)).render())
+                .contains("differs from the opening")
+                .contains("correct it with a stock-take");
+    }
+
+    /** The sample's first KLA balance row with its quantity changed to 1. */
+    private static String changedKlaRow() throws IOException {
+        return Files.readAllLines(RetailImportIT.SAMPLE.resolve("balances.jsonl")).stream()
+                .filter(l -> l.contains("\"KLA\""))
+                .findFirst()
+                .orElseThrow()
+                .replaceFirst("\"qty\": \"[^\"]*\"", "\"qty\": \"1\"");
     }
 
     @Test
