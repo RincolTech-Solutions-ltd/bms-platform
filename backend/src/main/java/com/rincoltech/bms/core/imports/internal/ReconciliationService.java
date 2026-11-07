@@ -187,6 +187,9 @@ class ReconciliationService implements ImportReconciliation {
                           LEFT JOIN LATERAL (SELECT version, signable FROM import_reconciliations x
                                               WHERE x.run_id = r.id ORDER BY version DESC LIMIT 1) c ON true
                          WHERE r.status IN ('committed', 'signed_off')
+                           -- Not the import-retail command's runs nor V145's backfill run (#135): neither staged rows
+                           -- to reconcile against.
+                           AND r.origin = 'framework'
                          ORDER BY r.committed_at DESC NULLS LAST, r.id
                          LIMIT 20
                         """)
@@ -351,8 +354,9 @@ class ReconciliationService implements ImportReconciliation {
             String status, Instant cutoverAt, Instant committedAt, Map<String, Map<String, Object>> policy) {}
 
     private RunRow run(UUID runId, boolean forUpdate) {
-        return jdbc.sql("SELECT status, cutover_at, committed_at, policy::text FROM import_runs WHERE id = ?"
-                        + (forUpdate ? " FOR UPDATE" : ""))
+        // A run of the import-retail command or V145's backfill run has no staged rows to reconcile: not found (#135).
+        return jdbc.sql("SELECT status, cutover_at, committed_at, policy::text FROM import_runs"
+                        + " WHERE id = ? AND origin = 'framework'" + (forUpdate ? " FOR UPDATE" : ""))
                 .param(runId)
                 .query((rs, n) -> {
                     Map<String, Map<String, Object>> policy = new TreeMap<>();
@@ -1115,7 +1119,9 @@ class ReconciliationService implements ImportReconciliation {
             long[] dc = perEntry.computeIfAbsent(l.entryId(), k -> new long[2]);
             dc[0] = Math.addExact(dc[0], l.debitMinor());
             dc[1] = Math.addExact(dc[1], l.creditMinor());
-            boolean isOpening = (RefService.MODULE.equals(l.sourceModule()) && "opening_balance".equals(l.sourceType()))
+            // The framework's opening journal whatever ledger type its template named (retail_v1's is
+            // retail.import_opening, #135), or a cash book opening of the import-retail command.
+            boolean isOpening = RefService.MODULE.equals(l.sourceModule())
                     || ("retail".equals(l.sourceModule()) && RefService.RETAIL_OPENINGS.contains(l.sourceType()));
             opening.merge(l.entryId(), isOpening, Boolean::logicalAnd);
         }
