@@ -28,7 +28,8 @@ class CollateralImportWriter implements CollateralImports {
         }
         return jdbc.sql("""
                         SELECT EXISTS (SELECT 1 FROM lending_collateral_items
-                                        WHERE collateral_type = ? AND reference_no_normalised = ?
+                                        WHERE tenant_id = current_setting('app.tenant_id')::uuid
+                                          AND collateral_type = ? AND reference_no_normalised = ?
                                           AND custody_status NOT IN ('released', 'disposed'))
                         """)
                 .params(collateralType, referenceNormalised)

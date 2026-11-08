@@ -66,6 +66,8 @@ class LendingLoansV1TemplateIT extends IntegrationTest {
 
     static final Path BRANCH_TWO = Path.of("../fixtures/imports/lending/fab-register-branch-two.csv");
 
+    static final Path OVERPAID = Path.of("../fixtures/imports/lending/fab-register-overpaid.csv");
+
     static final Path MAPPING = Path.of("../fixtures/imports/lending_loans_v1.pilot_register.mapping.json");
 
     static final String SHA = "d".repeat(64);
@@ -393,6 +395,49 @@ class LendingLoansV1TemplateIT extends IntegrationTest {
                 .contains("MEMBER_PHONE_CONFLICT")
                 .doesNotContain("MEMBER_MATCHED_EXISTING");
         assertThat(as(t, () -> codesOn(run, 3))).doesNotContain("MEMBER_PHONE_CONFLICT");
+    }
+
+    // JUSTIFICATION-A3: the Lead's nice-to-have 1 on the review of a4c6bd9, the member credit journal end to end.
+    @Test
+    void anOverpaidLoanGivesItsBranchAMemberCreditJournal() throws IOException {
+        // Row 2 paid 400,000 on a return of 360,000: a credit of 40,000; row 3 still owes its 200,000.
+        UUID run = reviewed(t, officer, Map.of("register|fab-register-overpaid.csv", Files.readAllBytes(OVERPAID)));
+        ImportPreview.Preview predicted = as(t, () -> preview.preview(run));
+        committed(t, run);
+
+        assertThat(lines(t, JOURNAL_STATE))
+                .containsExactlyInAnyOrder(
+                        "HQ|loans_receivable|200000|0",
+                        "HQ|member_overpayments|0|40000",
+                        "HQ|opening_balance_equity|40000|200000");
+        assertThat(lines(
+                        t,
+                        "SELECT l.status || '|' || l.principal_outstanding_minor || '|' || l.credit_balance_minor"
+                                + " FROM lending_loans l WHERE l.tenant_id = ?"))
+                .containsExactlyInAnyOrder("closed|0|40000", "active|200000|0");
+        Map<String, String> byKind = new TreeMap<>();
+        TestDatabase.owner()
+                .sql("""
+                        SELECT r.source_key, sum(l.debit), sum(l.credit) FROM import_refs r
+                          JOIN journal_lines l ON l.entry_id = r.target_id
+                         WHERE r.tenant_id = ? AND r.target_type = 'ledger.journal_entry'
+                         GROUP BY r.source_key
+                        """)
+                .param(t.tenantId())
+                .query((rs, n) -> byKind.put(
+                        rs.getString(1).contains("member_credit") ? "member_credit" : "loans_receivable",
+                        rs.getLong(2) + "|" + rs.getLong(3)))
+                .list();
+        assertThat(byKind).isEqualTo(Map.of("loans_receivable", "200000|200000", "member_credit", "40000|40000"));
+        CommitReport real = as(t, () -> runs.commitReport(run));
+        assertThat(real.journals()).hasSize(2);
+        for (CommitReport.Journal j : real.journals()) {
+            assertThat(j.debitMinor() + "|" + j.creditMinor()).isEqualTo(byKind.get(j.kind()));
+        }
+        assertThat(predicted.balances().journals()).hasSize(2);
+        for (ImportForecast.Journal j : predicted.balances().journals()) {
+            assertThat(j.debitMinor() + "|" + j.creditMinor()).isEqualTo(byKind.get(j.kind()));
+        }
     }
 
     @Test

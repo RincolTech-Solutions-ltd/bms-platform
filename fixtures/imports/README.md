@@ -37,5 +37,6 @@ The lending template (issue #136) adds:
 |---|---|
 | `lending_loans_v1.pilot_register.mapping.json` | The pilot register as the first mapping of `lending_loans_v1`: its 25 columns onto the template's fields, the row rules `subheader_month` and `placeholder_rows` (the patterns of SDD chapter 13 section 13.5), the loan product as the source's `defaults`, and a second source `register_br2` for a register of the second branch (`branch` as a default too). `LendingLoansV1TemplateTest` and `LendingLoansV1TemplateIT` read it over `fixtures/pilot_loan_register_sample.csv` |
 | `lending/fab-register-branch-two.csv` | A fabricated register of the second branch (three loans: one overdue, one current with a part payment, one repaid), for the golden test at two branches |
+| `lending/fab-register-overpaid.csv` | Two fabricated loans at the head office: one repaid with 40,000 more than it owed (the member credit journal), one still owing |
 | `lending/fab-register-edge-cases.csv` | Fabricated rows, each producing the codes of the catalogue the pilot sample does not (with `BRANCH` and `PRODUCT` columns) |
 | `issue-codes.txt`, lines `lending_loans_v1` | The codes of `lending_loans_v1`, pinned by `LendingLoansV1TemplateTest` |

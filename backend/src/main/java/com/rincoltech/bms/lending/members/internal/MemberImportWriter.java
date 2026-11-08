@@ -45,7 +45,7 @@ class MemberImportWriter implements MemberImports {
     @Transactional(propagation = Propagation.MANDATORY)
     public Optional<Held> byNin(String nationalId) {
         return jdbc.sql("SELECT id, branch_id, national_id, phone_e164, full_name FROM lending_members"
-                        + " WHERE national_id = ?")
+                        + " WHERE tenant_id = current_setting('app.tenant_id')::uuid AND national_id = ?")
                 .param(nationalId)
                 .query(MemberImportWriter::held)
                 .optional();
@@ -55,7 +55,8 @@ class MemberImportWriter implements MemberImports {
     @Transactional(propagation = Propagation.MANDATORY)
     public List<Held> byPhone(String phoneE164) {
         return jdbc.sql("SELECT id, branch_id, national_id, phone_e164, full_name FROM lending_members"
-                        + " WHERE phone_e164 = ? ORDER BY created_at, id")
+                        + " WHERE tenant_id = current_setting('app.tenant_id')::uuid AND phone_e164 = ?"
+                        + " ORDER BY created_at, id")
                 .param(phoneE164)
                 .query(MemberImportWriter::held)
                 .list();
@@ -64,7 +65,8 @@ class MemberImportWriter implements MemberImports {
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public boolean exists(UUID memberId) {
-        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM lending_members WHERE id = ?)")
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM lending_members"
+                        + " WHERE tenant_id = current_setting('app.tenant_id')::uuid AND id = ?)")
                 .param(memberId)
                 .query(Boolean.class)
                 .single();
@@ -144,7 +146,7 @@ class MemberImportWriter implements MemberImports {
     public KinHeld kinOf(UUID memberId, String nationalId, String phoneE164, String fullName) {
         UUID same = jdbc.sql("""
                         SELECT id FROM lending_next_of_kin
-                         WHERE member_id = ?
+                         WHERE tenant_id = current_setting('app.tenant_id')::uuid AND member_id = ?
                            AND (national_id = ? OR phone_e164 = ?
                                 OR (national_id IS NULL AND phone_e164 IS NULL AND CAST(? AS text) IS NULL
                                     AND CAST(? AS text) IS NULL AND lower(full_name) = lower(?)))
@@ -154,8 +156,8 @@ class MemberImportWriter implements MemberImports {
                 .query(UUID.class)
                 .optional()
                 .orElse(null);
-        boolean primary = jdbc.sql(
-                        "SELECT EXISTS (SELECT 1 FROM lending_next_of_kin WHERE member_id = ? AND is_primary)")
+        boolean primary = jdbc.sql("SELECT EXISTS (SELECT 1 FROM lending_next_of_kin WHERE tenant_id ="
+                        + " current_setting('app.tenant_id')::uuid AND member_id = ? AND is_primary)")
                 .param(memberId)
                 .query(Boolean.class)
                 .single();
