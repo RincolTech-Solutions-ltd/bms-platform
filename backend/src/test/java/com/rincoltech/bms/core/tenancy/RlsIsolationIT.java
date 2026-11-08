@@ -1275,9 +1275,7 @@ public class RlsIsolationIT {
                         INSERT INTO import_rehearsals (id, tenant_id, run_id, backup, build, outcome, timings)
                         VALUES (?, ?, ?, 'bms-staging-20261001T011500Z.dump.enc', 'test-build', 'committed',
                                 '{"commit_ms": 1}')
-                        """)
-                .params(UUID.randomUUID(), t.tenantId(), committedRun)
-                .update();
+                        """).params(UUID.randomUUID(), t.tenantId(), committedRun).update();
     }
 
     /**

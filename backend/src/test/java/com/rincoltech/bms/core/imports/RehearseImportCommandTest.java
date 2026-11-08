@@ -84,7 +84,9 @@ class RehearseImportCommandTest {
 
         out.reset();
         assertThat(run(answering("failed", "TENANT_TRADING", null), out, err)).isEqualTo(1);
-        assertThat(out.toString(StandardCharsets.UTF_8)).contains("failed (TENANT_TRADING)").contains("not compared");
+        assertThat(out.toString(StandardCharsets.UTF_8))
+                .contains("failed (TENANT_TRADING)")
+                .contains("not compared");
 
         out.reset();
         assertThat(run(answering("halted", "halted", false), out, err)).isEqualTo(1);

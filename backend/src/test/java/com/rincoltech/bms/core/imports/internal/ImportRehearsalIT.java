@@ -38,6 +38,8 @@ class ImportRehearsalIT extends IntegrationTest {
 
     static final String TOKEN = "f00dfeed".repeat(6);
 
+    static final String BACKUP = "bms-staging-20261024T011500Z.dump.enc";
+
     /** Three made-up rows read and written by every batch, and a note, the same in the dry run and the commit. */
     static final BatchWriter THREE_ROWS = (runId, batchId, seq, checkpoint) -> {
         checkpoint.note("three fabricated rows");
@@ -88,7 +90,9 @@ class ImportRehearsalIT extends IntegrationTest {
     static void mark(String token) {
         JdbcClient owner = TestDatabase.owner();
         owner.sql("CREATE TABLE bms_rehearsal_marker (token text NOT NULL)").update();
-        owner.sql("INSERT INTO bms_rehearsal_marker (token) VALUES (?)").param(token).update();
+        owner.sql("INSERT INTO bms_rehearsal_marker (token) VALUES (?)")
+                .param(token)
+                .update();
         owner.sql("GRANT SELECT ON bms_rehearsal_marker TO bms_app").update();
     }
 
@@ -111,7 +115,8 @@ class ImportRehearsalIT extends IntegrationTest {
                     .update();
             runs.transition(run, "uploaded");
             runs.transition(run, "in_review");
-            runs.allowTradingTenant(run, Api.platformUser(Api.email("rehearsal-maker")), "Rehearsal of a fabricated tab");
+            runs.allowTradingTenant(
+                    run, Api.platformUser(Api.email("rehearsal-maker")), "Rehearsal of a fabricated tab");
             runs.approveTradingTenant(run, Api.platformUser(Api.email("rehearsal-checker")));
             runs.dryRun(run, operator);
             runs.transition(run, "ready");
@@ -129,18 +134,22 @@ class ImportRehearsalIT extends IntegrationTest {
 
     static void assertCode(Runnable call, String code) {
         assertThatThrownBy(call::run)
-                .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.code()).isEqualTo(code));
+                .isInstanceOfSatisfying(
+                        ApiException.class, e -> assertThat(e.code()).isEqualTo(code));
+    }
+
+    /** A rehearsal of the run in the test's business, by the given service, with no host timings. */
+    Rehearsal rehearse(ImportRehearsals by, UUID run, String token) {
+        return as(() -> by.rehearse(run, token, BACKUP, Map.of()));
     }
 
     @Test
     void aRunIsRefusedInADatabaseWithoutTheTokenAndNothingIsWritten() {
         UUID run = readyRun(true);
-        assertCode(() -> as(() -> rehearsals.rehearse(run, TOKEN, "bms-staging-fab.dump.enc", Map.of())),
-                "not_a_rehearsal_database");
+        assertCode(() -> rehearse(rehearsals, run, TOKEN), "not_a_rehearsal_database");
         assertCode(() -> as(() -> runService.commitRehearsal(run, TOKEN)), "not_a_rehearsal_database");
         mark(TOKEN);
-        assertCode(() -> as(() -> rehearsals.rehearse(run, "0".repeat(48), "bms-staging-fab.dump.enc", Map.of())),
-                "not_a_rehearsal_database");
+        assertCode(() -> rehearse(rehearsals, run, "0".repeat(48)), "not_a_rehearsal_database");
         assertCode(() -> as(() -> runService.commitRehearsal(run, "")), "not_a_rehearsal_database");
         assertThat(rehearsalsOf(run)).isZero();
         assertThat(as(() -> runs.get(run)).status()).isEqualTo("ready");
@@ -153,8 +162,8 @@ class ImportRehearsalIT extends IntegrationTest {
         // The token loosens nothing for the ordinary commit: it still needs the dump and the checker.
         assertCode(() -> as(() -> runs.commit(run)), "pre_import_dump_missing");
 
-        Rehearsal rehearsal = as(() -> rehearsals.rehearse(
-                run, TOKEN, "bms-staging-20261024T011500Z.dump.enc", Map.of("download_ms", 12L, "restore_ms", 34L)));
+        Map<String, Long> host = Map.of("download_ms", 12L, "restore_ms", 34L);
+        Rehearsal rehearsal = as(() -> rehearsals.rehearse(run, TOKEN, BACKUP, host));
 
         assertThat(rehearsal.outcome()).isEqualTo("committed");
         assertThat(rehearsal.failure()).isNull();
@@ -183,7 +192,7 @@ class ImportRehearsalIT extends IntegrationTest {
                 .singleRow();
         assertThat(row)
                 .containsEntry("tenant_id", t.tenantId())
-                .containsEntry("backup", "bms-staging-20261024T011500Z.dump.enc")
+                .containsEntry("backup", BACKUP)
                 .containsEntry("outcome", "committed")
                 .containsEntry("no_failure", true)
                 .containsEntry("matches_dry_run", true)
@@ -204,23 +213,19 @@ class ImportRehearsalIT extends IntegrationTest {
         UUID run = readyRun(false);
         mark(TOKEN);
         RehearsalService staging = new RehearsalService(runService, jdbc, transactions, mapper, "staging");
-        assertCode(() -> as(() -> staging.rehearse(run, TOKEN, "bms-staging-fab.dump.enc", Map.of())),
-                "run_not_fabricated");
+        assertCode(() -> rehearse(staging, run, TOKEN), "run_not_fabricated");
         assertThat(rehearsalsOf(run)).isZero();
         assertThat(as(() -> runs.get(run)).status()).isEqualTo("ready");
 
         UUID fabricated = readyRun(true);
-        assertThat(as(() -> staging.rehearse(fabricated, TOKEN, "bms-staging-fab.dump.enc", Map.of()))
-                        .outcome())
-                .isEqualTo("committed");
+        assertThat(rehearse(staging, fabricated, TOKEN).outcome()).isEqualTo("committed");
     }
 
     @Test
     void aRunNeitherInReviewNorReadyIsRefused() {
         UUID run = as(() -> runs.open(operator, true).id());
         mark(TOKEN);
-        assertCode(() -> as(() -> rehearsals.rehearse(run, TOKEN, "bms-staging-fab.dump.enc", Map.of())),
-                "run_not_rehearsable");
+        assertCode(() -> rehearse(rehearsals, run, TOKEN), "run_not_rehearsable");
         assertThat(rehearsalsOf(run)).isZero();
     }
 

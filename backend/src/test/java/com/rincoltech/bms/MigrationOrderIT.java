@@ -3982,9 +3982,7 @@ class MigrationOrderIT {
                                                                    timings)
                                     VALUES (?, ?, ?, 'bms-staging-fab.dump.enc', 'test-build', 'failed', 'TENANT_TRADING',
                                             '{"restore_ms": 1}')
-                                    """)
-                            .params(UUID.randomUUID(), tenant, run)
-                            .update())
+                                    """).params(UUID.randomUUID(), tenant, run).update())
                     .isEqualTo(1);
             assertThatThrownBy(() -> owner.sql("DELETE FROM import_rehearsals WHERE run_id = ?")
                             .param(run)

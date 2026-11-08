@@ -79,7 +79,8 @@ class RehearsalService implements ImportRehearsals {
                     HttpStatus.CONFLICT,
                     "run_not_rehearsable",
                     "Import not rehearsable",
-                    "Only an import in review or ready is rehearsed; this one is " + RunStates.words(run.status()) + ".");
+                    "Only an import in review or ready is rehearsed; this one is "
+                            + RunStates.words(run.status()) + ".");
         }
         // The run's stored dry run is the live one, copied with the run: kept before the rehearsal's own replaces it.
         CommitReport liveDryRun = runs.dryRunReport(runId).map(ImportRuns.DryRun::report).orElse(null);
@@ -96,9 +97,7 @@ class RehearsalService implements ImportRehearsals {
                 jdbc.sql("""
                                 UPDATE import_runs SET status = 'in_review', version = version + 1, updated_at = now()
                                  WHERE id = ? AND status = 'ready'
-                                """)
-                        .param(runId)
-                        .update();
+                                """).param(runId).update();
             });
             long step = System.nanoTime();
             dryRun = runs.dryRun(runId, REHEARSAL).report();
