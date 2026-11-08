@@ -354,10 +354,11 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
     always give the same outcome. `ImportMalformedFilesIT` takes 18 named cases through the upload, validation and
     preview of `retail_v1` with the shop book mapping: truncation, UTF-16, Windows-1252, a byte that is not UTF-8, two
     exports joined with a byte order mark mid-file, an unbalanced quote, long and too long cells, control, zero-width
-    and right-to-left characters and a NUL in codes, merged cells, formulas with a value, with an error and without a
-    value, a hidden sheet before the items and a workbook whose only sheet is hidden, and dates as a serial, in a date
-    cell, as text and as an impossible text. Each ends in its refusal or failure code or its row codes, a failed batch
-    holds no rows, a refused file leaves no batch, and nothing outside the import tables and the audit log is written.
+    and right-to-left characters and a NUL in codes, merged cells, formulas with a value, with an error, without a
+    value and with empty text as their value (an empty cell, as shown), a hidden sheet before the items and a workbook
+    whose only sheet is hidden, and dates as a serial, in a date cell, as text and as an impossible text. Each ends in
+    exactly the codes it names (as a multiset), a failed batch holds no rows, a refused file leaves no batch, neither
+    leaves a quarantined object, and nothing outside the import tables and the audit log is written.
     The formulas found a defect, fixed in the same change (chapter 13 section 13.14.1, 11/16).
   - *Big file test* (`ImportBigFileIT`, on request: the CI job `import-big-file`, "Run workflow"; too long for
     `mvn verify`). It runs `retail_v1` product masters through the whole path in a child JVM at the staging API's heap
@@ -387,9 +388,11 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
     | CSV, 20,000 rows, 200 columns (193 ignored), 20.6 MB (column limit) | 224 MB | 2.9 to 3.0 s | 8.7 to 15.7 s | 1.1 to 1.2 s | stopped at its 900 s limit | 106 of 149 MB by the preview, 134 in the dry run |
     | CSV, 100,000 rows, 7 columns, 25.8 MB | 448 MB | 9.0 s | 55 s | 1.4 s | stopped at its 900 s limit | 293 of 298 MB |
 
-    The cases at 1,250 and 2,500 rows (seven columns, and 2,500 of the 200 of the column limit) run in every
-    `import-big-file` job; a file over 2,500 rows is refused with `TOO_MANY_ROWS` and split (the cutover runbook, stage
-    2), until #880 restores 100,000.
+    The cases at half the configured limit and at the limit (seven columns, and the limit at the 200 of the column
+    limit), their sizes taken from `UploadSettings.DEFAULT_MAX_ROWS`, run in every `import-big-file` job, with one row
+    over the limit refused with `TOO_MANY_ROWS` in the same child. Such a file is split (the cutover runbook, stage 2)
+    until #880 restores 100,000. The cases disabled for #880 need the limit raised first: at 2,500 their files are
+    refused at the upload.
 - **Normalisation tables.** Every table of examples in chapter 13 section 13.6 is a
   parametrised unit test.
 - **Loan servicing golden tests** (`ServicingTest`, #108). Fabricated schedules from worked

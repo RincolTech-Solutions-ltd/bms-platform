@@ -73,8 +73,9 @@ done by hand as the notes say.
       lists them for a correcting entry.
 - [ ] Rows per file: until #880 is fixed, a batch holds at most 2,500 rows (`TOO_MANY_ROWS` above it),
       a size the big file test commits on the staging heap well inside the time limits (SDD chapter 15
-      section 15.7: 2,500 items commit in under 2 minutes; 5,000 took up to 8 of the 10 the batch may
-      take; 10,000 took 17 and nearly filled the heap). Split a larger file into files of at most 2,500
+      section 15.7: 2,500 items dry run in 43 to 85 s and commit in 53 to 130 s; 5,000 took up to 473 s
+      of the 10 minutes a batch may take; 10,000 took 17 minutes and nearly filled the heap). Plan the
+      window from those figures, on the host the import runs on. Split a larger file into files of at most 2,500
       rows, each its own batch, and rehearse
       the dry run on the largest one first. The limit goes back up to 100,000 with #880.
 

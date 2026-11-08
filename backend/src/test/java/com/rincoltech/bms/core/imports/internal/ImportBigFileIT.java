@@ -22,7 +22,8 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -145,7 +146,7 @@ class ImportBigFileIT extends IntegrationTest {
      * and once at 10,000 (17 minutes, the old generation at 137 of 149 MB, over both bounds; SDD chapter 15 section 15.7).
      */
     @ParameterizedTest(name = "{0} rows of {1} columns")
-    @CsvSource({"1250, 7", "2500, 7", "2500, 200"})
+    @MethodSource("atTheConfiguredLimit")
     void aProductMasterAtTheConfiguredRowLimitIsCommittedOnTheStagingHeapInsideTheTimeLimits(int rows, int columns)
             throws Exception {
         int extra = columns - ITEM_HEADER.size();
@@ -159,6 +160,24 @@ class ImportBigFileIT extends IntegrationTest {
         assertThat(output).contains("rows=" + rows, "outcome=COMMITTED");
         assertThat(written(output)).isGreaterThanOrEqualTo(rows);
         assertThat(stepMillis(output, "commit")).isLessThan(BATCH_TIMEOUT_MS);
+    }
+
+    /** Half the configured limit and the limit itself at seven columns, and the limit at the column limit. */
+    static java.util.stream.Stream<Arguments> atTheConfiguredLimit() {
+        int limit = UploadSettings.DEFAULT_MAX_ROWS;
+        return java.util.stream.Stream.of(
+                Arguments.of(limit / 2, ITEM_HEADER.size()),
+                Arguments.of(limit, ITEM_HEADER.size()),
+                Arguments.of(limit, COLUMN_LIMIT));
+    }
+
+    /** One row over the configured limit is refused at the upload with TOO_MANY_ROWS, in the child at that limit. */
+    @Test
+    void oneRowOverTheConfiguredLimitIsRefused() throws Exception {
+        Path csv = dir.resolve("fab-items-over-the-limit.csv");
+        TestFiles.writeCsv(csv, ITEM_HEADER, items(UploadSettings.DEFAULT_MAX_ROWS + 1, 0));
+        String output = child("refuse", "items=" + csv, STAGING_HEAP_MB);
+        assertThat(output).contains("status=failed failure=" + Parsing.TOO_MANY_ROWS);
     }
 
     // ---------------------------------------------------------------------------------------------

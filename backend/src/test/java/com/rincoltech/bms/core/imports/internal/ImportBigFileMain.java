@@ -40,7 +40,8 @@ import tools.jackson.databind.json.JsonMapper;
  * what it should, 1 when one did not, and dies with an error when the heap runs out ({@code -XX:+ExitOnOutOfMemoryError}).
  *
  * <p>Arguments: the database URL and the {@code bms_app} password, the tenant's id and slug, the mapping document's file,
- * {@code commit} or {@code preview}, then one {@code source=file} per batch in commit order. Fabricated files only.
+ * {@code commit}, {@code preview} or {@code refuse} (the last file must be refused with {@code TOO_MANY_ROWS}), then one
+ * {@code source=file} per batch in commit order. Fabricated files only.
  */
 public final class ImportBigFileMain {
 
@@ -127,8 +128,12 @@ public final class ImportBigFileMain {
                     + batch.sizeBytes() + " rows=" + batch.rowCount() + " columns=" + batch.columnCount() + " status="
                     + batch.status() + " failure=" + batch.failureCode());
             if (!"parsed".equals(batch.status())) {
-                return false;
+                // In refuse mode the file over the row limit must end here, with its code.
+                return "refuse".equals(args[5]) && Parsing.TOO_MANY_ROWS.equals(batch.failureCode());
             }
+        }
+        if ("refuse".equals(args[5])) {
+            return false;
         }
         long started = System.nanoTime();
         ImportValidation.RunReport report = as(tenant, () -> validation.validate(runId));

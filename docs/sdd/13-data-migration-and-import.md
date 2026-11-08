@@ -1568,7 +1568,7 @@ section 4.1; coordinated with #110, which builds no second framework).**
   loader holds every staged row of the batch). #881: a restock's price change is looked for within its batch only, so
   splitting the restocks over two runs loses it. The tests that show them are disabled with those numbers.
 - **The row limit is 2,500 per batch until #880** (`bms.imports.max-rows`, `BMS_IMPORTS_MAX_ROWS`): the big file test
-  dry runs and commits it on the staging heap in under 2 minutes each with the old generation at 56 percent, at seven
-  columns and at the 200 of the column limit; 5,000 took up to 8 of the 10 minute batch timeout, too thin a margin
+  dry runs it in 43 to 85 s and commits it in 53 to 130 s on the staging heap with the old generation at 56 percent, at
+  seven columns and at the 200 of the column limit; 5,000 took up to 473 s of the 10 minute batch timeout, too thin a margin
   (chapter 15 section 15.7). It goes back up to 100,000
   with #880. The test profile keeps 100,000 for the readers' streaming proofs; `UploadServiceTest` pins production's.

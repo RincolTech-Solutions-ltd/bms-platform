@@ -228,7 +228,7 @@ class ImportMalformedFilesIT extends IntegrationTest {
                         "product_master",
                         "fab-hidden.csv",
                         utf8(PRODUCT_HEADER + "\r\n"
-                                + "FZ-\u0007001,Test fuzz item 01,Cables,metre,700,1200,Yes,0\r\n"
+                                + "FZ-" + (char) 0x07 + "001,Test fuzz item 01,Cables,metre,700,1200,Yes,0\r\n"
                                 + (char) 0x200F + "FZ-002,Test fuzz item 02,Cables,metre,700,1200,Yes,0\r\n"
                                 + "FZ" + (char) 0x202E + "-003,Test fuzz item 03,Cables,metre,700,1200,Yes,0\r\n"
                                 + "FZ-0" + (char) 0x200B + "04,Test fuzz item 04,Cables,metre,700,1200,Yes,0\r\n"
@@ -242,7 +242,8 @@ class ImportMalformedFilesIT extends IntegrationTest {
                         "a NUL character in a code",
                         "product_master",
                         "fab-nul.csv",
-                        utf8(PRODUCT_HEADER + "\r\nFZ-\u0000001,Test fuzz item 01,Cables,metre,700,1200,Yes,0\r\n"),
+                        utf8(PRODUCT_HEADER + "\r\nFZ-" + (char) 0x00
+                                + "001,Test fuzz item 01,Cables,metre,700,1200,Yes,0\r\n"),
                         "refused:FILE_TYPE_UNSUPPORTED"),
                 // Workbooks.
                 new Case(

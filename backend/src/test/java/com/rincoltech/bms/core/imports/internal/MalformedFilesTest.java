@@ -62,7 +62,7 @@ class MalformedFilesTest {
             // A right-to-left override and a right-to-left mark, by code point so no editor can strip them.
             String.valueOf((char) 0x202E).getBytes(StandardCharsets.UTF_8),
             String.valueOf((char) 0x200F).getBytes(StandardCharsets.UTF_8),
-            "\u0007".getBytes(StandardCharsets.UTF_8),
+            String.valueOf((char) 0x07).getBytes(StandardCharsets.UTF_8),
             "{".getBytes(StandardCharsets.UTF_8),
             "<".getBytes(StandardCharsets.UTF_8),
             "x".repeat(Parsing.MAX_CELL_CHARS + 10).getBytes(StandardCharsets.UTF_8));
@@ -154,7 +154,7 @@ class MalformedFilesTest {
                     written.utf8(),
                     () -> new ByteArrayInputStream(bytes),
                     null,
-                    new Parsing.Limits(100_000, 200, Set.of("code"), Set.of()),
+                    new Parsing.Limits(UploadSettings.DEFAULT_MAX_ROWS, 200, Set.of("code"), Set.of()),
                     JSON,
                     chunk -> chunk.stream().map(StagedRow::rawJson).forEach(rows::add));
         } catch (Parsing.Failure f) {
