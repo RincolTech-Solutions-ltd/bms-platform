@@ -77,8 +77,11 @@ public final class ImportBigFileMain {
             System.out.println("BIGFILE oldBaselineMb=" + oldUsed() / 1024 / 1024);
             ManagementFactory.getMemoryPoolMXBeans().forEach(MemoryPoolMXBean::resetPeakUsage);
             ok = run(ctx, tenant, slug, document, commit, args);
+            long gcMs = ManagementFactory.getGarbageCollectorMXBeans().stream()
+                    .mapToLong(java.lang.management.GarbageCollectorMXBean::getCollectionTime)
+                    .sum();
             System.out.println("BIGFILE maxHeapMb=" + Runtime.getRuntime().maxMemory() / 1024 / 1024 + " oldPeakMb="
-                    + oldPeak() / 1024 / 1024 + " oldMaxMb=" + oldMax() / 1024 / 1024);
+                    + oldPeak() / 1024 / 1024 + " oldMaxMb=" + oldMax() / 1024 / 1024 + " gcMs=" + gcMs);
         }
         System.exit(ok ? 0 : 1);
     }
