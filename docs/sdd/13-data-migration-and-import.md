@@ -1551,3 +1551,15 @@ section 4.1; coordinated with #110, which builds no second framework).**
   resume after a kill post no second journal and write nothing twice; a business with a member and a loan keeps them,
   has its borrowers linked to that member and journals only the imported loans; a run without the decision is not
   ready), with `ImportCatalogueTest` (the two shared codes and the lending catalogue pinned).
+
+**11/16, the error-proofing suite (#137, no migration, spec section 5).** Tests, and one fix the fuzzing found:
+
+- **A formula is read as the sheet shows it, or reported.** A workbook cell that holds a formula's error (`#N/A`, `#REF!`)
+  was read as that text, and a formula saved without its value (a file a program wrote and no spreadsheet calculated) as
+  an empty field, so an optional field lost it in silence. The reader now marks the second as a cell of type `formula`
+  (`XlsxRows.FORMULA`, empty value), and the validation reports both, on any field, as `TYPE_INVALID`
+  (`RowValidator.UNREAD_CELLS`); an operator's edit of the field replaces the cell as before. A formula with its value is
+  read by its value, unchanged.
+- **The suite** is SDD chapter 15 section 15.7: the golden report of `retail_v1` over fabricated edge cases, the property
+  tests on generated shop books, the fuzzed files, and the big file test at each limit of 13.14 on the staging heap, with
+  its times.

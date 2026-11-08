@@ -44,9 +44,16 @@ ADR-010 (section 15.3.1).
 | Unit and architecture | JUnit 6 in Maven Surefire, classes named `*Test`; Spring Modulith `ApplicationModules.verify()`; ArchUnit | Vitest (`*.test.ts`) |
 | Integration and API | JUnit 6 in Maven Failsafe, classes named `*IT`; Spring Boot test on a random port with `TestRestTemplate`; Testcontainers 2, PostgreSQL 16 (`TestDatabase`, one container per test JVM) | |
 | Contract | `OpenApiSnapshotIT` against `docs/api/openapi.json` | The generated `schema.d.ts` must match (CI) |
+| Property | jqwik 1.9.3 (`net.jqwik:jqwik-api` and `jqwik-engine`, test scope), a JUnit Platform engine beside Jupiter: Surefire runs its properties in `*Test` classes, Failsafe in `*IT` classes; an `*IT` property class gets its beans from the shared Spring test context through `TestContextManager` | |
 | End to end | | Playwright, later |
 
 `mvn verify` runs all backend levels; `npm test` the frontend unit tests (`make test` runs both).
+
+Every property names its seed and its tries in `@Property`, so a run is the same on every machine and a failure is
+reproduced by its seed; jqwik prints the shrunk counterexample. `src/test/resources/junit-platform.properties` keeps the
+failure database under `target`, never replays a stored sample first, and bounds shrinking at 120 seconds; a property that
+commits imports also asserts its own run time (`RetailImportPropertiesIT.PROPERTY_LIMIT`). jqwik 1.9.3 is the release line
+checked on JUnit Platform 6 for this stack (issue #137).
 
 ## 15.4 Isolation tests (RLS)
 

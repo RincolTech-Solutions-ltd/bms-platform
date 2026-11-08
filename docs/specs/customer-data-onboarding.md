@@ -440,6 +440,12 @@ Over generated fabricated rows (jqwik or an equivalent added to the test stack i
   the times are recorded. The commit of a batch at the row limit must finish inside the batch
   transaction timeout (10 minutes, `SET LOCAL statement_timeout` per batch).
 
+Built in #137 (SDD chapter 13 section 13.14.1 11/16; the suite and the big file times in chapter 15 section 15.7): the
+golden report of `retail_v1` over fabricated edge cases next to the existing goldens of `lending_loans_v1` and the test
+template; the five properties of 5.2 with jqwik on `retail_v1`; the fuzzed files of 5.3 at the readers and through the
+upload, validation and preview; and the big file test on the staging heap, on request. The fuzzing found that a formula's
+error and a formula saved without its value were read as a value and as an empty field; both are now `TYPE_INVALID`.
+
 ### 5.4 Guards in the product
 
 - **Trading tenant refusal.** A commit is refused (`TENANT_TRADING`) when the tenant has any live
