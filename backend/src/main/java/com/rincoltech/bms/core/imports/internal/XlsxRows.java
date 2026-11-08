@@ -59,6 +59,12 @@ final class XlsxRows {
     /** The longest sheet name a batch records: {@code import_batches.sheet_name} is {@code varchar(100)} (V129). */
     static final int MAX_SHEET_NAME = 100;
 
+    /**
+     * The type of a cell that holds a formula saved without its value (issue #137): a file a program wrote and no
+     * spreadsheet ever calculated. Its value is empty, and the validation reports it, never reading it as an empty field.
+     */
+    static final String FORMULA = "formula";
+
     /** The parts of the first pass; each may appear once. */
     private static final java.util.Set<String> PARTS =
             java.util.Set.of("xl/workbook.xml", "xl/_rels/workbook.xml.rels", "xl/styles.xml", "xl/sharedStrings.xml");
@@ -366,6 +372,7 @@ final class XlsxRows {
             int style = 0;
             String value = null;
             StringBuilder inline = null;
+            boolean formula = false;
             int phonetic = 0;
             while (r.hasNext()) {
                 int ev = r.next();
@@ -387,7 +394,9 @@ final class XlsxRows {
                             style = intAttr(r, "s", 0);
                             value = null;
                             inline = null;
+                            formula = false;
                         }
+                        case "f" -> formula = true;
                         case "v" -> value = readText(r, "on row " + rowNo);
                         case "is" -> inline = new StringBuilder();
                         // A phonetic reading is not the cell's text, here as in the shared strings (review of #790).
@@ -415,6 +424,9 @@ final class XlsxRows {
                                 throw Parsing.unreadable("A cell on row " + rowNo + " is beyond the last column.");
                             }
                             Cell cell = cell(type, style, value, inline, rowNo);
+                            if (cell == null && formula) {
+                                cell = new Cell("", FORMULA);
+                            }
                             while (row.size() < col) {
                                 row.add(null);
                             }
