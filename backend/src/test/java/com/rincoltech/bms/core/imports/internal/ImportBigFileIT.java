@@ -21,6 +21,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -138,6 +140,28 @@ class ImportBigFileIT extends IntegrationTest {
     void aCsvAtTheColumnLimitIsUploadedValidatedAndPreviewedOnTheStagingHeap() throws Exception {
         String output = child("preview", "wide_items=" + columnLimitCsv(), STAGING_HEAP_MB);
         assertThat(output).contains("columns=" + COLUMN_LIMIT, "step=preview");
+    }
+
+    // JUSTIFICATION-A3: the review of 74bfe3e (must-fix 4) asks a measured safe row limit while #880 is open.
+    /**
+     * The whole path, commit included, for product masters below the row limit of 100,000, on the staging heap and judged
+     * there: what sizes are safe while #880 is open, for the limit the configuration holds meanwhile.
+     */
+    @ParameterizedTest(name = "{0} rows of {1} columns")
+    @CsvSource({"2500, 7", "5000, 7", "10000, 7", "5000, 200"})
+    void aProductMasterBelowTheRowLimitIsCommittedOnTheStagingHeapInsideTheTimeLimits(int rows, int columns)
+            throws Exception {
+        int extra = columns - ITEM_HEADER.size();
+        List<String> header = new ArrayList<>(ITEM_HEADER);
+        for (int c = 1; c <= extra; c++) {
+            header.add(extraColumn(c));
+        }
+        Path csv = dir.resolve("fab-items-" + rows + "-by-" + columns + ".csv");
+        TestFiles.writeCsv(csv, header, items(rows, extra));
+        String output = child("commit", (extra > 0 ? "wide_items=" : "items=") + csv, STAGING_HEAP_MB);
+        assertThat(output).contains("rows=" + rows, "outcome=COMMITTED");
+        assertThat(written(output)).isGreaterThanOrEqualTo(rows);
+        assertThat(stepMillis(output, "commit")).isLessThan(BATCH_TIMEOUT_MS);
     }
 
     // ---------------------------------------------------------------------------------------------

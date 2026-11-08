@@ -13,7 +13,10 @@ import com.rincoltech.bms.core.imports.ImportReview;
 import com.rincoltech.bms.core.imports.ImportRuns;
 import com.rincoltech.bms.core.imports.ImportRuns.DryRun;
 import com.rincoltech.bms.core.imports.ImportRuns.PolicyDecision;
+import com.rincoltech.bms.core.imports.ImportTemplate.IssueCode;
 import com.rincoltech.bms.core.imports.ImportTemplate.Policy;
+import com.rincoltech.bms.core.imports.ImportTemplate.Severity;
+import com.rincoltech.bms.core.imports.ImportTemplates;
 import com.rincoltech.bms.core.imports.ImportUploads;
 import com.rincoltech.bms.core.imports.ImportUploads.Upload;
 import com.rincoltech.bms.core.imports.ImportValidation;
@@ -33,8 +36,11 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import org.assertj.core.groups.Tuple;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -71,6 +77,27 @@ class RetailV1TemplateIT extends IntegrationTest {
 
     static final Path EDGE_EXPECTED = Path.of("../fixtures/imports/retail/fab-edge-cases.expected-codes.txt");
 
+    // JUSTIFICATION-A3: the review of 74bfe3e (must-fix 2) asks the golden to cover the catalogue.
+    /**
+     * The row codes of the {@code retail_v1} catalogue that a validation of an export cannot carry, with where each is
+     * produced: the mapping's checks, the parse, the review, the commit, and the shared rules no retail set uses.
+     */
+    static final Map<String, String> OTHER_STAGES = Map.ofEntries(
+            Map.entry("COLUMN_UNMAPPED", "the mapping's check of a file's headers (MappingValidatorTest)"),
+            Map.entry("REQUIRED_FIELD_UNMAPPED", "the mapping's check (MappingValidatorTest)"),
+            Map.entry("FIELD_MAPPED_TWICE", "the mapping's check (MappingValidatorTest)"),
+            Map.entry("COLUMN_DUPLICATE", "the mapping's check (MappingValidatorTest)"),
+            Map.entry("MAP_FIELD_UNMAPPED", "the mapping's check (MappingValidatorTest)"),
+            Map.entry("SOURCE_REF_COLUMN_UNKNOWN", "the mapping's check (MappingValidatorTest)"),
+            Map.entry("ZONE_UNKNOWN", "the mapping's check (MappingValidatorTest)"),
+            Map.entry("REQUIRED_COLUMN_MISSING", "the mapping's check of a file's headers (MappingValidatorTest)"),
+            Map.entry("ENCODING_CONVERTED", "a parse warning of the batch (SourceParserTest, ImportMalformedFilesIT)"),
+            Map.entry("ROW_CHANGED_SINCE_REVIEW", "a new upload after a review (ImportReviewIT)"),
+            Map.entry("CHANGED_SINCE_IMPORT", "a row a framework run imported with other content (ImportCommitIT)"),
+            Map.entry("NIN_DUPLICATE", "no retail_v1 field is a NIN (the lending golden)"),
+            Map.entry("SUBHEADER_ROW", "a row rule no retail_v1 set offers (the lending golden)"),
+            Map.entry("PLACEHOLDER_ROW", "a row rule no retail_v1 set offers (the lending golden)"));
+
     static final String SHA = "e".repeat(64);
 
     /** The tenant administrator's permissions for the sign-off route. */
@@ -98,6 +125,9 @@ class RetailV1TemplateIT extends IntegrationTest {
 
     @Autowired
     ImportReconciliation reconciliation;
+
+    @Autowired
+    ImportTemplates templates;
 
     @Autowired
     BusinessClock clock;
@@ -211,13 +241,26 @@ class RetailV1TemplateIT extends IntegrationTest {
         List<String> expected = Files.readAllLines(EDGE_EXPECTED).stream()
                 .filter(l -> !l.isBlank() && !l.startsWith("#"))
                 .toList();
-        assertThat(found).containsAll(expected);
-        assertThat(expected.stream().map(l -> l.substring(l.lastIndexOf('|') + 1)))
-                .containsAll(List.of(
-                        RetailV1Template.NAME_MISSING,
-                        RetailV1Template.NEGATIVE_BALANCE,
-                        RetailV1Template.PRICE_DIFFERS_EXISTING,
-                        RetailV1Template.CREDIT_SALE_UNPAID));
+        // Exactly the golden report, as a multiset: no line missing and none added (review of 74bfe3e).
+        assertThat(found)
+                .as(
+                        "the run's report:%n%s",
+                        String.join("\n", found.stream().sorted().toList()))
+                .containsExactlyInAnyOrderElementsOf(expected);
+        // Every code of the catalogue a row can carry is on a line of it, but those another stage produces.
+        Set<String> rowCodes = templates.catalogue(RetailV1Template.KEY, RetailV1Template.VERSION).stream()
+                .filter(c -> !c.retired())
+                .filter(c -> List.of(Severity.INFO, Severity.WARNING, Severity.BLOCKING)
+                        .contains(c.severity()))
+                .map(IssueCode::code)
+                .collect(Collectors.toCollection(TreeSet::new));
+        assertThat(rowCodes).containsAll(OTHER_STAGES.keySet());
+        Set<String> golden = expected.stream()
+                .map(l -> l.substring(l.lastIndexOf('|') + 1))
+                .collect(Collectors.toCollection(TreeSet::new));
+        assertThat(golden).doesNotContainAnyElementsOf(OTHER_STAGES.keySet());
+        rowCodes.removeAll(OTHER_STAGES.keySet());
+        assertThat(golden).as("every row code of retail_v1 on a golden line").containsAll(rowCodes);
 
         settle(t, run);
         Map<String, Long> before = TestDatabase.rowCounts(t.tenantId());

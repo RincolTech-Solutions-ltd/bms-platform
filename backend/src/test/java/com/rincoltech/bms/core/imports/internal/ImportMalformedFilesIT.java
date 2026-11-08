@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
+import com.rincoltech.bms.core.documents.QuarantineStorage;
 import com.rincoltech.bms.core.imports.ImportMappings;
 import com.rincoltech.bms.core.imports.ImportPreview;
 import com.rincoltech.bms.core.imports.ImportRuns;
@@ -94,6 +95,9 @@ class ImportMalformedFilesIT extends IntegrationTest {
     @Autowired
     ImportTemplates templates;
 
+    @Autowired
+    QuarantineStorage quarantine;
+
     TestDatabase.Fixture t;
     UUID mapping;
     final UUID operator = UUID.randomUUID();
@@ -169,7 +173,8 @@ class ImportMalformedFilesIT extends IntegrationTest {
                         "a CSV in Windows-1252",
                         "product_master",
                         "fab-cp1252.csv",
-                        PRODUCTS.replace("item 01", "café 01").getBytes(Charset.forName("windows-1252")),
+                        PRODUCTS.replace("item 01", "caf" + (char) 0xE9 + " 01")
+                                .getBytes(Charset.forName("windows-1252")),
                         "warning:ENCODING_CONVERTED",
                         "clean:2"),
                 new Case(
@@ -182,7 +187,7 @@ class ImportMalformedFilesIT extends IntegrationTest {
                         "two CSV exports joined, the second's byte order mark mid-file",
                         "product_master",
                         "fab-joined.csv",
-                        utf8(PRODUCTS + "﻿" + PRODUCTS.replace("FZ-00", "FZ-10")),
+                        utf8(PRODUCTS + (char) 0xFEFF + PRODUCTS.replace("FZ-00", "FZ-10")),
                         "clean:2",
                         "issue:5:CODE_CONTROL_CHAR"),
                 // Quotes and long cells.
@@ -214,9 +219,9 @@ class ImportMalformedFilesIT extends IntegrationTest {
                         "fab-hidden.csv",
                         utf8(PRODUCT_HEADER + "\r\n"
                                 + "FZ-\u0007001,Test fuzz item 01,Cables,metre,700,1200,Yes,0\r\n"
-                                + "‏FZ-002,Test fuzz item 02,Cables,metre,700,1200,Yes,0\r\n"
-                                + "FZ‮-003,Test fuzz item 03,Cables,metre,700,1200,Yes,0\r\n"
-                                + "FZ-0​04,Test fuzz item 04,Cables,metre,700,1200,Yes,0\r\n"
+                                + (char) 0x200F + "FZ-002,Test fuzz item 02,Cables,metre,700,1200,Yes,0\r\n"
+                                + "FZ" + (char) 0x202E + "-003,Test fuzz item 03,Cables,metre,700,1200,Yes,0\r\n"
+                                + "FZ-0" + (char) 0x200B + "04,Test fuzz item 04,Cables,metre,700,1200,Yes,0\r\n"
                                 + "FZ-005,Test fuzz item 05,Cables,metre,700,1200,Yes,0\r\n"),
                         "issue:2:CODE_CONTROL_CHAR",
                         "issue:3:CODE_CONTROL_CHAR",
@@ -244,7 +249,7 @@ class ImportMalformedFilesIT extends IntegrationTest {
                         "clean:2",
                         "issue:3:REQUIRED_MISSING"),
                 new Case(
-                        "formulas: one with its value, one with an error, one saved without a value",
+                        "formulas: with a value, with an error, saved without a value, with empty text as value",
                         "product_master",
                         "fab-formulas.xlsx",
                         workbook(
@@ -264,10 +269,17 @@ class ImportMalformedFilesIT extends IntegrationTest {
                                         "<row r=\"4\">" + text("A4", "FZ-003") + text("B4", "Test fuzz item 03")
                                                 + text("C4", "Cables") + text("D4", "metre")
                                                 + "<c r=\"E4\"><v>700</v></c><c r=\"F4\"><v>1200</v></c>"
-                                                + "<c r=\"G4\"><f>E4&gt;0</f></c></row>")),
+                                                + "<c r=\"G4\"><f>E4&gt;0</f></c></row>",
+                                        // A formula whose value is empty text: an empty optional cell, as shown.
+                                        "<row r=\"5\">" + text("A5", "FZ-004") + text("B5", "Test fuzz item 04")
+                                                + text("C5", "Cables") + text("D5", "metre")
+                                                + "<c r=\"E5\"><v>700</v></c><c r=\"F5\"><v>1200</v></c>"
+                                                + "<c r=\"G5\" t=\"str\"><f>IF(A5=\"\",\"\",\"\")</f><v></v></c>"
+                                                + "</row>")),
                         "clean:2",
                         "issue:3:TYPE_INVALID",
-                        "issue:4:TYPE_INVALID"),
+                        "issue:4:TYPE_INVALID",
+                        "clean:5"),
                 new Case(
                         "a hidden first sheet of notes before the items",
                         "product_master",
@@ -316,6 +328,7 @@ class ImportMalformedFilesIT extends IntegrationTest {
                     .isEqualTo("parsed");
         }
         List<String> found = new ArrayList<>();
+        long objects = quarantined();
         ImportUploads.Batch batch = null;
         try {
             batch = upload(run, c.source(), c.file(), c.bytes());
@@ -328,6 +341,9 @@ class ImportMalformedFilesIT extends IntegrationTest {
                             c.file()))
                     .as("a refused file leaves no batch")
                     .isZero();
+            assertThat(quarantined())
+                    .as("a refused file leaves no quarantined object")
+                    .isEqualTo(objects);
         }
         ImportUploads.Batch stored = batch;
         if (stored != null && "failed".equals(stored.status())) {
@@ -336,6 +352,9 @@ class ImportMalformedFilesIT extends IntegrationTest {
             assertThat(count("SELECT count(*) FROM import_rows WHERE batch_id = ?", stored.id()))
                     .as("a failed batch holds no rows")
                     .isZero();
+            assertThat(quarantined())
+                    .as("a failed batch keeps no quarantined object")
+                    .isEqualTo(objects);
         } else if (stored != null) {
             assertThat(stored.status()).isEqualTo("parsed");
             stored.warnings().forEach(w -> found.add("warning:" + w));
@@ -374,6 +393,15 @@ class ImportMalformedFilesIT extends IntegrationTest {
                         bytes.length,
                         operator,
                         mappings.parseOptions(mapping, source))));
+    }
+
+    /** The business's quarantined objects in storage. */
+    long quarantined() {
+        return as(() -> {
+            try (Stream<QuarantineStorage.Held> held = quarantine.list()) {
+                return held.count();
+            }
+        });
     }
 
     /** The business's rows in every table but the import tables and the audit log. */

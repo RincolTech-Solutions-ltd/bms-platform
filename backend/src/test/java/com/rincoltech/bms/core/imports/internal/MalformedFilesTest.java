@@ -59,8 +59,9 @@ class MalformedFilesTest {
             new byte[] {(byte) 0xFF},
             new byte[] {(byte) 0xC3},
             new byte[] {(byte) 0xFF, (byte) 0xFE},
-            "‮".getBytes(StandardCharsets.UTF_8),
-            "‏".getBytes(StandardCharsets.UTF_8),
+            // A right-to-left override and a right-to-left mark, by code point so no editor can strip them.
+            String.valueOf((char) 0x202E).getBytes(StandardCharsets.UTF_8),
+            String.valueOf((char) 0x200F).getBytes(StandardCharsets.UTF_8),
             "\u0007".getBytes(StandardCharsets.UTF_8),
             "{".getBytes(StandardCharsets.UTF_8),
             "<".getBytes(StandardCharsets.UTF_8),
@@ -209,7 +210,7 @@ class MalformedFilesTest {
     Arbitrary<List<Item>> items() {
         Arbitrary<String> description = Arbitraries.strings()
                 .withCharRange('a', 'z')
-                .withChars(' ', ',', '"', '\'', ';', 'é', ' ')
+                .withChars(' ', ',', '"', '\'', ';', (char) 0xE9, (char) 0xA0)
                 .ofMinLength(1)
                 .ofMaxLength(24)
                 .map(s -> "Test " + s);

@@ -373,6 +373,7 @@ final class XlsxRows {
             String value = null;
             StringBuilder inline = null;
             boolean formula = false;
+            boolean valueSeen = false;
             int phonetic = 0;
             while (r.hasNext()) {
                 int ev = r.next();
@@ -395,9 +396,13 @@ final class XlsxRows {
                             value = null;
                             inline = null;
                             formula = false;
+                            valueSeen = false;
                         }
                         case "f" -> formula = true;
-                        case "v" -> value = readText(r, "on row " + rowNo);
+                        case "v" -> {
+                            value = readText(r, "on row " + rowNo);
+                            valueSeen = true;
+                        }
                         case "is" -> inline = new StringBuilder();
                         // A phonetic reading is not the cell's text, here as in the shared strings (review of #790).
                         case "rPh" -> phonetic++;
@@ -424,7 +429,8 @@ final class XlsxRows {
                                 throw Parsing.unreadable("A cell on row " + rowNo + " is beyond the last column.");
                             }
                             Cell cell = cell(type, style, value, inline, rowNo);
-                            if (cell == null && formula) {
+                            // A formula whose value is empty text (=IF(A2="","",...)) is an empty cell, as shown.
+                            if (cell == null && formula && !valueSeen && inline == null) {
                                 cell = new Cell("", FORMULA);
                             }
                             while (row.size() < col) {

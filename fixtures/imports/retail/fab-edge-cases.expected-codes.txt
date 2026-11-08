@@ -1,7 +1,8 @@
-# The golden report of retail_v1 over fab-edge-cases/ (issue #137, spec section 5.1): file, line and the issue code that line
-# must carry, read with the export's mapping, the run's cutover at midnight of 1 October 2026 in Kampala, and GE-EX1 already
-# imported with other prices. RetailV1TemplateIT checks that the run gives every line here and that every code of the
-# retail_v1 catalogue a row can carry is given by one of them. Fabricated values only.
+# The golden report of retail_v1 over fab-edge-cases/ (issue #137, spec section 5.1): file, line and code of every issue the
+# run gives, read with the export's mapping, the run's cutover at midnight of 1 October 2026 in Kampala, and GE-EX1 already
+# imported with other prices. RetailV1TemplateIT checks that the run gives exactly these lines, no more and no fewer, and
+# that every row code of the retail_v1 catalogue is on one of them, but those RetailV1TemplateIT.OTHER_STAGES names with
+# the stage that produces them. Fabricated values only.
 products.jsonl|2|NAME_MISSING
 products.jsonl|3|CODE_DUPLICATE
 products.jsonl|4|PRICE_DIFFERS_EXISTING

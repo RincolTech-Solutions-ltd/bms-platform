@@ -7,6 +7,7 @@ import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.core.imports.CommitApproval;
 import com.rincoltech.bms.core.imports.CommitReport;
 import com.rincoltech.bms.core.imports.ImportMappings;
+import com.rincoltech.bms.core.imports.ImportPreview;
 import com.rincoltech.bms.core.imports.ImportReconciliation;
 import com.rincoltech.bms.core.imports.ImportReview;
 import com.rincoltech.bms.core.imports.ImportRuns;
@@ -75,7 +76,10 @@ import org.springframework.test.context.TestContextManager;
  */
 class RetailImportPropertiesIT extends IntegrationTest {
 
-    /** The longest one property may take, its shrinking included; well under a minute on CI. */
+    /**
+     * The longest one property may take, its shrinking included: the bound, not the expectation. On CI the six take
+     * about two minutes together.
+     */
     static final Duration PROPERTY_LIMIT = Duration.ofMinutes(6);
 
     static final String SHA = "f".repeat(64);
@@ -102,6 +106,9 @@ class RetailImportPropertiesIT extends IntegrationTest {
 
     @Autowired
     ImportReconciliation reconciliation;
+
+    @Autowired
+    ImportPreview preview;
 
     @Autowired
     TestRestTemplate http;
@@ -136,6 +143,11 @@ class RetailImportPropertiesIT extends IntegrationTest {
         assertDerivedIsSource(t, book, first);
 
         UUID again = reviewed(t, book.files(0));
+        // Recognised, not refused: no row of the second run is left out or held back by an issue (review of 74bfe3e).
+        ImportPreview.Preview predicted = as(t, () -> preview.preview(again));
+        assertThat(predicted.batches())
+                .allSatisfy(
+                        b -> assertThat(b.excluded() + b.blocked()).as("%s", b).isZero());
         DryRun dry = as(t, () -> runs.dryRun(again, operator));
         assertThat(dry.report().journals()).as(dry.report().render()).isEmpty();
         committed(t, again);
@@ -143,9 +155,12 @@ class RetailImportPropertiesIT extends IntegrationTest {
         assertThat(RetailV1TemplateIT.state(t)).as("the state of one run").isEqualTo(once);
         assertThat(journals(t)).as("no second opening journal").isEqualTo(journals);
         CommitReport second = as(t, () -> runs.commitReport(again));
-        assertThat(second.sources())
-                .as(second.render())
-                .allSatisfy(s -> assertThat(s.written()).isZero());
+        // Every row of every file is read and counted existing: none written, none skipped.
+        assertThat(second.sources()).as(second.render()).allSatisfy(s -> {
+            assertThat(s.read()).isPositive();
+            assertThat(s.existing()).as(s.name()).isEqualTo(s.read());
+            assertThat(s.written() + s.skipped()).as(s.name()).isZero();
+        });
         assertThat(second.journals()).isEmpty();
     }
 
@@ -205,17 +220,28 @@ class RetailImportPropertiesIT extends IntegrationTest {
         TestDatabase.Fixture rehearsed = TestDatabase.tenant("prop-dry", false, true);
         TestDatabase.Fixture alone = TestDatabase.tenant("prop-alone", false, true);
         Path dir = Files.createTempDirectory("retail-property-");
-        for (Map.Entry<String, String> f : book.files(0).entrySet()) {
-            Files.writeString(dir.resolve(f.getKey() + ".jsonl"), f.getValue());
-        }
         Map<String, Long> before = TestDatabase.rowCounts(rehearsed.tenantId());
-
-        ImportReport dry = importer.run(rehearsed.slug(), dir, true);
-        assertThat(TestDatabase.rowCounts(rehearsed.tenantId()))
-                .as("the dry run writes nothing")
-                .isEqualTo(before);
-        ImportReport real = importer.run(rehearsed.slug(), dir, false);
-        ImportReport only = importer.run(alone.slug(), dir, false);
+        ImportReport dry;
+        ImportReport real;
+        ImportReport only;
+        try {
+            for (Map.Entry<String, String> f : book.files(0).entrySet()) {
+                Files.writeString(dir.resolve(f.getKey() + ".jsonl"), f.getValue());
+            }
+            dry = importer.run(rehearsed.slug(), dir, true);
+            assertThat(TestDatabase.rowCounts(rehearsed.tenantId()))
+                    .as("the dry run writes nothing")
+                    .isEqualTo(before);
+            real = importer.run(rehearsed.slug(), dir, false);
+            only = importer.run(alone.slug(), dir, false);
+        } finally {
+            try (java.util.stream.Stream<Path> files = Files.list(dir)) {
+                for (Path f : files.toList()) {
+                    Files.delete(f);
+                }
+            }
+            Files.delete(dir);
+        }
 
         assertThat(real.failed()).as(real.render()).isFalse();
         assertThat(real.render().replace(rehearsed.slug(), "<business>"))
