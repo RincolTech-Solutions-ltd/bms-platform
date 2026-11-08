@@ -24,6 +24,7 @@ transcript() {
     if [[ -n "${PRODUCTION:-}" ]]; then
         sed -i 's/^BMS_ENVIRONMENT=staging$/BMS_ENVIRONMENT=production/' "$HOST/.env"
     fi
+    # shellcheck disable=SC2119 # the drill is run with no argument on purpose.
     run_script
     {
         echo "== ${name}"

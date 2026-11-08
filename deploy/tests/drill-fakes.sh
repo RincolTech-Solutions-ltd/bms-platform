@@ -47,6 +47,7 @@ ENV
     fake_stubs "$WORK_DIR/bin"
 }
 
+# shellcheck disable=SC2034 # OUTPUT and STATUS are read by the sourcing test.
 run_script() {
     OUTPUT="$(PATH="$WORK_DIR/bin:$PATH" bash "$HOST/restore-drill.sh" "$@" 2>&1)"
     STATUS=$?
@@ -76,7 +77,8 @@ case "$1" in
             case "$1" in -in) in="$2"; shift ;; -out) out="$2"; shift ;; esac
             shift
         done
-        echo "decrypted $(basename "$in")" > "$out" ;;
+        echo "decrypted $(basename "$in")" > "$out"
+        stat -c '%a %n' "$(dirname "$out")" >> "$FAKE/decrypt-dirs" ;;
     *) echo "stub openssl: unexpected $*" >&2; exit 2 ;;
 esac
 STUB
@@ -129,6 +131,8 @@ case "$1" in
                     echo "migrate: 1 migration(s) applied, schema now at 146"
                 elif has rehearse-import "$@"; then
                     echo "rehearsal of the import run: committed (fabricated report)"
+                    # An operator's Ctrl-C or a stop while the commit runs: the signal reaches the script.
+                    [[ -n "${FAKE_API_SIGNAL:-}" ]] && kill -s "$FAKE_API_SIGNAL" "$PPID"
                     exit "${FAKE_API_EXIT:-0}"
                 fi ;;
         esac ;;
@@ -147,7 +151,7 @@ case "$1" in
                 printf '%s\n' SPRING_PROFILES_ACTIVE=server BMS_DB_URL=jdbc:postgresql://postgres:5432/bms \
                     BMS_APP_USER=bms_app BMS_APP_PASSWORD=live-app-secret BMS_ENVIRONMENT=staging \
                     BMS_SCHEDULER_ENABLED=true "JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=50"
-                [[ -n "${FAKE_ENV_DB_URL:-}" ]] && echo "SPRING_DATASOURCE_URL=${FAKE_ENV_DB_URL}" ;;
+                if [[ -n "${FAKE_ENV_DB_URL:-}" ]]; then echo "SPRING_DATASOURCE_URL=${FAKE_ENV_DB_URL}"; fi ;;
             *Id*)
                 if [[ "$target" == "$live_db" || -n "${FAKE_SAME_ID:-}" ]]; then echo "live-container-id"; else echo "id-$target"; fi ;;
             *Labels*) awk -F'|' -v n="$target" '$1 == n { print $2 }' "$FAKE/containers" ;;
@@ -173,12 +177,25 @@ case "$1" in
                 exit 0 ;;
         esac
         if [[ -n "$interactive" ]]; then
-            if [[ "$container" == "$live_db" ]]; then cat >> "$FAKE/live-writes"; else cat >> "$FAKE/copy-stream"; fi
+            if [[ "$container" == "$live_db" && "$(arg_after -U "$@")" == "bms_owner" ]]; then
+                # The read of the run's rows: echo what psql would print, a row for each COPY.
+                tee -a "$FAKE/live-reads" | while IFS= read -r line; do
+                    case "$line" in
+                        "\\echo '"*) line="${line#\\echo \'}"; printf '%s\n' "${line%\'}" | sed 's/\\\\/\\/g' ;;
+                        "COPY ("*) echo "staged row of the live run" ;;
+                    esac
+                done
+            elif [[ "$container" == "$live_db" ]]; then
+                cat >> "$FAKE/live-writes"
+            else
+                cat >> "$FAKE/copy-stream"
+            fi
             exit 0
         fi
         case "$sql" in
             *pg_control_system*)
                 if [[ "$container" == "$live_db" || -n "${FAKE_SAME_SYSID:-}" ]]; then echo "$FAKE_LIVE_SYSID"; else echo "7400000000000000999"; fi ;;
+            *"count(*) FROM import_runs WHERE id"*) echo 1 ;;
             *"FROM import_runs WHERE id"*) echo "${FAKE_RUN_ROW-$FAKE_TENANT|ready|t|framework}" ;;
             *flyway_schema_history*) echo 145 ;;
             *"count(*) FROM tenants WHERE id"*) echo 1 ;;
@@ -187,6 +204,7 @@ case "$1" in
             *"count(*) FROM audit_log"*) echo 40 ;;
             *"SELECT id FROM tenants"*) echo "$FAKE_TENANT" ;;
             *information_schema.columns*) echo "id,tenant_id,run_id" ;;
+            *"quote_literal(mapping_id"*) echo "'0b5e7a2c-0000-4000-8000-00000000b001'" ;;
             *"count(*) FROM import_rehearsals"*) echo 1 ;;
             *"TO STDOUT"*) echo "row of ${container}" ;;
             *) echo "stub docker: unexpected exec $container $sql" >&2; exit 2 ;;

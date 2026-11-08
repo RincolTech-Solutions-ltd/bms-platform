@@ -15,7 +15,365 @@
 #
 # Schedule: bms-restore-drill.timer, Sunday 03:30 host time, as the deploy user (docs/runbooks/monitoring-and-alerts.md).
 # Reads /opt/bms/.env like backup.sh, plus POSTGRES_IMAGE.
+#
+# Rehearsal mode (issue #138, ADR-027 decision 9, spec docs/specs/customer-data-onboarding.md section 5.5, runbook
+# docs/runbooks/restore-from-backup.md section 5.2): `restore-drill.sh --rehearse-import <run id>`, by hand, as the deploy
+# user. Opt in by the flag only: with no argument none of it runs and the drill below is unchanged, line for line
+# (deploy/tests/restore-drill-test.sh compares it with a golden transcript of the drill before this mode). It never writes
+# the drill's state files, so monitor.sh never takes a rehearsal for a drill.
+#   1. reads the run on the live database, read only: a run of the import screens, in review or ready, and on staging
+#      marked fabricated by its uploader;
+#   2. on staging, goes on only while bms.slice has room for its two containers by their limits (RH_NEEDED_MB);
+#   3. fetches and decrypts the newest backup as the drill does, into a mode-0700 temp dir under backups/;
+#   4. starts a throwaway PostgreSQL on an internal network of its own, restores into it, and goes on only while that
+#      database is provably not the live one: another name, container and cluster, this run's label, this network only;
+#   5. migrates it with the live API's image, copies the run's staged rows into it from the live database in one read-only
+#      transaction (the run, its batches, rows, issues, resolutions and mappings; the encrypted source comes as its object
+#      keys and the run's wrapped data key, and is never fetched or decrypted: the commit reads the staged rows only), and
+#      marks it with this rehearsal's one-time token;
+#   6. runs `rehearse-import` in a short-lived API container (the live API's image and settings, the database switched to
+#      the throwaway one, on that internal network only): the real dry run and the real commit, without the checker's
+#      approval and the pre-import dump, which the application waives only in a database that holds the token
+#      (core.imports.ImportRehearsals);
+#   7. stores the rehearsal (report, reconciliation, timings) on the live run: one import_rehearsals row inserted as bms_app
+#      under row-level security, the only write the rehearsal makes on the live database;
+#   8. removes every container, the network, the volume and the temp dir it made, on success, failure and interrupt.
+# Limits, inside bms.slice on staging (SDD chapter 9 section 9.13): the throwaway PostgreSQL 256 MB and 1 CPU, the API
+# 448 MB and 1 CPU with the staging API's 224 MB heap, 704 MB together; rclone 64 MB while it downloads.
+# Exit status: 0 rehearsed and stored, 1 failed, 2 usage, 3 refused (the run, the target or the room).
+# JUSTIFICATION-A3: the rehearsal is a new mode placed above the drill so that the drill's own lines stay untouched.
 set -uo pipefail
+
+RH_LIVE_DB=bms-postgres-1
+RH_NEEDED_MB=704
+# The staging API's JVM (compose.pi-staging.yml) with its 224 MB heap, on which the big file test commits a batch of
+# 2,500 rows (SDD chapter 15 section 15.7), so a rehearsal holds the batches the live API holds.
+RH_JAVA_OPTS="-Xmx224m -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=48m -XX:TieredStopAtLevel=1 -XX:+UseSerialGC"
+RH_JAVA_OPTS+=" -Xss512k -XX:+ExitOnOutOfMemoryError -Djava.security.egd=file:/dev/urandom"
+# The run's tables, in the order they are copied.
+RH_TABLES=(import_mappings import_runs import_batches import_rows import_issue_resolutions import_issues)
+RH_UUID='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+
+rh_log() { echo "[rehearsal $(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
+rh_ms() { date -u +%s%3N; }
+rh_fail() {
+    rh_log "FAILED: $*"
+    exit 1
+}
+rh_refuse() {
+    rh_log "REFUSED: $*"
+    exit 3
+}
+# The live database, as the drill reads it: bms_owner, one statement, read only.
+rh_live() { docker exec "$RH_LIVE_DB" psql -U bms_owner -d bms -v ON_ERROR_STOP=1 -tAc "$1"; }
+# The throwaway database as its superuser: only ever the container this rehearsal started.
+rh_scratch() { docker exec "$RH_DB" psql -U postgres -d bms -v ON_ERROR_STOP=1 -tAc "$1"; }
+rh_columns() {
+    printf '%s' "SELECT string_agg(quote_ident(column_name), ',' ORDER BY ordinal_position) FROM information_schema.columns"
+    printf '%s' " WHERE table_schema = 'public' AND table_name = '$1'"
+}
+# rh_where <table>: the run's rows of that table. The mappings are the ones the live run's batches name.
+rh_where() {
+    case "$1" in
+        import_mappings) echo "id IN (${RH_MAPPINGS:-NULL})" ;;
+        import_runs) echo "id = '${RH_RUN}'" ;;
+        import_rows | import_issues) echo "batch_id IN (SELECT id FROM import_batches WHERE run_id = '${RH_RUN}')" ;;
+        *) echo "run_id = '${RH_RUN}'" ;;
+    esac
+}
+
+# The drill's pick_newest_backup (below), under another name because the drill defines it only after this mode has run;
+# deploy/tests/rehearse-import-test.sh checks that the two bodies are the same.
+rh_pick_newest_backup() {
+    local limit name stamp best="" best_stamp=""
+    limit="$(date -u -d "@$(( $1 + 3600 ))" +%Y%m%dT%H%M%SZ)"
+    while IFS= read -r name; do
+        [[ "$name" =~ ^bms-[a-z0-9-]+-([0-9]{8}T[0-9]{6}Z)\.dump\.enc$ ]] || continue
+        stamp="${BASH_REMATCH[1]}"
+        [[ "$stamp" > "$limit" ]] && continue
+        if [[ -z "$best_stamp" || "$stamp" > "$best_stamp" ]]; then
+            best="$name"
+            best_stamp="$stamp"
+        fi
+    done
+    printf '%s\n' "$best"
+}
+
+rh_cleanup() {
+    local status=$?
+    trap - EXIT INT TERM
+    docker rm -f -v "$RH_API" "$RH_MIGRATE" "$RH_RCLONE" "$RH_DB" > /dev/null 2>&1 || true
+    docker volume rm "$RH_VOL" > /dev/null 2>&1 || true
+    docker network rm "$RH_NET" > /dev/null 2>&1 || true
+    if [[ -n "${RH_TMP:-}" && -d "$RH_TMP" ]]; then
+        rm -rf "$RH_TMP"
+    fi
+    rh_log "removed what the rehearsal made: its containers, network ${RH_NET}, volume ${RH_VOL} and temp dir"
+    exit "$status"
+}
+
+# On staging the slice must hold the throwaway database and API by their limits, beside the stack as it is now:
+# memory.high (else memory.max) less what the slice uses, page cache that can be dropped aside (as docker stats counts).
+rh_require_room() {
+    local dir="${BMS_REHEARSAL_SLICE_DIR:-/sys/fs/cgroup/bms.slice}" limit current inactive free_mb
+    limit="$(cat "$dir/memory.high" 2> /dev/null)"
+    [[ "$limit" =~ ^[0-9]+$ ]] || limit="$(cat "$dir/memory.max" 2> /dev/null)"
+    current="$(cat "$dir/memory.current" 2> /dev/null)"
+    inactive="$(awk '$1 == "inactive_file" { print $2 }' "$dir/memory.stat" 2> /dev/null)"
+    [[ "$limit" =~ ^[0-9]+$ && "$current" =~ ^[0-9]+$ ]] || rh_refuse "cannot read the memory of bms.slice at ${dir}"
+    free_mb=$(( (limit - current + ${inactive:-0}) / 1048576 ))
+    (( free_mb >= RH_NEEDED_MB )) \
+        || rh_refuse "bms.slice has ${free_mb} MB free under its limit and the rehearsal needs ${RH_NEEDED_MB} MB; wait until no deploy, drill or heavy job runs"
+    rh_log "bms.slice has ${free_mb} MB free; the rehearsal's containers take at most ${RH_NEEDED_MB} MB"
+}
+
+# Every write but the last goes to the throwaway database. Asked before the restore and again before the commit.
+rh_require_scratch() {
+    local id live_id label networks sysid live_sysid
+    [[ "$RH_DB" =~ ^bms-rehearsal-db-[0-9]+$ && "$RH_DB" != "$RH_LIVE_DB" ]] || rh_refuse "${RH_DB} is not a rehearsal database"
+    id="$(docker inspect -f '{{.Id}}' "$RH_DB" 2> /dev/null)"
+    live_id="$(docker inspect -f '{{.Id}}' "$RH_LIVE_DB" 2> /dev/null)"
+    [[ -n "$id" && "$id" != "$live_id" ]] || rh_refuse "the target container is the live database's"
+    label="$(docker inspect -f '{{index .Config.Labels "bms.rehearsal"}}' "$RH_DB" 2> /dev/null)"
+    [[ "$label" == "$RH_TOKEN" ]] || rh_refuse "the target container does not carry this rehearsal's label"
+    networks="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$RH_DB" 2> /dev/null)"
+    [[ "$networks" == "${RH_NET} " ]] || rh_refuse "the target container is on other networks: ${networks}"
+    sysid="$(rh_scratch "SELECT system_identifier FROM pg_control_system()" 2> /dev/null)"
+    live_sysid="$(docker exec "$RH_LIVE_DB" psql -U postgres -d bms -tAc "SELECT system_identifier FROM pg_control_system()" 2> /dev/null)"
+    [[ "$sysid" =~ ^[0-9]+$ && "$live_sysid" =~ ^[0-9]+$ && "$sysid" != "$live_sysid" ]] \
+        || rh_refuse "the target database is the live cluster, or the two cannot be told apart (${sysid:-none} and ${live_sysid:-none})"
+}
+
+# rh_require_env_target <env file>: the only database a container of the rehearsal is given is the throwaway one.
+rh_require_env_target() {
+    local urls
+    urls="$(grep -E 'jdbc:|postgres(ql)?://' "$1")"
+    [[ "$urls" == "BMS_DB_URL=jdbc:postgresql://${RH_DB}:5432/bms" ]] \
+        || rh_refuse "a rehearsal container would be given another database: ${urls//$'\n'/, }"
+}
+
+rehearse_import() {
+    if [[ $# -ne 2 || "$1" != "--rehearse-import" ]]; then
+        echo "usage: restore-drill.sh --rehearse-import <run id>   (no argument: the weekly restore drill)" >&2
+        return 2
+    fi
+    RH_RUN="$2"
+    if [[ ! "$RH_RUN" =~ $RH_UUID ]]; then
+        echo "restore-drill.sh: the run id must be a UUID in lower case" >&2
+        return 2
+    fi
+    cd "$(dirname "$0")" || return 1
+    set -a
+    # shellcheck disable=SC1091
+    . ./.env
+    set +a
+    : "${BMS_ENVIRONMENT:?}" "${BACKUP_ENCRYPTION_KEY:?}" "${R2_ENDPOINT:?}" "${R2_ACCESS_KEY_ID:?}"
+    : "${R2_SECRET_ACCESS_KEY:?}" "${R2_BACKUP_BUCKET:?}" "${RCLONE_IMAGE:?}" "${POSTGRES_IMAGE:?}"
+    umask 077
+    local started step status row tag initdb prefix owner_pw app_pw live_ver scratch_ver table cols scratch_cols ready
+    local prelude live_script old_ifs
+    local -a cgroup=() timings=()
+    started="$(rh_ms)"
+    RH_DB="bms-rehearsal-db-$$"
+    RH_API="bms-rehearsal-api-$$"
+    RH_MIGRATE="bms-rehearsal-migrate-$$"
+    RH_RCLONE="bms-rehearsal-rclone-$$"
+    RH_NET="bms-rehearsal-net-$$"
+    RH_VOL="bms-rehearsal-data-$$"
+    RH_TMP=""
+    trap rh_cleanup EXIT
+    trap 'rh_log "interrupted"; exit 130' INT
+    trap 'rh_log "terminated"; exit 143' TERM
+
+    # 1. The run, read on the live database.
+    row="$(rh_live "SELECT tenant_id, status, fabricated, origin FROM import_runs WHERE id = '${RH_RUN}'" 2> /dev/null)" \
+        || rh_fail "cannot read import_runs on the live database"
+    [[ -n "$row" ]] || rh_refuse "no import run ${RH_RUN} on the live database"
+    IFS='|' read -r RH_TENANT status RH_FABRICATED RH_ORIGIN <<< "$row"
+    [[ "$RH_TENANT" =~ $RH_UUID ]] || rh_fail "unexpected answer for the run: ${row}"
+    [[ "$RH_ORIGIN" == "framework" ]] || rh_refuse "run ${RH_RUN} is a run of ${RH_ORIGIN}, not of the import screens"
+    [[ "$status" == "in_review" || "$status" == "ready" ]] \
+        || rh_refuse "run ${RH_RUN} is ${status}; only a run in review or ready is rehearsed"
+    if [[ "$BMS_ENVIRONMENT" == "staging" ]]; then
+        [[ "$RH_FABRICATED" == "t" ]] \
+            || rh_refuse "on staging only a run its uploader marked fabricated is rehearsed; run ${RH_RUN} is not"
+        cgroup=(--cgroup-parent bms.slice)
+    fi
+    rh_log "rehearsing run ${RH_RUN} (${status}) of business ${RH_TENANT} on ${BMS_ENVIRONMENT}"
+    if docker ps --all --format '{{.Names}}' | grep -Eq '^(bms-restore-drill|bms-rehearsal-db)-'; then
+        rh_refuse "a restore drill or another rehearsal is running; try again when it ends"
+    fi
+    RH_LIVE_API="$(docker ps --filter label=com.docker.compose.project=bms --filter label=com.docker.compose.service=api \
+        --format '{{.Names}}' | head -n 1)"
+    [[ -n "$RH_LIVE_API" ]] || rh_fail "no running api container of the bms project: the rehearsal runs the live API's image"
+    RH_IMAGE="$(docker inspect -f '{{.Config.Image}}' "$RH_LIVE_API")" || rh_fail "cannot read the live API's image"
+    tag="$(cat state/current_tag)"
+    initdb="$PWD/releases/${tag}/postgres/initdb"
+    [[ -d "$initdb" ]] || initdb="$PWD/postgres/initdb"
+    [[ -d "$initdb" ]] || rh_fail "no initdb folder at ${initdb}"
+
+    # 2. Room in the slice.
+    if [[ "$BMS_ENVIRONMENT" == "staging" ]]; then
+        rh_require_room
+    fi
+
+    # 3. The newest backup, fetched and decrypted inside a mode-0700 temp dir only.
+    mkdir -p backups
+    RH_TMP="$(mktemp -d "$PWD/backups/rehearsal.XXXXXX")" || rh_fail "cannot make a temp dir under backups/"
+    chmod 700 "$RH_TMP"
+    prefix="r2:${R2_BACKUP_BUCKET}/${BMS_ENVIRONMENT}"
+    rh_rclone() {
+        docker run --rm --name "$RH_RCLONE" "${cgroup[@]}" --memory 64m --volume "${RH_TMP}:/work" \
+            --env RCLONE_CONFIG_R2_TYPE=s3 \
+            --env RCLONE_CONFIG_R2_PROVIDER=Cloudflare \
+            --env RCLONE_CONFIG_R2_ENDPOINT="$R2_ENDPOINT" \
+            --env RCLONE_CONFIG_R2_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID" \
+            --env RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY" \
+            --env RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true \
+            "$RCLONE_IMAGE" "$@"
+    }
+    step="$(rh_ms)"
+    RH_NAME="$(rh_rclone lsf --files-only "${prefix}/daily/" 2> /dev/null | rh_pick_newest_backup "$(date -u +%s)")"
+    [[ -n "$RH_NAME" ]] || rh_fail "no backup found under ${prefix}/daily/"
+    rh_log "newest backup: ${RH_NAME}"
+    rh_rclone copyto "${prefix}/daily/${RH_NAME}" /work/backup.dump.enc > /dev/null 2>&1 \
+        || rh_fail "download of ${RH_NAME} failed"
+    [[ -s "$RH_TMP/backup.dump.enc" ]] || rh_fail "downloaded file is empty"
+    openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_ENCRYPTION_KEY \
+        -in "$RH_TMP/backup.dump.enc" -out "$RH_TMP/backup.dump" 2> /dev/null \
+        || rh_fail "decryption failed (wrong BACKUP_ENCRYPTION_KEY or a corrupt file)"
+    rm -f "$RH_TMP/backup.dump.enc"
+    [[ -s "$RH_TMP/backup.dump" ]] || rh_fail "decrypted dump is empty"
+    timings+=("download_ms=$(( $(rh_ms) - step ))")
+
+    # 4. The throwaway database, on an internal network of its own, then the restore.
+    step="$(rh_ms)"
+    RH_TOKEN="$(openssl rand -hex 24)"
+    owner_pw="$(openssl rand -hex 24)"
+    app_pw="$(openssl rand -hex 24)"
+    docker network create --internal "$RH_NET" > /dev/null || rh_fail "cannot create the network ${RH_NET}"
+    docker volume create "$RH_VOL" > /dev/null || rh_fail "cannot create the volume ${RH_VOL}"
+    printf '%s\n' "POSTGRES_PASSWORD=$(openssl rand -hex 24)" POSTGRES_DB=bms "BMS_OWNER_PASSWORD=${owner_pw}" \
+        "BMS_APP_PASSWORD=${app_pw}" > "$RH_TMP/db.env"
+    rh_log "starting a throwaway postgres (${RH_DB})"
+    docker run --detach --name "$RH_DB" "${cgroup[@]}" --memory 256m --memory-swap 256m --cpus 1.0 \
+        --network "$RH_NET" --label "bms.rehearsal=${RH_TOKEN}" --env-file "$RH_TMP/db.env" \
+        --volume "${RH_VOL}:/var/lib/postgresql/data" --volume "${initdb}:/docker-entrypoint-initdb.d:ro" \
+        "$POSTGRES_IMAGE" postgres -c shared_buffers=64MB -c max_connections=20 -c work_mem=4MB \
+        -c maintenance_work_mem=64MB -c log_error_verbosity=terse > /dev/null \
+        || rh_fail "could not start the throwaway postgres"
+    ready=0
+    for _ in $(seq 1 90); do
+        if docker logs "$RH_DB" 2>&1 | grep -q "init process complete" \
+            && docker exec "$RH_DB" pg_isready -U bms_owner -d bms > /dev/null 2>&1; then
+            ready=1
+            break
+        fi
+        sleep 2
+    done
+    [[ "$ready" == "1" ]] || rh_fail "the throwaway postgres did not become ready"
+    rh_require_scratch
+    rh_log "restoring"
+    docker exec -i "$RH_DB" pg_restore -U bms_owner -d bms --exit-on-error < "$RH_TMP/backup.dump" > /dev/null \
+        2> "$RH_TMP/pg_restore.err" \
+        || rh_fail "pg_restore failed: $(head -c 2000 "$RH_TMP/pg_restore.err" | tr '\n' ' ')"
+    rm -f "$RH_TMP/backup.dump"
+    [[ "$(rh_scratch "SELECT count(*) FROM tenants WHERE id = '${RH_TENANT}'")" == "1" ]] \
+        || rh_fail "business ${RH_TENANT} is not in ${RH_NAME}; rehearse after the next nightly backup"
+    timings+=("restore_ms=$(( $(rh_ms) - step ))")
+
+    # 5. The live API's migrations, then the run's staged rows from the live database, then the token.
+    step="$(rh_ms)"
+    printf '%s\n' "BMS_DB_URL=jdbc:postgresql://${RH_DB}:5432/bms" BMS_OWNER_USER=bms_owner \
+        "BMS_OWNER_PASSWORD=${owner_pw}" "JAVA_TOOL_OPTIONS=${RH_JAVA_OPTS}" > "$RH_TMP/migrate.env"
+    rh_require_env_target "$RH_TMP/migrate.env"
+    docker run --rm --name "$RH_MIGRATE" "${cgroup[@]}" --memory 448m --memory-swap 448m --cpus 1.0 \
+        --network "$RH_NET" --env-file "$RH_TMP/migrate.env" "$RH_IMAGE" migrate \
+        || rh_fail "the live API's migrations failed on the throwaway database"
+    live_ver="$(rh_live "SELECT max(version::int) FROM flyway_schema_history WHERE success")"
+    scratch_ver="$(rh_scratch "SELECT max(version::int) FROM flyway_schema_history WHERE success")"
+    [[ -n "$live_ver" && "$live_ver" == "$scratch_ver" ]] \
+        || rh_fail "the throwaway database is at Flyway ${scratch_ver:-none}, the live one at ${live_ver:-none}"
+    timings+=("migrate_ms=$(( $(rh_ms) - step ))")
+
+    step="$(rh_ms)"
+    RH_MAPPINGS="$(rh_live "SELECT string_agg(DISTINCT quote_literal(mapping_id::text), ',') FROM import_batches WHERE run_id = '${RH_RUN}' AND mapping_id IS NOT NULL")"
+    prelude="SET session_replication_role = replica;"$'\n'
+    for table in import_issues import_rows import_issue_resolutions import_refs import_signoffs import_reconciliations \
+        import_rehearsals import_mappings import_batches import_runs; do
+        prelude+="DELETE FROM ${table} WHERE $(rh_where "$table");"$'\n'
+    done
+    prelude+="CREATE TABLE bms_rehearsal_marker (token text NOT NULL);"$'\n'
+    prelude+="INSERT INTO bms_rehearsal_marker (token) VALUES ('${RH_TOKEN}');"$'\n'
+    prelude+="GRANT SELECT ON bms_rehearsal_marker TO bms_app;"$'\n'
+    live_script="BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;"$'\n'
+    for table in "${RH_TABLES[@]}"; do
+        cols="$(rh_live "$(rh_columns "$table")")"
+        scratch_cols="$(rh_scratch "$(rh_columns "$table")")"
+        [[ -n "$cols" && "$cols" == "$scratch_cols" ]] \
+            || rh_fail "the columns of ${table} differ between the live and the throwaway database"
+        live_script+="\\echo 'COPY ${table} (${cols}) FROM STDIN;'"$'\n'
+        live_script+="COPY (SELECT ${cols} FROM ${table} WHERE $(rh_where "$table")) TO STDOUT;"$'\n'
+        live_script+="\\echo '\\\\.'"$'\n'
+    done
+    live_script+="COMMIT;"$'\n'
+    rh_log "copying the run's staged rows into the throwaway database"
+    {
+        printf '%s' "$prelude"
+        docker exec -i "$RH_LIVE_DB" psql -U bms_owner -d bms -q -v ON_ERROR_STOP=1 <<< "$live_script"
+        printf '%s\n' "SET session_replication_role = origin;"
+    } | docker exec -i "$RH_DB" psql -U postgres -d bms -q -v ON_ERROR_STOP=1 > /dev/null \
+        || rh_fail "copying the run's staged rows failed"
+    [[ "$(rh_scratch "SELECT count(*) FROM import_runs WHERE id = '${RH_RUN}'")" == "1" ]] \
+        || rh_fail "the run is not in the throwaway database after the copy"
+    timings+=("copy_ms=$(( $(rh_ms) - step ))")
+
+    # 6. The real commit, in a short-lived API container that reaches the throwaway database only.
+    docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$RH_LIVE_API" \
+        | grep -Ev '^(BMS_DB_URL|BMS_APP_USER|BMS_APP_PASSWORD|BMS_SCHEDULER_ENABLED|BMS_IMPORTS_CLEANUP_ENABLED|BMS_DOCUMENTS_ORPHAN_SWEEP_ENABLED|BMS_REHEARSAL_TOKEN|JAVA_TOOL_OPTIONS)=|^$' \
+            > "$RH_TMP/api.env" || rh_fail "cannot read the live API's settings"
+    printf '%s\n' "BMS_DB_URL=jdbc:postgresql://${RH_DB}:5432/bms" BMS_APP_USER=bms_app "BMS_APP_PASSWORD=${app_pw}" \
+        BMS_SCHEDULER_ENABLED=false BMS_IMPORTS_CLEANUP_ENABLED=false BMS_DOCUMENTS_ORPHAN_SWEEP_ENABLED=false \
+        "BMS_REHEARSAL_TOKEN=${RH_TOKEN}" "JAVA_TOOL_OPTIONS=${RH_JAVA_OPTS}" >> "$RH_TMP/api.env"
+    rh_require_env_target "$RH_TMP/api.env"
+    rh_require_scratch
+    rh_log "running the real commit in ${RH_API}"
+    old_ifs="$IFS"
+    IFS=,
+    docker run --rm --name "$RH_API" "${cgroup[@]}" --memory 448m --memory-swap 448m --cpus 1.0 \
+        --network "$RH_NET" --env-file "$RH_TMP/api.env" "$RH_IMAGE" \
+        rehearse-import --tenant "$RH_TENANT" --run "$RH_RUN" --backup "$RH_NAME" --timings "${timings[*]}"
+    status=$?
+    IFS="$old_ifs"
+    case "$status" in
+        0) ;;
+        1) rh_log "the rehearsal's commit did not complete; its outcome is stored on the run" ;;
+        *) rh_fail "rehearse-import exited ${status}; nothing is stored on the live run" ;;
+    esac
+
+    # 7. The one write on the live database: the rehearsal's row, as bms_app under the business's row-level security.
+    [[ "$(rh_scratch "SELECT count(*) FROM import_rehearsals WHERE run_id = '${RH_RUN}'")" == "1" ]] \
+        || rh_fail "the throwaway database does not hold one rehearsal of the run"
+    cols="$(rh_scratch "$(rh_columns import_rehearsals)")"
+    [[ -n "$cols" ]] || rh_fail "the throwaway database has no import_rehearsals"
+    docker exec "$RH_DB" psql -U postgres -d bms -v ON_ERROR_STOP=1 \
+        -c "COPY (SELECT ${cols} FROM import_rehearsals WHERE run_id = '${RH_RUN}') TO STDOUT" \
+        | docker exec -i "$RH_LIVE_DB" psql -U bms_app -d bms -q -v ON_ERROR_STOP=1 \
+            -c "SELECT set_config('app.tenant_id', '${RH_TENANT}', false)" \
+            -c "CREATE TEMP TABLE rehearsal_in AS SELECT ${cols} FROM import_rehearsals WITH NO DATA" \
+            -c "COPY rehearsal_in FROM STDIN" \
+            -c "INSERT INTO import_rehearsals (${cols}) SELECT ${cols} FROM rehearsal_in" > /dev/null \
+        || rh_fail "could not store the rehearsal on the live run"
+    rh_log "stored the rehearsal on live run ${RH_RUN}; $(( ($(rh_ms) - started) / 1000 )) s in all"
+    [[ "$status" == "0" ]] || exit 1
+    exit 0
+}
+
+# The rehearsal only with an argument; with none, the weekly drill below.
+if (( $# > 0 )); then
+    rehearse_import "$@"
+    exit $?
+fi
 
 cd "$(dirname "$0")" || exit 1
 mkdir -p state backups
