@@ -118,7 +118,8 @@ class ImportMalformedFilesIT extends IntegrationTest {
     /**
      * One malformed file: the mapping source that reads it, its name and bytes, and what it must end in, each one of
      * {@code refused:<code>}, {@code failed:<code>}, {@code warning:<code>} (a parse warning of the batch),
-     * {@code issue:<line>:<code>} and {@code clean:<line>} (no blocking issue and no warning on that line).
+     * {@code issue:<line>:<code>} and {@code clean:<line>} (no blocking issue and no warning on that line). Every code the
+     * file ends in is named, once per issue; the clean lines are those the case names.
      */
     record Case(String name, String source, String file, byte[] bytes, List<String> expected) {
 
@@ -374,7 +375,16 @@ class ImportMalformedFilesIT extends IntegrationTest {
             }
             as(() -> preview.preview(run));
         }
-        assertThat(found).as("what %s ended in", c.name()).containsAll(c.expected());
+        // Exactly the codes the case names, as a multiset; the clean lines it names among those found (Lead, 74bfe3e).
+        List<String> codes =
+                found.stream().filter(f -> !f.startsWith("clean:")).sorted().toList();
+        assertThat(codes)
+                .as("what %s ended in", c.name())
+                .isEqualTo(c.expected().stream()
+                        .filter(f -> !f.startsWith("clean:"))
+                        .sorted()
+                        .toList());
+        assertThat(found).as("the clean lines of %s", c.name()).containsAll(c.expected());
         if (!c.expected().stream().allMatch(e -> e.startsWith("clean:"))) {
             // A malformed file ends in a code; only a well formed case (a hidden sheet skipped) is clean.
             assertThat(found.stream().filter(f -> !f.startsWith("clean:")))
