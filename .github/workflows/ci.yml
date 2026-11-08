@@ -96,7 +96,7 @@ jobs:
     name: Import big file test (on request)
     if: github.event_name == 'workflow_dispatch'
     runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '["self-hosted","jerome-laptop"]') }}
-    timeout-minutes: 120
+    timeout-minutes: 240
     defaults:
       run:
         working-directory: backend
