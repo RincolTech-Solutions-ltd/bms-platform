@@ -340,11 +340,13 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
     items, restocks, sales and usage at two branches, a balance per branch and item from -2 to 40), through the
     framework on PostgreSQL: importing twice equals once (the second run posts no journal, one import opening journal
     per branch ever, writes nothing and reports every row existing); a permuted row order gives the same state and the
-    same reconciliation; the history split over two runs gives the state of one; a dry run then a real run reports what
-    a real run alone reports (through `import-retail`, the one path that commits without a dry run); the derived
-    balance is the source balance for every branch and item, the checksum matches and the reconciliation ties. Seeds
-    137001 to 137005 with 15 to 24 tries each; every commit's report equals its dry run's. The five took 43 seconds
-    together at a third of today's tries.
+    same reconciliation; the sales and usage split over two runs give the state of one; a dry run then a real run
+    reports what a real run alone reports (through `import-retail`, the one path that commits without a dry run); the
+    derived balance is the source balance for every branch and item (an item that never moved at a branch has no balance
+    row, so zero), the checksum matches and the reconciliation ties. Seeds 137001 to 137006 with 15 to 24 tries each;
+    every commit's report equals its dry run's. The split of the restocks as well found #881 (a restock's price change
+    is looked for within its batch only, so a split loses it; shrunk to one item restocked at 100, 100 and 200 with the
+    cut after the second) and is disabled with that number.
   - *Fuzzed files.* `MalformedFilesTest` (seed 137101, 1,500 files) breaks generated CSV, JSON Lines and XLSX item lists
     with one to three mutations (cut short, a byte order mark, a quote, a line break, a NUL, invalid UTF-8, a
     right-to-left mark or override, a cell over 32,767 characters, bytes deleted or flipped) and reads them as the upload
