@@ -61,6 +61,8 @@ public final class ImportBigFileMain {
             "--spring.datasource.password=" + args[1],
             "--server.port=0",
             "--management.server.port=0",
+            // Production's row limit, not the test profile's (application-test.yml keeps 100,000 for the readers).
+            "--bms.imports.max-rows=" + UploadSettings.DEFAULT_MAX_ROWS,
             "--bms.reports.runner-enabled=false",
             "--bms.lending.arrears-job-enabled=false",
             "--bms.platform.billing-job-enabled=false",

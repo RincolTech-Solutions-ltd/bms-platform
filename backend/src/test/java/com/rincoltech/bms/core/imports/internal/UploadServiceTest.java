@@ -19,6 +19,15 @@ class UploadServiceTest {
         assertThat(UploadService.truncate("short", 300)).isEqualTo("short");
     }
 
+    /** Issue #137: production holds the row limit the big file test measured as safe on the staging heap, until #880. */
+    @Test
+    void theRowLimitIsTheMeasuredFiveThousandUntil880() throws java.io.IOException {
+        assertThat(new UploadSettings.Properties(null, null, null, null, null, null).maxRows())
+                .isEqualTo(5_000);
+        assertThat(java.nio.file.Files.readString(java.nio.file.Path.of("src/main/resources/application.yml")))
+                .contains("max-rows: ${BMS_IMPORTS_MAX_ROWS:5000}");
+    }
+
     @Test
     void aStatementTimeoutIsFoundHoweverSpringWrapsIt() {
         assertThat(UploadService.queryTimedOut(new QueryTimeoutException("timed out")))

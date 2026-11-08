@@ -71,10 +71,11 @@ done by hand as the notes say.
       `BRANCH_IN_TWO_FILES` and the run is not ready until its rows are left out, so merge the files
       first); a later run that adds loans to a branch already opened posts no journal and its report
       lists them for a correcting entry.
-- [ ] Retail (`retail_v1`): until #880 is fixed, the dry run of a batch of about 20,000 items or more
-      does not finish on the staging heap (SDD chapter 15 section 15.7, the big file test). Split a
-      larger product master into files of fewer rows, each in its own batch or run, and rehearse the
-      dry run on the largest one first.
+- [ ] Rows per file: until #880 is fixed, a batch holds at most 5,000 rows (`TOO_MANY_ROWS` above it),
+      the largest size the big file test commits on the staging heap inside the time limits (SDD
+      chapter 15 section 15.7: 5,000 items commit in about 4 minutes; 10,000 took 17 and nearly filled
+      the heap). Split a larger file into files of at most 5,000 rows, each its own batch, and rehearse
+      the dry run on the largest one first. The limit goes back up to 100,000 with #880.
 
 ### 2.3 Cleaning and review (stage 3)
 

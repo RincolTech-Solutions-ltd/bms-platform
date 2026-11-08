@@ -44,10 +44,12 @@ import tools.jackson.databind.json.JsonMapper;
  * <p>They found #880. On the staging heap the dry run at the row limit runs out of memory, the workbook's validation
  * fills the old generation, and the dry run of the 20,000 items at the column limit stops at its 15 minute limit. On
  * twice the staging heap the dry run at the row limit stops at that limit too, and the validation of the CSV at the row
- * limit fills the old generation as the workbook's does. Those cases wait for #880 and are disabled with its number. The
- * upload, validation and preview at the column limit stay enabled on the staging heap and are judged there.
+ * limit fills the old generation as the workbook's does. Those cases wait for #880 and are disabled with its number.
+ * Until #880 the configured row limit is 5,000 (review of 74bfe3e): the largest size measured to dry run and commit inside
+ * the time limits on the staging heap with the old generation under 90 percent. The child runs at that limit, and the
+ * whole path is judged at it for seven columns and for the 200 of the column limit.
  *
- * <p><b>Not part of {@code mvn verify}.</b> Two commits of 100,000 and 20,000 rows, each with its dry run, take longer than
+ * <p><b>Not part of {@code mvn verify}.</b> The commits and their dry runs take longer than
  * the backend job can spare, and on the shared runner a stalled machine would fail the job for a reason that is not a
  * defect (the reason {@code ReportMemoryIT} left it). It runs with {@code -Dimports.bigfile.run=true}: locally, or in the
  * manually started CI job {@code import-big-file} ({@code .github/workflows/ci.yml}, "Run workflow"). The test storage
@@ -135,21 +137,16 @@ class ImportBigFileIT extends IntegrationTest {
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "step=preview");
     }
 
-    /** The upload, validation and preview at the column limit, on the staging heap, judged and timed. */
-    @Test
-    void aCsvAtTheColumnLimitIsUploadedValidatedAndPreviewedOnTheStagingHeap() throws Exception {
-        String output = child("preview", "wide_items=" + columnLimitCsv(), STAGING_HEAP_MB);
-        assertThat(output).contains("columns=" + COLUMN_LIMIT, "step=preview");
-    }
-
     // JUSTIFICATION-A3: the review of 74bfe3e (must-fix 4) asks a measured safe row limit while #880 is open.
     /**
-     * The whole path, commit included, for product masters below the row limit of 100,000, on the staging heap and judged
-     * there: what sizes are safe while #880 is open, for the limit the configuration holds meanwhile.
+     * The whole path, commit included, at and below the configured row limit of 5,000 (production's until #880), on the
+     * staging heap and judged there: 5,000 rows of the seven columns of a product master and of the 200 columns of the
+     * column limit. Measured once at 10,000 rows of seven columns too, which committed in 17 minutes with the old
+     * generation at 137 of 149 MB, over both bounds (SDD chapter 15 section 15.7).
      */
     @ParameterizedTest(name = "{0} rows of {1} columns")
-    @CsvSource({"2500, 7", "5000, 7", "10000, 7", "5000, 200"})
-    void aProductMasterBelowTheRowLimitIsCommittedOnTheStagingHeapInsideTheTimeLimits(int rows, int columns)
+    @CsvSource({"2500, 7", "5000, 7", "5000, 200"})
+    void aProductMasterAtTheConfiguredRowLimitIsCommittedOnTheStagingHeapInsideTheTimeLimits(int rows, int columns)
             throws Exception {
         int extra = columns - ITEM_HEADER.size();
         List<String> header = new ArrayList<>(ITEM_HEADER);
