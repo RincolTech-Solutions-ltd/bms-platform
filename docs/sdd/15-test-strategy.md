@@ -365,13 +365,13 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
 
     | File | Heap | Upload | Validation | Preview | Dry run | Old generation peak |
     |---|---|---|---|---|---|---|
-    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits) | 224 MB | 9.3 s | 122 s | 19 s | out of memory | |
+    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits) | 224 MB | 8.5 to 9.3 s | 122 to 123 s | 19 to 20 s | out of memory | 149 of 149 MB by the preview, 21 s in the collector |
     | XLSX, the same rows, 3.3 MB | 224 MB | 10.7 s | 324 s | 1.5 s | not run | 149 of 149 MB |
-    | CSV, 20,000 rows, 200 columns (193 ignored), 20.6 MB (column limit) | 224 MB | 2.9 s | 8.7 s | 1.1 s | stopped at its 900 s limit | 134 of 149 MB |
+    | CSV, 20,000 rows, 200 columns (193 ignored), 20.6 MB (column limit) | 224 MB | 2.9 to 3.0 s | 8.7 to 15.7 s | 1.1 to 1.2 s | stopped at its 900 s limit | 106 of 149 MB by the preview, 134 in the dry run |
     | CSV, 100,000 rows, 7 columns, 25.8 MB | 448 MB | 9.0 s | 55 s | 1.4 s | stopped at its 900 s limit | 293 of 298 MB |
 
-    The upload, validation and preview at the row and size limits and at the column limit stay enabled on the staging
-    heap. The limits of 3.1 stand as configured, and a file over about 20,000 items is split until #880 is fixed.
+    The upload, validation and preview at the column limit stay enabled on the staging heap and pass the heap check. The
+    limits of 3.1 stand as configured, and a file over about 20,000 items is split until #880 is fixed.
 - **Normalisation tables.** Every table of examples in chapter 13 section 13.6 is a
   parametrised unit test.
 - **Loan servicing golden tests** (`ServicingTest`, #108). Fabricated schedules from worked
