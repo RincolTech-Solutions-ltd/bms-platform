@@ -167,7 +167,9 @@ class ImportRehearsalIT extends IntegrationTest {
 
         assertThat(rehearsal.outcome()).isEqualTo("committed");
         assertThat(rehearsal.failure()).isNull();
-        assertThat(rehearsal.matchesDryRun()).as("the commit says what the run's stored dry run said").isTrue();
+        assertThat(rehearsal.matchesDryRun())
+                .as("the commit says what the run's stored dry run said")
+                .isTrue();
         assertThat(rehearsal.report().sources()).hasSize(2);
         assertThat(rehearsal.report().notes()).contains("three fabricated rows");
         assertThat(rehearsal.timings())
@@ -175,8 +177,8 @@ class ImportRehearsalIT extends IntegrationTest {
                 .containsEntry("restore_ms", 34L)
                 .containsKeys("start_ms", "dry_run_ms", "commit_ms");
         assertThat(as(() -> runs.get(run)).status()).isEqualTo("committed");
-        Map<String, Object> row = TestDatabase.owner()
-                .sql("""
+        Map<String, Object> row =
+                TestDatabase.owner().sql("""
                         SELECT tenant_id, backup, outcome, failure IS NULL AS no_failure, matches_dry_run,
                                report->>'mode' AS mode,
                                (reconciliation IS NULL) = NOT EXISTS (SELECT 1 FROM import_reconciliations r
@@ -186,10 +188,7 @@ class ImportRehearsalIT extends IntegrationTest {
                                                                       ORDER BY r.version DESC LIMIT 1), true) AS same,
                                timings->>'commit_ms' IS NOT NULL AS timed
                           FROM import_rehearsals h WHERE run_id = ?
-                        """)
-                .param(run)
-                .query()
-                .singleRow();
+                        """).param(run).query().singleRow();
         assertThat(row)
                 .containsEntry("tenant_id", t.tenantId())
                 .containsEntry("backup", BACKUP)
