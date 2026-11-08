@@ -10,7 +10,7 @@ spring:
 
 bms:
   # The readers' streaming proofs (ImportUploadsIT, issue #128) stage a file of 100,000 rows, the row limit #880 will
-  # restore; production holds 5,000 until then (application.yml), and ImportBigFileIT runs its child at that limit.
+  # restore; production holds 2,500 until then (application.yml), and ImportBigFileIT runs its child at that limit.
   imports:
     max-rows: 100000
   tenancy:

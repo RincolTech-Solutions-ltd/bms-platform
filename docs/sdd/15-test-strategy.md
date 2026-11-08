@@ -363,15 +363,17 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
     `mvn verify`). It runs `retail_v1` product masters through the whole path in a child JVM at the staging API's heap
     of 224 MB (`-XX:+UseSerialGC`, old generation 149 MB, the application alone 67 MB after a collection) and judges
     the old generation's peak a tenth below its limit. It found #880 at the row limit of 100,000, and the cases there are
-    disabled with that number; until #880 the configured row limit per batch is **5,000** (spec section 3.1,
-    `bms.imports.max-rows`), the largest size measured below, and it goes back up with #880. Times on the CI runner
-    (`ubuntu-latest`, GitHub-hosted), November 2026. At and below the configured limit, the whole path, judged:
+    disabled with that number; until #880 the configured row limit per batch is **2,500** (spec section 3.1,
+    `bms.imports.max-rows`), and it goes back up with #880. 5,000 passed too, but one run took 473 s of the 10 minute
+    batch timeout and the same file took half that on another run, so 5,000 leaves too thin a margin for a slower
+    host. Times on the CI runner (`ubuntu-latest`, GitHub-hosted), November 2026, two runs where two are given. At and
+    below the measured sizes, the whole path, judged:
 
     | File | Heap | Upload | Validation | Preview | Dry run | Commit | Old generation peak |
     |---|---|---|---|---|---|---|---|
-    | CSV, 2,500 rows, 7 columns, 0.6 MB | 224 MB | 0.3 s | 0.9 s | 0.1 s | 43 s | 53 s | 84 of 149 MB |
-    | CSV, 5,000 rows, 7 columns, 1.3 MB (configured row limit) | 224 MB | 0.4 s | 1.8 s | 0.2 s | 155 s | 234 s | 103 of 149 MB |
-    | CSV, 5,000 rows, 200 columns (193 ignored), 5.2 MB (row and column limits) | 224 MB | 0.7 s | 1.5 s | 0.1 s | 167 s | 243 s | 106 of 149 MB |
+    | CSV, 2,500 rows, 7 columns, 0.6 MB (configured row limit) | 224 MB | 0.3 s | 0.9 s | 0.1 s | 43 to 85 s | 53 to 114 s | 84 of 149 MB |
+    | CSV, 5,000 rows, 7 columns, 1.3 MB | 224 MB | 0.4 s | 1.8 s | 0.2 s | 155 to 309 s | 234 to 473 s | 103 of 149 MB |
+    | CSV, 5,000 rows, 200 columns (193 ignored), 5.2 MB | 224 MB | 0.7 s | 1.5 s | 0.1 s | 167 to 310 s | 243 to 467 s | 106 to 107 of 149 MB |
     | CSV, 10,000 rows, 7 columns, 2.6 MB (measured once, over both bounds) | 224 MB | 0.7 s | 4.0 s | 0.4 s | 617 s | 1,036 s, over the 10 minute batch timeout | 137 of 149 MB, over 90 percent |
 
     The loader's time grows about fourfold for twice the rows (#880). At the row limit of 100,000, recorded for #880:
@@ -383,8 +385,9 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
     | CSV, 20,000 rows, 200 columns (193 ignored), 20.6 MB (column limit) | 224 MB | 2.9 to 3.0 s | 8.7 to 15.7 s | 1.1 to 1.2 s | stopped at its 900 s limit | 106 of 149 MB by the preview, 134 in the dry run |
     | CSV, 100,000 rows, 7 columns, 25.8 MB | 448 MB | 9.0 s | 55 s | 1.4 s | stopped at its 900 s limit | 293 of 298 MB |
 
-    The cases at 5,000 rows run in every `import-big-file` job; a file over 5,000 rows is refused with `TOO_MANY_ROWS`
-    and split (the cutover runbook, stage 2), until #880 restores 100,000.
+    The cases at 1,250 and 2,500 rows (seven columns, and 2,500 of the 200 of the column limit) run in every
+    `import-big-file` job; a file over 2,500 rows is refused with `TOO_MANY_ROWS` and split (the cutover runbook, stage
+    2), until #880 restores 100,000.
 - **Normalisation tables.** Every table of examples in chapter 13 section 13.6 is a
   parametrised unit test.
 - **Loan servicing golden tests** (`ServicingTest`, #108). Fabricated schedules from worked

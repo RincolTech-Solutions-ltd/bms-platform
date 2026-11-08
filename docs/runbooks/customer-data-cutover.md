@@ -71,10 +71,11 @@ done by hand as the notes say.
       `BRANCH_IN_TWO_FILES` and the run is not ready until its rows are left out, so merge the files
       first); a later run that adds loans to a branch already opened posts no journal and its report
       lists them for a correcting entry.
-- [ ] Rows per file: until #880 is fixed, a batch holds at most 5,000 rows (`TOO_MANY_ROWS` above it),
-      the largest size the big file test commits on the staging heap inside the time limits (SDD
-      chapter 15 section 15.7: 5,000 items commit in about 4 minutes; 10,000 took 17 and nearly filled
-      the heap). Split a larger file into files of at most 5,000 rows, each its own batch, and rehearse
+- [ ] Rows per file: until #880 is fixed, a batch holds at most 2,500 rows (`TOO_MANY_ROWS` above it),
+      a size the big file test commits on the staging heap well inside the time limits (SDD chapter 15
+      section 15.7: 2,500 items commit in under 2 minutes; 5,000 took up to 8 of the 10 the batch may
+      take; 10,000 took 17 and nearly filled the heap). Split a larger file into files of at most 2,500
+      rows, each its own batch, and rehearse
       the dry run on the largest one first. The limit goes back up to 100,000 with #880.
 
 ### 2.3 Cleaning and review (stage 3)

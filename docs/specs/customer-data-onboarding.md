@@ -84,7 +84,7 @@ An **import run** (`import_runs`, one per onboarding attempt of a tenant) owns o
   as data dictionary section 3 learned), JSON Lines (the retail export format). Anything else is
   refused with `FILE_TYPE_UNSUPPORTED`.
 - Limits, sized for the staging stack's 900 MB cap (ADR-018) and the same on production: at most
-  25 MB per file, 100,000 rows per batch and 200 columns (5,000 rows per batch until #880: the
+  25 MB per file, 100,000 rows per batch and 200 columns (2,500 rows per batch until #880: the
   size the big file test of #137 measured as safe on the staging heap); XLSX is read with a streaming reader;
   the API never holds more than one chunk of 1,000 rows in memory. A file over a limit is refused
   at upload with `FILE_TOO_LARGE` or `TOO_MANY_ROWS` and the operator splits it. These limits are
