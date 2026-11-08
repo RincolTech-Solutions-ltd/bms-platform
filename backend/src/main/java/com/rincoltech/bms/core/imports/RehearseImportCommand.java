@@ -1,11 +1,13 @@
 package com.rincoltech.bms.core.imports;
 
+import com.rincoltech.bms.core.jobs.TenantJobs;
 import com.rincoltech.bms.kernel.ApiException;
-import com.rincoltech.bms.kernel.TenantContext;
 import java.io.PrintStream;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.BiFunction;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.WebApplicationType;
@@ -103,14 +105,23 @@ public final class RehearseImportCommand {
                 "db-scheduler.enabled", "false",
                 "logging.level.root", "WARN"));
         try (ConfigurableApplicationContext context = app.run()) {
-            return run(context.getBean(ImportRehearsals.class), options, token, System.out, System.err);
+            TenantJobs tenants = context.getBean(TenantJobs.class);
+            return run(
+                    context.getBean(ImportRehearsals.class), tenants::callAs, options, token, System.out, System.err);
         }
     }
 
-    static int run(ImportRehearsals rehearsals, Options options, String token, PrintStream out, PrintStream err) {
+    /** {@code asTenant} binds the business as a one-off command does ({@link TenantJobs#callAs}), outside a transaction. */
+    static int run(
+            ImportRehearsals rehearsals,
+            BiFunction<UUID, Supplier<ImportRehearsals.Rehearsal>, ImportRehearsals.Rehearsal> asTenant,
+            Options options,
+            String token,
+            PrintStream out,
+            PrintStream err) {
         ImportRehearsals.Rehearsal rehearsal;
         try {
-            rehearsal = TenantContext.callAs(
+            rehearsal = asTenant.apply(
                     options.tenant(),
                     () -> rehearsals.rehearse(options.run(), token, options.backup(), options.timings()));
         } catch (ApiException e) {

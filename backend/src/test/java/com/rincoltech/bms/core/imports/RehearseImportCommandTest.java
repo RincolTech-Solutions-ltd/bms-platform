@@ -60,6 +60,7 @@ class RehearseImportCommandTest {
     static int run(ImportRehearsals rehearsals, ByteArrayOutputStream out, ByteArrayOutputStream err) {
         return RehearseImportCommand.run(
                 rehearsals,
+                (tenant, work) -> work.get(),
                 RehearseImportCommand.Options.parse(args()),
                 "f00dfeed".repeat(6),
                 new PrintStream(out, true, StandardCharsets.UTF_8),
