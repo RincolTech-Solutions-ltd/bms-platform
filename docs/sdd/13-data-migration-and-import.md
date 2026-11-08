@@ -1563,3 +1563,7 @@ section 4.1; coordinated with #110, which builds no second framework).**
 - **The suite** is SDD chapter 15 section 15.7: the golden report of `retail_v1` over fabricated edge cases, the property
   tests on generated shop books, the fuzzed files, and the big file test at each limit of 13.14 on the staging heap, with
   its times.
+- **Open findings.** #880: on the staging heap the dry run of a `retail_v1` batch at the row limit runs out of memory,
+  validating 100,000 rows fills the old generation, and 20,000 items do not finish their dry run in its 15 minutes (the
+  loader holds every staged row of the batch). #881: a restock's price change is looked for within its batch only, so
+  splitting the restocks over two runs loses it. The tests that show them are disabled with those numbers.

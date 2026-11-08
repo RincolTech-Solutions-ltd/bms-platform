@@ -445,6 +445,9 @@ golden report of `retail_v1` over fabricated edge cases next to the existing gol
 template; the five properties of 5.2 with jqwik on `retail_v1`; the fuzzed files of 5.3 at the readers and through the
 upload, validation and preview; and the big file test on the staging heap, on request. The fuzzing found that a formula's
 error and a formula saved without its value were read as a value and as an empty field; both are now `TYPE_INVALID`.
+Two findings are open: #880 (a `retail_v1` batch at the row limit does not validate, dry run or commit within the staging
+heap and the time limits) and #881 (a restock's price change is lost when the restocks are split over two runs); their
+tests are disabled with those numbers.
 
 ### 5.4 Guards in the product
 
