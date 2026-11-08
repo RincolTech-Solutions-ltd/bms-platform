@@ -26,7 +26,8 @@ public interface CollateralImports {
     /**
      * Creates one item of a member, {@code pledged}. A reference another active item of its type already holds is not
      * repeated (the register allows one active item per type and reference): the item is then kept without it, the
-     * reference in its description, and a vehicle so held becomes {@code other}. Returns its id.
+     * reference in its description, and a vehicle so held becomes {@code other}. The item of a loan the register shows
+     * repaid is created {@code released}: it keeps its reference and holds no other pledge back. Returns its id.
      */
     UUID create(
             UUID branchId,
@@ -35,5 +36,6 @@ public interface CollateralImports {
             String description,
             String reference,
             String currency,
+            boolean released,
             UUID createdBy);
 }

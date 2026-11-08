@@ -45,11 +45,12 @@ class CollateralImportWriter implements CollateralImports {
             String description,
             String reference,
             String currency,
+            boolean released,
             UUID createdBy) {
         String normalised = CollateralImports.normalise(reference);
         String type = collateralType;
         String text = description;
-        if (referenceHeld(type, normalised)) {
+        if (!released && referenceHeld(type, normalised)) {
             // One active item per type and reference (the index lending_collateral_items_one_active): kept without it.
             text = description + " (" + reference + ")";
             reference = null;
@@ -64,8 +65,7 @@ class CollateralImportWriter implements CollateralImports {
                         INSERT INTO lending_collateral_items (id, tenant_id, branch_id, member_id, collateral_type,
                             description, reference_no, reference_no_normalised, owner_relationship,
                             estimated_value_minor, currency, custody_status, created_by)
-                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, 'self', NULL, ?,
-                            'pledged', ?)
+                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, 'self', NULL, ?, ?, ?)
                         """)
                 .params(
                         id,
@@ -76,6 +76,7 @@ class CollateralImportWriter implements CollateralImports {
                         reference,
                         normalised,
                         currency,
+                        released ? "released" : "pledged",
                         createdBy)
                 .update();
         return id;

@@ -53,6 +53,16 @@ class LoanRegisterWriter {
     static final String LOAN = "lending.loan";
     static final String TXN = "lending.loan_transaction";
 
+    /** The rows of one loan besides its transactions, by target type: what the loan of a row also made. */
+    private static final String CHILD_ROWS = """
+            SELECT 'lending.loan_status_history', id FROM lending_loan_status_history WHERE loan_id = ?
+            UNION ALL SELECT 'lending.schedule_item', id FROM lending_schedule_items WHERE loan_id = ?
+            UNION ALL SELECT 'lending.repayment_allocation', a.id FROM lending_repayment_allocations a
+                       JOIN lending_loan_transactions t ON t.id = a.transaction_id WHERE t.loan_id = ?
+            UNION ALL SELECT 'lending.loan_collateral', id FROM lending_loan_collateral WHERE loan_id = ?
+            UNION ALL SELECT 'lending.collection_action', id FROM lending_collection_actions WHERE loan_id = ?
+            """;
+
     private final JdbcClient jdbc;
     private final LoanRepository loans;
     private final ServicingRepository servicing;
@@ -289,6 +299,9 @@ class LoanRegisterWriter {
                         c.description(),
                         c.reference(),
                         p.product().currency(),
+                        LoanRegister.plan(r, p.product().allocationOrder(), asAt)
+                                .position()
+                                .settled(),
                         officer);
                 checkpoint.register(ref, COLLATERAL, item);
                 itemsMade++;
@@ -440,6 +453,15 @@ class LoanRegisterWriter {
         if (!predicted.position().equals(plan.position())) {
             throw new IllegalStateException("the loan of line " + p.staged().line() + " differs from its forecast");
         }
+        // Rule 4: every record the row made is in import_refs, the loan's own rows too (its status history, schedule
+        // items, allocations, pledge and collection note).
+        jdbc.sql(CHILD_ROWS)
+                .params(loanId, loanId, loanId, loanId, loanId)
+                .query((rs, n) -> {
+                    checkpoint.register(ref, rs.getString(1), rs.getObject(2, UUID.class));
+                    return null;
+                })
+                .list();
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("loan_no", loan.loanNo());
         after.put("status", status);

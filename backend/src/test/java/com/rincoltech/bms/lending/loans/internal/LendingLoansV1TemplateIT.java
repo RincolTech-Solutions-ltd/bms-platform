@@ -75,6 +75,19 @@ class LendingLoansV1TemplateIT extends IntegrationTest {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
+    /** Every table the loader writes a row of, each row registered in {@code import_refs} (rule 4 of retail_v1). */
+    static final List<String> WRITTEN_TABLES = List.of(
+            "lending_members",
+            "lending_next_of_kin",
+            "lending_collateral_items",
+            "lending_loans",
+            "lending_loan_status_history",
+            "lending_schedule_items",
+            "lending_loan_transactions",
+            "lending_repayment_allocations",
+            "lending_loan_collateral",
+            "lending_collection_actions");
+
     @Autowired
     ImportRuns runs;
 
@@ -237,17 +250,30 @@ class LendingLoansV1TemplateIT extends IntegrationTest {
                 .as("real:%n%s%ndry:%n%s", real.render(), dry.report().render())
                 .isTrue();
 
-        // Every record the run wrote is in import_refs; the reconciliation ties; another business has nothing.
+        // Every record the run wrote is in import_refs, a loan's own rows too; the reconciliation ties; another
+        // business has nothing.
+        for (String table : WRITTEN_TABLES) {
+            assertThat(count(t, "SELECT count(*) FROM " + table + " WHERE tenant_id = ?"))
+                    .as("the run wrote %s", table)
+                    .isPositive();
+            assertThat(count(
+                            t,
+                            "SELECT count(*) FROM " + table + " x WHERE x.tenant_id = ?"
+                                    + " AND NOT EXISTS (SELECT 1 FROM import_refs r WHERE r.target_id = x.id)"))
+                    .as("every row of %s is in import_refs", table)
+                    .isZero();
+        }
+        // A repaid loan's item is released with its pledge, so it holds no reference back (13.12: one closed loan at
+        // each branch).
         assertThat(count(
                         t,
-                        "SELECT count(*) FROM lending_loans l WHERE l.tenant_id = ?"
-                                + " AND NOT EXISTS (SELECT 1 FROM import_refs r WHERE r.target_id = l.id)"))
-                .isZero();
+                        "SELECT count(*) FROM lending_collateral_items WHERE tenant_id = ? AND custody_status"
+                                + " = 'released'"))
+                .isEqualTo(2);
         assertThat(count(
                         t,
-                        "SELECT count(*) FROM lending_members m WHERE m.tenant_id = ?"
-                                + " AND NOT EXISTS (SELECT 1 FROM import_refs r WHERE r.target_id = m.id)"))
-                .isZero();
+                        "SELECT count(*) FROM lending_loan_collateral WHERE tenant_id = ? AND released_at IS NOT NULL"))
+                .isEqualTo(2);
         ImportReconciliation.Report r = as(t, () -> reconciliation.latest(run)).orElseThrow();
         assertThat(r.signable()).as(r.render()).isTrue();
         assertThat(count(other, "SELECT count(*) FROM lending_members WHERE tenant_id = ?"))
@@ -295,6 +321,78 @@ class LendingLoansV1TemplateIT extends IntegrationTest {
         assertThat(state(t)).as("no duplicates and no second journal").isEqualTo(before);
         assertThat(count(t, "SELECT count(*) FROM journal_entries WHERE tenant_id = ?"))
                 .isEqualTo(2);
+    }
+
+    // JUSTIFICATION-A3: three new tests the review of a4c6bd9 asks for (must-fix 2 and 3), not new mechanism.
+    @Test
+    void aLaterRunAddingLoansToAnOpenedBranchPostsNoJournalAndAsksForACorrectingEntry() throws IOException {
+        Map<String, byte[]> first = new LinkedHashMap<>();
+        first.put("register|pilot_loan_register_sample.csv", Files.readAllBytes(PILOT));
+        committed(t, reviewed(t, officer, first));
+        // New loans for the head office: the second branch's register, read by the head office's source.
+        Map<String, byte[]> later = new LinkedHashMap<>();
+        later.put("register|fab-register-branch-two.csv", Files.readAllBytes(BRANCH_TWO));
+        UUID run = reviewed(t, officer, later);
+
+        ImportPreview.Preview predicted = as(t, () -> preview.preview(run));
+        assertThat(predicted.balances().journals())
+                .as("the forecast predicts no second journal")
+                .isEmpty();
+        DryRun dry = as(t, () -> runs.dryRun(run, operator));
+        assertThat(dry.report().failure()).as(dry.report().render()).isNull();
+        assertThat(dry.previewMatches()).as(dry.report().render()).isTrue();
+        assertThat(dry.report().journals()).as(dry.report().render()).isEmpty();
+        assertThat(dry.report().notes())
+                .as(dry.report().render())
+                .anySatisfy(n -> assertThat(n).contains("Branch HQ already has its import opening journal"));
+        committed(t, run);
+
+        assertThat(count(t, "SELECT count(*) FROM journal_entries WHERE tenant_id = ?"))
+                .isEqualTo(1);
+        assertThat(journalTotals(t)).isEqualTo(Map.of("HQ", "2810000|2810000"));
+        // The book holds the new loans; the journal does not, which is what the correcting entry is for.
+        assertThat(bookPrincipal(t)).isEqualTo(Map.of("HQ", 3_470_000L));
+        assertThat(as(t, () -> runs.commitReport(run)).sameAs(dry.report())).isTrue();
+    }
+
+    @Test
+    void anotherBusinessesMembersAreNeverMatched() throws IOException {
+        // The other business holds the NIN of row 3 and the phone of row 5 (fabricated); this business holds neither.
+        existingMemberWithLoan(other, "CMTEST0000001A", "+256700000001");
+        member(other, "CFTEST0000099A", "+256700000003", "Test Other Business Member");
+        UUID run = uploaded(t, officer, Map.of("register|pilot_loan_register_sample.csv", Files.readAllBytes(PILOT)));
+
+        assertThat(as(t, () -> codesOn(run, 3))).doesNotContain("MEMBER_MATCHED_EXISTING");
+        assertThat(as(t, () -> codesOn(run, 4))).doesNotContain("KIN_IS_MEMBER");
+        assertThat(as(t, () -> codesOn(run, 5))).doesNotContain("MEMBER_PHONE_CONFLICT", "MEMBER_MATCHED_EXISTING");
+        settle(t, run);
+        committed(t, run);
+
+        assertThat(count(t, "SELECT count(*) FROM lending_members WHERE tenant_id = ? AND source = 'import'"))
+                .as("rows 3 and 12 are one new member of this business")
+                .isEqualTo(6);
+        assertThat(count(
+                        t,
+                        "SELECT count(*) FROM lending_next_of_kin k WHERE k.tenant_id = ? AND k.linked_member_id IS"
+                                + " NOT NULL AND NOT EXISTS (SELECT 1 FROM lending_members m WHERE m.id ="
+                                + " k.linked_member_id AND m.tenant_id = k.tenant_id)"))
+                .isZero();
+        assertThat(count(other, "SELECT count(*) FROM lending_members WHERE tenant_id = ?"))
+                .isEqualTo(2);
+        assertThat(count(other, "SELECT count(*) FROM lending_loans WHERE tenant_id = ?"))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void aPhoneAnotherMemberOfTheBusinessHoldsIsAConflict() throws IOException {
+        // Row 5's phone belongs to a member of this business with another NIN (fabricated).
+        member(t, "CFTEST0000099A", "+256700000003", "Test Other Member");
+        UUID run = uploaded(t, officer, Map.of("register|pilot_loan_register_sample.csv", Files.readAllBytes(PILOT)));
+
+        assertThat(as(t, () -> codesOn(run, 5)))
+                .contains("MEMBER_PHONE_CONFLICT")
+                .doesNotContain("MEMBER_MATCHED_EXISTING");
+        assertThat(as(t, () -> codesOn(run, 3))).doesNotContain("MEMBER_PHONE_CONFLICT");
     }
 
     @Test
@@ -535,6 +633,20 @@ class LendingLoansV1TemplateIT extends IntegrationTest {
                 .sql("UPDATE lending_loan_products SET current_version_id = ? WHERE id = ?")
                 .params(version, product)
                 .update();
+    }
+
+    /** A member the business already has (fabricated), with no loan. */
+    static UUID member(TestDatabase.Fixture f, String nin, String phone, String name) {
+        UUID member = UUID.randomUUID();
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO lending_members (id, tenant_id, branch_id, member_no, full_name, phone_e164, id_type,
+                                                     national_id, currency, kyc_status, status, source)
+                        VALUES (?, ?, ?, 'LIVE-M2', ?, ?, 'nin', ?, 'UGX', 'incomplete', 'active', 'staff')
+                        """)
+                .params(member, f.tenantId(), f.headOffice(), name, phone, nin)
+                .update();
+        return member;
     }
 
     /** A member the business already has (fabricated) and one loan of theirs with no transaction yet. */

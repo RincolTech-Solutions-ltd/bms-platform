@@ -1510,17 +1510,22 @@ section 4.1; coordinated with #110, which builds no second framework).**
 - **The loader (13.10 steps 1 to 7).** One batch, one transaction: every borrower matched or made (the details of the
   key's latest row by date), then per row its next of kin (a duplicate for the member collapses; a kin whose NIN is a
   member's is linked `nin`, `confirmed`), its collateral item (`pledged`, no value, "imported; verify custody and value";
-  a reference another active item holds is kept in the description), the loan (`channel = import`, flat, per term,
-  bullet, status from the balance), its one bullet item, a historic disbursement and the historic repayment with its
-  allocations by the product's order (`is_historic`, no journal), the position as at the cutover day (DPD), each record
-  registered in `import_refs`; a row's branch must be open (`Branches.lockBranch`), or the batch is refused (the branch
-  limit of 1/16). No SMS, task or approval (the trigger of 7/16).
+  a reference another active item holds is kept in the description; the item of a loan the register shows repaid is
+  `released`, its pledge too), the loan (`channel = import`, flat, per term, bullet; inserted as a draft so its pledge
+  is accepted, as the V8 trigger `lending_loan_collateral_guard` asks, then moved to its status from the balance), its
+  one bullet item, a historic disbursement and the historic repayment with its allocations by the product's order
+  (`is_historic`, no journal), the position as at the cutover day (DPD). Every record a row made is registered in
+  `import_refs`, the loan's own rows too: member, next of kin, collateral item, loan, status history, schedule item,
+  transaction, allocation, pledge and collection note. A row's branch must be open (`Branches.lockBranch`), or the batch
+  is refused (the branch limit of 1/16). No SMS, task or approval (the trigger of 7/16).
 - **One opening journal per branch, ever (the rule of #135).** After its rows, the batch posts, for each branch it wrote
   that has no import opening journal of loans yet, one journal through `openingJournal` for every loan imported into the
   branch (by any run) still owing principal: debit `loans_receivable`, one line per loan with the loan as subledger (the
   framework's `ImportRefs.Opening.lines`), credit `opening_balance_equity` the total; and the same for members' credits
   (`member_overpayments`). Valuing every imported loan of the branch makes the first journal after a stopped run value
   everything imported. A branch that already has one takes none; the report lists its new loans for a correcting entry.
+  "Ever" holds under concurrency because every batch of the business first takes the business's import key
+  (`pg_try_advisory_xact_lock` in `ImportRunService`, Lead ruling 5 on #869), so two batches never check and post a branch's journal at once.
   The forecast applies the same rule (the branches opened by other runs, the principal their imported loans still hold,
   and this run's rows by `LoanRegister.plan`), so the preview and the commit agree.
 - **The forecast and the books.** The forecast predicts per branch the loan principal outstanding, the loans and
