@@ -97,6 +97,8 @@ the source; the trial balance of one tenant balances (sum of debits equals sum o
 
 ## 5. The weekly drill and the backup alert
 
+### 5.1 The weekly drill
+
 `deploy/restore-drill.sh` (`bms-restore-drill.timer`, Sunday 03:30 host time, as the deploy user; installed with
 `docs/runbooks/monitoring-and-alerts.md` section 2) does steps 1 to 4 for you without touching the live database: it fetches the
 newest `daily/` dump, decrypts it, restores it into a throwaway PostgreSQL (no network, 384 MB, inside `bms.slice` on staging; on production the 384 MB and 64 MB container caps apply, and the drill reads the init scripts from `/opt/bms/postgres/initdb`, on staging from `releases/<tag>/postgres/initdb`) and
@@ -120,6 +122,118 @@ workstation watchdog this section used to describe.
 
 The weekly drill proves the data and the grants restore and gives a lower bound on the time. It does not prove the two hour RTO
 for a lost host; that stays the quarterly drill onto a fresh VM (sections 1 to 4, recorded as in section 6).
+
+### 5.2 Rehearsing an import on last night's backup (`--rehearse-import`)
+
+Before a cutover the operator rehearses the customer's import run against last night's backup (spec
+`docs/specs/customer-data-onboarding.md` section 5.5, ADR-027 decision 9, issue #138; the cutover runbook
+`docs/runbooks/customer-data-cutover.md` section 2.4 says when). The same script does it, only when asked:
+
+```
+cd /opt/bms && ./restore-drill.sh --rehearse-import <run id>
+```
+
+Run it by hand as the user that runs the drill (`bms` on staging, `deploy` on production), never from the timer or
+cron: those run the script with no argument, which is the weekly drill above, unchanged. What it does, in order:
+
+1. Reads the run on the live database as `bms_owner`, read only: it must be a run of the import screens (origin
+   `framework`), in review or ready, and on staging marked fabricated by its uploader (`import_runs.fabricated`).
+2. On staging, starts nothing unless `bms.slice` has 704 MB free below `MemoryHigh` (in use counted as `memory.current`
+   less inactive page cache), and refuses while the weekly drill or another rehearsal runs. Do not run it during a deploy.
+3. Fetches and decrypts the newest backup, as the drill does, into a mode-0700 temp dir `backups/rehearsal.XXXXXX`; the
+   decrypted dump is deleted as soon as it is restored.
+4. Starts a throwaway PostgreSQL (`bms-rehearsal-db-<pid>`, 256 MB, 1 CPU, inside `bms.slice` on staging) on an internal
+   Docker network of its own (`bms-rehearsal-net-<pid>`, no route out, the live database not on it) with a volume of its
+   own, restores into it, and refuses to go on unless it is provably not the live database: another name, another
+   container, another cluster (`pg_control_system()`'s identifier), this rehearsal's label, this network only. It asks
+   again before the commit.
+5. Migrates it with the live API's own image, refuses if its Flyway version is then not the live one, and copies the
+   run's staged rows from the live database in one `REPEATABLE READ READ ONLY` transaction: the run, its batches, rows,
+   issues, resolutions and the mappings its batches name. The encrypted source comes only as its object keys and the
+   run's wrapped data key: the commit reads the staged rows, so the source is never fetched or decrypted. It then marks
+   the throwaway database with a one-time token, the only thing that lets the application commit without the checker
+   and the pre-import dump.
+6. Runs `rehearse-import` in a short-lived API container (`bms-rehearsal-api-<pid>`, 448 MB, 1 CPU, the staging api's
+   224 MB heap) with the live API's image and settings, the database switched to the throwaway one, the scheduler and
+   the clean-ups off, on the internal network only. It moves the run back to review there, takes the dry run again on
+   the restored state and this build, makes the run ready and commits it with the real commit.
+7. Stores the rehearsal on the live run: one `import_rehearsals` row, inserted as `bms_app` under the business's
+   row-level security. It is the only write the rehearsal makes on the live database.
+8. Removes the containers, the network, the volume and the temp dir on success, on failure, on Ctrl-C (INT) and on
+   TERM, and says so in its last line.
+
+Exit status: 0 rehearsed and stored; 1 failed (a commit that ran and failed or halted is stored with its failure's code;
+anything earlier stores nothing); 2 usage; 3 refused (the run, the target or the room). It writes none of the drill's
+state files, so `monitor.sh` never reads a rehearsal as a drill. The output (the report, codes, counts and amounts) has
+no personal value; keep it with the cutover notes.
+
+Read the stored rehearsal:
+
+```
+docker exec bms-postgres-1 psql -U bms_owner -d bms -c "SELECT created_at, backup, outcome, failure, matches_dry_run, timings
+  FROM import_rehearsals WHERE run_id = '<run id>' ORDER BY created_at DESC LIMIT 1"
+```
+
+`timings` holds milliseconds per step: `download_ms`, `restore_ms`, `migrate_ms`, `copy_ms` on the host, then `start_ms`,
+`dry_run_ms` and `commit_ms` (the commit includes the reconciliation) in the API. Plan the cutover window from
+`dry_run_ms` and `commit_ms`. `matches_dry_run` says whether the commit's report is the run's stored dry run's, apart
+from its mode; journal entry numbers differ when the business posted a journal after last night's backup.
+
+If the host loses power during a rehearsal, remove what is left (names all start `bms-rehearsal-`):
+
+```
+docker rm -f -v $(docker ps -aq --filter name=bms-rehearsal-) 2> /dev/null
+docker volume rm $(docker volume ls -q --filter name=bms-rehearsal-) 2> /dev/null
+docker network rm $(docker network ls -q --filter name=bms-rehearsal-) 2> /dev/null
+rm -rf /opt/bms/backups/rehearsal.*
+```
+
+#### 5.2.1 Acceptance check on staging (issue #138, run by the Lead after the merge)
+
+On the Pi, as `bms`, from `/opt/bms`, with a fabricated run `<run id>` of the import screens in review or ready on live
+staging (it has the stored dry run of live staging that step 4 compares with) and nobody using staging meanwhile:
+
+```
+cd /opt/bms
+RUN=<run id>
+# Live staging before: the row count of every table but import_rehearsals, and the whole Flyway history.
+snapshot() {
+  docker exec -i bms-postgres-1 psql -U bms_owner -d bms -tA <<'SQL'
+SELECT format('SELECT %L || ''|'' || count(*) FROM %I', relname, relname) FROM pg_class
+ WHERE relkind = 'r' AND relnamespace = 'public'::regnamespace AND relname <> 'import_rehearsals' ORDER BY relname
+\gexec
+SELECT 'flyway|' || installed_rank || '|' || version || '|' || checksum || '|' || success FROM flyway_schema_history ORDER BY installed_rank;
+SQL
+}
+snapshot > state/rehearsal-check-before.txt
+docker exec bms-postgres-1 psql -U bms_owner -d bms -tAc "SELECT count(*) FROM import_rehearsals WHERE run_id = '$RUN'"
+
+# 1. The rehearsal. Watch it fit in the slice from a second terminal:
+#    watch -n 5 "cat /sys/fs/cgroup/bms.slice/memory.current; docker stats --no-stream --format '{{.Name}} {{.MemUsage}}'"
+./restore-drill.sh --rehearse-import "$RUN" 2>&1 | tee "state/rehearsal-$RUN.log"; echo "exit ${PIPESTATUS[0]}"   # exit 0
+
+# 2. The live database is untouched: no difference at all, and one more import_rehearsals row.
+snapshot > state/rehearsal-check-after.txt
+diff state/rehearsal-check-before.txt state/rehearsal-check-after.txt && echo "live database untouched"
+docker exec bms-postgres-1 psql -U bms_owner -d bms -tAc "SELECT count(*) FROM import_rehearsals WHERE run_id = '$RUN'"
+
+# 3. The rehearsal's report is the dry run's on live staging, apart from its mode: t|t|committed
+docker exec bms-postgres-1 psql -U bms_owner -d bms -tAc "SELECT h.matches_dry_run, (h.report - 'mode') = (r.dry_run_report - 'mode'), h.outcome
+  FROM import_rehearsals h JOIN import_runs r ON r.id = h.run_id WHERE h.run_id = '$RUN' ORDER BY h.created_at DESC LIMIT 1"
+
+# 4. Nothing is left: four zeros.
+docker ps -aq --filter name=bms-rehearsal- | wc -l; docker network ls -q --filter name=bms-rehearsal- | wc -l
+docker volume ls -q --filter name=bms-rehearsal- | wc -l; ls -d backups/rehearsal.* 2> /dev/null | wc -l
+
+# 5. A refusal: a run not marked fabricated (any, or the id of a run opened without the mark) exits 3 and starts nothing.
+./restore-drill.sh --rehearse-import <id of a run not marked fabricated>; echo "exit $?"   # exit 3
+
+# 6. The weekly drill still runs as before, with no argument, as cron runs it.
+./restore-drill.sh >> state/restore-drill.log 2>&1; echo "exit $?"; cat state/last_restore_drill
+```
+
+The live API, `scheduled_tasks` and `audit_log` keep working during the check; a row count that moved in step 2 is
+explained by what the stack did meanwhile (a sign-in, a scheduled job) or the check is repeated when staging is quiet.
 
 ## 6. Clean up and record
 
