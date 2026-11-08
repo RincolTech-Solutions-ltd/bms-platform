@@ -328,6 +328,50 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
   date of its source row and the legacy balances the import date, that a valuation `as_of` the day
   before the import counts the imported history by business date, and that product codes are
   normalised exactly as the catalogue normalises them (review F9).
+- **Customer data onboarding error-proofing** (issue #137, spec `docs/specs/customer-data-onboarding.md` section 5).
+  - *Golden per template and per known mapping.* The test template `fixture_shop` over `fixtures/imports/golden/`
+    (`ImportCatalogueTest`, `ImportValidationIT`, exactly `expected-issues.txt`); `retail_v1` with the export's mapping
+    over `fixtures/retail/import-sample/` and over `fixtures/imports/retail/fab-edge-cases/`, whose rows give every
+    line of `fab-edge-cases.expected-codes.txt` (every code of the template's own and the shared row codes on a
+    fixture row; then the dry run writes nothing, the commit reports what it predicted, the run reconciles and another
+    business is untouched), and with the shop book mapping (`RetailV1TemplateIT`); `lending_loans_v1` with the pilot
+    register mapping (`LendingLoansV1TemplateTest`, `LendingLoansV1TemplateIT`, section 13.12).
+  - *Properties* (`RetailImportPropertiesIT`, jqwik, section 15.3.1) over generated fabricated shop books (one to three
+    items, restocks, sales and usage at two branches, a balance per branch and item from -2 to 40), through the
+    framework on PostgreSQL: importing twice equals once (the second run posts no journal, one import opening journal
+    per branch ever, writes nothing and reports every row existing); a permuted row order gives the same state and the
+    same reconciliation; the history split over two runs gives the state of one; a dry run then a real run reports what
+    a real run alone reports (through `import-retail`, the one path that commits without a dry run); the derived
+    balance is the source balance for every branch and item, the checksum matches and the reconciliation ties. Seeds
+    137001 to 137005 with 15 to 24 tries each; every commit's report equals its dry run's. The five took 43 seconds
+    together at a third of today's tries.
+  - *Fuzzed files.* `MalformedFilesTest` (seed 137101, 1,500 files) breaks generated CSV, JSON Lines and XLSX item lists
+    with one to three mutations (cut short, a byte order mark, a quote, a line break, a NUL, invalid UTF-8, a
+    right-to-left mark or override, a cell over 32,767 characters, bytes deleted or flipped) and reads them as the upload
+    does: every one ends in a refusal or a failure with a code of the shared catalogue, or in rows, and the same bytes
+    always give the same outcome. `ImportMalformedFilesIT` takes 18 named cases through the upload, validation and
+    preview of `retail_v1` with the shop book mapping: truncation, UTF-16, Windows-1252, a byte that is not UTF-8, two
+    exports joined with a byte order mark mid-file, an unbalanced quote, long and too long cells, control, zero-width
+    and right-to-left characters and a NUL in codes, merged cells, formulas with a value, with an error and without a
+    value, a hidden sheet before the items and a workbook whose only sheet is hidden, and dates as a serial, in a date
+    cell, as text and as an impossible text. Each ends in its refusal or failure code or its row codes, a failed batch
+    holds no rows, a refused file leaves no batch, and nothing outside the import tables and the audit log is written.
+    The formulas found a defect, fixed in the same change (chapter 13 section 13.14.1, 11/16).
+  - *Big file test* (`ImportBigFileIT`, on request: the CI job `import-big-file`, "Run workflow"; too long for
+    `mvn verify`). It runs `retail_v1` product masters through the whole path in a child JVM at the staging API's heap
+    of 224 MB (`-XX:+UseSerialGC`, old generation 149 MB, the application alone 67 MB after a collection) and judges
+    the old generation's peak a tenth below its limit. It found #880: the commit of a batch at the limits is not proven
+    yet, and the cases that commit are disabled with that number. Times on the GitHub-hosted runner, November 2026:
+
+    | File | Heap | Upload | Validation | Preview | Dry run | Old generation peak |
+    |---|---|---|---|---|---|---|
+    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits) | 224 MB | 9.3 s | 122 s | 19 s | out of memory | |
+    | XLSX, the same rows, 3.3 MB | 224 MB | 10.7 s | 324 s | 1.5 s | not run | 149 of 149 MB |
+    | CSV, 20,000 rows, 200 columns (193 ignored), 20.6 MB (column limit) | 224 MB | 2.9 s | 8.7 s | 1.1 s | stopped at its 900 s limit | 134 of 149 MB |
+    | CSV, 100,000 rows, 7 columns, 25.8 MB | 448 MB | 9.0 s | 55 s | 1.4 s | stopped at its 900 s limit | 293 of 298 MB |
+
+    The upload, validation and preview at the row and size limits and at the column limit stay enabled on the staging
+    heap. The limits of 3.1 stand as configured, and a file over about 20,000 items is split until #880 is fixed.
 - **Normalisation tables.** Every table of examples in chapter 13 section 13.6 is a
   parametrised unit test.
 - **Loan servicing golden tests** (`ServicingTest`, #108). Fabricated schedules from worked

@@ -71,6 +71,10 @@ done by hand as the notes say.
       `BRANCH_IN_TWO_FILES` and the run is not ready until its rows are left out, so merge the files
       first); a later run that adds loans to a branch already opened posts no journal and its report
       lists them for a correcting entry.
+- [ ] Retail (`retail_v1`): until #880 is fixed, the dry run of a batch of about 20,000 items or more
+      does not finish on the staging heap (SDD chapter 15 section 15.7, the big file test). Split a
+      larger product master into files of fewer rows, each in its own batch or run, and rehearse the
+      dry run on the largest one first.
 
 ### 2.3 Cleaning and review (stage 3)
 
