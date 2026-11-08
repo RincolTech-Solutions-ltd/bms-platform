@@ -3989,7 +3989,7 @@ class MigrationOrderIT {
             assertThatThrownBy(() -> owner.sql("DELETE FROM import_rehearsals WHERE run_id = ?")
                             .param(run)
                             .update())
-                    .hasMessageContaining("append-only");
+                    .hasStackTraceContaining("append-only");
             assertThat(owner.sql("SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE relname ="
                                     + " 'import_rehearsals'")
                             .query(Boolean.class)
