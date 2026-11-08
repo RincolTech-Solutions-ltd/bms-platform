@@ -387,6 +387,14 @@ public interface ImportTemplate {
     }
 
     /**
+     * The blocking codes of the run as a whole (issue #136): while an issue of one of them is open on a row the review keeps,
+     * the run is not {@code ready} (409 with the code), so leaving the rows out has to be a decision. None by default.
+     */
+    default Set<String> readyBlockingCodes() {
+        return Set.of();
+    }
+
+    /**
      * What the template's own books hold after a commit (issue #134): its stock ledger and its loan book, the system side of
      * the reconciliation the ledger cannot answer. {@link ImportBooks#NONE} by default.
      */

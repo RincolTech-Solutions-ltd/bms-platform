@@ -397,9 +397,11 @@ so is not listed again by the template. The rules every catalogue keeps:
 As built in #136 (section 13.14.1 10/16), the catalogue differs from the table above in four ways. `SUBHEADER_ROW`
 (info) and `PLACEHOLDER_ROW` (blocking) are shared codes, the codes of the shared row rules `subheader_month` and
 `placeholder_rows` that any template may offer, as `BLANK_ROW` is the shared code of a blank row. A code has one
-severity, so the kin's `PHONE_UNPARSEABLE` (a warning) is its own code, `KIN_PHONE_UNPARSEABLE`. Three codes are added:
+severity, so the kin's `PHONE_UNPARSEABLE` (a warning) is its own code, `KIN_PHONE_UNPARSEABLE`. Four codes are added:
 `BRANCH_UNKNOWN` and `PRODUCT_UNKNOWN` (blocking, a row's branch or loan product that the business has not open or
-active) and `DISBURSEMENT_DECISION_MISSING` (the run's refusal while the decision of 13.8 row 15 is not recorded). And
+active), `BRANCH_IN_TWO_FILES` (blocking, on every row of a later file of the run for a branch an earlier file has; the
+run is not `ready` while one is open on a row it keeps, so a branch's one opening journal holds all its loans) and
+`DISBURSEMENT_DECISION_MISSING` (the run's refusal while the decision of 13.8 row 15 is not recorded). And
 `reclassify` is not a resolution: a row of a class is completed by `edit_value` of its cells (the row is classed again
 from the edit) or left out by `exclude_row`, and `link_row` on `AMOUNTS_ONLY_ROW` decides nothing the commit writes.
 `DATE_AMBIGUOUS` has no suggestion (a resolution names one value, so the reviewer edits the date); `KIN_PHONE_MATCH`
@@ -1504,9 +1506,10 @@ section 4.1; coordinated with #110, which builds no second framework).**
   member with the NIN, or the one member holding the phone unless they differ (both NINs given and different, or a name
   that differs when one has none), among the business's members (`MEMBER_MATCHED_EXISTING`) and those the run's earlier
   rows make; a member on that phone who differs, or two on it, is `MEMBER_PHONE_CONFLICT` and a new member. The reads go
-  through the lending port `MemberImports` inside the validation's transaction, so only the business's own rows. A review's
-  `link_member` reaches the loader (`ImportRefs.StagedRow.linkedMemberId`), which uses that member. An existing member's
-  fields are never changed.
+  through the lending port `MemberImports` inside the validation's transaction, so only the business's own rows (each
+  lookup also names the business). A review's `link_member` reaches the loader (`ImportRefs.StagedRow.linkedMemberId`):
+  every row of the linked row's key in the batch takes that member, and a key whose rows are linked to two members fails
+  the batch. An existing member's fields are never changed.
 - **The loader (13.10 steps 1 to 7).** One batch, one transaction: every borrower matched or made (the details of the
   key's latest row by date), then per row its next of kin (a duplicate for the member collapses; a kin whose NIN is a
   member's is linked `nin`, `confirmed`), its collateral item (`pledged`, no value, "imported; verify custody and value";
@@ -1525,7 +1528,10 @@ section 4.1; coordinated with #110, which builds no second framework).**
   (`member_overpayments`). Valuing every imported loan of the branch makes the first journal after a stopped run value
   everything imported. A branch that already has one takes none; the report lists its new loans for a correcting entry.
   "Ever" holds under concurrency because every batch of the business first takes the business's import key
-  (`pg_try_advisory_xact_lock` in `ImportRunService`, Lead ruling 5 on #869), so two batches never check and post a branch's journal at once.
+  (`pg_try_advisory_xact_lock` in `ImportRunService`, Lead ruling 5 on #869), so two batches never check and post a
+  branch's journal at once. Within a run, a branch is one file: two files of one branch get `BRANCH_IN_TWO_FILES` on the
+  later file's rows, and a template's ready-blocking codes (the SPI `ImportTemplate.readyBlockingCodes`, none by default)
+  keep the run from `ready` while one is open on a row the review keeps.
   The forecast applies the same rule (the branches opened by other runs, the principal their imported loans still hold,
   and this run's rows by `LoanRegister.plan`), so the preview and the commit agree.
 - **The forecast and the books.** The forecast predicts per branch the loan principal outstanding, the loans and

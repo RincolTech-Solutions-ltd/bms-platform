@@ -42,6 +42,8 @@ class LendingLoansV1TemplateTest {
 
     static final Path PILOT = FIXTURES.resolve("pilot_loan_register_sample.csv");
 
+    static final Path BRANCH_TWO = FIXTURES.resolve("imports/lending/fab-register-branch-two.csv");
+
     static final Path EDGE = FIXTURES.resolve("imports/lending/fab-register-edge-cases.csv");
 
     /** The batch business date of 13.12, 30 June 2026, as a cutover moment in Kampala (21:00). */
@@ -315,10 +317,28 @@ class LendingLoansV1TemplateTest {
         assertThat(suggestion(r, 8, "AMOUNT_MISMATCH", "return_amount")).isEqualTo("120000");
         assertThat(suggestion(r, 8, "BALANCE_MISMATCH", "outstanding")).isEqualTo("120000");
 
-        // Every code of the template's own catalogue is produced by one of the two registers, but the run's refusal
+        // JUSTIFICATION-A3: the new code BRANCH_IN_TWO_FILES (round 2 of the review), produced and pinned here.
+        // A branch's register in two files of one run: every row of the later file, none of the first.
+        EngineRun.Result twice = EngineRun.run(
+                template(LoanRegisterRules.Directory.NONE),
+                mapping(),
+                CUTOVER,
+                List.of(
+                        file(PILOT, "pilot_loan_register_sample.csv", "register", Map.of()),
+                        file(BRANCH_TWO, "fab-register-branch-two.csv", "register", Map.of())));
+        assertThat(twice.issues().stream()
+                        .filter(i -> "BRANCH_IN_TWO_FILES".equals(i.code()))
+                        .map(i -> i.file() + ":" + i.line()))
+                .containsExactly(
+                        "fab-register-branch-two.csv:2",
+                        "fab-register-branch-two.csv:3",
+                        "fab-register-branch-two.csv:4");
+
+        // Every code of the template's own catalogue is produced by one of these registers, but the run's refusal
         // DISBURSEMENT_DECISION_MISSING, which LendingLoansV1TemplateIT asserts.
         Set<String> produced = new LinkedHashSet<>();
         pilot(Map.of()).issues().forEach(i -> produced.add(i.code()));
+        twice.issues().forEach(i -> produced.add(i.code()));
         r.issues().forEach(i -> produced.add(i.code()));
         Set<String> catalogue = LendingLoansV1Template.CODES.stream()
                 .filter(c -> !c.retired())

@@ -32,14 +32,19 @@ import org.springframework.stereotype.Component;
 /**
  * The loader of {@code lending_loans_v1} (issue #136, chapter 13 section 13.10 steps 1 to 7): one batch of register rows,
  * in the batch's transaction. First every borrower is matched or made, in line order, as the validation's rules
- * ({@link LoanRegisterRules}) assigned them: the member the review linked the row to, the member an earlier row of the file
- * with the same key made, a member {@link LoanRegister#match} finds, or a new one with the details of the key's latest row by
- * date. Then each row's next of kin (a duplicate collapses), collateral item, loan with its one bullet item, historic
+ * ({@link LoanRegisterRules}) assigned them: the member the review linked a row of the key to (every row of the key takes
+ * it; a key linked to two members is refused), the member an earlier row of the file with the same key made, a member
+ * {@link LoanRegister#match} finds, or a new one with the details of the key's latest row by date. Then each row's next of kin (a duplicate collapses), collateral item, loan with its one bullet item, historic
  * disbursement and repayment with its allocations, and the remark as a collection note. Every record is registered in
  * {@code import_refs}. Last, one opening journal per branch, ever: a branch with no import opening journal of loans yet takes
  * one for every imported loan of it still owing principal, one {@code loans_receivable} line per loan; a branch that has one
  * takes none and its new loans are listed for a correcting entry. Imported loans send no SMS, start no task and post no
  * other journal: the historic transactions have none (ADR-071, ADR-004).
+ *
+ * <p>"Ever" does not rest on {@link Branches#lockBranch}, which reads {@code FOR SHARE}: every batch of the business first
+ * takes the business's import key ({@code ImportRunService.LOCK_KEY}, with {@code pg_try_advisory_xact_lock}, held to the
+ * batch's commit), so no two batches check and post a branch's journal at once; and the rules refuse a run with two files
+ * of one branch ({@code BRANCH_IN_TWO_FILES}, ready-blocking), so a run's journal of a branch holds all its loans.
  *
  * <p>Branch limits are this writer's (BatchWriter): every row's branch is an open branch of the business, read with
  * {@link Branches#lockBranch}, or the batch is refused.
@@ -199,7 +204,17 @@ class LoanRegisterWriter {
         for (Planned p : planned) {
             latest.merge(p.key(), p.row(), (a, b) -> b.disbursedOn().isBefore(a.disbursedOn()) ? a : b);
         }
+        // A review's link_member is the borrower's, so every row of the same key takes that member; a key linked to two
+        // members is refused, the reviewer to link its rows alike.
         Map<String, UUID> byKey = new HashMap<>();
+        for (Planned p : planned) {
+            UUID linked = p.staged().linkedMemberId();
+            UUID held = linked == null ? null : byKey.putIfAbsent(p.key(), linked);
+            if (held != null && !held.equals(linked)) {
+                throw new IllegalStateException("line " + p.staged().line() + " is linked to another member than an"
+                        + " earlier row of the same borrower; link both rows to one member");
+            }
+        }
         Map<Integer, UUID> memberOf = new HashMap<>();
         int made = 0;
         for (Planned p : planned) {

@@ -23,6 +23,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -345,6 +346,23 @@ class PreviewService implements ImportPreview {
      * The policies the run needs and has not recorded, inside the caller's transaction: a policy is needed when a row the
      * commit writes, of the policy's entity set, matches its rule.
      */
+    /** The first of the template's ready-blocking codes still open on a row the review keeps, if any (issue #136). */
+    Optional<String> readyBlocker(UUID runId) {
+        ImportTemplate template = template(batchRows(runId));
+        if (template == null || template.readyBlockingCodes().isEmpty()) {
+            return Optional.empty();
+        }
+        return jdbc.sql("""
+                        SELECT i.code FROM import_issues i
+                          JOIN import_batches b ON b.id = i.batch_id JOIN import_rows r ON r.id = i.row_id
+                         WHERE b.run_id = ? AND i.status = 'open' AND r.excluded_by IS NULL AND i.code = ANY(?)
+                         ORDER BY i.code LIMIT 1
+                        """)
+                .params(runId, template.readyBlockingCodes().toArray(String[]::new))
+                .query(String.class)
+                .optional();
+    }
+
     List<ImportTemplate.Policy> missingPolicies(UUID runId, Set<String> recorded) {
         List<BatchRow> batches = batchRows(runId);
         ImportTemplate template = template(batches);

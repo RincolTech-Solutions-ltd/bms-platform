@@ -253,7 +253,12 @@ class LendingLoansV1TemplateIT extends IntegrationTest {
                 .isTrue();
 
         // Every record the run wrote is in import_refs, a loan's own rows too; the reconciliation ties; another
-        // business has nothing.
+        // business has nothing. The tables are those the commit made grow, read from the database, not a list alone.
+        Map<String, Long> after = TestDatabase.rowCounts(t.tenantId());
+        assertThat(after.keySet().stream()
+                        .filter(k -> k.startsWith("lending_") && after.get(k) > before.getOrDefault(k, 0L)))
+                .as("the lending tables the commit wrote")
+                .containsExactlyInAnyOrderElementsOf(WRITTEN_TABLES);
         for (String table : WRITTEN_TABLES) {
             assertThat(count(t, "SELECT count(*) FROM " + table + " WHERE tenant_id = ?"))
                     .as("the run wrote %s", table)
@@ -394,6 +399,70 @@ class LendingLoansV1TemplateIT extends IntegrationTest {
                 .contains("MEMBER_PHONE_CONFLICT")
                 .doesNotContain("MEMBER_MATCHED_EXISTING");
         assertThat(as(t, () -> codesOn(run, 3))).doesNotContain("MEMBER_PHONE_CONFLICT");
+    }
+
+    // JUSTIFICATION-A3: the two tests round 2 of the review asks for (must-fix 1 and the Lead's must-fix 2).
+    @Test
+    void aBorrowerTheReviewLinksToAMemberHasAllTheirLoansOnThatMember() throws IOException {
+        // Row 3's phone is a member of this business with another NIN (fabricated): a conflict the review links.
+        // Row 12 is the same borrower as row 3 (13.12), not linked by the review.
+        UUID linked = member(t, "CMTEST0000099A", "+256700000001", "Test Linked Member");
+        UUID run = uploaded(t, officer, Map.of("register|pilot_loan_register_sample.csv", Files.readAllBytes(PILOT)));
+        Issue conflict = as(t, () -> issueOn(run, 3, "MEMBER_PHONE_CONFLICT"));
+        assertThat(conflict).isNotNull();
+        as(
+                t,
+                () -> review.resolve(
+                        conflict.id(),
+                        new ImportReview.Resolution(
+                                "link_member", conflict.version(), null, null, linked, "Fabricated: confirmed"),
+                        operator));
+        settle(t, run);
+        committed(t, run);
+
+        assertThat(count(t, "SELECT count(*) FROM lending_loans WHERE tenant_id = ? AND member_id = '" + linked + "'"))
+                .as("rows 3 and 12")
+                .isEqualTo(2);
+        assertThat(count(t, "SELECT count(*) FROM lending_members WHERE tenant_id = ? AND source = 'import'"))
+                .as("no new member for the linked borrower")
+                .isEqualTo(5);
+        assertThat(count(
+                        t, "SELECT count(*) FROM lending_members WHERE tenant_id = ? AND phone_e164 = '+256700000001'"))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void aRunWithTwoFilesOfOneBranchIsNotReadyUntilTheLaterFileIsLeftOut() throws IOException {
+        // Both registers read by the head office's source: one branch in two files of one run.
+        Map<String, byte[]> files = new LinkedHashMap<>();
+        files.put("register|pilot_loan_register_sample.csv", Files.readAllBytes(PILOT));
+        files.put("register|fab-register-branch-two.csv", Files.readAllBytes(BRANCH_TWO));
+        UUID run = uploaded(t, officer, files);
+        assertThat(count(
+                        t,
+                        "SELECT count(*) FROM import_issues WHERE tenant_id = ? AND code = 'BRANCH_IN_TWO_FILES'"
+                                + " AND status = 'open' AND severity = 'blocking'"))
+                .as("every row of the later file")
+                .isEqualTo(3);
+        settleExcept(t, run, "BRANCH_IN_TWO_FILES");
+        decide(t, run);
+        DryRun dry = as(t, () -> runs.dryRun(run, operator));
+        assertThat(dry.report().failure()).as(dry.report().render()).isNull();
+
+        ApiException refused = null;
+        try {
+            as(t, () -> runs.transition(run, "ready"));
+        } catch (ApiException e) {
+            refused = e;
+        }
+        assertThat(refused).isNotNull();
+        assertThat(refused.code()).isEqualTo("BRANCH_IN_TWO_FILES");
+
+        // Leaving the later file's rows out is the decision that makes it ready; the book and the journal then agree.
+        settleWithoutDecision(t, run);
+        committed(t, run);
+        assertThat(journalTotals(t)).isEqualTo(Map.of("HQ", "2810000|2810000"));
+        assertThat(bookPrincipal(t)).isEqualTo(Map.of("HQ", 2_810_000L));
     }
 
     // JUSTIFICATION-A3: the Lead's nice-to-have 1 on the review of a4c6bd9, the member credit journal end to end.
@@ -579,6 +648,11 @@ class LendingLoansV1TemplateIT extends IntegrationTest {
 
     void settle(TestDatabase.Fixture f, UUID run) {
         settleWithoutDecision(f, run);
+        decide(f, run);
+    }
+
+    /** The decision of 13.8 row 15, recorded with the customer's confirmation (fabricated). */
+    void decide(TestDatabase.Fixture f, UUID run) {
         as(
                 f,
                 () -> runs.recordPolicy(
@@ -598,8 +672,13 @@ class LendingLoansV1TemplateIT extends IntegrationTest {
      * its row out (rows 7, 9 and 13), any other warning is overridden with a note.
      */
     void settleWithoutDecision(TestDatabase.Fixture f, UUID run) {
+        settleExcept(f, run, null);
+    }
+
+    /** The standard resolutions, leaving the issues of one code open. */
+    void settleExcept(TestDatabase.Fixture f, UUID run, String kept) {
         for (int pass = 0; pass < 100; pass++) {
-            Issue next = as(f, () -> openIssue(run));
+            Issue next = as(f, () -> openIssue(run, kept));
             if (next == null) {
                 return;
             }
@@ -617,10 +696,21 @@ class LendingLoansV1TemplateIT extends IntegrationTest {
         throw new AssertionError("the review did not settle");
     }
 
-    Issue openIssue(UUID run) {
+    Issue openIssue(UUID run, String kept) {
         for (ImportUploads.Batch b : uploads.batches(run)) {
             for (Issue i : validation.issues(b.id())) {
-                if ("open".equals(i.status())) {
+                if ("open".equals(i.status()) && !i.code().equals(kept)) {
+                    return i;
+                }
+            }
+        }
+        return null;
+    }
+
+    Issue issueOn(UUID run, int line, String code) {
+        for (ImportUploads.Batch b : uploads.batches(run)) {
+            for (Issue i : validation.issues(b.id())) {
+                if (i.line() == line && i.code().equals(code)) {
                     return i;
                 }
             }

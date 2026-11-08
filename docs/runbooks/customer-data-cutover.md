@@ -67,8 +67,10 @@ done by hand as the notes say.
         amount, so the requested principal is taken as disbursed in full) is recorded with the
         customer's confirmation, like the receivable decision; the run is not ready without it.
 - [ ] Lending: each branch gets one import opening journal of loans, ever. Import a branch's whole
-      register in one run (one file per branch is one batch); a later run that adds loans to a branch
-      already opened posts no journal and its report lists them for a correcting entry.
+      register in one run (one file per branch is one batch; a second file of the same branch gets
+      `BRANCH_IN_TWO_FILES` and the run is not ready until its rows are left out, so merge the files
+      first); a later run that adds loans to a branch already opened posts no journal and its report
+      lists them for a correcting entry.
 
 ### 2.3 Cleaning and review (stage 3)
 

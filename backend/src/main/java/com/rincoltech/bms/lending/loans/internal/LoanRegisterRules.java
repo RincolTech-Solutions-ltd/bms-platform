@@ -15,6 +15,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -43,6 +44,11 @@ final class LoanRegisterRules implements SetRules {
 
         /** Whether the code names an open branch; an empty code is the head office, which every business has. */
         boolean branchOpen(String code);
+
+        /** The branch a code names, as one key: an empty code is the head office's. */
+        default String branchKey(String code) {
+            return code == null ? "" : code.strip().toUpperCase(Locale.ROOT);
+        }
 
         boolean productActive(String code);
 
@@ -98,6 +104,8 @@ final class LoanRegisterRules implements SetRules {
     private final Map<UUID, TreeMap<Integer, MonthLabel>> subheaders = new HashMap<>();
     private final Map<UUID, TreeMap<Integer, Set<Integer>>> years = new HashMap<>();
     private final List<Seen> seen = new ArrayList<>();
+    /** The first file of the run with a row of each branch: a branch's register is one file (one opening journal). */
+    private final Map<String, UUID> branchFile = new HashMap<>();
     private Map<String, Assigned> assigned;
 
     LoanRegisterRules(Directory directory) {
@@ -120,6 +128,7 @@ final class LoanRegisterRules implements SetRules {
         if (cls != null) {
             return;
         }
+        branchFile.putIfAbsent(directory.branchKey(row.text(BRANCH)), row.batchId());
         Set<Integer> y = new HashSet<>();
         candidates(row.text(DISBURSED_ON)).forEach(c -> y.add(c.date().getYear()));
         years.computeIfAbsent(row.batchId(), k -> new TreeMap<>()).put(row.line(), y);
@@ -195,6 +204,10 @@ final class LoanRegisterRules implements SetRules {
         // The batch's branch and loan product.
         if (!directory.branchOpen(row.text(BRANCH))) {
             notes.add(Note.of("BRANCH_UNKNOWN", BRANCH));
+        }
+        UUID firstFile = branchFile.get(directory.branchKey(row.text(BRANCH)));
+        if (firstFile != null && !firstFile.equals(row.batchId())) {
+            notes.add(Note.of("BRANCH_IN_TWO_FILES", BRANCH));
         }
         if (row.text(PRODUCT) != null && !directory.productActive(row.text(PRODUCT))) {
             notes.add(Note.of("PRODUCT_UNKNOWN", PRODUCT));

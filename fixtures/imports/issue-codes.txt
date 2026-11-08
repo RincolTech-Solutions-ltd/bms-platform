@@ -98,5 +98,6 @@ lending_loans_v1 KIN_IS_MEMBER info
 lending_loans_v1 KIN_PHONE_MATCH warning
 lending_loans_v1 MULTIPLE_ACTIVE_LOANS info
 lending_loans_v1 BRANCH_UNKNOWN blocking
+lending_loans_v1 BRANCH_IN_TWO_FILES blocking
 lending_loans_v1 PRODUCT_UNKNOWN blocking
 lending_loans_v1 DISBURSEMENT_DECISION_MISSING refused

@@ -317,6 +317,10 @@ class LendingLoansV1Template implements ImportTemplate {
                     "Line {line} of {file} is a loan of a borrower whose loan on line {other} was still open on its"
                             + " date."),
             blocking("BRANCH_UNKNOWN", "{field} on {file} line {line} is not an open branch of the business."),
+            blocking(
+                    "BRANCH_IN_TWO_FILES",
+                    "{field} on {file} line {line} is a branch an earlier file of this import has; a branch's register"
+                            + " is one file, so its one opening journal holds every loan."),
             blocking("PRODUCT_UNKNOWN", "{field} on {file} line {line} is not an active loan product of the business."),
             new IssueCode(
                     "DISBURSEMENT_DECISION_MISSING",
@@ -354,6 +358,18 @@ class LendingLoansV1Template implements ImportTemplate {
             }
 
             @Override
+            public String branchKey(String code) {
+                String named = code == null
+                        ? branches.all().stream()
+                                .filter(Branches.Branch::headOffice)
+                                .map(Branches.Branch::code)
+                                .findFirst()
+                                .orElse("")
+                        : code;
+                return named.strip().toUpperCase(Locale.ROOT);
+            }
+
+            @Override
             public boolean productActive(String code) {
                 return products.currentByCode(code.strip())
                         .map(p -> "active".equals(p.productStatus()))
@@ -371,6 +387,11 @@ class LendingLoansV1Template implements ImportTemplate {
     @Override
     public boolean recordExists(String entitySet, UUID id) {
         return LOANS.equals(entitySet) && members.exists(id);
+    }
+
+    @Override
+    public Set<String> readyBlockingCodes() {
+        return Set.of("BRANCH_IN_TWO_FILES");
     }
 
     @Override

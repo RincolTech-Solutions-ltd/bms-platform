@@ -16,7 +16,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * {@link MemberImports} over {@code lending_members} and {@code lending_next_of_kin} (issue #136). Plain SQL in the caller's
- * transaction; no tenant predicate, since row-level security applies it (ADR-003). The audit rows name ids and numbers
+ * transaction; every lookup names the business ({@code tenant_id = current_setting('app.tenant_id')}) as well as
+ * row-level security does (ADR-003), defence in depth (Lead on #877). The audit rows name ids and numbers
  * only, never a name, phone or NIN of the register.
  */
 @Component
