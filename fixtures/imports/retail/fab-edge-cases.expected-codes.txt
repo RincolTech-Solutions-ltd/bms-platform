@@ -12,6 +12,7 @@ products.jsonl|7|VALUE_OUT_OF_RANGE
 products.jsonl|8|CODE_CONTROL_CHAR
 products.jsonl|9|VALUE_NORMALISED
 products.jsonl|10|TEXT_TOO_LONG
+products.jsonl|10|NAME_MISSING
 products.jsonl|11|BLANK_ROW
 products.jsonl|12|REQUIRED_MISSING
 sales.jsonl|1|CREDIT_SALE_UNPAID

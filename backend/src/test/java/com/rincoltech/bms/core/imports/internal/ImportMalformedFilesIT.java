@@ -150,6 +150,9 @@ class ImportMalformedFilesIT extends IntegrationTest {
                         utf8(cut),
                         "clean:2",
                         "clean:3",
+                        // The unit, the cost and the sell price are cut off.
+                        "issue:4:REQUIRED_MISSING",
+                        "issue:4:REQUIRED_MISSING",
                         "issue:4:REQUIRED_MISSING"),
                 new Case(
                         "a CSV cut inside its header",
@@ -190,7 +193,11 @@ class ImportMalformedFilesIT extends IntegrationTest {
                         "fab-joined.csv",
                         utf8(PRODUCTS + (char) 0xFEFF + PRODUCTS.replace("FZ-00", "FZ-10")),
                         "clean:2",
-                        "issue:5:CODE_CONTROL_CHAR"),
+                        // The second header as a row: its code holds the mark, and its cost, sell and in use are words.
+                        "issue:5:CODE_CONTROL_CHAR",
+                        "issue:5:TYPE_INVALID",
+                        "issue:5:TYPE_INVALID",
+                        "issue:5:TYPE_INVALID"),
                 // Quotes and long cells.
                 new Case(
                         "a CSV with a quote that never closes",
@@ -204,7 +211,9 @@ class ImportMalformedFilesIT extends IntegrationTest {
                         "fab-long.csv",
                         utf8(PRODUCT_HEADER + "\r\nFZ-001," + "d".repeat(301) + ",Cables,metre,700,1200,Yes,0\r\n"
                                 + "FZ-" + "9".repeat(40) + ",Test fuzz item,Cables,metre,700,1200,Yes,0\r\n"),
+                        // A description left out is no name (retail_v1's own code).
                         "issue:2:TEXT_TOO_LONG",
+                        "issue:2:NAME_MISSING",
                         "issue:3:TEXT_TOO_LONG"),
                 new Case(
                         "a cell over the 32,767 characters a spreadsheet can hold",
@@ -279,6 +288,7 @@ class ImportMalformedFilesIT extends IntegrationTest {
                                                 + "</row>")),
                         "clean:2",
                         "issue:3:TYPE_INVALID",
+                        "issue:3:NAME_MISSING",
                         "issue:4:TYPE_INVALID",
                         "clean:5"),
                 new Case(
