@@ -221,7 +221,7 @@ class RetailImportPropertiesIT extends IntegrationTest {
                 .param(t.tenantId())
                 .query((rs, n) -> derived.put(rs.getString(1) + "|" + rs.getString(2), rs.getBigDecimal(3)))
                 .list();
-        Map<String, BigDecimal> source = book.balances();
+        Map<String, BigDecimal> source = book.sourceBalances();
         assertThat(derived.keySet()).containsExactlyInAnyOrderElementsOf(source.keySet());
         source.forEach((key, qty) -> assertThat(derived.get(key)).as(key).isEqualByComparingTo(qty));
         CommitReport report = as(t, () -> runs.commitReport(run));
@@ -273,7 +273,7 @@ class RetailImportPropertiesIT extends IntegrationTest {
         }
 
         /** The source balance by {@code BRANCH|code}: every branch and item. */
-        Map<String, BigDecimal> balances() {
+        Map<String, BigDecimal> sourceBalances() {
             Map<String, BigDecimal> out = new LinkedHashMap<>();
             for (int i = 0; i < items.size(); i++) {
                 for (int b = 0; b < BRANCHES.size(); b++) {
@@ -366,7 +366,7 @@ class RetailImportPropertiesIT extends IntegrationTest {
             sets.put("usage", used);
             if (balancesToo) {
                 List<String> rows = new ArrayList<>();
-                balances()
+                sourceBalances()
                         .forEach((key, qty) -> rows.add(String.format(
                                 "{\"branch\": \"%s\", \"product_code\": \"%s\", \"qty\": \"%s\"}",
                                 key.substring(0, key.indexOf('|')),
