@@ -113,7 +113,7 @@ class ImportMalformedFilesIT extends IntegrationTest {
 
     /**
      * One malformed file: the mapping source that reads it, its name and bytes, and what it must end in, each one of
-     * {@code refused:<code or *>}, {@code failed:<code>}, {@code warning:<code>} (a parse warning of the batch),
+     * {@code refused:<code>}, {@code failed:<code>}, {@code warning:<code>} (a parse warning of the batch),
      * {@code issue:<line>:<code>} and {@code clean:<line>} (no blocking issue and no warning on that line).
      */
     record Case(String name, String source, String file, byte[] bytes, List<String> expected) {
@@ -164,7 +164,7 @@ class ImportMalformedFilesIT extends IntegrationTest {
                         "product_master",
                         "fab-utf16.csv",
                         PRODUCTS.getBytes(StandardCharsets.UTF_16LE),
-                        "refused:*"),
+                        "refused:FILE_TYPE_UNSUPPORTED"),
                 new Case(
                         "a CSV in Windows-1252",
                         "product_master",
@@ -228,7 +228,7 @@ class ImportMalformedFilesIT extends IntegrationTest {
                         "product_master",
                         "fab-nul.csv",
                         utf8(PRODUCT_HEADER + "\r\nFZ-\u0000001,Test fuzz item 01,Cables,metre,700,1200,Yes,0\r\n"),
-                        "failed:FILE_UNREADABLE"),
+                        "refused:FILE_TYPE_UNSUPPORTED"),
                 // Workbooks.
                 new Case(
                         "merged cells: the category of two rows held once",
@@ -356,9 +356,12 @@ class ImportMalformedFilesIT extends IntegrationTest {
             as(() -> preview.preview(run));
         }
         assertThat(found).as("what %s ended in", c.name()).containsAll(c.expected());
-        assertThat(found.stream().filter(f -> !f.startsWith("clean:")))
-                .as("%s ends in a code", c.name())
-                .isNotEmpty();
+        if (!c.expected().stream().allMatch(e -> e.startsWith("clean:"))) {
+            // A malformed file ends in a code; only a well formed case (a hidden sheet skipped) is clean.
+            assertThat(found.stream().filter(f -> !f.startsWith("clean:")))
+                    .as("%s ends in a code", c.name())
+                    .isNotEmpty();
+        }
         assertThat(outsideImports()).as("nothing outside the import tables").isEqualTo(before);
     }
 

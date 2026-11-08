@@ -73,7 +73,7 @@ import org.springframework.test.context.TestContextManager;
  */
 class RetailImportPropertiesIT extends IntegrationTest {
 
-    /** The longest one property may take, its shrinking included; about a minute on a quiet machine. */
+    /** The longest one property may take, its shrinking included; well under a minute on CI. */
     static final Duration PROPERTY_LIMIT = Duration.ofMinutes(6);
 
     static final String SHA = "f".repeat(64);
@@ -125,7 +125,7 @@ class RetailImportPropertiesIT extends IntegrationTest {
     // The properties.
     // ---------------------------------------------------------------------------------------------
 
-    @Property(tries = 6, seed = "137001")
+    @Property(tries = 18, seed = "137001")
     void importingTwiceEqualsImportingOnce(@ForAll("books") Book book) {
         TestDatabase.Fixture t = TestDatabase.tenant("prop-twice", false, true);
         UUID first = committed(t, reviewed(t, book.files(0)));
@@ -147,7 +147,7 @@ class RetailImportPropertiesIT extends IntegrationTest {
         assertThat(second.journals()).isEmpty();
     }
 
-    @Property(tries = 6, seed = "137002")
+    @Property(tries = 18, seed = "137002")
     void aPermutedRowOrderGivesTheSameStateAndReconciliation(@ForAll("books") Book book, @ForAll long order) {
         TestDatabase.Fixture a = TestDatabase.tenant("prop-order-a", false, true);
         TestDatabase.Fixture b = TestDatabase.tenant("prop-order-b", false, true);
@@ -158,7 +158,7 @@ class RetailImportPropertiesIT extends IntegrationTest {
         assertThat(reconciled(b, permuted)).isEqualTo(reconciled(a, inOrder));
     }
 
-    @Property(tries = 5, seed = "137003")
+    @Property(tries = 15, seed = "137003")
     void splittingTheHistoryIntoTwoRunsGivesTheStateOfOneRun(
             @ForAll("books") Book book, @ForAll @IntRange(min = 0, max = 6) int cut) {
         TestDatabase.Fixture whole = TestDatabase.tenant("prop-whole", false, true);
@@ -175,7 +175,7 @@ class RetailImportPropertiesIT extends IntegrationTest {
         assertDerivedIsSource(split, book, second);
     }
 
-    @Property(tries = 8, seed = "137004")
+    @Property(tries = 24, seed = "137004")
     void aDryRunThenARealRunReportsWhatARealRunAloneReports(@ForAll("books") Book book) throws IOException {
         TestDatabase.Fixture rehearsed = TestDatabase.tenant("prop-dry", false, true);
         TestDatabase.Fixture alone = TestDatabase.tenant("prop-alone", false, true);
@@ -200,7 +200,7 @@ class RetailImportPropertiesIT extends IntegrationTest {
         assertThat(RetailV1TemplateIT.state(rehearsed)).isEqualTo(RetailV1TemplateIT.state(alone));
     }
 
-    @Property(tries = 8, seed = "137005")
+    @Property(tries = 24, seed = "137005")
     void theDerivedBalanceEqualsTheSourceBalanceForEveryBranchAndItem(@ForAll("books") Book book) {
         TestDatabase.Fixture t = TestDatabase.tenant("prop-balance", false, true);
         UUID run = committed(t, reviewed(t, book.files(0)));
