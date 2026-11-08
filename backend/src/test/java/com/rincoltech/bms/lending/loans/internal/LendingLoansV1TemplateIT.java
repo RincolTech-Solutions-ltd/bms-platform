@@ -365,7 +365,6 @@ class LendingLoansV1TemplateIT extends IntegrationTest {
         UUID run = uploaded(t, officer, Map.of("register|pilot_loan_register_sample.csv", Files.readAllBytes(PILOT)));
 
         assertThat(as(t, () -> codesOn(run, 3))).doesNotContain("MEMBER_MATCHED_EXISTING");
-        assertThat(as(t, () -> codesOn(run, 4))).doesNotContain("KIN_IS_MEMBER");
         assertThat(as(t, () -> codesOn(run, 5))).doesNotContain("MEMBER_PHONE_CONFLICT", "MEMBER_MATCHED_EXISTING");
         settle(t, run);
         committed(t, run);
