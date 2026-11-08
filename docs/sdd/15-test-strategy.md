@@ -366,12 +366,14 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
     disabled with that number; until #880 the configured row limit per batch is **2,500** (spec section 3.1,
     `bms.imports.max-rows`), and it goes back up with #880. 5,000 passed too, but one run took 473 s of the 10 minute
     batch timeout and the same file took half that on another run, so 5,000 leaves too thin a margin for a slower
-    host. Times on the CI runner (`ubuntu-latest`, GitHub-hosted), November 2026, two runs where two are given. At and
-    below the measured sizes, the whole path, judged:
+    host. Times on the CI runner (`ubuntu-latest`, GitHub-hosted), November 2026, the range of the runs where there
+    were several. At and below the measured sizes, the whole path, judged:
 
     | File | Heap | Upload | Validation | Preview | Dry run | Commit | Old generation peak |
     |---|---|---|---|---|---|---|---|
-    | CSV, 2,500 rows, 7 columns, 0.6 MB (configured row limit) | 224 MB | 0.3 s | 0.9 s | 0.1 s | 43 to 85 s | 53 to 114 s | 84 of 149 MB |
+    | CSV, 1,250 rows, 7 columns, 0.3 MB | 224 MB | 0.3 s | 0.9 s | 0.1 s | 24 s | 30 s | 71 of 149 MB |
+    | CSV, 2,500 rows, 7 columns, 0.6 MB (configured row limit) | 224 MB | 0.3 to 0.6 s | 0.9 to 1.9 s | 0.1 s | 43 to 85 s | 53 to 125 s | 84 of 149 MB |
+    | CSV, 2,500 rows, 200 columns (193 ignored), 2.6 MB (row and column limits) | 224 MB | 0.8 s | 2.0 s | 0.1 s | 82 s | 130 s | 84 of 149 MB |
     | CSV, 5,000 rows, 7 columns, 1.3 MB | 224 MB | 0.4 s | 1.8 s | 0.2 s | 155 to 309 s | 234 to 473 s | 103 of 149 MB |
     | CSV, 5,000 rows, 200 columns (193 ignored), 5.2 MB | 224 MB | 0.7 s | 1.5 s | 0.1 s | 167 to 310 s | 243 to 467 s | 106 to 107 of 149 MB |
     | CSV, 10,000 rows, 7 columns, 2.6 MB (measured once, over both bounds) | 224 MB | 0.7 s | 4.0 s | 0.4 s | 617 s | 1,036 s, over the 10 minute batch timeout | 137 of 149 MB, over 90 percent |
