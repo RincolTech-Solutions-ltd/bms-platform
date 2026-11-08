@@ -1,6 +1,7 @@
 package com.rincoltech.bms;
 
 import com.rincoltech.bms.core.identity.ProvisioningKeys;
+import com.rincoltech.bms.core.imports.RehearseImportCommand;
 import com.rincoltech.bms.lending.seed.LendingSeedCommand;
 import com.rincoltech.bms.retail.imports.RetailImportCommand;
 import io.swagger.v3.oas.annotations.OpenAPIDefinition;
@@ -21,6 +22,8 @@ import org.springframework.modulith.Modulithic;
  * one tenant as {@code bms_app}, prints its report and exits ({@code docs/runbooks/import-retail.md}).
  * {@code java -jar bms-api.jar seed-lending --tenant <slug>} fills one empty lending tenant with
  * fabricated data on staging and exits; it is refused in production ({@code docs/runbooks/seed-lending.md}).
+ * {@code java -jar bms-api.jar rehearse-import --tenant <id> --run <id> --backup <name>} rehearses one import run in the
+ * throwaway database of {@code deploy/restore-drill.sh --rehearse-import} and exits (issue #138).
  * Neither command runs unless named: the image's default startup is the web application.
  */
 @SpringBootApplication
@@ -41,6 +44,9 @@ public class BmsApplication {
         }
         if (args.length > 0 && args[0].equals(LendingSeedCommand.NAME)) {
             System.exit(LendingSeedCommand.run(BmsApplication.class, args));
+        }
+        if (args.length > 0 && args[0].equals(RehearseImportCommand.NAME)) {
+            System.exit(RehearseImportCommand.run(BmsApplication.class, args));
         }
         SpringApplication.run(BmsApplication.class, args);
     }
