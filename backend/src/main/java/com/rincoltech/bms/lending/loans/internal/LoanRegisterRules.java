@@ -106,6 +106,7 @@ final class LoanRegisterRules implements SetRules {
     private final List<Seen> seen = new ArrayList<>();
     /** The first file of the run with a row of each branch: a branch's register is one file (one opening journal). */
     private final Map<String, UUID> branchFile = new HashMap<>();
+
     private Map<String, Assigned> assigned;
 
     LoanRegisterRules(Directory directory) {
