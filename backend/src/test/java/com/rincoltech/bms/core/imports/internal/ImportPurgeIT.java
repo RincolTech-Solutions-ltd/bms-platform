@@ -679,7 +679,7 @@ class ImportPurgeIT extends IntegrationTest {
     /** What the purge writes in a run's resolutions, written by hand. */
     static String hashResolutions(UUID run) {
         return "UPDATE import_issue_resolutions SET row_key = 'sha256:" + "a".repeat(64)
-                + "', before_value = NULL, after_value = NULL WHERE run_id = " + quote(run);
+                + "', before_value = NULL, after_value = NULL, note = NULL WHERE run_id = " + quote(run);
     }
 
     void refused(UUID marked, UUID named, String statement, String message) {
