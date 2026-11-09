@@ -141,8 +141,10 @@ cron: those run the script with no argument, which is the weekly drill above, un
 2. Runs alone: it takes `state/rehearsal.lock` and the puller's and the deploy's locks (`state/pull.lock`,
    `state/deploy.lock`) and holds them to the end, so no deploy starts beside it (the puller just ends its run and the
    next one deploys); it refuses while a deploy, the puller, the weekly drill (by its process or container) or another
-   rehearsal runs; it starts nothing from Saturday 21:30 to Sunday 07:00 host time, the drill's window with room for a
-   rehearsal of up to six hours, and asks again before the migrations and the commit. On staging it starts nothing
+   rehearsal runs; it starts nothing from Saturday 21:30 to Sunday 07:00 host time, and asks again before the
+   migrations and the commit. Its deadline is the next Sunday 03:20 host time, ten minutes before the drill, which it
+   logs at the start: a download, restore, migration or commit still running then has its container removed and the
+   rehearsal fails with nothing stored (start a long one early in the week). On staging it starts nothing
    unless `bms.slice` has 704 MB free below `MemoryHigh` (in use counted as `memory.current` less inactive page cache),
    and 448 MB again before the API container.
 3. Fetches and decrypts the newest backup, as the drill does, into a mode-0700 temp dir `backups/rehearsal.XXXXXX`; the
@@ -207,7 +209,10 @@ On the Pi, as `bms`, from `/opt/bms`, with nobody using staging meanwhile, not b
 The run to rehearse. Until the operator screens (#141) can upload one, `stage-import-run` stages it: the fabricated
 `fixtures/retail/import-sample/` of this repository as a run of the import screens, marked fabricated, reviewed, dry run
 on live staging and ready. It needs a staging business with retail switched on that has not traded (a new one,
-`docs/runbooks/onboard-tenant.md`), whose slug is `<slug>`; it is refused in production.
+`docs/runbooks/onboard-tenant.md`), whose slug is `<slug>`. It runs only where `BMS_ENVIRONMENT` is exactly `staging`
+(unset, blank or anything else is refused) and stages only that sample, every file present and byte for byte the
+SHA-256 the code holds, so no real export can be marked fabricated. `docker compose run` starts it from the `api`
+service, so it gets the staging api's limits (448 MB inside `bms.slice`); run it, like the rehearsal, when no deploy runs.
 
 ```
 # From a checkout of the repository, on your machine: the fabricated sample onto the Pi.
