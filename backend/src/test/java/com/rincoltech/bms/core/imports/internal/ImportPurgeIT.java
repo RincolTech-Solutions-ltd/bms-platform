@@ -20,6 +20,7 @@ import com.rincoltech.bms.core.imports.ImportUploads.Batch;
 import com.rincoltech.bms.core.imports.ImportUploads.Upload;
 import com.rincoltech.bms.core.imports.ImportValidation;
 import com.rincoltech.bms.core.imports.ImportValidation.Issue;
+import com.rincoltech.bms.core.notifications.Outbox;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.BusinessClock;
@@ -436,6 +437,9 @@ class ImportPurgeIT extends IntegrationTest {
     @Autowired
     ObjectMapper mapper;
 
+    @Autowired
+    Outbox outbox;
+
     // JUSTIFICATION-A3: review of #886, M1 asks for this new test case with its two injected failures.
     /**
      * Review of #886, M1: storage that refuses the second file, then a purge transaction that fails after every file is
@@ -480,7 +484,8 @@ class ImportPurgeIT extends IntegrationTest {
                 return quarantine.deleteAll(keys);
             }
         };
-        PurgeService storageDown = new PurgeService(jdbc, transactions, refusingSecond, audit, clock, tenant, mapper);
+        PurgeService storageDown =
+                new PurgeService(jdbc, transactions, refusingSecond, audit, clock, tenant, mapper, outbox);
         assertCode(() -> as(t, () -> storageDown.purge(run, request)), "storage_unavailable");
         assertThat(objectsOf(t, run)).as("the first file stays deleted").hasSize(GoldenRun.FILES.size() - 1);
         assertThat(count(unchanged, run)).isEqualTo(1);
@@ -501,7 +506,8 @@ class ImportPurgeIT extends IntegrationTest {
                 audit.record(entry, actorUserId, actorKind);
             }
         };
-        PurgeService failing = new PurgeService(jdbc, transactions, quarantine, refusingPurge, clock, tenant, mapper);
+        PurgeService failing =
+                new PurgeService(jdbc, transactions, quarantine, refusingPurge, clock, tenant, mapper, outbox);
         assertThatThrownBy(() -> as(t, () -> failing.purge(run, request))).isInstanceOf(IllegalStateException.class);
         assertThat(objectsOf(t, run)).as("every file deleted").isEmpty();
         assertThat(count(unchanged, run)).isEqualTo(1);
@@ -605,7 +611,7 @@ class ImportPurgeIT extends IntegrationTest {
      * S1), nor may it or the application mark a run purged (M2).
      */
     @Test
-    void theGuardsLetThroughOnlyThePurgeOfItsOwnRunInItsOwnTransaction() throws IOException {
+    void theGuardsLetThroughOnlyThePurgeOfItsOwnRunInItsOwnTransaction() throws IOException, SQLException {
         UUID run = signedRun(t);
         UUID neighbour = signedRun(t);
         String issuesKept = "the issues of a committed import batch never change";

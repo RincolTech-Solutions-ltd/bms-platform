@@ -1196,7 +1196,8 @@ Detailed requirements are NFR-DP-01 to NFR-DP-08 in chapter 4. Design consequenc
 - Customer data onboarding (ADR-027 decision 8, spec section 6.4, issue #139, chapter 13 section 13.14.1 13/16). A
   customer's export lives in the import quarantine only until its run is purged: by the platform operator at stage 9 after
   the sign-off, with a second operator as witness, or by the daily `core.imports.retention` at the latest 30 days after the
-  sign-off, or 90 days after the last activity of a run never signed off, after a warning to the operators. The purge
+  sign-off, or 90 days after the last activity of a run never signed off; the operators are warned a week before, and if
+  that warning never went the purge still happens on the deadline and tells the operators and the Owner. The purge
   deletes the encrypted files and the run's data key, clears the cells and typed values of the staged rows and the issues'
   original values, and replaces the values and row keys of the review's resolutions by a hash salted with a value kept
   nowhere (so a phone number cannot be found again by hashing every number); counts, file hashes, reports and the signed

@@ -94,11 +94,12 @@ operator confirms its deletion by name and hash at stage 9, with a witness, and 
 not confirmed until they do, which issues the certificate's next version. The certificate is stored append-only on the run
 as JSON and as the plain text the operator sends, with the text's SHA-256, as the reconciliation is (note of 7 November).
 
-The 30 days are a ceiling and the warning comes first (review of #886, M4 and S3): the daily job purges a signed run on
-day 29, so it is never late by the hours between its run and the deadline, and when no warning stands by then (the job or
-the outbox was down) it warns in the same pass, just before it purges, rather than keep personal data past the ceiling. A
-run never signed off has no ceiling but 90 days of inactivity, so its purge waits for a warning a week old. Every business
-with a run to purge is visited, a suspended one too. The references of imported records (`import_refs`) are kept unhashed:
+The deadline wins over the warning (Lead ruling on #886, M4): personal data is not kept past 30 days after the sign-off,
+or past 90 days of inactivity, because a warning failed to go out. The operators are warned a week before each deadline;
+when that warning never went (the job or the outbox was down), the purge still happens on the deadline and enqueues a
+"purged without warning" notice to the operators and to the business's Owner in the same transaction as the purge, so they
+hear of it. The daily job purges a signed run on day 29, so it is never late by the hours between its run and the deadline
+(review of #886, S3). Every business with a run to purge is visited, a suspended one too. The references of imported records (`import_refs`) are kept unhashed:
 a later run of the business matches its rows on them, and their content hash covers a whole mapped row, so it can confirm
 a guess of an entire row but reveals no value.
 

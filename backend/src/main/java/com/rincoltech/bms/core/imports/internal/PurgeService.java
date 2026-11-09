@@ -3,6 +3,7 @@ package com.rincoltech.bms.core.imports.internal;
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.documents.QuarantineStorage;
 import com.rincoltech.bms.core.imports.ImportPurges;
+import com.rincoltech.bms.core.notifications.Outbox;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.BusinessClock;
@@ -95,6 +96,7 @@ class PurgeService implements ImportPurges {
     private final BusinessClock clock;
     private final CurrentTenant tenant;
     private final ObjectMapper mapper;
+    private final Outbox outbox;
 
     PurgeService(
             JdbcClient jdbc,
@@ -103,7 +105,8 @@ class PurgeService implements ImportPurges {
             AuditLog audit,
             BusinessClock clock,
             CurrentTenant tenant,
-            ObjectMapper mapper) {
+            ObjectMapper mapper,
+            Outbox outbox) {
         this.jdbc = jdbc;
         this.tx = new TransactionTemplate(transactions);
         this.quarantine = quarantine;
@@ -111,7 +114,11 @@ class PurgeService implements ImportPurges {
         this.clock = clock;
         this.tenant = tenant;
         this.mapper = mapper;
+        this.outbox = outbox;
     }
+
+    /** The notice of a scheduled purge whose warning never went (Lead ruling on #886, M4). */
+    static final String PURGED_WITHOUT_WARNING = "imports.purged_without_warning";
 
     /** A run the scheduled purge may reach, with its reason, when its clock started and the warning it was given. */
     record Candidate(UUID id, String reason, Instant since, Instant warnedAt) {
@@ -135,15 +142,12 @@ class PurgeService implements ImportPurges {
         }
 
         /**
-         * Due at the deadline. A signed run is purged within its 30 days whatever happened to its warning (the ceiling of
-         * spec section 6.4): if none stands, the job warns in the same pass, just before it purges. A run never signed off
-         * only once its warning is a week old, so that purge never comes without a week's notice.
+         * Due at the deadline, whatever happened to the warning (Lead ruling on #886, M4: personal data is not kept past the
+         * deadline because a warning failed to go out). A purge with no warning standing sends the notice
+         * {@value #PURGED_WITHOUT_WARNING} in its own transaction instead.
          */
         boolean due(Instant now) {
-            if (now.isBefore(dueAt())) {
-                return false;
-            }
-            return signed() || (warned() && !now.isBefore(warnedAt.plus(WARNING)));
+            return !now.isBefore(dueAt());
         }
     }
 
@@ -189,8 +193,11 @@ class PurgeService implements ImportPurges {
 
     private record RunRow(String status, String dumpFile, String dumpSha256) {}
 
-    /** What the check found: the answer when there is nothing to purge, else the reason and the files to delete. */
-    private record Plan(Certificate done, String reason, boolean dumpConfirmed, List<String> keys) {}
+    /**
+     * What the check found: the answer when there is nothing to purge, else the reason, the files to delete, and whether a
+     * scheduled purge comes with no warning standing.
+     */
+    private record Plan(Certificate done, String reason, boolean dumpConfirmed, List<String> keys, boolean unwarned) {}
 
     private Optional<Certificate> purge(
             UUID runId, String operatorReason, Signers signers, String dumpFile, String dumpSha256, Instant now) {
@@ -232,12 +239,13 @@ class PurgeService implements ImportPurges {
             if (signers != null && run.dumpFile() != null && !newest.dumpConfirmed()) {
                 // After a scheduled purge, which cannot reach the host: the operator confirms the dump they deleted.
                 requireDump(run, dumpFile, dumpSha256);
-                return new Plan(confirmDump(runId, newest, signers), null, true, List.of());
+                return new Plan(confirmDump(runId, newest, signers), null, true, List.of(), false);
             }
-            return new Plan(newest, null, false, List.of());
+            return new Plan(newest, null, false, List.of(), false);
         }
         String reason;
         boolean dumpConfirmed = false;
+        boolean unwarned = false;
         if (operatorReason != null) {
             if (!RunStates.SIGNED_OFF.equals(run.status())) {
                 throw new ApiException(
@@ -255,13 +263,14 @@ class PurgeService implements ImportPurges {
                 return null;
             }
             reason = candidate.reason();
+            unwarned = !candidate.warned();
         }
         List<String> keys = jdbc.sql("""
                         SELECT object_key FROM import_batches
                          WHERE tenant_id = current_setting('app.tenant_id')::uuid AND run_id = ? AND object_key IS NOT NULL
                          ORDER BY seq
                         """).param(runId).query(String.class).list();
-        return new Plan(null, reason, dumpConfirmed, keys);
+        return new Plan(null, reason, dumpConfirmed, keys, unwarned);
     }
 
     /** The purge itself, once the files are deleted: one transaction. */
@@ -319,6 +328,7 @@ class PurgeService implements ImportPurges {
         after.put("resolutions", counts.get("resolutions"));
         after.put("dump_confirmed", plan.dumpConfirmed());
         after.put("certificate_sha256", certificate.sha256());
+        after.put("warned", !plan.unwarned());
         if (signers != null) {
             // The names on the certificate are the operator's word; the audit keeps where the command ran (review S5).
             after.put("witness_id", signers.witness().id().toString());
@@ -329,6 +339,9 @@ class PurgeService implements ImportPurges {
                         "core.import_run.purged", "import_run", runId, null, Map.of("status", run.status()), after),
                 signers == null ? null : signers.operator().id(),
                 signers == null ? "system" : "platform");
+        if (plan.unwarned()) {
+            notifyPurgedWithoutWarning(runId, plan.reason(), at);
+        }
         log.info(
                 "import run {} purged ({}): files {}, rows {}, issues {}, resolutions {}",
                 runId,
@@ -338,6 +351,51 @@ class PurgeService implements ImportPurges {
                 counts.get("issues"),
                 counts.get("resolutions"));
         return certificate;
+    }
+
+    // JUSTIFICATION-A3: the Lead's ruling on #886 (M4) asks for this notice in the purge's transaction.
+    /**
+     * A scheduled purge whose warning never went (the job or the outbox was down): the operators' chat and the business's
+     * Owner hear of it in the purge's own transaction, so the notice exists exactly when the purge does (Lead ruling on
+     * #886, M4). Ids, the business's name and the day only; never a value of a row.
+     */
+    private void notifyPurgedWithoutWarning(UUID runId, String reason, Instant at) {
+        CurrentTenant.Profile business = tenant.profile();
+        String day = LocalDate.ofInstant(at, zone(business)).toString();
+        boolean signed = SIGNED_OFF_30_DAYS.equals(reason);
+        Map<String, String> operators = new LinkedHashMap<>();
+        operators.put("run", runId.toString());
+        operators.put("business", business.slug());
+        operators.put("day", day);
+        operators.put("reason", signed ? "30 days after the customer's sign-off" : "90 days after its last activity");
+        outbox.enqueue(new Outbox.Message(
+                Outbox.TELEGRAM,
+                Outbox.OPERATOR_CHAT,
+                PURGED_WITHOUT_WARNING,
+                operators,
+                PURGED_WITHOUT_WARNING + ":" + runId + ":telegram"));
+        jdbc.sql("""
+                        SELECT full_name, email FROM users
+                         WHERE is_owner AND status = 'active' AND email IS NOT NULL
+                         ORDER BY id LIMIT 1
+                        """)
+                .query((rs, n) -> Map.entry(rs.getString("full_name"), rs.getString("email")))
+                .optional()
+                .ifPresent(owner -> {
+                    Map<String, String> params = new LinkedHashMap<>();
+                    params.put("owner_name", owner.getKey());
+                    params.put("business_name", business.name());
+                    params.put("day", day);
+                    params.put(
+                            "reason",
+                            signed ? "30 days after it was signed off" : "90 days after it was last worked on");
+                    outbox.enqueue(new Outbox.Message(
+                            Outbox.EMAIL,
+                            owner.getValue(),
+                            PURGED_WITHOUT_WARNING,
+                            params,
+                            PURGED_WITHOUT_WARNING + ":" + runId + ":email"));
+                });
     }
 
     /** The next version of a scheduled purge's certificate, with the dump the operator confirmed and their signatures. */
@@ -556,7 +614,7 @@ class PurgeService implements ImportPurges {
     private static final Map<String, String> REASONS = Map.of(
             OPERATOR, "at stage 9 by the platform operator",
             SIGNED_OFF_30_DAYS, "by the scheduled purge, 30 days after the customer's sign-off",
-            INACTIVE_90_DAYS, "by the scheduled purge, 90 days after the import's last activity, after a warning");
+            INACTIVE_90_DAYS, "by the scheduled purge, 90 days after the import's last activity");
 
     private static final String UNCONFIRMED_DUMP = "; its deletion on the host NOT confirmed: the scheduled purge does"
             + " not reach the host. The operator deletes it and confirms it with purge-import, which issues the next"

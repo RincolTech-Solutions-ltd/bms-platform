@@ -33,16 +33,16 @@ import org.springframework.transaction.support.TransactionTemplate;
  * too, not one whose removal has begun), on the business clock:
  *
  * <ul>
- *   <li>a run signed off is purged within 30 days of its sign-off (from day 29, so a daily job is never late), its operator
- *       warned a week before, or in the same pass when no warning stands;
+ *   <li>a run signed off is purged within 30 days of its sign-off (on day 29, so a daily job is never late);
  *   <li>a run never signed off (any state but {@code committing}, which only a resume or the dev lead's restore ends) is
- *       purged 90 days after its last activity, and only once a warning a week old stands since that activity: a run that
- *       is used again after its warning starts again.
+ *       purged 90 days after its last activity; a run used again after its warning starts again.
  * </ul>
  *
- * The warning is a Telegram message to the platform operators' chat through the outbox ({@code imports.purge_warning}) and
- * an audit row ({@code core.import_run.purge_warned}, actor {@code system}), written with {@code purge_warned_at} in one
- * transaction; the purge is {@link PurgeService}'s, audited and with its certificate. Logs carry counts and run ids only.
+ * Its operators are warned a week before: a Telegram message to the platform operators' chat through the outbox
+ * ({@code imports.purge_warning}) and an audit row ({@code core.import_run.purge_warned}, actor {@code system}), written
+ * with {@code purge_warned_at} in one transaction. The deadline wins over a warning that never went (Lead ruling on #886,
+ * M4): the purge goes ahead and sends {@code imports.purged_without_warning} to the operators and the business's Owner in
+ * its own transaction. The purge is {@link PurgeService}'s, audited and with its certificate. Logs carry counts and run ids only.
  * Every step is safe to repeat: a run purged is never listed again, and a warning stands until the run is used again.
  */
 @Component
@@ -130,11 +130,8 @@ class PurgeRetention {
         int failed = 0;
         for (PurgeService.Candidate c : candidates) {
             if (c.due(now)) {
-                // A signed run past its deadline is purged even when no warning stands (the job was down, the outbox
-                // failed): the warning still goes, in this pass, just before (review of #886, M4).
-                if (!c.warned() && Boolean.TRUE.equals(tx.execute(s -> warn(c, now)))) {
-                    warned++;
-                }
+                // The deadline wins over a warning that never went (Lead ruling on #886, M4); the purge then sends the
+                // notice imports.purged_without_warning in its own transaction.
                 try {
                     if (purges.purgeScheduled(c.id(), now).isPresent()) {
                         purged++;

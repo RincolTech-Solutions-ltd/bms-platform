@@ -217,8 +217,9 @@ Record every decision, its time and who made it in the cutover record.
       staging row counts, the dump's name and hash, time, operator and witness, what is retained.
       Stored on the run; saved with the cutover record and sent to the customer.
 - [ ] If you do not purge within 30 days of the sign-off, the daily `core.imports.retention` does,
-      on day 29 (a warning reaches the operators' Telegram chat a week before, or in the same pass if
-      none went), whether the business is active or suspended. Its certificate says the dump
+      on day 29, whether the business is active or suspended. A warning reaches the operators'
+      Telegram chat a week before; if it never went, the purge still happens and a "purged without
+      warning" notice reaches the chat and the Owner's email. Its certificate says the dump
       was not confirmed: delete the dump, then run `purge-import` as above with the dump, which
       issues the certificate's next version with your confirmation and the witness. A run never
       signed off is purged 90 days after its last activity, after the same warning; working on it

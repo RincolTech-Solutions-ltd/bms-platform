@@ -9,8 +9,9 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The deadlines of the scheduled purge (issue #139, spec section 6.4) without a database: a signed run is due 29 days after
- * its sign-off whatever its warning (a day's margin on the 30 of the spec, review of #886); a run never signed off is due 90 days after its last activity and only once a warning
- * given since that activity is a week old; the warning is due a week before the deadline, once per start of the clock.
+ * its sign-off (a day's margin on the 30 of the spec, review of #886), a run never signed off 90 days after its last
+ * activity, both whatever happened to their warning (Lead ruling on #886, M4); the warning is due a week before the
+ * deadline, once per start of the clock.
  * {@code ImportRetentionIT} runs the same rules against PostgreSQL with the business clock fixed.
  */
 class PurgeDeadlinesTest {
@@ -38,25 +39,23 @@ class PurgeDeadlinesTest {
         assertThat(signed(days(22)).warnable(days(23))).isFalse();
         assertThat(signed(null).due(days(29).minusSeconds(1))).isFalse();
         assertThat(signed(null).due(days(29)))
-                .as("due; the job then warns in the same pass")
+                .as("due; with no warning standing the purge sends its notice")
                 .isTrue();
         assertThat(signed(days(28)).due(days(29))).isTrue();
     }
 
     @Test
-    void aRunNeverSignedOffIsDueNinetyDaysAfterItsLastActivityOnceItsWarningIsAWeekOld() {
+    void aRunNeverSignedOffIsDueNinetyDaysAfterItsLastActivityWarnedOrNot() {
         assertThat(unsigned(null).dueAt()).isEqualTo(days(90));
         assertThat(unsigned(null).warnable(days(83).minusSeconds(1))).isFalse();
         assertThat(unsigned(null).warnable(days(83))).isTrue();
-        assertThat(unsigned(null).due(days(200))).as("never without a warning").isFalse();
         assertThat(unsigned(days(83)).due(days(90).minusSeconds(1))).isFalse();
         assertThat(unsigned(days(83)).due(days(90))).isTrue();
-        assertThat(unsigned(days(100)).due(days(107).minusSeconds(1)))
-                .as("a week after a late warning")
-                .isFalse();
-        assertThat(unsigned(days(100)).due(days(107))).isTrue();
+        // The deadline wins over a warning that never went (Lead ruling on #886, M4); the purge then sends its notice.
+        assertThat(unsigned(null).due(days(90))).isTrue();
+        assertThat(unsigned(null).warned()).isFalse();
         // A warning older than the last activity does not stand: the clock started again.
         assertThat(unsigned(DAY0.minus(Duration.ofDays(1))).warnable(days(83))).isTrue();
-        assertThat(unsigned(DAY0.minus(Duration.ofDays(1))).due(days(95))).isFalse();
+        assertThat(unsigned(DAY0.minus(Duration.ofDays(1))).warned()).isFalse();
     }
 }

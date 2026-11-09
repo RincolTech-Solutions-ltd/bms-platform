@@ -1639,8 +1639,10 @@ section 4.1; coordinated with #110, which builds no second framework).**
   the run (`pre_import_dump_confirmation_required`, `pre_import_dump_differs`, `no_pre_import_dump`); the audit row records
   the host and user the command ran as beside the two names, which are the operator's word. And the daily job
   `core.imports.retention` (chapter 9 section 9.9), for every business with a run to purge, suspended ones too: on day 29
-  after the sign-off (warning in the same pass if none stands), and 90 days after the last activity of a run never signed
-  off once a warning a week old stands, never a `committing` run (its way out is a resume or the dev lead's restore).
+  after the sign-off and 90 days after the last activity of a run never signed off, never a `committing` run (its way out
+  is a resume or the dev lead's restore). The operators are warned a week before; the deadline wins over a warning that
+  never went (Lead ruling on #886, ADR-027 decision 8): the purge goes ahead and enqueues `imports.purged_without_warning`
+  to the operators' chat and the Owner by email in its own transaction.
 - **Failures.** Files are deleted first, with no transaction open, then the run is purged in one transaction. Storage that
   refuses a delete is 503 `storage_unavailable`, and any failure after the deletes rolls the transaction back: either way
   some files may be gone while the run, its key and its rows are unchanged, and running the purge again finishes it (a

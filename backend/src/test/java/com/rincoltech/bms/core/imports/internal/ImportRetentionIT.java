@@ -28,10 +28,11 @@ import org.springframework.context.annotation.Import;
 /**
  * The scheduled purge of issue #139 (spec section 6.4, ADR-008, job {@code core.imports.retention}) with the business
  * clock fixed ({@link MovableClock}), on real PostgreSQL as bms_app. A signed run is warned 22 days after its sign-off and
- * purged on day 29, inside the 30 days, warned in the same pass if no warning stands; a run never signed off is warned 83
- * days after its last activity and purged at 90 days once its warning is a week old, and activity after the warning starts
- * its clock again; a committing run is never purged; a suspended business is purged too; another business is untouched. The scheduled purge's certificate says the dump was not confirmed, and the
- * operator's later confirmation issues its next version. Each run here holds one staged row of fabricated cells and every
+ * purged on day 29, inside the 30 days; a run never signed off is warned 83 days after its last activity and purged at 90
+ * days; a purge whose warning never went happens on the deadline all the same, with a purged-without-warning notice to the
+ * operators and the Owner (Lead ruling on #886, M4); activity after a warning starts the clock again; a committing run is
+ * never purged; a suspended business is purged too; another business is untouched. The scheduled purge's certificate says
+ * the dump was not confirmed, and the operator's later confirmation issues its next version. Each run here holds one staged row of fabricated cells and every
  * stamp of its activity is set to a fixed day, so only the clock decides. Fabricated data only.
  */
 @Import(MovableClockConfig.class)
@@ -191,14 +192,40 @@ class ImportRetentionIT extends IntegrationTest {
                 .isEqualTo(2);
     }
 
+    /**
+     * Lead ruling on #886 (M4): the deadline wins over a warning that never went; the operators and the business's Owner
+     * get a purged-without-warning notice, written in the purge's own transaction.
+     */
     @Test
-    void aSignedRunNeverWarnedIsWarnedAndPurgedInTheSamePassOnItsDeadline() {
+    void aSignedRunWhoseWarningWasMissedIsPurgedOnTheDeadlineWithAPurgedWithoutWarningNotice() {
         UUID run = runAt(t, "signed_off", DAY0);
-        assertThat(at(t, days(29))).isEqualTo(new PurgeRetention.Result(1, 1, 0));
+        assertThat(at(t, days(29))).isEqualTo(new PurgeRetention.Result(0, 1, 0));
         assertThat(status(run)).isEqualTo("purged");
-        assertThat(warnings(run))
-                .as("the warning still goes, just before the purge")
+        assertThat(warnings(run)).isZero();
+        assertThat(notices(run, "telegram")).isEqualTo(1);
+        assertThat(notices(run, "email")).isEqualTo(owners(t));
+        assertThat(count(
+                        "SELECT count(*) FROM audit_log WHERE action = 'core.import_run.purged' AND entity_id = ?"
+                                + " AND data -> 'after' ->> 'warned' = 'false'",
+                        run))
                 .isEqualTo(1);
+    }
+
+    /** The purged-without-warning notices of a run on a channel (their outbox keys name the run). */
+    static long notices(UUID run, String channel) {
+        return count(
+                "SELECT count(*) FROM notification_outbox WHERE idempotency_key = ?",
+                "imports.purged_without_warning:" + run + ":" + channel);
+    }
+
+    /** One when the business has an active Owner with an email, as the notice's recipient, else none. */
+    static long owners(TestDatabase.Fixture f) {
+        return Math.min(
+                1,
+                count(
+                        "SELECT count(*) FROM users WHERE tenant_id = ? AND is_owner AND status = 'active'"
+                                + " AND email IS NOT NULL",
+                        f.tenantId()));
     }
 
     // JUSTIFICATION-A3: review of #886, M3: a new test case for a suspended business beside the one it replaces.
@@ -211,7 +238,7 @@ class ImportRetentionIT extends IntegrationTest {
                 .param(other.tenantId())
                 .update();
         assertThat(retentionTenants()).contains(other.tenantId());
-        assertThat(at(other, days(29))).isEqualTo(new PurgeRetention.Result(1, 1, 0));
+        assertThat(at(other, days(29))).isEqualTo(new PurgeRetention.Result(0, 1, 0));
         assertThat(status(run)).isEqualTo("purged");
         assertThat(retentionTenants()).as("nothing left to purge there").doesNotContain(other.tenantId());
     }
@@ -242,15 +269,15 @@ class ImportRetentionIT extends IntegrationTest {
     }
 
     @Test
-    void aRunWarnedLateIsPurgedOnlyAWeekAfterItsWarning() {
+    void aRunNeverSignedOffWhoseWarningWasMissedIsPurgedOnTheDeadlineWithAPurgedWithoutWarningNotice() {
         UUID run = runAt(t, "committed", DAY0);
         assertThat(at(t, days(100)))
-                .as("past the deadline, warned first")
-                .isEqualTo(new PurgeRetention.Result(1, 0, 0));
-        assertThat(at(t, days(107).minusSeconds(1))).isEqualTo(new PurgeRetention.Result(0, 0, 0));
-        assertThat(status(run)).isEqualTo("committed");
-        assertThat(at(t, days(107))).isEqualTo(new PurgeRetention.Result(0, 1, 0));
+                .as("past the deadline with no warning: purged all the same")
+                .isEqualTo(new PurgeRetention.Result(0, 1, 0));
         assertThat(status(run)).isEqualTo("purged");
+        assertThat(warnings(run)).isZero();
+        assertThat(notices(run, "telegram")).isEqualTo(1);
+        assertThat(notices(run, "email")).isEqualTo(owners(t));
     }
 
     @Test

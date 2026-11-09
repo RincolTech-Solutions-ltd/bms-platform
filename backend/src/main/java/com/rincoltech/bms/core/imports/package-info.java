@@ -48,7 +48,8 @@
  * a run's quarantined files, data key and personal staged values, through the definer function {@code import_purge_run},
  * the only way past the guards of a committed batch, with the certificate of deletion stored append-only in
  * {@code import_deletion_certificates}; by the operator at stage 9, and by the schedule 30 days after the sign-off or 90
- * days after the last activity of a run never signed off, after a warning to the operators' chat. The operator screens
+ * days after the last activity of a run never signed off, warning the operators' chat a week before (and, if that warning
+ * never went, telling the operators and the business's Owner with the purge). The operator screens
  * follow in #141. Public API:
  * {@link com.rincoltech.bms.core.imports.ImportRuns}, {@link com.rincoltech.bms.core.imports.ImportRefs},
  * {@link com.rincoltech.bms.core.imports.ImportUploads}, {@link com.rincoltech.bms.core.imports.ImportTemplates},
