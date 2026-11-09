@@ -203,10 +203,11 @@ class MetricsService implements ImportMetrics {
             cells.add(String.valueOf(m.rehearsalDifferences().size()));
             cells.add(String.valueOf(m.defects().open()));
             cells.add(String.valueOf(m.defects().closed()));
+            // A run not committed has no cutover seconds: an empty cell (findFirst refuses a null element).
             Long cutover = m.stages().stream()
                     .filter(st -> "cutover".equals(st.key()))
-                    .map(Stage::seconds)
                     .findFirst()
+                    .map(Stage::seconds)
                     .orElse(null);
             cells.add(cutover == null ? "" : String.valueOf(cutover));
             out.append(String.join(",", cells)).append('\n');
