@@ -77,7 +77,7 @@ sleeper bms_owner bms-rehearsal-9999
 sleeper someone_else "$RH_APP"
 sleeping() { super "SELECT string_agg(usename || '/' || application_name, ' ' ORDER BY usename, application_name)
     FROM pg_stat_activity WHERE state = 'active' AND query = 'SELECT pg_sleep(100)'"; }
-all="bms_app/$RH_APP bms_owner/bms-rehearsal-9999 bms_owner/$RH_APP someone_else/$RH_APP"
+all="bms_app/$RH_APP bms_owner/$RH_APP bms_owner/bms-rehearsal-9999 someone_else/$RH_APP"
 for _ in $(seq 30); do [[ "$(sleeping)" == "$all" ]] && break; sleep 1; done
 [[ "$(sleeping)" == "$all" ]] || fail "the four sleeping sessions did not start: $(sleeping)"
 
