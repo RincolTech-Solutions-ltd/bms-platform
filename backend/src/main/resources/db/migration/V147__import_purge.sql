@@ -64,7 +64,7 @@
 --     The tab's name is part of the key, so it stays here though import_batches.sheet_name is hashed.
 --   import_reconciliations.report: the signed document, made by the application with codes, counts and amounts only, which
 --     the sign-off's SHA-256 names and nothing may change (V144).
---   import_rehearsals, import_runs.dry_run_report and dry_run_writer, import_batches.report: made by the application and
+--   import_rehearsals' reports, import_runs.dry_run_report, import_batches.report: made by the application and
 --     the restore script, codes, counts and amounts only.
 --   import_deletion_certificates.document: the certificate itself, which names the platform operator and the witness (the
 --     team, never a customer's person) and the files.
