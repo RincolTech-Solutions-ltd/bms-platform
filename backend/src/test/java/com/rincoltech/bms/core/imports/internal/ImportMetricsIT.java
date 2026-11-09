@@ -254,6 +254,20 @@ class ImportMetricsIT extends IntegrationTest {
         assertThat(withoutToken.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
+    /** The status of a GET as a browser would send it (CSV or JSON accepted), with a token and a tenant's host or none. */
+    org.springframework.http.HttpStatusCode status(String path, String token, String slug) {
+        HttpHeaders h = new HttpHeaders();
+        h.setAccept(List.of(MediaType.parseMediaType("text/csv"), MediaType.APPLICATION_JSON, MediaType.ALL));
+        if (token != null) {
+            h.setBearerAuth(token);
+        }
+        if (slug != null) {
+            h.add("X-Tenant", slug);
+        }
+        return http.exchange(path, HttpMethod.GET, new HttpEntity<>(null, h), String.class)
+                .getStatusCode();
+    }
+
     static HttpHeaders tenantOnly(TestDatabase.Fixture f) {
         HttpHeaders h = new HttpHeaders();
         h.add("X-Tenant", f.slug());
@@ -281,13 +295,13 @@ class ImportMetricsIT extends IntegrationTest {
         String staffToken = Api.tenant(http, t.slug()).signIn(staffId, staffEmail, Api.PASSWORD, null).accessToken();
 
         for (String path : List.of("/api/v1/platform/imports/report", "/api/v1/platform/imports/report.csv")) {
-            assertThat(platform.get(path, null).getStatusCode())
+            assertThat(status(path, null, null))
                     .as("%s anonymous", path)
                     .isEqualTo(HttpStatus.UNAUTHORIZED);
-            assertThat(platform.get(path, staffToken).getStatusCode())
+            assertThat(status(path, staffToken, null))
                     .as("%s with a tenant's staff token on the platform host", path)
                     .isEqualTo(HttpStatus.UNAUTHORIZED);
-            assertThat(Api.tenant(http, t.slug()).get(path, staffToken).getStatusCode())
+            assertThat(status(path, staffToken, t.slug()))
                     .as("%s with a tenant's staff token on the tenant's host", path)
                     .isEqualTo(HttpStatus.UNAUTHORIZED);
         }
