@@ -1,6 +1,7 @@
 package com.rincoltech.bms.core.imports;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
@@ -29,6 +30,7 @@ import org.springframework.boot.availability.ApplicationAvailability;
 import org.springframework.boot.availability.ReadinessState;
 import org.springframework.boot.logging.LoggingSystem;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.env.SystemEnvironmentPropertySource;
 
@@ -145,28 +147,91 @@ class RehearsalSettingsIT {
                 .containsEntry("BMS_TOKEN_SIGNING_JWK", host.get("BMS_TOKEN_SIGNING_JWK"))
                 .containsEntry("R2_ENDPOINT", "http://rehearsal-storage.invalid")
                 .containsEntry("BMS_PUSH_VAPID_PUBLIC_KEY", "")
-                .containsEntry("BMS_PUSH_VAPID_PRIVATE_KEY", "");
+                .containsEntry("BMS_PUSH_VAPID_PRIVATE_KEY", "")
+                // Set even when the live value is empty or absent: empty means the provider's real host (#890 review).
+                .containsEntry("BMS_RESEND_API_URL", "https://rehearsal-mail.invalid")
+                .containsEntry("BMS_AI_BASE_URL", "https://rehearsal-ai.invalid");
         if (host.containsKey("BMS_SMTP_HOST")) {
-            assertThat(settings)
-                    .containsEntry("BMS_SMTP_HOST", "rehearsal-mail.invalid")
-                    .containsEntry("BMS_AI_BASE_URL", "https://rehearsal-ai.invalid");
+            assertThat(settings).containsEntry("BMS_SMTP_HOST", "rehearsal-mail.invalid");
         } else {
             // A service off on the live API stays off: an empty value is not turned into a placeholder.
             assertThat(settings).containsEntry("BMS_SMTP_PASSWORD", "").containsEntry("BMS_AI_API_KEY", "");
         }
 
-        // The throwaway database of this test instead of the script's container; nothing else is changed.
-        settings.put("BMS_DB_URL", TestDatabase.url());
-        settings.put("BMS_APP_PASSWORD", TestDatabase.APP_PASSWORD);
+        withStarted(settings, context -> {
+            assertThat(context.getBean(ApplicationAvailability.class).getReadinessState())
+                    .isEqualTo(ReadinessState.ACCEPTING_TRAFFIC);
+            assertThat(context.getEnvironment().getProperty("bms.storage.r2.endpoint"))
+                    .isEqualTo("http://rehearsal-storage.invalid");
+            assertThat(context.getEnvironment().getProperty("bms.notifications.mail.resend-url"))
+                    .isEqualTo("https://rehearsal-mail.invalid");
+            // Only the image's own configuration: the server profile, nothing from the test classpath.
+            assertThat(context.getEnvironment().getActiveProfiles()).containsExactly("server");
+            assertThat(context.getEnvironment().getPropertySources().stream())
+                    .map(source -> source.getName())
+                    .noneMatch(source -> source.contains("application-test") || source.contains("test-classes"));
+        });
+    }
 
+    /** The placeholders the script wrote before #889, one at a time, on the lines it writes now. */
+    static Stream<Arguments> oldPlaceholders() {
+        return Stream.of(
+                Arguments.of(
+                        Map.of("R2_ENDPOINT", "rehearsal-placeholder"),
+                        "The URI scheme of endpointOverride must not be null"),
+                Arguments.of(
+                        Map.of(
+                                "BMS_PUSH_VAPID_PUBLIC_KEY", "rehearsal-placeholder",
+                                "BMS_PUSH_VAPID_PRIVATE_KEY", "rehearsal-placeholder"),
+                        "the VAPID keys are not valid"),
+                Arguments.of(
+                        Map.of("BMS_PESAPAL_PLATFORM_IPN_TOKEN", "rehearsal-placeholder"),
+                        "an IPN path token must be 24 to 128"));
+    }
+
+    /** This test fails for a placeholder of the wrong shape: each one of before #889 stops the start (review of #890). */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("oldPlaceholders")
+    void aPlaceholderOfTheWrongShapeStopsTheStart(Map<String, String> old, String refusal) throws Exception {
+        Map<String, String> settings = settingsOf(
+                rehearsalLines(liveApiEnvironment(Path.of("..", "deploy", "compose.pi-staging.yml"), allOn(false))));
+        settings.putAll(old);
+        assertThatThrownBy(() -> withStarted(settings, context -> {})).hasStackTraceContaining(refusal);
+    }
+
+    static Map<String, String> settingsOf(List<String> lines) {
+        Map<String, String> settings = new LinkedHashMap<>();
+        for (String line : lines) {
+            int eq = line.indexOf('=');
+            settings.put(line.substring(0, eq), line.substring(eq + 1));
+        }
+        return settings;
+    }
+
+    interface Check {
+        void accept(ConfigurableApplicationContext context) throws Exception;
+    }
+
+    /**
+     * Starts the application as {@code rehearse-import} does, with {@code settings} as its whole environment (no system
+     * properties either), on the test database instead of the script's container.
+     */
+    static void withStarted(Map<String, String> settings, Check check) throws Exception {
+        Map<String, Object> env = new LinkedHashMap<>(settings);
+        env.put("BMS_DB_URL", TestDatabase.url());
+        env.put("BMS_APP_PASSWORD", TestDatabase.APP_PASSWORD);
         StandardEnvironment environment = new StandardEnvironment();
         environment
                 .getPropertySources()
                 .replace(
                         StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
                         new SystemEnvironmentPropertySource(
-                                StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
-                                Map.<String, Object>copyOf(settings)));
+                                StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME, env));
+        environment
+                .getPropertySources()
+                .replace(
+                        StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME,
+                        new MapPropertySource(StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME, Map.of()));
         SpringApplication app = RehearseImportCommand.application(BmsApplication.class);
         app.setEnvironment(environment);
         app.setRegisterShutdownHook(false);
@@ -177,10 +242,7 @@ class RehearsalSettingsIT {
         before.putAll(System.getProperties());
         System.setProperty(LoggingSystem.SYSTEM_PROPERTY, LoggingSystem.NONE);
         try (ConfigurableApplicationContext context = app.run()) {
-            assertThat(context.getBean(ApplicationAvailability.class).getReadinessState())
-                    .isEqualTo(ReadinessState.ACCEPTING_TRAFFIC);
-            assertThat(context.getEnvironment().getProperty("bms.storage.r2.endpoint"))
-                    .isEqualTo("http://rehearsal-storage.invalid");
+            check.accept(context);
         } finally {
             System.setProperties(before);
         }
@@ -218,11 +280,17 @@ class RehearsalSettingsIT {
             if (!inEnvironment || line.isBlank() || line.trim().startsWith("#")) {
                 continue;
             }
-            Matcher entry = ENTRY.matcher(line);
-            if (!entry.matches()) {
+            if (line.length() - line.stripLeading().length() < 6) {
+                // The next key of the api service: the environment ends here.
                 inEnvironment = false;
                 continue;
             }
+            // Any other line inside the environment stops the test, so no key below it is dropped unread (review of
+            // #890): the list form, an anchor or a merge key needs this reader taught first.
+            Matcher entry = ENTRY.matcher(line);
+            assertThat(entry.matches())
+                    .as("%s: a line of the api environment this test cannot read: %s", compose, line)
+                    .isTrue();
             String raw = entry.group(2).trim();
             if (raw.equals(">-")) {
                 folded = entry.group(1);
@@ -244,6 +312,10 @@ class RehearsalSettingsIT {
                 } else {
                     value = set.isEmpty() ? variable.group(3) : set;
                 }
+            } else {
+                assertThat(raw)
+                        .as("%s: a value this test cannot resolve: %s", compose, line)
+                        .doesNotContain("$");
             }
             env.put(entry.group(1), value);
         }

@@ -179,8 +179,9 @@ cron: those run the script with no argument, which is the weekly drill above, un
    chat) replaced by a placeholder (the data and signing keys stay: the application needs them to start), on the
    internal network only. A placeholder has the shape its setting is checked for at start, and its address is on
    `.invalid`, which no resolver answers (the storage endpoint is `http://rehearsal-storage.invalid`, issue #889); a
-   value empty on the live API stays empty, so a service off there stays off; push is off. Base URLs the startup guards
-   hold to the provider's own host (SMS, payments, Ask BMS) are kept. CI starts the application with exactly these
+   value empty on the live API stays empty, so a service off there stays off; push is off. The Resend and AI URLs are
+   always set to `.invalid`, since empty means the provider's real host. Base URLs the startup guards hold to the
+   provider's own host (SMS, payments, Ask BMS) are kept, with placeholder keys, and rely on the internal network. CI starts the application with exactly these
    settings (`RehearsalSettingsIT`). It moves the run back to review there, takes the dry run again on
    the restored state and this build, makes the run ready and commits it with the real commit.
 7. Stores the rehearsal on the live run: one `import_rehearsals` row, inserted as `bms_app` under the business's
