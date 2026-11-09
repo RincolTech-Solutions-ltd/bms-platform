@@ -13,6 +13,7 @@ import com.rincoltech.bms.core.imports.ImportRuns;
 import com.rincoltech.bms.core.imports.ImportUploads;
 import com.rincoltech.bms.core.imports.ImportValidation;
 import com.rincoltech.bms.core.jobs.TenantJobs;
+import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.TenantContext;
 import java.nio.file.Path;
 import java.util.Map;
@@ -61,6 +62,9 @@ class StageImportRunIT extends IntegrationTest {
     @Autowired
     ImportReview review;
 
+    @Autowired
+    BusinessClock clock;
+
     TestDatabase.Fixture t;
 
     @BeforeEach
@@ -102,7 +106,7 @@ class StageImportRunIT extends IntegrationTest {
     @Test
     void productionAndADirectoryWithoutAnExportFileAreRefused(@TempDir Path empty) {
         FabricatedRunStager production =
-                new FabricatedRunStager(tenants, runs, mappings, uploads, validation, review, "production");
+                new FabricatedRunStager(tenants, runs, mappings, uploads, validation, review, clock, "production");
         assertThatThrownBy(() -> production.stage(t.slug(), RetailImportIT.SAMPLE))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("production");

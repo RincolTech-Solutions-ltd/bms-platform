@@ -8,6 +8,7 @@ import com.rincoltech.bms.core.imports.ImportTemplate.Policy;
 import com.rincoltech.bms.core.imports.ImportUploads;
 import com.rincoltech.bms.core.imports.ImportValidation;
 import com.rincoltech.bms.core.jobs.TenantJobs;
+import com.rincoltech.bms.kernel.BusinessClock;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -47,6 +48,7 @@ public class FabricatedRunStager {
     private final ImportUploads uploads;
     private final ImportValidation validation;
     private final ImportReview review;
+    private final BusinessClock clock;
     private final String environment;
 
     FabricatedRunStager(
@@ -56,7 +58,9 @@ public class FabricatedRunStager {
             ImportUploads uploads,
             ImportValidation validation,
             ImportReview review,
+            BusinessClock clock,
             @Value("${bms.environment:}") String environment) {
+        this.clock = clock;
         this.tenants = tenants;
         this.runs = runs;
         this.mappings = mappings;
@@ -114,7 +118,7 @@ public class FabricatedRunStager {
         for (int pass = 0; pass < 5_000; pass++) {
             ImportValidation.Issue next = openIssue(run);
             if (next == null) {
-                LocalDate day = LocalDate.now();
+                LocalDate day = clock.today(KAMPALA);
                 PolicyDecision decision = new PolicyDecision(Policy.TREAT_AS_SETTLED, day, NOTE, OPERATOR, null, null);
                 runs.recordPolicy(run, Policy.RECEIVABLE, decision);
                 return;
