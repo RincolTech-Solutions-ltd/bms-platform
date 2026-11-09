@@ -265,6 +265,9 @@ class ImportRunService implements ImportRuns {
         if (RunStates.SIGN_OFF_ONLY.contains(status)) {
             throw invalidTransition("A run is signed off only by the customer's sign-off of its reconciliation.");
         }
+        if (RunStates.PURGE_ONLY.contains(status)) {
+            throw invalidTransition("A run is purged only by the purge, which deletes its personal data (issue #139).");
+        }
         return tx.execute(s -> {
             Run run = find(runId, true);
             if (!RunStates.allowed(run.status(), status)) {

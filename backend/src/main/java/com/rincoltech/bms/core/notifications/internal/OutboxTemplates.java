@@ -772,6 +772,14 @@ class OutboxTemplates {
                             + " hour passes. Check the edge rule and the portal."),
             "insights.daily_digest",
             new Template(null, "{text}"),
+            // Spec section 6.4 (issue #139): the scheduled purge of an import run is announced a week ahead. Ids and
+            // the business's slug only, never a value of a row.
+            "imports.purge_warning",
+            new Template(
+                    null,
+                    "BMS import run {run} of {business} is purged on {day}: {reason}. To purge it at stage 9 with a"
+                            + " witness and the pre-import dump confirmed, run purge-import before then"
+                            + " (customer-data-cutover runbook, 6.2)."),
             // ADR-036 decision 13: the operator hears when SMS use reaches 80 percent of a daily cap or
             // a cap holds messages back. The scope is "platform" or a tenant id; no number, no text.
             "sms.provider_alert",
