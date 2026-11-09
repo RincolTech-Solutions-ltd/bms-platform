@@ -1497,7 +1497,7 @@ Added by `V148__import_metrics_and_defects.sql` (issue #140, spec section 8, cha
   index `import_defects_by_run (tenant_id, run_id, created_at)`. The trigger `import_defects_kept` (every role): logged open
   and only against a run `committed`, `signed_off` or `purged`; closed once and never opened again; its run, code, author
   and time never change; its description changes only to its hash, as the owner, for a purged run's defect, and a defect
-  closed on a purged run has its description hashed as it closes. V102's ways through (a migration's opt-in,
+  logged against a run already purged is stored with its description hashed. V102's ways through (a migration's opt-in,
   `bms_erasing`) are kept.
 - **`import_defects_purged()`** (definer), an `AFTER UPDATE OF status` trigger on `import_runs` when a run becomes `purged`
   (only inside `import_purge_run`): every description of the run's defects becomes `sha256:` and the SHA-256 over a salt

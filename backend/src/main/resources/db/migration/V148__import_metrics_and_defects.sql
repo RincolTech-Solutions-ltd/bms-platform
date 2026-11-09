@@ -33,8 +33,8 @@
 --
 -- Personal data. The description is the operator's free text, so it follows the V147 rule for every free-text column of a
 -- run (Lead on #886): it is hashed with a salt kept nowhere when the run is purged (trigger import_defects_purged, inside
--- import_purge_run's transaction), and a defect still open then, or logged after the purge, has its description hashed when
--- it closes (import_defects_kept), so a purged run keeps no description of a closed defect. Before that the application
+-- import_purge_run's transaction), open or closed, and a defect logged against a run already purged is stored with its
+-- description hashed at once (import_defects_kept), so a purged run never holds a defect's words. Before that the application
 -- refuses a description that names a personal value of the run's staged rows or holds a phone-like run of digits or an
 -- email address (MetricsService). The removal of a closed business writes "Removed" (imports_erase_personal_data, below).
 -- expected_code is held to an issue code's form by a CHECK and fix_ref to an issue or pull request number, a commit hash
@@ -66,7 +66,7 @@ CREATE TABLE import_defects (
     run_id        uuid         NOT NULL,
     -- The member of staff who logged it.
     logged_by     uuid         NOT NULL,
-    -- What went wrong, without personal data (see the header); its hash once the run is purged and the defect closed.
+    -- What went wrong, without personal data (see the header); its hash once the run is purged.
     description   varchar(500) NOT NULL CHECK (btrim(description) <> ''),
     -- The issue code the row should have had: a code of the run's template, or a new code to add to it.
     expected_code text         NOT NULL CHECK (expected_code ~ '^[A-Z][A-Z0-9_]{1,59}$'),
@@ -108,6 +108,14 @@ BEGIN
             RAISE EXCEPTION 'a defect is logged open and closed later with its fix'
                 USING ERRCODE = 'check_violation', CONSTRAINT = 'import_defects_logged_open';
         END IF;
+        -- Logged against a run already purged: the description is stored as its hash at once, so a purged run never
+        -- holds a defect's words, open or closed (review of #888). The code and, later, the fix reference stay.
+        IF EXISTS (SELECT 1 FROM import_runs r
+                    WHERE r.tenant_id = NEW.tenant_id AND r.id = NEW.run_id AND r.status = 'purged')
+           AND NEW.description !~ '^sha256:[0-9a-f]{64}$' THEN
+            v_salt := decode(replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''), 'hex');
+            NEW.description := 'sha256:' || encode(sha256(v_salt || convert_to(NEW.description, 'UTF8')), 'hex');
+        END IF;
         RETURN NEW;
     END IF;
     IF (session_user = 'bms_owner' AND coalesce(current_setting('bms.allow_mutation', true), '') = 'on')
@@ -133,11 +141,6 @@ BEGIN
     IF OLD.status = 'closed' THEN
         RAISE EXCEPTION 'a closed defect stays closed with its fix'
             USING ERRCODE = 'check_violation', CONSTRAINT = 'import_defects_kept';
-    END IF;
-    -- Closed on a purged run: the description goes the way of the run's other free text.
-    IF NEW.status = 'closed' AND coalesce(v_purged, false) AND OLD.description !~ '^sha256:[0-9a-f]{64}$' THEN
-        v_salt := decode(replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''), 'hex');
-        NEW.description := 'sha256:' || encode(sha256(v_salt || convert_to(OLD.description, 'UTF8')), 'hex');
     END IF;
     RETURN NEW;
 END

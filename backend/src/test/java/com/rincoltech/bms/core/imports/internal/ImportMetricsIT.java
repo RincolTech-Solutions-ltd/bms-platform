@@ -288,6 +288,28 @@ class ImportMetricsIT extends IntegrationTest {
     void thePlatformReportIsReadOnlyByAPlatformOperatorAndNamesBusinessesBySlug() {
         UUID ours = run(t, "committed");
         UUID theirs = run(other, "signed_off");
+        // JUSTIFICATION-A3: review of #888 finding 3 asks to prove the platform view leaves out the business's labels.
+        // The business's own labels: a mapping and a source it named after its trading name (review of #888).
+        UUID mapping = UUID.randomUUID();
+        TestDatabase.owner().sql("""
+                        INSERT INTO import_mappings (id, tenant_id, name, version, template_key, template_version,
+                                                     document, created_by)
+                        VALUES (?, ?, 'brandname-stock', 1, 'fixture_shop', 1,
+                                '{"template": "fixture_shop", "template_version": 1}', ?)
+                        """).params(mapping, t.tenantId(), staff).update();
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO import_batches (id, tenant_id, run_id, seq, status, row_count, mapping_id,
+                                                    mapping_source, template_key, template_version)
+                        VALUES (?, ?, ?, 1, 'parsed', 2, ?, 'brandname_items', 'fixture_shop', 1)
+                        """)
+                .params(UUID.randomUUID(), t.tenantId(), ours, mapping)
+                .update();
+        assertThat(call(t, HttpMethod.GET, "/api/v1/imports/runs/" + ours + "/metrics", null, MANAGE)
+                        .getBody()
+                        .toString())
+                .as("the business sees its own labels")
+                .contains("brandname-stock", "brandname_items");
         String ourName = TestDatabase.owner()
                 .sql("SELECT name FROM tenants WHERE id = ?")
                 .param(t.tenantId())
@@ -319,7 +341,7 @@ class ImportMetricsIT extends IntegrationTest {
         assertThat(report.getStatusCode()).as("%s", report.getBody()).isEqualTo(HttpStatus.OK);
         String body = report.getBody().toString();
         assertThat(body).contains(t.slug(), other.slug(), ours.toString(), theirs.toString());
-        assertThat(body).doesNotContain(ourName);
+        assertThat(body).doesNotContain(ourName).doesNotContain("brandname");
         JsonNode ourRow = null;
         for (JsonNode row : report.getBody().get("items")) {
             if (row.get("metrics").get("run_id").asString().equals(ours.toString())) {

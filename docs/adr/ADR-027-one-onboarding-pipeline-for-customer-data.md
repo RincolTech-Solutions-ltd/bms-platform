@@ -92,8 +92,9 @@ took, is now written where the step ends (V148). The platform report reads acros
 that refuses a call bound to a business and names each business by its slug only.
 
 The defect log is the one new place an operator types free text against a run, so the one rule for typed text of the
-note of 9 November covers it: `import_defects.description` joins the hashed list (hashed when the run is purged, or as a
-defect of a purged run closes, so a purged run keeps no description of a closed defect), and before that the application
+note of 9 November covers it: `import_defects.description` joins the hashed list (hashed when the run is purged, open or
+closed, and stored hashed when logged against a run already purged, so a purged run never holds a defect's words; review of
+#888), and before that the application
 refuses a description that names a personal value of the run's staged rows, an email address, an ID number, a phone number
 or seven digits in a row. The code it should have had (`expected_code`) and the fix's reference (`fix_ref`) are held to
 their forms by CHECKs and stay readable: they are what each defect teaches.

@@ -92,7 +92,7 @@ class MetricsService implements ImportMetrics {
         if (json == null) {
             throw ApiException.notFound();
         }
-        return metricsOf(mapper.readTree(json));
+        return metricsOf(mapper.readTree(json), false);
     }
 
     @Override
@@ -119,7 +119,7 @@ class MetricsService implements ImportMetrics {
                         + " FROM platform_import_runs_report(CAST(? AS timestamptz), ?)")
                 .params(since == null ? null : Timestamp.from(since), Math.clamp(limit, 1, PLATFORM_LIMIT))
                 .query((rs, n) -> new PlatformRun(
-                        rs.getString("tenant_slug"), metricsOf(mapper.readTree(rs.getString("metrics")))))
+                        rs.getString("tenant_slug"), metricsOf(mapper.readTree(rs.getString("metrics")), true)))
                 .list();
     }
 
@@ -230,8 +230,12 @@ class MetricsService implements ImportMetrics {
                 .sum();
     }
 
-    /** The JSON of {@code import_run_metrics} as the port's records; keys are the function's, read one by one. */
-    static Metrics metricsOf(JsonNode m) {
+    /**
+     * The JSON of {@code import_run_metrics} as the port's records; keys are the function's, read one by one. For the
+     * platform the business's own labels are left out (review of #888): a mapping's name, a batch's mapping source and a
+     * rehearsal source's file name are typed by the business and may carry its trading name; only the slug names it.
+     */
+    static Metrics metricsOf(JsonNode m, boolean platform) {
         JsonNode st = m.path("stamps");
         JsonNode q = m.path("questions");
         JsonNode d = m.path("defects");
@@ -285,7 +289,7 @@ class MetricsService implements ImportMetrics {
                                 num(x, "template_version") == null
                                         ? null
                                         : num(x, "template_version").intValue(),
-                                str(x, "mapping_source"),
+                                platform ? null : str(x, "mapping_source"),
                                 num(x, "rows"),
                                 x.path("excluded").asLong(),
                                 num(x, "read"),
@@ -327,7 +331,7 @@ class MetricsService implements ImportMetrics {
                         m,
                         "mappings",
                         x -> new MappingVersion(
-                                str(x, "name"),
+                                platform ? null : str(x, "name"),
                                 x.path("version").asInt(),
                                 str(x, "template_key"),
                                 x.path("template_version").asInt())),
@@ -345,7 +349,10 @@ class MetricsService implements ImportMetrics {
                         m,
                         "rehearsal_differences",
                         x -> new Difference(
-                                str(x, "source"), str(x, "measure"), num(x, "rehearsal"), num(x, "cutover"))),
+                                platform ? null : str(x, "source"),
+                                str(x, "measure"),
+                                num(x, "rehearsal"),
+                                num(x, "cutover"))),
                 new Defects(
                         d.path("open").asLong(),
                         d.path("closed").asLong(),
@@ -425,7 +432,7 @@ class MetricsService implements ImportMetrics {
                 throw ApiException.rule(
                         "description_names_personal_data",
                         "Describe the defect by file, line, field and code, never by a person's name, phone, ID number"
-                                + " or email.");
+                                + " or email, and with no number of seven digits or more (write a date as 2026-10-01).");
             }
             boolean known = catalogueOf(runId).contains(code);
             UUID id = UUID.randomUUID();

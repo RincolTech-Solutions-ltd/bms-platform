@@ -10537,7 +10537,7 @@ export interface components {
             closed_at?: string;
             /** Format: uuid */
             closed_by?: string;
-            /** @description What went wrong, naming nobody; its hash once the run is purged and the defect closed */
+            /** @description What went wrong, naming nobody; its hash once the run is purged (open or closed) */
             description?: string;
             /** @description The issue code the row should have had */
             expected_code?: string;

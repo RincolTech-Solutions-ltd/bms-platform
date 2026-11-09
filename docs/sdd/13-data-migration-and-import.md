@@ -1714,8 +1714,9 @@ section 4.1; coordinated with #110, which builds no second framework).**
   (the commit's own `RunPrivacy`), or that the kernel's log redaction finds an email address, an ID number or a phone
   number in, or that holds seven digits in a row (422 `description_names_personal_data`). And it follows the purge's one
   rule for free text: the trigger `import_defects_purged` hashes every description of the run with a salt kept nowhere in
-  the purge's transaction, and a defect closed on a purged run has its description hashed as it closes, so a purged run
-  keeps no description of a closed defect. `ImportPurgeIT` classes the column as hashed; the removal of a closed business
+  the purge's transaction, open or closed, and a defect logged against a run already purged is stored with its
+  description hashed at once, so a purged run never holds a defect's words (review of #888: a bare name is no pattern the
+  application can refuse once the staged values are gone). `ImportPurgeIT` classes the column as hashed; the removal of a closed business
   writes "Removed" (`imports_erase_personal_data`).
 - **The platform report** (`GET /platform/imports/report` and `.../report.csv`, `platform.tenants.read`, on the platform
   host only) reads every business's runs through the definer function `platform_import_runs_report`, which refuses a call

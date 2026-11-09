@@ -383,7 +383,7 @@ class ImportPurgeIT extends IntegrationTest {
             "import_issue_resolutions.after_value",
             "import_issue_resolutions.note",
             "import_signoffs.signed_name",
-            // The operator's description of a defect (V148, #140): hashed by the purge, or when it closes after it.
+            // The operator's description of a defect (V148, #140): hashed by the purge, or on insert after it.
             "import_defects.description",
             "approval_requests.decision_note",
             "approval_requests.execution_error");
@@ -677,16 +677,22 @@ class ImportPurgeIT extends IntegrationTest {
                 .as("columns still holding a personal value")
                 .isEmpty();
 
-        // The open one closes with its fix and stays a hash; one logged after the purge is readable until it closes.
+        // The open one closes with its fix and stays a hash. One logged after the purge names a person the application
+        // cannot recognise any more (the staged values are gone; a bare name is no email, phone or ID number) and is
+        // left open: it is stored as its hash at once (review of #888), so the run never holds its words.
         Defect closedNow = as(t, () -> metrics.closeDefect(open, 0, "#141", operator));
         assertThat(closedNow.description()).matches("sha256:[0-9a-f]{64}");
         Defect late = as(
                 t,
                 () -> metrics.logDefect(
-                        run, new NewDefect("Line 3 of the till roll kept a stale price", "PRICE_STALE"), operator));
-        assertThat(late.description()).isEqualTo("Line 3 of the till roll kept a stale price");
+                        run, new NewDefect("Fabricated Buyer Gamma was imported twice", "BUYER_DUPLICATE"), operator));
+        assertThat(late.description()).matches("sha256:[0-9a-f]{64}");
+        assertThat(late.status()).isEqualTo("open");
+        assertThat(personalValuesOf(run, PERSONAL))
+                .as("columns holding a personal value after a defect logged on the purged run")
+                .isEmpty();
         Defect lateClosed = as(t, () -> metrics.closeDefect(late.id(), late.version(), "0123abc", operator));
-        assertThat(lateClosed.description()).matches("sha256:[0-9a-f]{64}");
+        assertThat(lateClosed.description()).isEqualTo(late.description());
         assertThat(lateClosed.fixRef()).isEqualTo("0123abc");
         assertThat(as(t, () -> metrics.metrics(run)).defects().closed()).isEqualTo(3);
     }

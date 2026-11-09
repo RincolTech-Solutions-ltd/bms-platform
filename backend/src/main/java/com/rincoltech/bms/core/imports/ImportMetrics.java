@@ -18,7 +18,7 @@ import java.util.UUID;
  * <p>A defect is logged against an imported run (committed, signed off or purged) during hypercare, with a description that
  * names nobody, the issue code it should have had and, when it closes, the fix's reference. Both are audited. The
  * description is refused when it names a personal value of the run's staged rows, an email address, an ID number or a
- * phone number; it becomes its hash when the run is purged, or when a defect of a purged run closes.
+ * phone number; it becomes its hash when the run is purged, and a defect logged against a purged run is stored hashed.
  *
  * <p>Every method but the platform's works for the business bound to the thread, in its own transaction; a run or defect of
  * another business is 404. The platform report reads across businesses, unbound, through the definer function
@@ -61,9 +61,7 @@ public interface ImportMetrics {
             Instant loggedAt,
             UUID loggedBy,
 
-            @Schema(
-                    description =
-                            "What went wrong, naming nobody; its hash once the run is purged and the defect closed")
+            @Schema(description = "What went wrong, naming nobody; its hash once the run is purged (open or closed)")
             String description,
 
             @Schema(description = "The issue code the row should have had")
