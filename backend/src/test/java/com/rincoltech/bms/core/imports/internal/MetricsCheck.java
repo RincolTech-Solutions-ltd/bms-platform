@@ -84,12 +84,13 @@ public final class MetricsCheck {
                         run));
 
         // Issues by code and severity, and resolutions by kind, as the tables hold them.
-        assertThat(m.issues().stream()
-                        .collect(Collectors.toMap(
-                                i -> i.code() + "|" + i.severity(),
-                                i -> i.total() + "|" + i.open(),
-                                (a, b) -> a,
-                                TreeMap::new)))
+        Map<String, String> issues = m.issues().stream()
+                .collect(Collectors.toMap(
+                        i -> i.code() + "|" + i.severity(),
+                        i -> i.total() + "|" + i.open(),
+                        (a, b) -> a,
+                        TreeMap::new));
+        assertThat(issues)
                 .isEqualTo(pairs(
                         """
                         SELECT i.code || '|' || i.severity, count(*) || '|' || count(*) FILTER (WHERE i.status = 'open')
@@ -97,8 +98,9 @@ public final class MetricsCheck {
                          WHERE b.run_id = ? GROUP BY i.code, i.severity
                         """,
                         run));
-        assertThat(m.resolutions().stream()
-                        .collect(Collectors.toMap(r -> r.kind(), r -> String.valueOf(r.count()), (a, b) -> a, TreeMap::new)))
+        Map<String, String> resolutions = m.resolutions().stream()
+                .collect(Collectors.toMap(r -> r.kind(), r -> String.valueOf(r.count()), (a, b) -> a, TreeMap::new));
+        assertThat(resolutions)
                 .isEqualTo(pairs(
                         "SELECT resolution, CAST(count(*) AS text) FROM import_issue_resolutions WHERE run_id = ?"
                                 + " GROUP BY resolution",

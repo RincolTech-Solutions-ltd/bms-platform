@@ -332,12 +332,12 @@ class ImportMetricsIT extends IntegrationTest {
                                 .single())))
                 .hasStackTraceContaining("by the platform operator only");
         // And bound to a business, the run metrics of another business are not found.
-        assertThat(TenantContext.callAs(
-                        t.tenantId(),
-                        () -> tx.execute(s -> jdbc.sql("SELECT import_run_metrics(?) IS NULL")
-                                .param(theirs)
-                                .query(Boolean.class)
-                                .single())))
-                .isTrue();
+        Boolean notFound = TenantContext.callAs(
+                t.tenantId(),
+                () -> tx.execute(s -> jdbc.sql("SELECT import_run_metrics(?) IS NULL")
+                        .param(theirs)
+                        .query(Boolean.class)
+                        .single()));
+        assertThat(notFound).isTrue();
     }
 }
