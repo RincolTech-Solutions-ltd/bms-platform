@@ -15,6 +15,8 @@
 # The checks are strings eval'd when they run, so their variables are meant to stay unexpanded until then.
 # shellcheck disable=SC2016
 set -uo pipefail
+# The drill's window is in host time; the fake clock's days are read in UTC.
+export TZ=UTC
 
 TESTS_HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=deploy/tests/drill-fakes.sh
@@ -69,7 +71,7 @@ no_live_write() { [[ ! -s "$FAKE/live-writes" ]] && ! grep -q 'bms-postgres-1 ps
 all_removed() {
     [[ ! -s "$FAKE/containers" && ! -s "$FAKE/networks" && ! -s "$FAKE/volumes" ]] \
         && [[ -z "$(find "$HOST" -path '*backups/rehearsal.*' -print -quit)" ]] \
-        && [[ "$(cd "$HOST/state" && ls)" == "current_tag" ]]
+        && [[ -z "$(find "$HOST/state" -mindepth 1 -not -name current_tag -not -name '*.lock' -print -quit)" ]]
 }
 
 # --- Opt in only: usage errors start nothing --------------------------------------------------------------------------
@@ -102,7 +104,8 @@ check "the backup is decrypted only inside a mode-0700 temp dir under backups/" 
 check "the live run's rows are read in one read-only transaction, with no write" \
     eval 'head -n 1 "$FAKE/live-reads" | grep -q "READ ONLY" && ! grep -Eiq "^(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|TRUNCATE|GRANT)" "$FAKE/live-reads"'
 check "the copy into the throwaway database holds the deletes, the token and every table's rows" \
-    eval 'grep -q "^SET session_replication_role = replica;" "$FAKE/copy-stream" \
+    eval 'head -n 2 "$FAKE/copy-stream" | tr "\n" " " | grep -q "^BEGIN; SET LOCAL session_replication_role = replica; " \
+        && [[ "$(tail -n 1 "$FAKE/copy-stream")" == "COMMIT;" ]] \
         && grep -q "^INSERT INTO bms_rehearsal_marker (token) VALUES (.f00d" "$FAKE/copy-stream" \
         && [[ "$(grep -c "^COPY import_" "$FAKE/copy-stream")" == 6 && "$(grep -c "^staged row" "$FAKE/copy-stream")" == 6 ]] \
         && [[ "$(grep -cx "\\\\." "$FAKE/copy-stream")" == 6 ]]'
@@ -177,6 +180,58 @@ rehearse busy
 echo "bms-restore-drill-4242||none" >> "$FAKE/containers"
 run_script --rehearse-import "$RUN"
 check "a rehearsal is refused (3) while the weekly drill runs" eval '[[ "$STATUS" == 3 ]] && said "restore drill or another rehearsal"'
+
+# --- Review of #882: nothing beside it, a whole copy or none, no secret in argv, a prompt stop, placeholder keys ------------
+# JUSTIFICATION-A3: one test per finding of the review's FAIL verdict.
+check "the puller's, the deploy's and its own locks are held while the commit runs" \
+    eval 'rehearse locks && [[ "$(tr "\n" " " < "$FAKE/locks-during-commit")" == "pull held deploy held rehearsal held " ]]'
+
+for lock in pull deploy rehearsal; do
+    fake_host "$WORK/lock-$lock"
+    slice "$WORK/lock-$lock/slice"
+    export BMS_REHEARSAL_SLICE_DIR="$WORK/lock-$lock/slice"
+    exec 5> "$HOST/state/$lock.lock"
+    flock 5
+    run_script --rehearse-import "$RUN"
+    exec 5>&-
+    check "while state/${lock}.lock is held (a ${lock} runs) the rehearsal is refused (3) and starts nothing" \
+        eval '[[ "$STATUS" == 3 ]] && nothing_started && all_removed'
+done
+
+FAKE_EPOCH=1792897200 rehearse sunday-0300
+check "Sunday 03:00, the weekly drill's hour, is refused (3) before any container starts" \
+    eval '[[ "$STATUS" == 3 ]] && said "weekly restore drill" && nothing_started'
+FAKE_EPOCH=1792879200 rehearse saturday-2200
+check "Saturday 22:00, too close to the drill for a long rehearsal, is refused (3) too" \
+    eval '[[ "$STATUS" == 3 ]] && said "weekly restore drill" && nothing_started'
+# fake_host exports the clock, so the assignment outlives the call: back to the fixed Monday morning.
+FAKE_EPOCH=1793000000
+
+FAKE_LIVE_READ_FAIL=1 rehearse live-read-fails
+check "a live read that dies part way ends the copy with ROLLBACK, exits 1 and commits nothing" \
+    eval '[[ "$STATUS" == 1 ]] && [[ "$(tail -n 1 "$FAKE/copy-stream")" == "ROLLBACK;" ]] && ! grep -q "^COMMIT;" "$FAKE/copy-stream" \
+        && said "reading the run" && no_commit && no_live_write && all_removed'
+FAKE_COUNT_MISMATCH=1 rehearse copy-short
+check "a copy that does not hold the live run's rows (count and ids) exits 1 before the commit" \
+    eval '[[ "$STATUS" == 1 ]] && said "does not hold the same rows" && no_commit && no_live_write && all_removed'
+
+rehearse no-secret-in-argv
+check "no R2 key, password or token is on any command line; the label is the token's SHA-256" \
+    eval '! grep -Eq "fake-secret|fake-access|f00dfeed" "$FAKE/calls.log" \
+        && grep -q "bms.rehearsal=$(printf %s f00dfeedf00dfeedf00dfeedf00dfeedf00dfeedf00dfeed | sha256sum | cut -c1-64)" "$FAKE/calls.log"'
+check "outside services' keys reach the API container as placeholders; the data and signing keys are kept; no import key" \
+    eval '! grep -Eq "live-(smtp|r2|resend|telegram)-secret|live-import-key" "$FAKE/api-env.seen" \
+        && grep -qx BMS_SMTP_PASSWORD=rehearsal-placeholder "$FAKE/api-env.seen" \
+        && grep -qx R2_DOCUMENTS_SECRET_ACCESS_KEY=rehearsal-placeholder "$FAKE/api-env.seen" \
+        && grep -qx BMS_DATA_KEY=live-data-key "$FAKE/api-env.seen" && grep -qx BMS_TOKEN_SIGNING_JWK=live-jwk "$FAKE/api-env.seen" \
+        && grep -qx BMS_IMPORT_KEY= "$FAKE/api-env.seen"'
+
+# shellcheck disable=SC2034 # read by the eval'd check below.
+started_at=$SECONDS
+FAKE_API_SIGNAL=TERM FAKE_API_HANG=20 rehearse terminated-hanging
+check "a TERM while the commit still runs cleans up at once (not after the commit) and exits 143" \
+    eval '[[ "$STATUS" == 143 ]] && (( SECONDS - started_at < 10 )) && all_removed \
+        && grep -q "^rm -f -v bms-rehearsal-api-" "$FAKE/calls.log"'
 
 same_picker() {
     diff <(sed -n '/^pick_newest_backup() {/,/^}/p' "$TESTS_HERE/../restore-drill.sh" | tail -n +2) \

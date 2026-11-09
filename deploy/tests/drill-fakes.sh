@@ -13,7 +13,9 @@
 #   FAKE_SAME_ID=1          docker inspect gives the throwaway the live container's id;
 #   FAKE_RUN_ROW=<t|s|f|o>  the live run's tenant, status, fabricated flag and origin ("" for no such run);
 #   FAKE_API_EXIT=<n>       the rehearsal API container's exit status;  FAKE_MIGRATE_FAIL=1  migrate fails;
-#   FAKE_ENV_DB_URL=<url>   an extra SPRING_DATASOURCE_URL in the live API's environment.
+#   FAKE_ENV_DB_URL=<url>   an extra SPRING_DATASOURCE_URL in the live API's environment;
+#   FAKE_LIVE_READ_FAIL=1   the live read of the run's rows dies part way; FAKE_COUNT_MISMATCH=1  the copy lost rows;
+#   FAKE_API_SIGNAL=<sig>   the commit sends the script that signal; FAKE_API_HANG=<s>  and then runs on for s seconds.
 # JUSTIFICATION-A2: the fake host is shared by two test files and is not a tiny helper.
 
 FAKE_EPOCH=1793000000
@@ -24,7 +26,9 @@ fake_host() {
     WORK_DIR="$1"
     HOST="$WORK_DIR/opt"
     FAKE="$WORK_DIR/fake"
-    export FAKE FAKE_EPOCH FAKE_LIVE_SYSID FAKE_TENANT
+    FAKE_HOST="$HOST"
+    REAL_SLEEP="$(command -v sleep)"
+    export FAKE FAKE_EPOCH FAKE_LIVE_SYSID FAKE_TENANT FAKE_HOST REAL_SLEEP
     mkdir -p "$HOST/state" "$HOST/postgres/initdb" "$WORK_DIR/bin" "$FAKE"
     : > "$FAKE/calls.log"
     : > "$FAKE/containers"
@@ -132,7 +136,16 @@ case "$1" in
                 elif has rehearse-import "$@"; then
                     echo "rehearsal of the import run: committed (fabricated report)"
                     # An operator's Ctrl-C or a stop while the commit runs: the signal reaches the script.
+                    # Whether the puller's and the deploy's locks are held while the commit runs.
+                    for lock in pull deploy rehearsal; do
+                        if flock --nonblock "$FAKE_HOST/state/$lock.lock" true; then echo "$lock free"; else echo "$lock held"; fi
+                    done > "$FAKE/locks-during-commit"
                     [[ -n "${FAKE_API_SIGNAL:-}" ]] && kill -s "$FAKE_API_SIGNAL" "$PPID"
+                    # A commit that keeps running: the script must not wait for it before it cleans up.
+                    if [[ -n "${FAKE_API_HANG:-}" ]]; then
+                        exec > /dev/null 2>&1
+                        "$REAL_SLEEP" "$FAKE_API_HANG"
+                    fi
                     exit "${FAKE_API_EXIT:-0}"
                 fi ;;
         esac ;;
@@ -150,7 +163,10 @@ case "$1" in
             *Config.Env*)
                 printf '%s\n' SPRING_PROFILES_ACTIVE=server BMS_DB_URL=jdbc:postgresql://postgres:5432/bms \
                     BMS_APP_USER=bms_app BMS_APP_PASSWORD=live-app-secret BMS_ENVIRONMENT=staging \
-                    BMS_SCHEDULER_ENABLED=true "JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=50"
+                    BMS_SCHEDULER_ENABLED=true "JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=50" \
+                    BMS_DATA_KEY=live-data-key BMS_TOKEN_SIGNING_JWK=live-jwk BMS_IMPORT_KEY=live-import-key \
+                    BMS_SMTP_PASSWORD=live-smtp-secret R2_DOCUMENTS_SECRET_ACCESS_KEY=live-r2-secret \
+                    BMS_RESEND_API_KEY=live-resend-secret BMS_TELEGRAM_BOT_TOKEN=live-telegram-secret
                 if [[ -n "${FAKE_ENV_DB_URL:-}" ]]; then echo "SPRING_DATASOURCE_URL=${FAKE_ENV_DB_URL}"; fi ;;
             *Id*)
                 if [[ "$target" == "$live_db" || -n "${FAKE_SAME_ID:-}" ]]; then echo "live-container-id"; else echo "id-$target"; fi ;;
@@ -179,12 +195,21 @@ case "$1" in
         if [[ -n "$interactive" ]]; then
             if [[ "$container" == "$live_db" && "$(arg_after -U "$@")" == "bms_owner" ]]; then
                 # The read of the run's rows: echo what psql would print, a row for each COPY.
+                copies=0
                 tee -a "$FAKE/live-reads" | while IFS= read -r line; do
                     case "$line" in
                         "\\echo '"*) line="${line#\\echo \'}"; printf '%s\n' "${line%\'}" | sed 's/\\\\/\\/g' ;;
-                        "COPY ("*) echo "staged row of the live run" ;;
+                        "COPY ("*)
+                            copies=$(( copies + 1 ))
+                            # The live session dies part way through the second table's rows.
+                            if [[ -n "${FAKE_LIVE_READ_FAIL:-}" && "$copies" == 2 ]]; then
+                                echo "half a staged row"
+                                exit 1
+                            fi
+                            echo "staged row of the live run" ;;
                     esac
                 done
+                exit "${PIPESTATUS[1]}"
             elif [[ "$container" == "$live_db" ]]; then
                 cat >> "$FAKE/live-writes"
             else
@@ -193,6 +218,9 @@ case "$1" in
             exit 0
         fi
         case "$sql" in
+            *"count(*) || ':'"*)
+                # The run's rows in a table, live and copied: the same unless a test says the copy lost some.
+                if [[ -n "${FAKE_COUNT_MISMATCH:-}" && "$container" != "$live_db" ]]; then echo "2:0f0f"; else echo "3:0f0f"; fi ;;
             *pg_control_system*)
                 if [[ "$container" == "$live_db" || -n "${FAKE_SAME_SYSID:-}" ]]; then echo "$FAKE_LIVE_SYSID"; else echo "7400000000000000999"; fi ;;
             *"count(*) FROM import_runs WHERE id"*) echo 1 ;;
