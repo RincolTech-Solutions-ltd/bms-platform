@@ -168,6 +168,10 @@ check "a failed migration exits 1, commits nothing and removes everything" \
 FAKE_API_EXIT=1 rehearse commit-fails
 check "a commit that fails is stored on the run as such, exits 1 and removes everything" \
     eval '[[ "$STATUS" == 1 ]] && [[ -s "$FAKE/live-writes" ]] && all_removed'
+FAKE_API_EXIT=1 FAKE_NO_OUTCOME=1 rehearse api-never-starts
+check "an API container that exits 1 without an outcome (#889) says nothing is stored, exits 1 and removes everything" \
+    eval '[[ "$STATUS" == 1 ]] && said "without recording an outcome" && ! said "is stored on the live run next" \
+        && no_live_write && all_removed'
 FAKE_API_EXIT=3 rehearse command-refuses
 check "a command that refuses stores nothing, exits 3 (refused) and removes everything" \
     eval '[[ "$STATUS" == 3 ]] && no_live_write && all_removed'
