@@ -220,7 +220,9 @@ check "no R2 key, password or token is on any command line; the label is the tok
     eval '! grep -Eq "fake-secret|fake-access|f00dfeed" "$FAKE/calls.log" \
         && grep -q "bms.rehearsal=$(printf %s f00dfeedf00dfeedf00dfeedf00dfeedf00dfeedf00dfeed | sha256sum | cut -c1-64)" "$FAKE/calls.log"'
 check "outside services' keys reach the API container as placeholders; the data and signing keys are kept; no import key" \
-    eval '! grep -Eq "live-(smtp|r2|resend|telegram)-secret|live-import-key" "$FAKE/api-env.seen" \
+    eval '! grep -Eq "live-(smtp|r2|resend|telegram|pay|vapid)-secret|live-import-key" "$FAKE/api-env.seen" \
+        && grep -qx BMS_PAY_SECRET_HASH=rehearsal-placeholder "$FAKE/api-env.seen" \
+        && grep -qx BMS_PUSH_VAPID_KEY=rehearsal-placeholder "$FAKE/api-env.seen" \
         && grep -qx BMS_SMTP_PASSWORD=rehearsal-placeholder "$FAKE/api-env.seen" \
         && grep -qx R2_DOCUMENTS_SECRET_ACCESS_KEY=rehearsal-placeholder "$FAKE/api-env.seen" \
         && grep -qx BMS_DATA_KEY=live-data-key "$FAKE/api-env.seen" && grep -qx BMS_TOKEN_SIGNING_JWK=live-jwk "$FAKE/api-env.seen" \
@@ -232,6 +234,24 @@ FAKE_API_SIGNAL=TERM FAKE_API_HANG=20 rehearse terminated-hanging
 check "a TERM while the commit still runs cleans up at once (not after the commit) and exits 143" \
     eval '[[ "$STATUS" == 143 ]] && (( SECONDS - started_at < 10 )) && all_removed \
         && grep -q "^rm -f -v bms-rehearsal-api-" "$FAKE/calls.log"'
+
+# --- Review of d98fd0b: the run is bounded; the locks are the ones the puller and deploy.sh take --------------------------
+# Saturday 21:20, just before the window, and a commit still running at Sunday 03:21.
+# (The stub cannot be stopped by docker rm -f as a real container is, so it hangs only 3 s.)
+FAKE_EPOCH=1792876800 FAKE_ADVANCE_TO=1792898460 FAKE_API_HANG=3 rehearse past-deadline
+FAKE_EPOCH=1793000000
+check "a commit still running at the deadline (Sunday 03:20) is stopped, fails (1), stores nothing and removes everything" \
+    eval '[[ "$STATUS" == 1 ]] && said "stopped at its deadline" && no_live_write && all_removed \
+        && grep -q "^rm -f -v bms-rehearsal-api-" "$FAKE/calls.log"'
+check "the run states its deadline, the next Sunday 03:20" said "it must end by 2026-10-25T03:20"
+
+locks_match() {
+    grep -q '^exec 8> state/pull.lock$' "$TESTS_HERE/../pull-staging.sh" \
+        && grep -q 'BMS_STATE_DIR="$ROOT/state"' "$TESTS_HERE/../pull-staging.sh" \
+        && grep -q '^STATE_DIR="${BMS_STATE_DIR:-$PWD/state}"$' "$TESTS_HERE/../deploy.sh" \
+        && grep -q '^exec 9> "$STATE_DIR/deploy.lock"$' "$TESTS_HERE/../deploy.sh"
+}
+check "the locks it takes are the very files pull-staging.sh and deploy.sh lock (state/ under /opt/bms)" locks_match
 
 same_picker() {
     diff <(sed -n '/^pick_newest_backup() {/,/^}/p' "$TESTS_HERE/../restore-drill.sh" | tail -n +2) \

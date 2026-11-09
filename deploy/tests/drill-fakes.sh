@@ -15,7 +15,8 @@
 #   FAKE_API_EXIT=<n>       the rehearsal API container's exit status;  FAKE_MIGRATE_FAIL=1  migrate fails;
 #   FAKE_ENV_DB_URL=<url>   an extra SPRING_DATASOURCE_URL in the live API's environment;
 #   FAKE_LIVE_READ_FAIL=1   the live read of the run's rows dies part way; FAKE_COUNT_MISMATCH=1  the copy lost rows;
-#   FAKE_API_SIGNAL=<sig>   the commit sends the script that signal; FAKE_API_HANG=<s>  and then runs on for s seconds.
+#   FAKE_API_SIGNAL=<sig>   the commit sends the script that signal; FAKE_API_HANG=<s>  and then runs on for s seconds;
+#   FAKE_ADVANCE_TO=<epoch> the clock jumps to that moment while the commit runs.
 # JUSTIFICATION-A2: the fake host is shared by two test files and is not a tiny helper.
 
 FAKE_EPOCH=1793000000
@@ -64,7 +65,10 @@ fake_stubs() {
     cat > "$bin/date" <<STUB
 #!/usr/bin/env bash
 for a in "\$@"; do [[ "\$a" == -d* ]] && exec $real_date "\$@"; done
-exec $real_date -d "@\${FAKE_EPOCH}" "\$@"
+# A test moves the clock by writing \$FAKE/epoch.
+now="\${FAKE_EPOCH}"
+if [[ -s "\$FAKE/epoch" ]]; then now="\$(cat "\$FAKE/epoch")"; fi
+exec $real_date -d "@\${now}" "\$@"
 STUB
     cat > "$bin/sleep" <<'STUB'
 #!/usr/bin/env bash
@@ -141,6 +145,8 @@ case "$1" in
                         if flock --nonblock "$FAKE_HOST/state/$lock.lock" true; then echo "$lock free"; else echo "$lock held"; fi
                     done > "$FAKE/locks-during-commit"
                     [[ -n "${FAKE_API_SIGNAL:-}" ]] && kill -s "$FAKE_API_SIGNAL" "$PPID"
+                    # A commit that runs past the deadline: the clock moves on while it runs.
+                    [[ -n "${FAKE_ADVANCE_TO:-}" ]] && echo "$FAKE_ADVANCE_TO" > "$FAKE/epoch"
                     # A commit that keeps running: the script must not wait for it before it cleans up.
                     if [[ -n "${FAKE_API_HANG:-}" ]]; then
                         exec > /dev/null 2>&1
@@ -166,7 +172,8 @@ case "$1" in
                     BMS_SCHEDULER_ENABLED=true "JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=50" \
                     BMS_DATA_KEY=live-data-key BMS_TOKEN_SIGNING_JWK=live-jwk BMS_IMPORT_KEY=live-import-key \
                     BMS_SMTP_PASSWORD=live-smtp-secret R2_DOCUMENTS_SECRET_ACCESS_KEY=live-r2-secret \
-                    BMS_RESEND_API_KEY=live-resend-secret BMS_TELEGRAM_BOT_TOKEN=live-telegram-secret
+                    BMS_RESEND_API_KEY=live-resend-secret BMS_TELEGRAM_BOT_TOKEN=live-telegram-secret \
+                    BMS_PAY_SECRET_HASH=live-pay-secret BMS_PUSH_VAPID_KEY=live-vapid-secret
                 if [[ -n "${FAKE_ENV_DB_URL:-}" ]]; then echo "SPRING_DATASOURCE_URL=${FAKE_ENV_DB_URL}"; fi ;;
             *Id*)
                 if [[ "$target" == "$live_db" || -n "${FAKE_SAME_ID:-}" ]]; then echo "live-container-id"; else echo "id-$target"; fi ;;

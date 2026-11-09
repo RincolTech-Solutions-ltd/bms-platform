@@ -158,7 +158,7 @@ rh_require_alone() {
     rh_require_drill_clear
     if pgrep -f 'restore-drill\.sh$' > /dev/null 2>&1 \
         || docker ps --all --format '{{.Names}}' | grep -Eq '^(bms-restore-drill|bms-rehearsal-db)-'; then
-        rh_refuse "a restore drill or another rehearsal is running; try again when it ends"
+        rh_refuse "a restore drill or another rehearsal is running, or one left its containers behind; try again when it ends, or remove what is left (docs/runbooks/restore-from-backup.md section 5.2)"
     fi
 }
 
@@ -181,9 +181,33 @@ rh_require_scratch() {
 
 # rh_bg <command...>: runs it in the background and waits for it, so INT or TERM reaches the trap at once and the clean-up
 # removes the container while it still runs, instead of after it (review of #882, finding 5). Its exit status.
+# It also keeps the run inside its time (review of d98fd0b, must-fix 2): at the deadline it removes the rehearsal's
+# containers and fails, nothing stored, so the weekly drill, which takes no lock, never starts beside it.
+# JUSTIFICATION-A3: the review's must-fix 2 asks for the deadline on every long step, which all run through here.
 rh_bg() {
+    local pid
     "$@" 0<&0 &
-    wait "$!"
+    pid=$!
+    while kill -0 "$pid" 2> /dev/null; do
+        if (( $(date +%s) >= RH_DEADLINE )); then
+            docker rm -f -v "$RH_API" "$RH_MIGRATE" "$RH_RCLONE" "$RH_DB" > /dev/null 2>&1
+            wait "$pid"
+            rh_fail "stopped at its deadline, Sunday 03:20 host time, so the weekly drill never runs beside it; nothing is stored"
+        fi
+        sleep 2 &
+        wait "$!"
+    done
+    wait "$pid"
+}
+
+# The deadline: the next Sunday 03:20 host time, ten minutes before the weekly drill (Uganda keeps no summer time).
+rh_deadline() {
+    local now since_midnight days
+    now="$(date +%s)"
+    since_midnight=$(( 10#$(date +%H) * 3600 + 10#$(date +%M) * 60 + 10#$(date +%S) ))
+    days=$(( (7 - $(date +%u)) % 7 ))
+    (( days > 0 )) || days=7
+    echo $(( now - since_midnight + days * 86400 + 3 * 3600 + 20 * 60 ))
 }
 
 # rh_require_env_target <env file>: the only database a container of the rehearsal is given is the throwaway one.
@@ -243,6 +267,8 @@ rehearse_import() {
     fi
     rh_log "rehearsing run ${RH_RUN} (${status}) of business ${RH_TENANT} on ${BMS_ENVIRONMENT}"
     rh_require_alone
+    RH_DEADLINE="$(rh_deadline)"
+    rh_log "it must end by $(date -d "@${RH_DEADLINE}" +%Y-%m-%dT%H:%M%z), before the weekly drill"
     RH_LIVE_API="$(docker ps --filter label=com.docker.compose.project=bms --filter label=com.docker.compose.service=api \
         --format '{{.Names}}' | head -n 1)"
     [[ -n "$RH_LIVE_API" ]] || rh_fail "no running api container of the bms project: the rehearsal runs the live API's image"
@@ -274,7 +300,7 @@ rehearse_import() {
     RH_NAME="$(rh_rclone lsf --files-only "${prefix}/daily/" 2> /dev/null | rh_pick_newest_backup "$(date -u +%s)")"
     [[ -n "$RH_NAME" ]] || rh_fail "no backup found under ${prefix}/daily/"
     rh_log "newest backup: ${RH_NAME}"
-    rh_rclone copyto "${prefix}/daily/${RH_NAME}" /work/backup.dump.enc > /dev/null 2>&1 \
+    rh_bg rh_rclone copyto "${prefix}/daily/${RH_NAME}" /work/backup.dump.enc > /dev/null 2>&1 \
         || rh_fail "download of ${RH_NAME} failed"
     [[ -s "$RH_TMP/backup.dump.enc" ]] || rh_fail "downloaded file is empty"
     openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_ENCRYPTION_KEY \
@@ -388,7 +414,8 @@ rehearse_import() {
     # start and to read its own sealed columns. The container has no route out either way.
     docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$RH_LIVE_API" \
         | grep -Ev '^(BMS_DB_URL|BMS_APP_USER|BMS_APP_PASSWORD|BMS_SCHEDULER_ENABLED|BMS_IMPORTS_CLEANUP_ENABLED|BMS_DOCUMENTS_ORPHAN_SWEEP_ENABLED|BMS_REHEARSAL_TOKEN|BMS_IMPORT_KEY|JAVA_TOOL_OPTIONS)=|^$' \
-        | sed -E 's/^((R2_[A-Z_]*|[A-Z0-9_]*(PASSWORD|SECRET|_TOKEN|API_KEY|ACCESS_KEY[A-Z_]*|PRIVATE_KEY|WEBHOOK[A-Z_]*))=).*/\1rehearsal-placeholder/' \
+        | awk -F= '$1 != "BMS_DATA_KEY" && $1 ~ /^R2_|SECRET|PASSWORD|PRIVATE|WEBHOOK|ACCESS_KEY|_TOKEN$|_KEY$/ {
+                print $1 "=rehearsal-placeholder"; next } { print }' \
             > "$RH_TMP/api.env" || rh_fail "cannot read the live API's settings"
     printf '%s\n' "BMS_DB_URL=jdbc:postgresql://${RH_DB}:5432/bms" BMS_APP_USER=bms_app "BMS_APP_PASSWORD=${app_pw}" \
         BMS_SCHEDULER_ENABLED=false BMS_IMPORTS_CLEANUP_ENABLED=false BMS_DOCUMENTS_ORPHAN_SWEEP_ENABLED=false \
