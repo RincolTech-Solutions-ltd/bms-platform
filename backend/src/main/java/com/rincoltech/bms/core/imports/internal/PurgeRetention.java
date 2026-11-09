@@ -114,8 +114,12 @@ class PurgeRetention {
         return new Result(warned, purged, failed);
     }
 
-    /** One business, bound to the thread, with no transaction open, at {@code now} on the business clock. */
-    Result runBound(Instant now) {
+    /** One business, bound to the thread, with no transaction open, now on the business clock. */
+    Result runBound() {
+        return runBound(clock.now());
+    }
+
+    private Result runBound(Instant now) {
         requireNoTransaction();
         List<PurgeService.Candidate> candidates = tx.execute(s -> purges.candidates(null));
         int warned = 0;

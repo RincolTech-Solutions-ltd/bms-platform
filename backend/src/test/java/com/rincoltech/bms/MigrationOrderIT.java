@@ -4003,6 +4003,99 @@ class MigrationOrderIT {
         }
     }
 
+    /**
+     * V147 (issue #139) is expand only: a run stored before it keeps its state and has not been warned; a certificate of
+     * deletion is taken only for a purged run, its operator and witness both or neither and never the same person, and is
+     * append-only under forced row-level security, read and inserted by bms_app only; the three guards of a committed
+     * batch keep V102's bms_erasing beside the purge's way through, and the purge is a definer function bms_app may call.
+     * JUSTIFICATION-A3: a new test case; no existing case covers V147.
+     */
+    @Test
+    void importPurgeMigrationKeepsEveryRunAndGuardsTheCertificates() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            String before = VERSIONS.get(VERSIONS.indexOf("147") - 1);
+            assertThat(flyway(postgres, before).migrate().targetSchemaVersion).isEqualTo(before);
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            UUID tenant = UUID.randomUUID();
+            owner.sql("INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v147', 'Test Tenant V147',"
+                            + " '00000000-0000-4000-8000-000000000001')")
+                    .param(tenant)
+                    .update();
+            UUID run = UUID.randomUUID();
+            owner.sql("INSERT INTO import_runs (id, tenant_id, created_by, status, signed_off_at)"
+                            + " VALUES (?, ?, ?, 'signed_off', now())")
+                    .params(run, tenant, UUID.randomUUID())
+                    .update();
+            UUID operator = UUID.randomUUID();
+            owner.sql("INSERT INTO platform_users (id, email, full_name) VALUES (?, 'v147-operator@example.test',"
+                            + " 'Test Operator')")
+                    .param(operator)
+                    .update();
+
+            assertThat(DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD)
+                            .success)
+                    .isTrue();
+
+            assertThat(owner.sql("SELECT status = 'signed_off' AND purge_warned_at IS NULL FROM import_runs"
+                                    + " WHERE id = ?")
+                            .param(run)
+                            .query(Boolean.class)
+                            .single())
+                    .isTrue();
+            String insert = """
+                    INSERT INTO import_deletion_certificates (id, tenant_id, run_id, version, reason, operator_id,
+                                                              witness_id, dump_confirmed, body, document, sha256)
+                    VALUES (?, ?, ?, 1, ?, ?, ?, false, '{}', 'Certificate of deletion', repeat('c', 64))
+                    """;
+            assertThatThrownBy(() -> owner.sql(insert)
+                            .params(UUID.randomUUID(), tenant, run, "signed_off_30_days", null, null)
+                            .update())
+                    .hasMessageContaining("a certificate of deletion is issued only for a purged import run");
+            owner.sql("UPDATE import_runs SET status = 'purged', purged_at = now() WHERE id = ?")
+                    .param(run)
+                    .update();
+            assertThatThrownBy(() -> owner.sql(insert)
+                            .params(UUID.randomUUID(), tenant, run, "operator", operator, null)
+                            .update())
+                    .hasMessageContaining("import_deletion_certificates_people");
+            assertThatThrownBy(() -> owner.sql(insert)
+                            .params(UUID.randomUUID(), tenant, run, "operator", operator, operator)
+                            .update())
+                    .hasMessageContaining("import_deletion_certificates_witness_not_operator");
+            assertThat(owner.sql(insert)
+                            .params(UUID.randomUUID(), tenant, run, "signed_off_30_days", null, null)
+                            .update())
+                    .isEqualTo(1);
+            assertThatThrownBy(() -> owner.sql("DELETE FROM import_deletion_certificates WHERE run_id = ?")
+                            .param(run)
+                            .update())
+                    .hasStackTraceContaining("append-only");
+            assertThat(owner.sql("SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE relname ="
+                                    + " 'import_deletion_certificates'")
+                            .query(Boolean.class)
+                            .single())
+                    .isTrue();
+            assertThat(owner.sql("SELECT has_table_privilege('bms_app', 'import_deletion_certificates', 'SELECT')"
+                                    + " AND has_table_privilege('bms_app', 'import_deletion_certificates', 'INSERT')"
+                                    + " AND NOT has_table_privilege('bms_app', 'import_deletion_certificates', 'UPDATE')"
+                                    + " AND NOT has_table_privilege('bms_app', 'import_deletion_certificates', 'DELETE')"
+                                    + " AND has_function_privilege('bms_app', 'import_purge_run(uuid)', 'EXECUTE')"
+                                    + " AND (SELECT prosecdef FROM pg_proc WHERE proname = 'import_purge_run')")
+                            .query(Boolean.class)
+                            .single())
+                    .isTrue();
+            for (String guard : List.of("reject_mutation", "import_issues_batch_kept", "import_rows_validation_kept")) {
+                String body = owner.sql("SELECT pg_get_functiondef(CAST(? AS regproc))")
+                        .param(guard)
+                        .query(String.class)
+                        .single();
+                assertThat(body).as(guard).contains("bms_erasing(to_jsonb(OLD))", "bms_import_purging(TG_TABLE_NAME");
+            }
+        }
+    }
+
     /** The migrator's settings, optionally stopped at a target version. */
     private static Flyway flyway(PostgreSQLContainer postgres, String target) {
         return flyway(postgres.getJdbcUrl(), target);

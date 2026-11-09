@@ -5,10 +5,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
+import com.rincoltech.bms.core.documents.QuarantineStorage;
 import com.rincoltech.bms.core.imports.BatchWriter;
 import com.rincoltech.bms.core.imports.CommitApproval;
 import com.rincoltech.bms.core.imports.ImportMappings;
 import com.rincoltech.bms.core.imports.ImportMappings.Mapping;
+import com.rincoltech.bms.core.imports.ImportPurges;
+import com.rincoltech.bms.core.imports.ImportPurges.Certificate;
+import com.rincoltech.bms.core.imports.ImportPurges.Purge;
 import com.rincoltech.bms.core.imports.ImportReconciliation;
 import com.rincoltech.bms.core.imports.ImportReconciliation.Check;
 import com.rincoltech.bms.core.imports.ImportReconciliation.Item;
@@ -33,6 +37,7 @@ import com.rincoltech.bms.retail.RetailTestSupport;
 import com.rincoltech.bms.retail.catalogue.CatalogueHistory;
 import com.rincoltech.bms.retail.stock.StockLedger;
 import com.rincoltech.bms.retail.stock.StockLedger.HistoricalMovement;
+import com.rincoltech.bms.testsupport.Api;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -894,6 +899,77 @@ class ImportReconciliationIT extends IntegrationTest {
                         .getStatusCode())
                 .isEqualTo(HttpStatus.CONFLICT);
     }
+
+    @Autowired
+    ImportPurges purges;
+
+    // JUSTIFICATION-A3: issue #139's acceptance test on the real commit, reconciliation and sign-off this class drives.
+    /**
+     * Issue #139 on the real pipeline: the golden run committed, reconciled and signed off in the app, then purged at stage
+     * 9 by a platform operator with a witness and the dump as recorded. No personal value of the fixture is left in any
+     * table that refers to the run ({@link ImportPurgeIT#personalValuesOf}) or in object storage, while the signed
+     * reconciliation, the sign-off, the references of the imported records and the commit's report stay as they were.
+     */
+    @Test
+    void aSignedRunPurgedAtStage9KeepsItsSignedReconciliationAndNoPersonalValueOfTheFixture() throws IOException {
+        UUID run = committedGoldenRun(null);
+        Report r = as(t, () -> reconciliation.latest(run)).orElseThrow();
+        assertThat(signOff(t, run, r, allSections(r), "Fabricated Signer", today(t))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(ImportPurgeIT.personalValuesOf(run, GoldenRun.PERSONAL))
+                .as("the scan finds the fixture's values before the purge")
+                .isNotEmpty();
+        String kept = """
+                SELECT concat_ws(' / ',
+                       (SELECT string_agg(CAST(sha256 AS text) || CAST(report AS text), '|' ORDER BY version)
+                          FROM import_reconciliations WHERE run_id = ?),
+                       (SELECT CAST(reconciliation_id AS text) || CAST(report_sha256 AS text) || signed_name
+                          FROM import_signoffs WHERE run_id = ?),
+                       (SELECT string_agg(source_ref || CAST(target_id AS text), '|' ORDER BY source_ref, target_id)
+                          FROM import_refs WHERE run_id = ?),
+                       (SELECT string_agg(coalesce(CAST(report AS text), ''), '|' ORDER BY seq)
+                          FROM import_batches WHERE run_id = ?))
+                """;
+        String before = TestDatabase.owner()
+                .sql(kept)
+                .params(run, run, run, run)
+                .query(String.class)
+                .single();
+        assertThat(before).contains(r.sha256(), "Fabricated Signer");
+        String operatorEmail = Api.email("purge-operator");
+        String witnessEmail = Api.email("purge-witness");
+        Api.platformUser(operatorEmail);
+        Api.platformUser(witnessEmail);
+
+        Certificate certificate = as(
+                t, () -> purges.purge(run, new Purge(operatorEmail, witnessEmail, "pre-import-fabricated.dump", SHA)));
+
+        assertThat(status(run)).isEqualTo("purged");
+        assertThat(ImportPurgeIT.personalValuesOf(run, GoldenRun.PERSONAL))
+                .as("columns still holding a personal value")
+                .isEmpty();
+        assertThat(as(t, () -> {
+                    try (var listed = quarantine.list()) {
+                        return listed.filter(o -> o.key().contains("/" + run + "/"))
+                                .count();
+                    }
+                }))
+                .as("objects of the run left in storage")
+                .isZero();
+        assertThat(TestDatabase.owner()
+                        .sql(kept)
+                        .params(run, run, run, run)
+                        .query(String.class)
+                        .single())
+                .as("the signed reconciliation, the sign-off, the references and the reports are kept")
+                .isEqualTo(before);
+        assertThat(certificate.dumpConfirmed()).isTrue();
+        assertThat(certificate.document()).contains("fab-buyers.csv", "pre-import-fabricated.dump, SHA-256 " + SHA);
+    }
+
+    @Autowired
+    QuarantineStorage quarantine;
 
     static String code(ResponseEntity<JsonNode> response) {
         return response.getBody() == null || response.getBody().get("code") == null
