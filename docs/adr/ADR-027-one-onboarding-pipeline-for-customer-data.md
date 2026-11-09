@@ -83,6 +83,21 @@ use it); the batch transaction timeout against real volumes (the big file test s
 mappings drifting from the template version a run started with; operators bypassing the app with
 host-side files after self service exists.
 
+## Note (10 November 2026, issue #140): metrics and the defect log
+
+The metrics of spec section 8 are computed when asked from what the run stored, never from logs, by one database function
+(`import_run_metrics`) that the business's route and the platform report share, so the two never disagree. It reads only
+columns the purge keeps, so a run's figures survive its purge. What was not stored before, the time each pipeline step
+took, is now written where the step ends (V148). The platform report reads across businesses through one definer function
+that refuses a call bound to a business and names each business by its slug only.
+
+The defect log is the one new place an operator types free text against a run, so the one rule for typed text of the
+note of 9 November covers it: `import_defects.description` joins the hashed list (hashed when the run is purged, or as a
+defect of a purged run closes, so a purged run keeps no description of a closed defect), and before that the application
+refuses a description that names a personal value of the run's staged rows, an email address, an ID number, a phone number
+or seven digits in a row. The code it should have had (`expected_code`) and the fix's reference (`fix_ref`) are held to
+their forms by CHECKs and stay readable: they are what each defect teaches.
+
 ## Note (9 November 2026, issue #139): decision 8 as built
 
 The deletion is a purge of the run, not of its records: the staged rows and issues stay without their values, so every
