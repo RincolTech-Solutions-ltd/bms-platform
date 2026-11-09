@@ -14,7 +14,8 @@ import org.springframework.context.ConfigurableApplicationContext;
  * {@code java -jar bms-api.jar stage-import-run --tenant <slug> --dir <path>} (issue #138, review of #882): stages, on
  * staging, a run of the import screens marked fabricated from an {@code import-retail} export directory of fabricated data,
  * reviewed, dry run and ready, and prints its id, so the rehearsal ({@code deploy/restore-drill.sh --rehearse-import}) has
- * a run to rehearse before the operator screens (#141) can upload one. Refused in production. Starts the application
+ * a run to rehearse before the operator screens (#141) can upload one. Only on staging ({@code BMS_ENVIRONMENT=staging})
+ * and only with the repository's fabricated {@code fixtures/retail/import-sample/}. Starts the application
  * without the web server and the job scheduler, connected as {@code bms_app} like the API.
  *
  * <p>Exit status: 0 staged, 1 refused or failed (the reason's code only), 2 for a usage error.
@@ -59,8 +60,9 @@ public final class StageImportRunCommand {
             System.err.println(USAGE);
             return 2;
         }
-        if ("production".equalsIgnoreCase(System.getenv("BMS_ENVIRONMENT"))) {
-            System.err.println("stage-import-run refused: fabricated data is never written in production");
+        // An allowlist (review of #882): an unset, blank or misspelt environment is refused like production.
+        if (!"staging".equals(System.getenv("BMS_ENVIRONMENT"))) {
+            System.err.println("stage-import-run refused: only on staging (BMS_ENVIRONMENT=staging)");
             return 1;
         }
         SpringApplication app = new SpringApplication(application);

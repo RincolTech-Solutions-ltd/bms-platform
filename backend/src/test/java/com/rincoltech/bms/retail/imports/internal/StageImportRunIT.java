@@ -15,7 +15,11 @@ import com.rincoltech.bms.core.imports.ImportValidation;
 import com.rincoltech.bms.core.jobs.TenantJobs;
 import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.TenantContext;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -30,16 +34,14 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * The fabricated run of the rehearsal's acceptance check (issue #138, review of #882), on real PostgreSQL as bms_app:
  * {@code stage-import-run} stages the fabricated {@code fixtures/retail/import-sample/} as a run of the import screens,
  * marked fabricated, reviewed, dry run and ready; the rehearsal then commits it in a database holding the token, and its
- * report says what the staged dry run said. Refused in production and for a directory with no export file.
+ * report says what the staged dry run said. Refused, with no run opened, anywhere but staging (an unset, blank or misspelt
+ * environment included) and for any export that is not the fabricated sample byte for byte (review of #882).
  */
 class StageImportRunIT extends IntegrationTest {
 
     static final String TOKEN = "beadfeed".repeat(6);
 
     static final String BACKUP = "bms-staging-20261024T011500Z.dump.enc";
-
-    @Autowired
-    FabricatedRunStager stager;
 
     @Autowired
     ImportRuns runs;
@@ -81,9 +83,14 @@ class StageImportRunIT extends IntegrationTest {
         return TenantContext.callAs(t.tenantId(), work);
     }
 
+    /** The stager as it is built on a host whose BMS_ENVIRONMENT is the given value. */
+    FabricatedRunStager on(String environment) {
+        return new FabricatedRunStager(tenants, runs, mappings, uploads, validation, review, clock, environment);
+    }
+
     @Test
     void aStagedFabricatedRunIsReadyAndTheRehearsalCommitsIt() {
-        UUID run = stager.stage(t.slug(), RetailImportIT.SAMPLE);
+        UUID run = on("staging").stage(t.slug(), RetailImportIT.SAMPLE);
 
         ImportRuns.Run staged = as(() -> runs.get(run));
         assertThat(staged.status()).isEqualTo("ready");
@@ -104,14 +111,40 @@ class StageImportRunIT extends IntegrationTest {
     }
 
     @Test
-    void productionAndADirectoryWithoutAnExportFileAreRefused(@TempDir Path empty) {
-        FabricatedRunStager production =
-                new FabricatedRunStager(tenants, runs, mappings, uploads, validation, review, clock, "production");
-        assertThatThrownBy(() -> production.stage(t.slug(), RetailImportIT.SAMPLE))
+    void anythingButStagingIsRefusedAnUnsetOrBlankEnvironmentToo() {
+        for (String environment : List.of("production", "prod", "", " ", "Staging", "staging2")) {
+            assertThatThrownBy(() -> on(environment).stage(t.slug(), RetailImportIT.SAMPLE))
+                    .as("BMS_ENVIRONMENT=%s", environment)
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("only on staging");
+        }
+        assertThatThrownBy(() -> on(null).stage(t.slug(), RetailImportIT.SAMPLE))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("production");
-        assertThatThrownBy(() -> stager.stage(t.slug(), empty))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("no export file");
+                .hasMessageContaining("only on staging");
+        assertThat(openRuns()).isZero();
+    }
+
+    @Test
+    void anExportThatIsNotTheFabricatedSampleIsRefusedEvenOnStaging(@TempDir Path copy) throws IOException {
+        // An empty directory, the sample with one file missing, and the sample with one row changed.
+        assertThatThrownBy(() -> on("staging").stage(t.slug(), copy)).hasMessageContaining("only the fabricated");
+        for (String set : FabricatedRunStager.FIXTURE.keySet()) {
+            Files.copy(RetailImportIT.SAMPLE.resolve(set + ".jsonl"), copy.resolve(set + ".jsonl"));
+        }
+        Files.delete(copy.resolve("usage.jsonl"));
+        assertThatThrownBy(() -> on("staging").stage(t.slug(), copy)).hasMessageContaining("only the fabricated");
+        Files.copy(RetailImportIT.SAMPLE.resolve("usage.jsonl"), copy.resolve("usage.jsonl"));
+        Files.writeString(copy.resolve("products.jsonl"), "\n", StandardOpenOption.APPEND);
+        assertThatThrownBy(() -> on("staging").stage(t.slug(), copy)).hasMessageContaining("only the fabricated");
+        assertThat(openRuns()).isZero();
+    }
+
+    /** The business's runs: none is opened by a refused staging. */
+    long openRuns() {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM import_runs WHERE tenant_id = ?")
+                .param(t.tenantId())
+                .query(Long.class)
+                .single();
     }
 }

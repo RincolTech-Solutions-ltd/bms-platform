@@ -678,7 +678,7 @@ class ImportRunService implements ImportRuns {
                 && Boolean.TRUE.equals(jdbc.sql("SELECT to_regclass('public.bms_rehearsal_marker') IS NOT NULL")
                         .query(Boolean.class)
                         .single())
-                && jdbc.sql("SELECT count(*) FROM bms_rehearsal_marker WHERE token = ?")
+                && jdbc.sql("SELECT count(*) FROM public.bms_rehearsal_marker WHERE token = ?")
                                 .param(token)
                                 .query(Long.class)
                                 .single()
