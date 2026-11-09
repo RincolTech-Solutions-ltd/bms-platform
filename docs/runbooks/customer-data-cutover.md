@@ -208,10 +208,13 @@ Record every decision, its time and who made it in the cutover record.
       deleted and nothing else changed: run the same command again until it prints the certificate.
 
       Only a `signed_off` run is purged this way; a run without a dump takes no `--dump-*`. Exit 0
-      prints the certificate of deletion and its `sha256`; exit 3 names the refusal
-      (`run_not_signed_off`, `pre_import_dump_differs`, `witness_is_operator`,
-      `platform_operator_unknown`, `storage_unavailable`) and nothing was purged. Running it again
-      prints the same certificate.
+      prints the certificate of deletion and its `sha256`. Exit 3 with `run_not_signed_off`,
+      `pre_import_dump_differs`, `pre_import_dump_confirmation_required`, `witness_is_operator` or
+      `platform_operator_unknown` is a refusal before anything is deleted: fix the command. Exit 3
+      with `storage_unavailable`, `run_changed`, `run_committing` or `purge-import failed` comes after
+      the files are being deleted: some files may already be gone while the run, its key and its
+      rows are unchanged, so run the same command again until it prints the certificate. Running it
+      after a purge prints the same certificate.
 - [ ] Any copy on the operator's own device deleted, and the channel's copy removed.
 - [ ] Certificate of deletion (spec section 6.4): the printed text, with files, sizes and SHA-256,
       staging row counts, the dump's name and hash, time, operator and witness, what is retained.
@@ -222,7 +225,7 @@ Record every decision, its time and who made it in the cutover record.
       warning" notice reaches the chat and the Owner's email. Its certificate says the dump
       was not confirmed: delete the dump, then run `purge-import` as above with the dump, which
       issues the certificate's next version with your confirmation and the witness. A run never
-      signed off is purged 90 days after its last activity, after the same warning; working on it
+      signed off is purged 90 days after its last activity, with the same warning; working on it
       again starts that clock again.
 
 ### 6.3 Hypercare (stage 10), two weeks

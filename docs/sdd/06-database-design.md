@@ -1465,7 +1465,7 @@ expand only:
 - **`import_purge_run(run uuid)`** (definer, V147, #139; `bms_app` may execute): the purge of one run of the business bound
   to the transaction, every statement naming the business: the run `purged` with `purged_at = now()` and its
   `data_key_wrapped` cleared; its `import_rows.raw` `{}`, `normalised` NULL and `source_ref` hashed; its
-  `import_issues.original_value` NULL; its resolutions' `before_value`, `after_value` and `row_key` hashed (SHA-256 with a
+  `import_issues.original_value` NULL; its resolutions' `before_value`, `after_value`, `row_key` and `note` hashed (SHA-256 with a
   salt kept nowhere). Refuses a run already purged or committing, and one whose batches still name a stored file (the
   application deletes them first). Returns the counts.
 - **`import_runs_purged_by_purge`** (V147, #139): a `BEFORE INSERT OR UPDATE OF status` trigger on `import_runs`; a run

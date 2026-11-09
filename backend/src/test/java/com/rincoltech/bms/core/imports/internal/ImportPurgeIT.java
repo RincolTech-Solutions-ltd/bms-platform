@@ -190,7 +190,9 @@ class ImportPurgeIT extends IntegrationTest {
                 .filter(i -> i.line() == 5 && "TYPE_INVALID".equals(i.code()) && "phone".equals(i.field()))
                 .findFirst()
                 .orElseThrow();
-        Resolution edit = new Resolution("edit_value", phone.version(), TYPED_PHONE, null, null, null);
+        // The note carries personal values on purpose, as an operator's free text might (review of #886, MF1).
+        String note = "Fabricated Buyer Gamma confirmed " + TYPED_PHONE;
+        Resolution edit = new Resolution("edit_value", phone.version(), TYPED_PHONE, null, null, note);
         as(f, () -> review.resolve(phone.id(), edit, operator));
         return run;
     }
@@ -264,7 +266,7 @@ class ImportPurgeIT extends IntegrationTest {
         // And the rows that name the run without a foreign key (review of #886, S4): the audit rows of the run, its
         // batches, issues and resolutions, and the outbox rows of its warning.
         for (String value : values) {
-            if (count(AUDIT_OF_RUN, run, run, run, run, value) > 0) {
+            if (count(AUDIT_OF_RUN, run, run, run, run, run, value) > 0) {
                 found.add("audit_log.data");
                 break;
             }
@@ -284,7 +286,9 @@ class ImportPurgeIT extends IntegrationTest {
                                  UNION SELECT id FROM import_batches WHERE run_id = ?
                                  UNION SELECT i.id FROM import_issues i JOIN import_batches b ON b.id = i.batch_id
                                         WHERE b.run_id = ?
-                                 UNION SELECT id FROM import_issue_resolutions WHERE run_id = ?)
+                                 UNION SELECT id FROM import_issue_resolutions WHERE run_id = ?
+                                 UNION SELECT w.id FROM import_rows w JOIN import_batches b ON b.id = w.batch_id
+                                        WHERE b.run_id = ?)
                AND strpos(lower(CAST(data AS text)), lower(?)) > 0
             """;
 
@@ -341,7 +345,8 @@ class ImportPurgeIT extends IntegrationTest {
                         "import_rows.raw",
                         "import_rows.normalised",
                         "import_issues.original_value",
-                        "import_issue_resolutions.after_value");
+                        "import_issue_resolutions.after_value",
+                        "import_issue_resolutions.note");
         assertThat(objectsOf(t, run)).hasSize(GoldenRun.FILES.size());
         long rows = count("SELECT count(*)" + ROWS_OF_RUN, run);
         long issues = count("SELECT count(*)" + ISSUES_OF_RUN, run);
@@ -366,7 +371,8 @@ class ImportPurgeIT extends IntegrationTest {
                 .isEqualTo(issues);
         String hashed = "SELECT count(*) FROM import_issue_resolutions WHERE run_id = ?"
                 + " AND row_key ~ '^sha256:[0-9a-f]{64}$'"
-                + " AND (after_value IS NULL OR after_value ->> 'sha256' ~ '^[0-9a-f]{64}$')";
+                + " AND (after_value IS NULL OR after_value ->> 'sha256' ~ '^[0-9a-f]{64}$')"
+                + " AND (note IS NULL OR note ~ '^sha256:[0-9a-f]{64}$')";
         assertThat(count(hashed, run)).isEqualTo(resolutions);
         // The certificate: on the run, its hash its text's, the files with sizes and hashes, the counts, the dump as
         // confirmed, the operator and the witness, and what is kept.
@@ -631,6 +637,7 @@ class ImportPurgeIT extends IntegrationTest {
         refused(run, neighbour, hashRun, appendOnly);
         // Its own run, but a column that is not personal, a value that is not a hash, or a delete: refused.
         String resolutionsOfRun = " WHERE run_id = " + quote(run);
+        refused(run, run, "UPDATE import_issue_resolutions SET field = NULL" + resolutionsOfRun, appendOnly);
         refused(run, run, "UPDATE import_issue_resolutions SET note = 'x'" + resolutionsOfRun, appendOnly);
         refused(run, run, "UPDATE import_issue_resolutions SET row_key = 'x'" + resolutionsOfRun, appendOnly);
         refused(run, run, "DELETE FROM import_issues" + inBatches(run), issuesKept);

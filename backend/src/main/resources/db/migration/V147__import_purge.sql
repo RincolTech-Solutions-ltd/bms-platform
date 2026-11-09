@@ -17,8 +17,8 @@
 -- The purge itself is `import_purge_run(run)`, a definer function called in the business's transaction (app.tenant_id
 -- bound, every statement names the business): the run becomes `purged` with `purged_at = now()` and its wrapped data key
 -- cleared; its staged rows lose their cells and typed values (`raw` becomes {}, `normalised` NULL) and their reference
--- becomes its hash; its issues lose their original cell values; its resolutions' values before and after and their row key
--- become their hash. The hash is SHA-256 over a salt made for the purge and kept nowhere, so equal values keep equal
+-- becomes its hash; its issues lose their original cell values; its resolutions' values before and after, their row key
+-- and the operator's note become their hash. The hash is SHA-256 over a salt made for the purge and kept nowhere, so equal values keep equal
 -- hashes within the run and nobody can find a phone number again by hashing every number. The quarantined files are removed
 -- from object storage by the application before it calls the function.
 --
@@ -39,7 +39,12 @@
 -- included, except one whose removal has begun.
 --
 -- Personal data: the certificate's text names the platform operator and the witness of a stage 9 purge (the team, never a
--- customer's person), the files by the names the customer gave them, and counts and hashes; never a value of a row.
+-- customer's person), the files by the names the customer gave them, and counts and hashes; never a value of a row. The
+-- other free text the run's tables keep is not a customer's personal value by construction: an issue's message (built
+-- from the catalogue without a value, the catalogue test of #130), a batch's failure reason (a limit, a line or a column
+-- number), the trading override's reason (an operator's words about the business, V127) and a policy decision's
+-- confirmation reference (the question list or a document, ImportRuns.recordPolicy); the name a tenant administrator typed on the sign-off
+-- stays with the signed reconciliation and goes with the removal of the business (V144).
 --
 -- Locks, said plainly. The new column takes ACCESS EXCLUSIVE on `import_runs` for milliseconds (no default, no rewrite);
 -- the new table takes SHARE ROW EXCLUSIVE on `tenants`, `import_runs` and `platform_users` (its foreign keys) until the
@@ -141,11 +146,12 @@ BEGIN
         SELECT b.run_id INTO v_row_run FROM import_batches b
          WHERE b.id = (p_old ->> 'batch_id')::uuid AND b.tenant_id = (p_old ->> 'tenant_id')::uuid;
     ELSIF p_table = 'import_issue_resolutions' THEN
-        IF (p_new - ARRAY['before_value', 'after_value', 'row_key'])
-               <> (p_old - ARRAY['before_value', 'after_value', 'row_key'])
+        IF (p_new - ARRAY['before_value', 'after_value', 'row_key', 'note'])
+               <> (p_old - ARRAY['before_value', 'after_value', 'row_key', 'note'])
            OR NOT bms_import_purged_value(p_new -> 'before_value')
            OR NOT bms_import_purged_value(p_new -> 'after_value')
-           OR NOT coalesce(p_new ->> 'row_key', '') ~ '^sha256:[0-9a-f]{64}$' THEN
+           OR NOT coalesce(p_new ->> 'row_key', '') ~ '^sha256:[0-9a-f]{64}$'
+           OR NOT coalesce(p_new ->> 'note', 'sha256:' || repeat('0', 64)) ~ '^sha256:[0-9a-f]{64}$' THEN
             RETURN false;
         END IF;
         v_row_run := (p_old ->> 'run_id')::uuid;
@@ -220,7 +226,10 @@ BEGIN
            after_value = CASE WHEN x.after_value IS NULL THEN NULL
                               ELSE jsonb_build_object('sha256', encode(sha256(v_salt
                                        || convert_to(x.after_value::text, 'UTF8')), 'hex')) END,
-           row_key = 'sha256:' || encode(sha256(v_salt || convert_to(x.row_key, 'UTF8')), 'hex')
+           row_key = 'sha256:' || encode(sha256(v_salt || convert_to(x.row_key, 'UTF8')), 'hex'),
+           -- The operator's free text can name a person or hold a phone number (review of #886, MF1).
+           note = CASE WHEN x.note IS NULL THEN NULL
+                       ELSE 'sha256:' || encode(sha256(v_salt || convert_to(x.note, 'UTF8')), 'hex') END
      WHERE x.tenant_id = v_tenant AND x.run_id = p_run;
     GET DIAGNOSTICS v_resolutions = ROW_COUNT;
 

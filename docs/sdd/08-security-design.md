@@ -1199,7 +1199,7 @@ Detailed requirements are NFR-DP-01 to NFR-DP-08 in chapter 4. Design consequenc
   sign-off, or 90 days after the last activity of a run never signed off; the operators are warned a week before, and if
   that warning never went the purge still happens on the deadline and tells the operators and the Owner. The purge
   deletes the encrypted files and the run's data key, clears the cells and typed values of the staged rows and the issues'
-  original values, and replaces the values and row keys of the review's resolutions by a hash salted with a value kept
+  original values, and replaces the values, row keys and notes of the review's resolutions by a hash salted with a value kept
   nowhere (so a phone number cannot be found again by hashing every number); counts, file hashes, reports and the signed
   reconciliation stay. The append-only guards of a committed import let that change through only inside the definer
   function `import_purge_run`, for the run it purges, in its own transaction, and nothing else; a business's removal keeps

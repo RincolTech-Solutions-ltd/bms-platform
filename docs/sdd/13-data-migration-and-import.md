@@ -1609,8 +1609,8 @@ section 4.1; coordinated with #110, which builds no second framework).**
   `quarantine_deleted_at` stamped), its wrapped data key (`import_runs.data_key_wrapped`, so any copy of a file left
   anywhere no longer opens), the cells and typed values of its staged rows (`import_rows.raw` becomes `{}`, `normalised`
   NULL, `source_ref` its hash), the original cell values of its issues (`import_issues.original_value` NULL), and the values
-  before and after and the row key of its resolutions (`import_issue_resolutions.before_value`, `after_value` and
-  `row_key`), which become their hash: SHA-256 over a salt made for the purge and kept nowhere, so equal values keep equal
+  before and after, the row key and the operator's note of its resolutions (`import_issue_resolutions.before_value`,
+  `after_value`, `row_key` and `note`), which become their hash: SHA-256 over a salt made for the purge and kept nowhere, so equal values keep equal
   hashes within the run and nobody can find a phone number again by hashing every number. The run becomes `purged` with
   `purged_at`; a run is never purged twice.
 - **What it keeps.** The run, its batches with the file names, sizes and SHA-256, its staged rows and issues as records
@@ -1620,6 +1620,11 @@ section 4.1; coordinated with #110, which builds no second framework).**
   content hash is the first 32 hex digits of the SHA-256 of the whole mapped row's canonical JSON (`ImportRefs.contentHash`),
   which can confirm a guess of an entire row but reveals no value, and
   is what tells a later run that a row changed since its import), and the audit trail. The records the import created are the business's own and are not touched.
+  The other free text kept is not a customer's personal value by construction: an issue's message (built from the
+  catalogue without a value, the catalogue test of #130), a batch's failure reason (a limit, a line or a column number),
+  the trading override's reason (an operator's words about the business, V127) and a policy decision's confirmation
+  reference (the question list or a document). The name the tenant administrator typed on the sign-off stays with the
+  signed reconciliation and goes with the removal of the business (V144).
 - **The way past the guards** of a committed batch (Lead ruling on #867): the purge is one definer function,
   `import_purge_run(run)`, called in the business's transaction, which refuses while a file of the run is still in
   storage. `bms_import_purging` lets an UPDATE of a staged row, an issue or a resolution through

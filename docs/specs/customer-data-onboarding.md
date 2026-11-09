@@ -528,7 +528,7 @@ daily job `core.imports.retention` purges on day 29 after the sign-off and 90 da
 signed off (activity after the warning starts the clock again; a run `committing` is never purged), in every business,
 suspended ones too. The operators' chat is warned a week before; if that warning never went, the deadline still wins and
 the purge tells the operators and the Owner in its own transaction (Lead ruling on #886). The staged rows and issues stay as records without values, so every count stays; the
-resolutions' values and row keys become a hash salted with a value kept nowhere. The certificate is stored append-only
+resolutions' values, row keys and notes become a hash salted with a value kept nowhere. The certificate is stored append-only
 (`import_deletion_certificates`) with its text and that text's SHA-256; a scheduled purge cannot reach the host, so its
 certificate says the dump is not confirmed until the operator confirms it with `purge-import`, which issues the next
 version. The operator sends the printed text to the customer; a download from the screens comes with #141.

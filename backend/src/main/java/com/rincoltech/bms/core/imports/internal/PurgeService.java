@@ -60,7 +60,10 @@ class PurgeService implements ImportPurges {
     /** Spec section 6.4: a run never signed off is purged this long after its last activity. */
     static final Duration AFTER_LAST_ACTIVITY = Duration.ofDays(90);
 
-    /** The operator is warned this long before the scheduled purge, which waits for the warning to be this old. */
+    /**
+     * The operators are warned this long before the scheduled purge; a warning sent later than that does not count as
+     * notice, and the purge then sends its purged-without-warning notice too.
+     */
     static final Duration WARNING = Duration.ofDays(7);
 
     /**
@@ -136,6 +139,14 @@ class PurgeService implements ImportPurges {
             return warnedAt != null && !warnedAt.isBefore(since);
         }
 
+        /**
+         * Whether the warning gave its full week: sent since the clock started and at least a week before the deadline.
+         * A purge without one sends the purged-without-warning notice (review of #886, nice-to-have 5).
+         */
+        boolean warnedInTime() {
+            return warned() && !warnedAt.isAfter(dueAt().minus(WARNING));
+        }
+
         /** The warning is due from a week before the deadline, once per start of the clock. */
         boolean warnable(Instant now) {
             return !warned() && !now.isBefore(dueAt().minus(WARNING));
@@ -157,10 +168,13 @@ class PurgeService implements ImportPurges {
                 .params(runId == null ? List.of() : List.of(runId))
                 .query((rs, n) -> {
                     boolean signed = RunStates.SIGNED_OFF.equals(rs.getString("status"));
+                    Instant signedAt = instant(rs, "signed_off_at");
+                    // A signed run always has its sign-off's moment; if one ever did not, its last activity stands in,
+                    // so one odd row never stops the business's job (review of #886, nice-to-have 3).
                     return new Candidate(
                             rs.getObject("id", UUID.class),
                             signed ? SIGNED_OFF_30_DAYS : INACTIVE_90_DAYS,
-                            instant(rs, signed ? "signed_off_at" : "last_activity"),
+                            signed && signedAt != null ? signedAt : instant(rs, "last_activity"),
                             instant(rs, "purge_warned_at"));
                 })
                 .list();
@@ -263,7 +277,7 @@ class PurgeService implements ImportPurges {
                 return null;
             }
             reason = candidate.reason();
-            unwarned = !candidate.warned();
+            unwarned = !candidate.warnedInTime();
         }
         List<String> keys = jdbc.sql("""
                         SELECT object_key FROM import_batches
@@ -285,7 +299,8 @@ class PurgeService implements ImportPurges {
                     HttpStatus.CONFLICT,
                     "run_committing",
                     "Import being written",
-                    "This import started its commit while it was being purged; nothing was purged.");
+                    "This import started its commit while it was being purged. Some of its files may already be"
+                            + " deleted; its rows and key are unchanged.");
         }
         Set<String> deleted = new HashSet<>(plan.keys());
         List<String> held = jdbc.sql("""
@@ -297,7 +312,8 @@ class PurgeService implements ImportPurges {
                     HttpStatus.CONFLICT,
                     "run_changed",
                     "Import changed",
-                    "A file was added to this import while it was being purged; nothing was purged. Purge it again.");
+                    "A file was added to this import while it was being purged. Some of its files may already be"
+                            + " deleted; nothing else changed. Run the purge again to finish it.");
         }
         jdbc.sql("""
                         UPDATE import_batches SET object_key = NULL, quarantine_deleted_at = coalesce(quarantine_deleted_at, now())
@@ -329,6 +345,10 @@ class PurgeService implements ImportPurges {
         after.put("dump_confirmed", plan.dumpConfirmed());
         after.put("certificate_sha256", certificate.sha256());
         after.put("warned", !plan.unwarned());
+        if (plan.unwarned()) {
+            // Whether the business heard too: a business with no active Owner email gets the operators' notice only.
+            after.put("owner_notified", notifyPurgedWithoutWarning(runId, plan.reason(), at));
+        }
         if (signers != null) {
             // The names on the certificate are the operator's word; the audit keeps where the command ran (review S5).
             after.put("witness_id", signers.witness().id().toString());
@@ -339,9 +359,6 @@ class PurgeService implements ImportPurges {
                         "core.import_run.purged", "import_run", runId, null, Map.of("status", run.status()), after),
                 signers == null ? null : signers.operator().id(),
                 signers == null ? "system" : "platform");
-        if (plan.unwarned()) {
-            notifyPurgedWithoutWarning(runId, plan.reason(), at);
-        }
         log.info(
                 "import run {} purged ({}): files {}, rows {}, issues {}, resolutions {}",
                 runId,
@@ -357,9 +374,9 @@ class PurgeService implements ImportPurges {
     /**
      * A scheduled purge whose warning never went (the job or the outbox was down): the operators' chat and the business's
      * Owner hear of it in the purge's own transaction, so the notice exists exactly when the purge does (Lead ruling on
-     * #886, M4). Ids, the business's name and the day only; never a value of a row.
+     * #886, M4). Ids, the business's name and the day only; never a value of a row. Returns whether the Owner was emailed.
      */
-    private void notifyPurgedWithoutWarning(UUID runId, String reason, Instant at) {
+    private boolean notifyPurgedWithoutWarning(UUID runId, String reason, Instant at) {
         CurrentTenant.Profile business = tenant.profile();
         String day = LocalDate.ofInstant(at, zone(business)).toString();
         boolean signed = SIGNED_OFF_30_DAYS.equals(reason);
@@ -374,28 +391,29 @@ class PurgeService implements ImportPurges {
                 PURGED_WITHOUT_WARNING,
                 operators,
                 PURGED_WITHOUT_WARNING + ":" + runId + ":telegram"));
-        jdbc.sql("""
+        Optional<Map.Entry<String, String>> owner = jdbc.sql("""
                         SELECT full_name, email FROM users
-                         WHERE is_owner AND status = 'active' AND email IS NOT NULL
+                         WHERE tenant_id = current_setting('app.tenant_id')::uuid
+                           AND is_owner AND status = 'active' AND email IS NOT NULL
                          ORDER BY id LIMIT 1
                         """)
                 .query((rs, n) -> Map.entry(rs.getString("full_name"), rs.getString("email")))
-                .optional()
-                .ifPresent(owner -> {
-                    Map<String, String> params = new LinkedHashMap<>();
-                    params.put("owner_name", owner.getKey());
-                    params.put("business_name", business.name());
-                    params.put("day", day);
-                    params.put(
-                            "reason",
-                            signed ? "30 days after it was signed off" : "90 days after it was last worked on");
-                    outbox.enqueue(new Outbox.Message(
-                            Outbox.EMAIL,
-                            owner.getValue(),
-                            PURGED_WITHOUT_WARNING,
-                            params,
-                            PURGED_WITHOUT_WARNING + ":" + runId + ":email"));
-                });
+                .optional();
+        if (owner.isEmpty()) {
+            return false;
+        }
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("owner_name", owner.get().getKey());
+        params.put("business_name", business.name());
+        params.put("day", day);
+        params.put("reason", signed ? "30 days after it was signed off" : "90 days after it was last worked on");
+        outbox.enqueue(new Outbox.Message(
+                Outbox.EMAIL,
+                owner.get().getValue(),
+                PURGED_WITHOUT_WARNING,
+                params,
+                PURGED_WITHOUT_WARNING + ":" + runId + ":email"));
+        return true;
     }
 
     /** The next version of a scheduled purge's certificate, with the dump the operator confirmed and their signatures. */
@@ -674,7 +692,7 @@ class PurgeService implements ImportPurges {
         out.append("- The original cell values of ")
                 .append(body.get("issue_values_deleted"))
                 .append(" issues.\n");
-        out.append("- The values before and after and the row key of ")
+        out.append("- The values before and after, the row key and the note of ")
                 .append(body.get("resolutions_hashed"))
                 .append(" resolutions, replaced by their hash (SHA-256 with a salt kept nowhere).\n");
         Map<String, Object> dump = (Map<String, Object>) body.get("pre_import_dump");

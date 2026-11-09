@@ -229,7 +229,10 @@ class ImportRetentionIT extends IntegrationTest {
     }
 
     // JUSTIFICATION-A3: review of #886, M3: a new test case for a suspended business beside the one it replaces.
-    /** A suspended business is listed and purged on its deadline like an active one; once purged it is not listed. */
+    /**
+     * A suspended business is listed and purged on its deadline like an active one, by the job's own entry point
+     * ({@link PurgeRetention#runAll}); once purged it is not listed.
+     */
     @Test
     void aSuspendedBusinessIsPurgedOnItsDeadline() {
         UUID run = runAt(other, "signed_off", DAY0);
@@ -238,8 +241,15 @@ class ImportRetentionIT extends IntegrationTest {
                 .param(other.tenantId())
                 .update();
         assertThat(retentionTenants()).contains(other.tenantId());
-        assertThat(at(other, days(29))).isEqualTo(new PurgeRetention.Result(0, 1, 0));
+        // The job's own entry point, as db-scheduler calls it: it lists the businesses and binds each through
+        // TenantJobs.callAs (review of #886, MF2). Other businesses of the shared test database may be purged too; none
+        // may fail, or runAll throws.
+        clock.set(days(29));
+        PurgeRetention.Result all = retention.runAll();
+        assertThat(all.failed()).isZero();
+        assertThat(all.purged()).isGreaterThanOrEqualTo(1);
         assertThat(status(run)).isEqualTo("purged");
+        assertThat(notices(run, "telegram")).as("its warning never went").isEqualTo(1);
         assertThat(retentionTenants()).as("nothing left to purge there").doesNotContain(other.tenantId());
     }
 

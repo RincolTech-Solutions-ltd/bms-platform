@@ -11,14 +11,15 @@ import java.util.UUID;
  *
  * <p>The purge deletes the run's quarantined files from object storage and its wrapped data key, the cells and typed values
  * of its staged rows (each row's reference becomes its hash), the original cell values of its issues, and the values before
- * and after of its resolutions with their row keys, which become their hash. It keeps the run, its batches with their file
+ * and after of its resolutions with their row keys and notes, which become their hash. It keeps the run, its batches with their file
  * names, sizes and SHA-256, its issues without values, its resolutions with hashes, the counts, the reports, the signed
  * reconciliation, the rehearsals and the references of the records it imported. The run becomes {@code purged}; the
  * certificate of deletion is stored on it; both are audited ({@code core.import_run.purged}). A run already purged is
  * never purged again: the call answers its certificate.
  *
- * <p>The scheduled purge (job {@code core.imports.retention}) does the same 30 days after a sign-off and 90 days after the
- * last activity of a run never signed off, warning the operator first.
+ * <p>The scheduled purge (job {@code core.imports.retention}) does the same within 30 days of a sign-off (on day 29) and
+ * 90 days after the last activity of a run never signed off. The operators are warned a week before; the deadline wins over
+ * a warning that never went, and the purge then tells the operators and the business's Owner (Lead ruling on #886).
  */
 public interface ImportPurges {
 

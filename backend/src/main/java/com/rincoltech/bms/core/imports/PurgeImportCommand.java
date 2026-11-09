@@ -124,8 +124,9 @@ public final class PurgeImportCommand {
             return 3;
         } catch (RuntimeException e) {
             // The class only: a message could carry a value (AGENTS.md rule 9). Running it again finishes a purge.
-            err.println("purge-import failed: " + e.getClass().getSimpleName() + "; nothing is reported purged, run it"
-                    + " again");
+            String failure = e.getClass().getSimpleName();
+            err.println(
+                    "purge-import failed: " + failure + "; some files may already be deleted, run it again to finish");
             return 3;
         }
         out.print(certificate.document());
