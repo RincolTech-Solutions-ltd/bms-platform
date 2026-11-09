@@ -193,6 +193,7 @@ Record every decision, its time and who made it in the cutover record.
 
       ```bash
       cd /opt/bms
+      set -o pipefail   # so the exit status is purge-import's, not tee's
       docker compose --project-name bms -f compose.yml run --rm --no-deps \
         api purge-import --tenant <business id> --run <run id> \
         --operator <your sign-in email> --witness <the witness's sign-in email> \
@@ -200,8 +201,11 @@ Record every decision, its time and who made it in the cutover record.
         | tee ~/certificate-of-deletion-<slug>.txt
       ```
 
-      The certificate holds no value of a row; keep it with the cutover record, not on the host,
-      once sent.
+      The certificate holds no value of a row, but it lists the files by the names the customer gave
+      them, as the run does: if a file name holds a person's name, rename the copy before upload
+      (stage 3) next time, and keep the certificate with the cutover record, not on the host, once
+      sent. Exit 3 with `storage_unavailable` or `purge-import failed` means some files may already be
+      deleted and nothing else changed: run the same command again until it prints the certificate.
 
       Only a `signed_off` run is purged this way; a run without a dump takes no `--dump-*`. Exit 0
       prints the certificate of deletion and its `sha256`; exit 3 names the refusal
@@ -212,8 +216,9 @@ Record every decision, its time and who made it in the cutover record.
 - [ ] Certificate of deletion (spec section 6.4): the printed text, with files, sizes and SHA-256,
       staging row counts, the dump's name and hash, time, operator and witness, what is retained.
       Stored on the run; saved with the cutover record and sent to the customer.
-- [ ] If you do not purge within 30 days of the sign-off, the daily `core.imports.retention` does
-      (a warning reaches the operators' Telegram chat a week before). Its certificate says the dump
+- [ ] If you do not purge within 30 days of the sign-off, the daily `core.imports.retention` does,
+      on day 29 (a warning reaches the operators' Telegram chat a week before, or in the same pass if
+      none went), whether the business is active or suspended. Its certificate says the dump
       was not confirmed: delete the dump, then run `purge-import` as above with the dump, which
       issues the certificate's next version with your confirmation and the witness. A run never
       signed off is purged 90 days after its last activity, after the same warning; working on it

@@ -1277,9 +1277,10 @@ public class RlsIsolationIT {
                                 '{"commit_ms": 1}')
                         """).params(UUID.randomUUID(), t.tenantId(), committedRun).update();
         // The purge and its certificate of deletion (migration V147, #139): the same run purged by the schedule, with
-        // its certificate, which holds counts and no value.
-        owner.sql("UPDATE import_runs SET status = 'purged', purged_at = now() WHERE id = ?")
-                .param(committedRun)
+        // its certificate, which holds counts and no value. Purged only by the purge (the trigger
+        // import_runs_purged_by_purge of V147): the factory opts in as a migration does.
+        owner.sql("DO $$ BEGIN PERFORM set_config('bms.allow_mutation', 'on', true); UPDATE import_runs SET status ="
+                        + " 'purged', purged_at = now() WHERE id = '" + committedRun + "'; END $$")
                 .update();
         owner.sql("""
                         INSERT INTO import_deletion_certificates (id, tenant_id, run_id, version, reason, dump_confirmed,

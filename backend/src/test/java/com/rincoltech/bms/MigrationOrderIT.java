@@ -4033,10 +4033,27 @@ class MigrationOrderIT {
                             + " 'Test Operator')")
                     .param(operator)
                     .update();
+            // The three guards as V146 left them (review of #886, M5): V147 may only add the purge's block to each.
+            List<String> guards = List.of("reject_mutation", "import_issues_batch_kept", "import_rows_validation_kept");
+            Map<String, String> beforeV147 = new java.util.HashMap<>();
+            for (String guard : guards) {
+                beforeV147.put(guard, functionBody(owner, guard));
+            }
 
             assertThat(DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD)
                             .success)
                     .isTrue();
+
+            for (String guard : guards) {
+                String after = functionBody(owner, guard);
+                assertThat(after).as(guard).contains("bms_erasing(to_jsonb(OLD))", "bms_import_purging(TG_TABLE_NAME");
+                String withoutPurge = after.replace(PURGE_BLOCK_REJECT, "")
+                        .replace(PURGE_BLOCK_ISSUES, "")
+                        .replace(PURGE_BLOCK, "");
+                assertThat(withoutPurge)
+                        .as("%s is its V146 body with only the purge's block added", guard)
+                        .isEqualTo(beforeV147.get(guard));
+            }
 
             assertThat(owner.sql("SELECT status = 'signed_off' AND purge_warned_at IS NULL FROM import_runs"
                                     + " WHERE id = ?")
@@ -4053,8 +4070,14 @@ class MigrationOrderIT {
                             .params(UUID.randomUUID(), tenant, run, "signed_off_30_days", null, null)
                             .update())
                     .hasMessageContaining("a certificate of deletion is issued only for a purged import run");
-            owner.sql("UPDATE import_runs SET status = 'purged', purged_at = now() WHERE id = ?")
-                    .param(run)
+            // Purged only by the purge (trigger import_runs_purged_by_purge), even for the owner role; a migration's
+            // explicit opt-in (bms.allow_mutation) stands in for it here.
+            String purged = "UPDATE import_runs SET status = 'purged', purged_at = now() WHERE id = ?";
+            assertThatThrownBy(() -> owner.sql(purged).param(run).update())
+                    .hasMessageContaining("import_runs_purged_by_purge");
+            owner.sql("DO $$ BEGIN PERFORM set_config('bms.allow_mutation', 'on', true);"
+                            + " UPDATE import_runs SET status = 'purged', purged_at = now() WHERE id = '" + run + "';"
+                            + " END $$")
                     .update();
             assertThatThrownBy(() -> owner.sql(insert)
                             .params(UUID.randomUUID(), tenant, run, "operator", operator, null)
@@ -4086,15 +4109,26 @@ class MigrationOrderIT {
                             .query(Boolean.class)
                             .single())
                     .isTrue();
-            for (String guard : List.of("reject_mutation", "import_issues_batch_kept", "import_rows_validation_kept")) {
-                String body = owner.sql("SELECT pg_get_functiondef(CAST(? AS regproc))")
-                        .param(guard)
-                        .query(String.class)
-                        .single();
-                assertThat(body).as(guard).contains("bms_erasing(to_jsonb(OLD))", "bms_import_purging(TG_TABLE_NAME");
-            }
         }
     }
+
+    /** A function's definition with its whitespace collapsed, so two bodies compare by their words. */
+    private static String functionBody(JdbcClient owner, String function) {
+        return owner.sql("SELECT pg_get_functiondef(CAST(? AS regproc))")
+                .param(function)
+                .query(String.class)
+                .single()
+                .replaceAll("\\s+", " ");
+    }
+
+    /** The blocks V147 adds to the guards (issue #139), whitespace collapsed. */
+    private static final String PURGE_BLOCK =
+            " IF bms_import_purging(TG_TABLE_NAME, to_jsonb(OLD), to_jsonb(NEW)) THEN RETURN NEW; END IF;";
+
+    private static final String PURGE_BLOCK_ISSUES = " IF TG_OP = 'UPDATE' THEN" + PURGE_BLOCK + " END IF;";
+
+    private static final String PURGE_BLOCK_REJECT =
+            " IF TG_OP = 'UPDATE' AND TG_TABLE_NAME = 'import_issue_resolutions' THEN" + PURGE_BLOCK + " END IF;";
 
     /** The migrator's settings, optionally stopped at a target version. */
     private static Flyway flyway(PostgreSQLContainer postgres, String target) {

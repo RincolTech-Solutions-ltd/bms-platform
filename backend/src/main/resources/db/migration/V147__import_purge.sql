@@ -1,7 +1,7 @@
 -- V147: customer data onboarding 13/16, retention, purge and the certificate of deletion (issue #139, ADR-027 decision 8,
 -- spec docs/specs/customer-data-onboarding.md sections 3.11 and 6.4, SDD chapter 8 section 8.9 and chapter 13 section
--- 13.14). Directly after V146. Expand only, safe on a populated database: one new nullable column, one new table, three new
--- functions, and three guard functions replaced by their own bodies with one more way through.
+-- 13.14). Directly after V146. Expand only, safe on a populated database: one new nullable column, one new table, five new
+-- functions, two new triggers, and three guard functions replaced by their own bodies with one more way through.
 --
 -- `import_runs.purge_warned_at`: when the operator was last warned that the scheduled purge will reach the run (spec
 -- section 6.4: a run never signed off is purged 90 days after its last activity, after a warning to the operator; a signed
@@ -24,14 +24,19 @@
 --
 -- The narrow way past the guards (Lead ruling on #867). The staged rows, the issues and the resolutions of a committed
 -- batch never change (import_rows_validation_kept, import_issues_batch_kept, reject_mutation). `bms_import_purging`
--- lets one change through, and only when all of these hold: it runs as bms_owner, which bms_app becomes only inside a
--- definer function; the transaction-local setting `bms.purging_import_run`, which import_purge_run sets for its own
+-- lets one change through, and only when all of these hold: it runs as bms_owner inside a definer function called by
+-- another role's session (current_user bms_owner, session_user not: a session of the owner itself, which a migration
+-- uses, never passes this way); the transaction-local setting `bms.purging_import_run`, which import_purge_run sets for its own
 -- statements and clears before it returns, names the run of the row; the row is of the business bound to the transaction;
 -- that run is `purged` with `purged_at` equal to this transaction's start (so it was purged in this transaction); it is an
 -- UPDATE; and the only columns it changes are the personal ones, to exactly what the purge writes (an empty cell map, NULL,
 -- or a hash). A delete is never let through, another run of the same business is never let through, and nothing else is.
 -- V102's bypass for a migration and for the removal and purge of a closed business (bms_erasing) stays in every guard as it
--- was.
+-- was. The state `purged` itself is guarded the same way (trigger import_runs_purged_by_purge): a run becomes purged only
+-- inside import_purge_run, which refuses while a file of the run is still in storage, and never leaves it.
+--
+-- `imports_retention_tenants()` lists the businesses the daily job visits: every one with a run to purge, suspended ones
+-- included, except one whose removal has begun.
 --
 -- Personal data: the certificate's text names the platform operator and the witness of a stage 9 purge (the team, never a
 -- customer's person), the files by the names the customer gave them, and counts and hashes; never a value of a row.
@@ -111,7 +116,8 @@ DECLARE
     v_run     text := coalesce(current_setting('bms.purging_import_run', true), '');
     v_row_run uuid;
 BEGIN
-    IF current_user <> 'bms_owner' OR v_run = '' OR p_old IS NULL OR p_new IS NULL THEN
+    -- Inside a definer function called by the application's session, never a session of the owner itself.
+    IF current_user <> 'bms_owner' OR session_user = 'bms_owner' OR v_run = '' OR p_old IS NULL OR p_new IS NULL THEN
         RETURN false;
     END IF;
     IF p_old ->> 'tenant_id' IS NULL
@@ -181,10 +187,15 @@ BEGIN
         RAISE EXCEPTION 'an import run that is % is not purged', v_status
             USING ERRCODE = 'check_violation', CONSTRAINT = 'import_purge_run_state';
     END IF;
+    -- The application deletes the files first and clears their keys; a run still naming one is not purged here.
+    IF EXISTS (SELECT 1 FROM import_batches WHERE tenant_id = v_tenant AND run_id = p_run AND object_key IS NOT NULL) THEN
+        RAISE EXCEPTION 'import_purge_run: a file of the run is still in storage; delete it first'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    PERFORM set_config('bms.purging_import_run', p_run::text, true);
     UPDATE import_runs
        SET status = 'purged', purged_at = now(), data_key_wrapped = NULL, version = version + 1, updated_at = now()
      WHERE tenant_id = v_tenant AND id = p_run;
-    PERFORM set_config('bms.purging_import_run', p_run::text, true);
 
     UPDATE import_rows w
        SET raw = '{}'::jsonb,
@@ -219,6 +230,47 @@ END
 $$;
 REVOKE ALL ON FUNCTION import_purge_run(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION import_purge_run(uuid) TO bms_app;
+
+-- A run becomes purged only inside import_purge_run (the same marker as bms_import_purging, for the run itself), and a
+-- purged run never leaves that state; a migration and the removal of a closed business keep V102's ways through.
+CREATE FUNCTION import_runs_purged_by_purge() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'UPDATE' AND NEW.status IS NOT DISTINCT FROM OLD.status THEN
+        RETURN NEW;
+    END IF;
+    IF NEW.status IS DISTINCT FROM 'purged' AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM 'purged') THEN
+        RETURN NEW;
+    END IF;
+    IF (session_user = 'bms_owner' AND coalesce(current_setting('bms.allow_mutation', true), '') = 'on')
+       OR (TG_OP = 'UPDATE' AND bms_erasing(to_jsonb(OLD))) THEN
+        RETURN NEW;
+    END IF;
+    IF TG_OP = 'UPDATE' AND NEW.status = 'purged' AND current_user = 'bms_owner' AND session_user <> 'bms_owner'
+       AND coalesce(current_setting('bms.purging_import_run', true), '') = NEW.id::text THEN
+        RETURN NEW;
+    END IF;
+    RAISE EXCEPTION 'import_runs_purged_by_purge: an import run is purged only by the purge, and stays purged'
+        USING ERRCODE = 'check_violation';
+END
+$$;
+
+CREATE TRIGGER import_runs_purged_by_purge BEFORE INSERT OR UPDATE OF status ON import_runs
+    FOR EACH ROW EXECUTE FUNCTION import_runs_purged_by_purge();
+
+-- The businesses the scheduled purge visits: every one holding a run not purged and not committing, active or suspended,
+-- except one whose removal has begun (the removal and purge of a closed business erase its imports, V102). Unbound: called
+-- by the job before it binds each business.
+CREATE FUNCTION imports_retention_tenants() RETURNS SETOF uuid
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+    SELECT t.id FROM tenants t
+     WHERE EXISTS (SELECT 1 FROM import_runs r WHERE r.tenant_id = t.id AND r.status NOT IN ('purged', 'committing'))
+       AND NOT EXISTS (SELECT 1 FROM tenant_closures k
+                        WHERE k.tenant_id = t.id AND k.status IN ('removing', 'removed', 'purging', 'purged'))
+     ORDER BY t.id
+$$;
+REVOKE ALL ON FUNCTION imports_retention_tenants() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION imports_retention_tenants() TO bms_app;
 
 -- The guards, each the body it has had since V141 (V102's bypass included) with the purge's way through added before the
 -- refusal.

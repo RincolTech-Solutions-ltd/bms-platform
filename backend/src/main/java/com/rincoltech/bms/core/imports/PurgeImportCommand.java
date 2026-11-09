@@ -20,7 +20,8 @@ import org.springframework.context.ConfigurableApplicationContext;
  * the run and prints its certificate of deletion, which holds file names, sizes, hashes and counts, never a value of a
  * row. On a run the schedule already purged, the dump given issues the certificate's next version.
  *
- * <p>Exit status: 0 purged (or already purged, the certificate printed), 2 for a usage error, 3 refused (nothing purged).
+ * <p>Exit status: 0 purged (or already purged, the certificate printed), 2 for a usage error, 3 refused or failed (no
+ * certificate; some files may be deleted already, and running the command again finishes the purge).
  */
 public final class PurgeImportCommand {
 
@@ -60,7 +61,18 @@ public final class PurgeImportCommand {
             if (blank(dumpFile) != blank(dumpSha256)) {
                 throw new IllegalArgumentException("--dump-file and --dump-sha256 go together");
             }
-            return new Options(tenant, run, new ImportPurges.Purge(operator, witness, dumpFile, dumpSha256));
+            return new Options(tenant, run, new ImportPurges.Purge(operator, witness, dumpFile, dumpSha256, origin()));
+        }
+
+        /** Where the command runs: the host's name and the user, for the audit row (review of #886, S5). */
+        static String origin() {
+            String host;
+            try {
+                host = java.net.InetAddress.getLocalHost().getHostName();
+            } catch (java.io.IOException e) {
+                host = "unknown host";
+            }
+            return "purge-import on " + host + " as " + System.getProperty("user.name", "unknown user");
         }
 
         private static boolean blank(String value) {
@@ -109,6 +121,11 @@ public final class PurgeImportCommand {
             certificate = asTenant.apply(options.tenant(), () -> purges.purge(options.run(), options.purge()));
         } catch (ApiException e) {
             err.println("purge-import refused: " + e.code());
+            return 3;
+        } catch (RuntimeException e) {
+            // The class only: a message could carry a value (AGENTS.md rule 9). Running it again finishes a purge.
+            err.println("purge-import failed: " + e.getClass().getSimpleName() + "; nothing is reported purged, run it"
+                    + " again");
             return 3;
         }
         out.print(certificate.document());

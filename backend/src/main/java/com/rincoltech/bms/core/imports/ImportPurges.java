@@ -32,16 +32,25 @@ public interface ImportPurges {
      *
      * <p>On a run the scheduled purge already purged, the operator's confirmation of the dump issues the next version of
      * its certificate, signed by them and the witness, and changes nothing else; any other call on a purged run answers
-     * its newest certificate and writes nothing. Object storage that refuses a delete is 503 {@code storage_unavailable}
-     * with nothing purged.
+     * its newest certificate and writes nothing. Object storage that refuses a delete is 503 {@code storage_unavailable}:
+     * the files deleted before it stay deleted, the run, its key and its rows are unchanged, and running the purge again
+     * finishes it. Any failure after the files are deleted leaves the run the same way.
      */
     Certificate purge(UUID runId, Purge request);
 
     /** The newest certificate of deletion of a run, empty until it is purged. */
     Optional<Certificate> certificate(UUID runId);
 
-    /** The operator's request: who purges, who witnesses, and the pre-import dump as they deleted it (both null for none). */
-    record Purge(String operatorEmail, String witnessEmail, String dumpFile, String dumpSha256) {}
+    /**
+     * The operator's request: who purges, who witnesses, the pre-import dump as they deleted it (both null for none), and
+     * where it was run from (the host command's host and user), which the audit row records beside the two names.
+     */
+    record Purge(String operatorEmail, String witnessEmail, String dumpFile, String dumpSha256, String origin) {
+
+        public Purge(String operatorEmail, String witnessEmail, String dumpFile, String dumpSha256) {
+            this(operatorEmail, witnessEmail, dumpFile, dumpSha256, null);
+        }
+    }
 
     /**
      * A certificate of deletion: why the run was purged ({@code operator}, {@code signed_off_30_days} or

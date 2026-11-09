@@ -12,7 +12,6 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,10 +29,12 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * The scheduled purge of spec section 6.4 (issue #139, ADR-008), daily at 04:40 Kampala time, after the quarantine cleanup,
- * leased by db-scheduler. For each active business, on the business clock:
+ * leased by db-scheduler. For each business holding a run to purge ({@code imports_retention_tenants()}: suspended ones
+ * too, not one whose removal has begun), on the business clock:
  *
  * <ul>
- *   <li>a run signed off is purged 30 days after its sign-off, and its operator is warned a week before;
+ *   <li>a run signed off is purged within 30 days of its sign-off (from day 29, so a daily job is never late), its operator
+ *       warned a week before, or in the same pass when no warning stands;
  *   <li>a run never signed off (any state but {@code committing}, which only a resume or the dev lead's restore ends) is
  *       purged 90 days after its last activity, and only once a warning a week old stands since that activity: a run that
  *       is used again after its warning starts again.
@@ -86,8 +87,10 @@ class PurgeRetention {
 
     Result runAll() {
         requireNoTransaction();
-        List<UUID> tenants = new ArrayList<>();
-        tenantJobs.forEachActiveTenant(JOB + ".list", tenants::add);
+        // Every business with a run to purge, suspended ones too (review of #886, M3): the deadline holds whatever the
+        // business's state, except one whose removal has begun, which erases its imports itself.
+        List<UUID> tenants = tx.execute(s ->
+                jdbc.sql("SELECT imports_retention_tenants()").query(UUID.class).list());
         Instant now = clock.now();
         int warned = 0;
         int purged = 0;
@@ -127,6 +130,11 @@ class PurgeRetention {
         int failed = 0;
         for (PurgeService.Candidate c : candidates) {
             if (c.due(now)) {
+                // A signed run past its deadline is purged even when no warning stands (the job was down, the outbox
+                // failed): the warning still goes, in this pass, just before (review of #886, M4).
+                if (!c.warned() && Boolean.TRUE.equals(tx.execute(s -> warn(c, now)))) {
+                    warned++;
+                }
                 try {
                     if (purges.purgeScheduled(c.id(), now).isPresent()) {
                         purged++;

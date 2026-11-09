@@ -15,6 +15,7 @@ import com.rincoltech.bms.testsupport.MovableClockConfig;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
@@ -26,10 +27,10 @@ import org.springframework.context.annotation.Import;
 
 /**
  * The scheduled purge of issue #139 (spec section 6.4, ADR-008, job {@code core.imports.retention}) with the business
- * clock fixed ({@link MovableClock}), on real PostgreSQL as bms_app. A signed run is warned 23 days after its sign-off and
- * purged at 30 days, warned or not; a run never signed off is warned 83 days after its last activity and purged at 90 days
- * once its warning is a week old, and activity after the warning starts its clock again; a committing run is never
- * purged; another business is untouched. The scheduled purge's certificate says the dump was not confirmed, and the
+ * clock fixed ({@link MovableClock}), on real PostgreSQL as bms_app. A signed run is warned 22 days after its sign-off and
+ * purged on day 29, inside the 30 days, warned in the same pass if no warning stands; a run never signed off is warned 83
+ * days after its last activity and purged at 90 days once its warning is a week old, and activity after the warning starts
+ * its clock again; a committing run is never purged; a suspended business is purged too; another business is untouched. The scheduled purge's certificate says the dump was not confirmed, and the
  * operator's later confirmation issues its next version. Each run here holds one staged row of fabricated cells and every
  * stamp of its activity is set to a fixed day, so only the clock decides. Fabricated data only.
  */
@@ -136,12 +137,12 @@ class ImportRetentionIT extends IntegrationTest {
     }
 
     @Test
-    void aSignedRunIsWarnedAWeekAheadAndPurged30DaysAfterTheSignOff() {
+    void aSignedRunIsWarnedAWeekAheadAndPurgedWithinThe30DaysAfterTheSignOff() {
         UUID run = runAt(t, "signed_off", DAY0);
 
-        assertThat(at(t, days(22))).isEqualTo(new PurgeRetention.Result(0, 0, 0));
+        assertThat(at(t, days(22).minusSeconds(1))).isEqualTo(new PurgeRetention.Result(0, 0, 0));
         assertThat(warnings(run)).isZero();
-        assertThat(at(t, days(23))).isEqualTo(new PurgeRetention.Result(1, 0, 0));
+        assertThat(at(t, days(22))).isEqualTo(new PurgeRetention.Result(1, 0, 0));
         assertThat(warnings(run)).isEqualTo(1);
         assertThat(count(
                         "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'core.import_run.purge_warned'"
@@ -149,18 +150,19 @@ class ImportRetentionIT extends IntegrationTest {
                         t.tenantId(),
                         run))
                 .isEqualTo(1);
-        assertThat(at(t, days(24))).as("warned once").isEqualTo(new PurgeRetention.Result(0, 0, 0));
-        assertThat(at(t, days(30).minusSeconds(1))).isEqualTo(new PurgeRetention.Result(0, 0, 0));
+        assertThat(at(t, days(23))).as("warned once").isEqualTo(new PurgeRetention.Result(0, 0, 0));
+        assertThat(at(t, days(29).minusSeconds(1))).isEqualTo(new PurgeRetention.Result(0, 0, 0));
         assertThat(status(run)).isEqualTo("signed_off");
         assertThat(stagedCells(run)).isEqualTo(1);
 
-        assertThat(at(t, days(30))).isEqualTo(new PurgeRetention.Result(0, 1, 0));
+        // Day 29: a daily job is never later than day 30.
+        assertThat(at(t, days(29))).isEqualTo(new PurgeRetention.Result(0, 1, 0));
         assertThat(status(run)).isEqualTo("purged");
         assertThat(stagedCells(run)).isZero();
         Certificate scheduled = as(t, () -> purges.certificate(run)).orElseThrow();
         assertThat(scheduled.reason()).isEqualTo("signed_off_30_days");
         assertThat(scheduled.dumpConfirmed()).isFalse();
-        assertThat(scheduled.issuedAt()).isEqualTo(days(30));
+        assertThat(scheduled.issuedAt()).isEqualTo(days(29));
         assertThat(scheduled.document())
                 .contains("Operator: none (the scheduled purge)", "its deletion on the host NOT confirmed");
         assertThat(count(
@@ -190,10 +192,35 @@ class ImportRetentionIT extends IntegrationTest {
     }
 
     @Test
-    void aSignedRunNeverWarnedIsStillPurgedOnItsDeadline() {
+    void aSignedRunNeverWarnedIsWarnedAndPurgedInTheSamePassOnItsDeadline() {
         UUID run = runAt(t, "signed_off", DAY0);
-        assertThat(at(t, days(30))).isEqualTo(new PurgeRetention.Result(0, 1, 0));
+        assertThat(at(t, days(29))).isEqualTo(new PurgeRetention.Result(1, 1, 0));
         assertThat(status(run)).isEqualTo("purged");
+        assertThat(warnings(run))
+                .as("the warning still goes, just before the purge")
+                .isEqualTo(1);
+    }
+
+    // JUSTIFICATION-A3: review of #886, M3: a new test case for a suspended business beside the one it replaces.
+    /** A suspended business is listed and purged on its deadline like an active one; once purged it is not listed. */
+    @Test
+    void aSuspendedBusinessIsPurgedOnItsDeadline() {
+        UUID run = runAt(other, "signed_off", DAY0);
+        TestDatabase.owner()
+                .sql("UPDATE tenants SET status = 'suspended' WHERE id = ?")
+                .param(other.tenantId())
+                .update();
+        assertThat(retentionTenants()).contains(other.tenantId());
+        assertThat(at(other, days(29))).isEqualTo(new PurgeRetention.Result(1, 1, 0));
+        assertThat(status(run)).isEqualTo("purged");
+        assertThat(retentionTenants()).as("nothing left to purge there").doesNotContain(other.tenantId());
+    }
+
+    static List<UUID> retentionTenants() {
+        return TestDatabase.owner()
+                .sql("SELECT imports_retention_tenants()")
+                .query(UUID.class)
+                .list();
     }
 
     @Test

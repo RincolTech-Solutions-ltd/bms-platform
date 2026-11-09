@@ -21,6 +21,7 @@ import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -60,6 +61,12 @@ class PurgeService implements ImportPurges {
 
     /** The operator is warned this long before the scheduled purge, which waits for the warning to be this old. */
     static final Duration WARNING = Duration.ofDays(7);
+
+    /**
+     * A signed run is due this much before its 30 days, so the daily job, which runs once a day, never purges it after
+     * them (review of #886, S3).
+     */
+    static final Duration MARGIN = Duration.ofDays(1);
 
     private static final Logger log = LoggerFactory.getLogger(PurgeService.class);
 
@@ -110,7 +117,11 @@ class PurgeService implements ImportPurges {
     record Candidate(UUID id, String reason, Instant since, Instant warnedAt) {
 
         Instant dueAt() {
-            return since.plus(SIGNED_OFF_30_DAYS.equals(reason) ? AFTER_SIGN_OFF : AFTER_LAST_ACTIVITY);
+            return signed() ? since.plus(AFTER_SIGN_OFF).minus(MARGIN) : since.plus(AFTER_LAST_ACTIVITY);
+        }
+
+        boolean signed() {
+            return SIGNED_OFF_30_DAYS.equals(reason);
         }
 
         /** Whether the operator was warned since the clock started. */
@@ -124,14 +135,15 @@ class PurgeService implements ImportPurges {
         }
 
         /**
-         * Due at the deadline. A signed run is purged at 30 days whatever happened to its warning (the deadline of spec
-         * section 6.4); a run never signed off only once its warning is a week old, so the purge never comes unannounced.
+         * Due at the deadline. A signed run is purged within its 30 days whatever happened to its warning (the ceiling of
+         * spec section 6.4): if none stands, the job warns in the same pass, just before it purges. A run never signed off
+         * only once its warning is a week old, so that purge never comes without a week's notice.
          */
         boolean due(Instant now) {
             if (now.isBefore(dueAt())) {
                 return false;
             }
-            return SIGNED_OFF_30_DAYS.equals(reason) || (warned() && !now.isBefore(warnedAt.plus(WARNING)));
+            return signed() || (warned() && !now.isBefore(warnedAt.plus(WARNING)));
         }
     }
 
@@ -172,7 +184,8 @@ class PurgeService implements ImportPurges {
 
     private record Person(UUID id, String name) {}
 
-    private record Signers(Person operator, Person witness) {}
+    /** The operator and the witness by their platform accounts, and where the command was run from, if said. */
+    private record Signers(Person operator, Person witness, String origin) {}
 
     private record RunRow(String status, String dumpFile, String dumpSha256) {}
 
@@ -196,11 +209,14 @@ class PurgeService implements ImportPurges {
                         "import run {}: a quarantined file could not be deleted ({})",
                         runId,
                         e.getClass().getSimpleName());
+                // Files deleted before this one stay deleted; the run, its key and its rows are unchanged. A purge run
+                // again deletes the rest (a missing object is not an error, QuarantineStorage.delete) and finishes.
                 throw new ApiException(
                         HttpStatus.SERVICE_UNAVAILABLE,
                         "storage_unavailable",
                         "Storage unavailable",
-                        "A file of this import could not be deleted from storage, so nothing was purged. Try again.");
+                        "A file of this import could not be deleted from storage. Some of its files may already be"
+                                + " deleted; nothing else changed. Run the purge again.");
             }
         }
         return Optional.of(tx.execute(s -> purgeChecked(runId, plan, signers)));
@@ -303,6 +319,11 @@ class PurgeService implements ImportPurges {
         after.put("resolutions", counts.get("resolutions"));
         after.put("dump_confirmed", plan.dumpConfirmed());
         after.put("certificate_sha256", certificate.sha256());
+        if (signers != null) {
+            // The names on the certificate are the operator's word; the audit keeps where the command ran (review S5).
+            after.put("witness_id", signers.witness().id().toString());
+            after.put("origin", signers.origin() == null ? "not given" : signers.origin());
+        }
         audit.record(
                 new AuditLog.Entry(
                         "core.import_run.purged", "import_run", runId, null, Map.of("status", run.status()), after),
@@ -437,12 +458,12 @@ class PurgeService implements ImportPurges {
         if (dumpFile == null
                 || dumpFile.isBlank()
                 || dumpSha256 == null
-                || !SHA256.matcher(dumpSha256).matches()) {
+                || !SHA256.matcher(dumpSha256.toLowerCase(Locale.ROOT)).matches()) {
             throw ApiException.rule(
                     "pre_import_dump_confirmation_required",
                     "Give the file name and SHA-256 of the pre-import dump you deleted on the host.");
         }
-        if (!run.dumpFile().equals(dumpFile.strip()) || !run.dumpSha256().equals(dumpSha256)) {
+        if (!run.dumpFile().equals(dumpFile.strip()) || !run.dumpSha256().equals(dumpSha256.toLowerCase(Locale.ROOT))) {
             throw ApiException.rule(
                     "pre_import_dump_differs",
                     "That is not the pre-import dump recorded on this import; check its file name and SHA-256.");
@@ -457,7 +478,9 @@ class PurgeService implements ImportPurges {
             throw ApiException.rule(
                     "witness_is_operator", "The witness is another platform operator, never the one who purges.");
         }
-        return new Signers(operator, witness);
+        String given = request.origin() == null ? "" : request.origin().strip();
+        String origin = given.isEmpty() ? null : given.substring(0, Math.min(given.length(), 200));
+        return new Signers(operator, witness, origin);
     }
 
     private Person person(String email) {

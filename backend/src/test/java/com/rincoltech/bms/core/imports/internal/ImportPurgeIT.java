@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
+import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.documents.QuarantineStorage;
 import com.rincoltech.bms.core.imports.ImportMappings;
 import com.rincoltech.bms.core.imports.ImportMappings.Mapping;
@@ -19,26 +20,36 @@ import com.rincoltech.bms.core.imports.ImportUploads.Batch;
 import com.rincoltech.bms.core.imports.ImportUploads.Upload;
 import com.rincoltech.bms.core.imports.ImportValidation;
 import com.rincoltech.bms.core.imports.ImportValidation.Issue;
+import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.kernel.ApiException;
+import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.TenantContext;
 import com.rincoltech.bms.testsupport.Api;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.sql.Types;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * The purge of issue #139 (spec section 6.4, ADR-027 decision 8, migration V147) on real PostgreSQL as bms_app, through the
@@ -104,6 +115,12 @@ class ImportPurgeIT extends IntegrationTest {
         witnessEmail = Api.email("purge-witness");
         operatorId = Api.platformUser(operatorEmail);
         witnessId = Api.platformUser(witnessEmail);
+        // Two names, so the certificate shows which is which (review of #886, S11).
+        TestDatabase.owner()
+                .sql("UPDATE platform_users SET full_name = CASE WHEN id = ? THEN 'Test Operator 01'"
+                        + " ELSE 'Test Operator 02' END WHERE id IN (?, ?)")
+                .params(operatorId, operatorId, witnessId)
+                .update();
     }
 
     static <T> T as(TestDatabase.Fixture f, Supplier<T> work) {
@@ -225,7 +242,8 @@ class ImportPurgeIT extends IntegrationTest {
                     .sql("""
                             SELECT column_name FROM information_schema.columns
                              WHERE table_schema = 'public' AND table_name = ?
-                               AND (data_type IN ('text', 'character varying', 'character', 'jsonb', 'json')
+                               AND (data_type IN ('text', 'character varying', 'character', 'jsonb', 'json',
+                                                  'USER-DEFINED')
                                     OR (data_type = 'ARRAY' AND udt_name IN ('_text', '_varchar')))
                             """)
                     .param(table)
@@ -242,8 +260,36 @@ class ImportPurgeIT extends IntegrationTest {
                 }
             }
         }
+        // And the rows that name the run without a foreign key (review of #886, S4): the audit rows of the run, its
+        // batches, issues and resolutions, and the outbox rows of its warning.
+        for (String value : values) {
+            if (count(AUDIT_OF_RUN, run, run, run, run, value) > 0) {
+                found.add("audit_log.data");
+                break;
+            }
+        }
+        for (String value : values) {
+            if (count(OUTBOX_OF_RUN, run, value) > 0) {
+                found.add("notification_outbox.params");
+                break;
+            }
+        }
         return found;
     }
+
+    static final String AUDIT_OF_RUN = """
+            SELECT count(*) FROM audit_log
+             WHERE entity_id IN (SELECT CAST(? AS uuid)
+                                 UNION SELECT id FROM import_batches WHERE run_id = ?
+                                 UNION SELECT i.id FROM import_issues i JOIN import_batches b ON b.id = i.batch_id
+                                        WHERE b.run_id = ?
+                                 UNION SELECT id FROM import_issue_resolutions WHERE run_id = ?)
+               AND strpos(lower(CAST(data AS text)), lower(?)) > 0
+            """;
+
+    static final String OUTBOX_OF_RUN =
+            "SELECT count(*) FROM notification_outbox WHERE params ->> 'run' = CAST(? AS text)"
+                    + " AND strpos(lower(CAST(params AS text)), lower(?)) > 0";
 
     /** The objects of the run left in the business's quarantine. */
     List<String> objectsOf(TestDatabase.Fixture f, UUID run) {
@@ -340,7 +386,7 @@ class ImportPurgeIT extends IntegrationTest {
         assertThat(certificate.document())
                 .contains(files)
                 .contains(DUMP + ", SHA-256 " + DUMP_SHA + "; its deletion on the host confirmed by the operator")
-                .contains("Operator: Test Operator", "Witness: Test Operator", "Retained", rows + " staged");
+                .contains("Operator: Test Operator 01", "Witness: Test Operator 02", "Retained", rows + " staged");
         assertThat(certificate.reason()).isEqualTo("operator");
         assertThat(certificate.dumpConfirmed()).isTrue();
         // Audited once, with counts and never a value.
@@ -370,6 +416,108 @@ class ImportPurgeIT extends IntegrationTest {
                 + " AND entity_id = ?";
         assertThat(count(audited, t.tenantId(), run)).isEqualTo(1);
         assertThat(status(run)).isEqualTo("purged");
+    }
+
+    @Autowired
+    JdbcClient jdbc;
+
+    @Autowired
+    PlatformTransactionManager transactions;
+
+    @Autowired
+    AuditLog audit;
+
+    @Autowired
+    BusinessClock clock;
+
+    @Autowired
+    CurrentTenant tenant;
+
+    @Autowired
+    ObjectMapper mapper;
+
+    // JUSTIFICATION-A3: review of #886, M1 asks for this new test case with its two injected failures.
+    /**
+     * Review of #886, M1: storage that refuses the second file, then a purge transaction that fails after every file is
+     * deleted (its audit row refused). Each time the run, its key, its rows and its batches' keys are as they were, with
+     * fewer files, and no certificate; the next purge finishes it with one certificate.
+     */
+    @Test
+    void aPurgeStoppedByStorageOrByItsTransactionLeavesTheRunAsItWasAndTheNextOneFinishes() throws IOException {
+        UUID run = signedRun(t);
+        Purge request = new Purge(operatorEmail, witnessEmail, DUMP, DUMP_SHA);
+        String unchanged = "SELECT count(*) FROM import_runs WHERE id = ? AND status = 'signed_off'"
+                + " AND data_key_wrapped IS NOT NULL AND purged_at IS NULL";
+        String keysKept = "SELECT count(*) FROM import_batches WHERE run_id = ? AND object_key IS NOT NULL";
+
+        int[] deletes = {0};
+        QuarantineStorage refusingSecond = new QuarantineStorage() {
+            @Override
+            public String put(UUID runId, UUID batchId, Path encryptedFile) {
+                return quarantine.put(runId, batchId, encryptedFile);
+            }
+
+            @Override
+            public Optional<InputStream> open(String key) {
+                return quarantine.open(key);
+            }
+
+            @Override
+            public void delete(String key) {
+                if (++deletes[0] == 2) {
+                    throw new IllegalStateException("storage refuses");
+                }
+                quarantine.delete(key);
+            }
+
+            @Override
+            public Stream<Held> list() {
+                return quarantine.list();
+            }
+
+            @Override
+            public List<String> deleteAll(List<String> keys) {
+                return quarantine.deleteAll(keys);
+            }
+        };
+        PurgeService storageDown = new PurgeService(jdbc, transactions, refusingSecond, audit, clock, tenant, mapper);
+        assertCode(() -> as(t, () -> storageDown.purge(run, request)), "storage_unavailable");
+        assertThat(objectsOf(t, run)).as("the first file stays deleted").hasSize(GoldenRun.FILES.size() - 1);
+        assertThat(count(unchanged, run)).isEqualTo(1);
+        assertThat(count(keysKept, run)).isEqualTo(GoldenRun.FILES.size());
+        assertThat(personalValuesOf(run, PERSONAL)).isNotEmpty();
+
+        AuditLog refusingPurge = new AuditLog() {
+            @Override
+            public void record(Entry entry) {
+                audit.record(entry);
+            }
+
+            @Override
+            public void record(Entry entry, UUID actorUserId, String actorKind) {
+                if ("core.import_run.purged".equals(entry.action())) {
+                    throw new IllegalStateException("audit refuses");
+                }
+                audit.record(entry, actorUserId, actorKind);
+            }
+        };
+        PurgeService failing = new PurgeService(jdbc, transactions, quarantine, refusingPurge, clock, tenant, mapper);
+        assertThatThrownBy(() -> as(t, () -> failing.purge(run, request))).isInstanceOf(IllegalStateException.class);
+        assertThat(objectsOf(t, run)).as("every file deleted").isEmpty();
+        assertThat(count(unchanged, run)).isEqualTo(1);
+        assertThat(count(keysKept, run))
+                .as("the transaction that cleared them rolled back")
+                .isEqualTo(GoldenRun.FILES.size());
+        assertThat(count("SELECT count(*) FROM import_deletion_certificates WHERE run_id = ?", run))
+                .isZero();
+        assertThat(personalValuesOf(run, PERSONAL)).isNotEmpty();
+
+        Certificate certificate = purge(t, run);
+        assertThat(status(run)).isEqualTo("purged");
+        assertThat(personalValuesOf(run, PERSONAL)).isEmpty();
+        assertThat(count("SELECT count(*) FROM import_deletion_certificates WHERE run_id = ?", run))
+                .isEqualTo(1);
+        assertThat(certificate.document()).contains(DUMP + ", SHA-256 " + DUMP_SHA);
     }
 
     @Test
@@ -449,9 +597,12 @@ class ImportPurgeIT extends IntegrationTest {
     // ---- The guards ----
 
     /**
-     * The narrow way past the guards of a committed batch: even the owner role, with the purge's setting naming the run
-     * and the business bound, changes nothing unless the run was purged in that same transaction, and then only the
-     * personal columns of that run's rows, to what the purge writes; never a delete, never another run.
+     * The narrow way past the guards of a committed batch, tried from a definer function the test makes for the purpose
+     * ({@link #asDefiner}: another definer function holding the purge's marker, the strongest position short of the
+     * purge itself). It changes the run's own personal columns to what the purge writes once the run is purged in that
+     * transaction, and nothing else: not before, not another run, not another column or value, no delete, no other
+     * append-only table, nothing in a later transaction. A session of the owner role itself never passes (review of #886,
+     * S1), nor may it or the application mark a run purged (M2).
      */
     @Test
     void theGuardsLetThroughOnlyThePurgeOfItsOwnRunInItsOwnTransaction() throws IOException {
@@ -460,25 +611,44 @@ class ImportPurgeIT extends IntegrationTest {
         String issuesKept = "the issues of a committed import batch never change";
         String rowsKept = "the rows of a committed import batch never change";
         String appendOnly = "append-only";
+        String purgedOnly = "import_runs_purged_by_purge";
         String hashRun = hashResolutions(run);
+        String issuesOfRun = "UPDATE import_issues SET original_value = NULL" + inBatches(run);
+        String rowsOfRun = "UPDATE import_rows SET raw = '{}', normalised = NULL, source_ref = NULL" + inBatches(run);
 
-        // Not purged in this transaction: refused by each guard, the owner role and the setting notwithstanding.
-        refused(run, run, false, "UPDATE import_issues SET original_value = NULL" + inBatches(run), issuesKept);
-        refused(run, run, false, "UPDATE import_rows SET normalised = NULL" + inBatches(run), rowsKept);
-        refused(run, run, false, hashRun, appendOnly);
+        // Not purged in this transaction: refused by each guard.
+        refused(null, run, issuesOfRun, issuesKept);
+        refused(null, run, rowsOfRun, rowsKept);
+        refused(null, run, hashRun, appendOnly);
         // Purged in this transaction, but the rows of another run, or the setting naming another run: refused.
-        refused(run, run, true, hashResolutions(neighbour), appendOnly);
-        refused(run, neighbour, true, hashRun, appendOnly);
+        refused(run, run, hashResolutions(neighbour), appendOnly);
+        refused(run, neighbour, hashRun, appendOnly);
         // Its own run, but a column that is not personal, a value that is not a hash, or a delete: refused.
         String resolutionsOfRun = " WHERE run_id = " + quote(run);
-        refused(run, run, true, "UPDATE import_issue_resolutions SET note = 'x'" + resolutionsOfRun, appendOnly);
-        refused(run, run, true, "UPDATE import_issue_resolutions SET row_key = 'x'" + resolutionsOfRun, appendOnly);
-        refused(run, run, true, "DELETE FROM import_issues" + inBatches(run), issuesKept);
-        refused(run, run, true, "DELETE FROM import_issue_resolutions WHERE run_id = " + quote(run), appendOnly);
+        refused(run, run, "UPDATE import_issue_resolutions SET note = 'x'" + resolutionsOfRun, appendOnly);
+        refused(run, run, "UPDATE import_issue_resolutions SET row_key = 'x'" + resolutionsOfRun, appendOnly);
+        refused(run, run, "DELETE FROM import_issues" + inBatches(run), issuesKept);
+        refused(run, run, "DELETE FROM import_issue_resolutions" + resolutionsOfRun, appendOnly);
+        // Any other append-only table stays closed under the setting (review M5).
+        refused(run, run, "UPDATE audit_log SET action = 'x' WHERE tenant_id = " + quote(t.tenantId()), appendOnly);
+        // Its own run's personal columns, to what the purge writes, in the transaction that purged it: through.
+        asDefiner(run, run, hashRun);
+        asDefiner(run, run, issuesOfRun);
+        asDefiner(run, run, rowsOfRun);
 
-        // The real purge passes, and a later transaction cannot use its way through again.
+        // A session of the owner role (a migration's) cannot mark a run purged nor use the way through.
+        String markPurged = "UPDATE import_runs SET status = 'purged', purged_at = now() WHERE id = " + quote(run);
+        assertThatThrownBy(() -> asOwnerSession(run, markPurged)).hasMessageContaining(purgedOnly);
+        assertThatThrownBy(() -> asOwnerSession(run, hashRun)).hasMessageContaining(appendOnly);
+        // Nor can the application: purged only by the purge.
+        assertThatThrownBy(() -> asApp("UPDATE import_runs SET status = 'purged' WHERE id = ?", run))
+                .hasMessageContaining(purgedOnly);
+
+        // The real purge passes; a later transaction cannot use its way through again, and the run stays purged.
         purge(t, run);
-        refused(run, run, false, hashRun, appendOnly);
+        refused(null, run, hashRun, appendOnly);
+        assertThatThrownBy(() -> asApp("UPDATE import_runs SET status = 'signed_off' WHERE id = ?", run))
+                .hasMessageContaining(purgedOnly);
         // The application role is refused by its grants before any guard.
         assertThatThrownBy(() -> asApp(hashResolutions(neighbour), null)).hasMessageContaining("permission denied");
         assertThat(status(neighbour)).isEqualTo("signed_off");
@@ -499,33 +669,77 @@ class ImportPurgeIT extends IntegrationTest {
                 + "', before_value = NULL, after_value = NULL WHERE run_id = " + quote(run);
     }
 
-    void refused(UUID run, UUID named, boolean purgedNow, String statement, String message) {
-        assertThatThrownBy(() -> asPurging(run, named, purgedNow, statement))
+    void refused(UUID marked, UUID named, String statement, String message) {
+        assertThatThrownBy(() -> asDefiner(marked, named, statement))
                 .as(statement)
                 .hasMessageContaining(message);
     }
 
     /**
-     * One transaction as the owner role (as a migration or a definer function runs), with the business bound and the
-     * purge's setting naming {@code named}; with {@code purgedNow} the run is first marked purged in this transaction, as
-     * {@code import_purge_run} marks it. Rolled back whatever happens.
+     * A definer function the test makes, owned by the owner role like every migration's: it marks {@code marked} purged in
+     * the caller's transaction exactly as {@code import_purge_run} does (setting, then the state), sets the purge's
+     * setting to {@code named}, then runs the statements. Dropped after each test.
      */
-    void asPurging(UUID run, UUID named, boolean purgedNow, String statement) throws SQLException {
+    static final String DEFINER = """
+            CREATE OR REPLACE FUNCTION test_purge_as_definer(p_mark uuid, p_named text, p_sql text) RETURNS void
+            LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+            BEGIN
+                IF p_mark IS NOT NULL THEN
+                    PERFORM set_config('bms.purging_import_run', CAST(p_mark AS text), true);
+                    UPDATE import_runs SET status = 'purged', purged_at = now() WHERE id = p_mark;
+                END IF;
+                PERFORM set_config('bms.purging_import_run', coalesce(p_named, ''), true);
+                EXECUTE p_sql;
+            END
+            $$
+            """;
+
+    @AfterEach
+    void dropDefiner() {
+        TestDatabase.owner()
+                .sql("DROP FUNCTION IF EXISTS test_purge_as_definer(uuid, text, text)")
+                .update();
+    }
+
+    /** The statements through {@link #DEFINER}, called by bms_app with this test's business bound; rolled back. */
+    void asDefiner(UUID marked, UUID named, String statements) throws SQLException {
+        TestDatabase.owner().sql(DEFINER).update();
+        TestDatabase.owner()
+                .sql("GRANT EXECUTE ON FUNCTION test_purge_as_definer(uuid, text, text) TO bms_app")
+                .update();
+        try (Connection c = TestDatabase.appDataSource().getConnection()) {
+            c.setAutoCommit(false);
+            try {
+                try (PreparedStatement bind = c.prepareStatement("SELECT set_config('app.tenant_id', ?, true)")) {
+                    bind.setString(1, t.tenantId().toString());
+                    bind.execute();
+                }
+                try (PreparedStatement ps = c.prepareStatement("SELECT test_purge_as_definer(?, ?, ?)")) {
+                    if (marked == null) {
+                        ps.setNull(1, Types.OTHER);
+                    } else {
+                        ps.setObject(1, marked);
+                    }
+                    ps.setString(2, named.toString());
+                    ps.setString(3, statements);
+                    ps.execute();
+                }
+            } finally {
+                c.rollback();
+            }
+        }
+    }
+
+    /** One transaction in a session of the owner role, the business bound and the purge's setting naming the run. */
+    void asOwnerSession(UUID run, String statement) throws SQLException {
         try (Connection c = TestDatabase.ownerDataSource().getConnection()) {
             c.setAutoCommit(false);
             try {
                 try (PreparedStatement bind = c.prepareStatement(
                         "SELECT set_config('app.tenant_id', ?, true), set_config('bms.purging_import_run', ?, true)")) {
                     bind.setString(1, t.tenantId().toString());
-                    bind.setString(2, named.toString());
+                    bind.setString(2, run.toString());
                     bind.execute();
-                }
-                if (purgedNow) {
-                    try (PreparedStatement mark = c.prepareStatement(
-                            "UPDATE import_runs SET status = 'purged', purged_at = now() WHERE id = ?")) {
-                        mark.setObject(1, run);
-                        mark.executeUpdate();
-                    }
                 }
                 try (PreparedStatement ps = c.prepareStatement(statement)) {
                     ps.execute();

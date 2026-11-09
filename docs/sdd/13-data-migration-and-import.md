@@ -1616,23 +1616,36 @@ section 4.1; coordinated with #110, which builds no second framework).**
 - **What it keeps.** The run, its batches with the file names, sizes and SHA-256, its staged rows and issues as records
   without values (so every count stays), its resolutions with hashes, the dry run and commit reports, the signed
   reconciliation and sign-off, the rehearsals, `import_refs` (the references of the records the import created, which a
-  later run of the business matches on: a mapping's reference column is a business code, never a personal value), and the
-  audit trail. The records the import created are the business's own and are not touched.
+  later run of the business matches on: a mapping's reference column is a business code, never a personal value; its
+  content hash is the first 32 hex digits of the SHA-256 of the whole mapped row's canonical JSON (`ImportRefs.contentHash`),
+  which can confirm a guess of an entire row but reveals no value, and
+  is what tells a later run that a row changed since its import), and the audit trail. The records the import created are the business's own and are not touched.
 - **The way past the guards** of a committed batch (Lead ruling on #867): the purge is one definer function,
-  `import_purge_run(run)`, called in the business's transaction. `bms_import_purging` lets an UPDATE of a staged row, an
-  issue or a resolution through `import_rows_validation_kept`, `import_issues_batch_kept` and `reject_mutation` only as the
-  owner role (inside the definer function), with the transaction-local `bms.purging_import_run` naming the row's own run,
-  the row of the bound business, that run purged in this very transaction (`purged_at = now()`), and only the personal
-  columns changed, to exactly what the purge writes. No delete, no other run, no other table, nothing in a later
-  transaction. The removal and purge of a closed business keep their own way (`bms_erasing`), unchanged.
+  `import_purge_run(run)`, called in the business's transaction, which refuses while a file of the run is still in
+  storage. `bms_import_purging` lets an UPDATE of a staged row, an issue or a resolution through
+  `import_rows_validation_kept`, `import_issues_batch_kept` and `reject_mutation` only inside a definer function called by
+  another role's session (`current_user` the owner, `session_user` not, so a session of the owner itself never passes),
+  with `bms.purging_import_run` naming the row's own run, the row of the bound business, that run purged in this very
+  transaction (`purged_at = now()`), and only the personal columns changed, to exactly what the purge writes. No delete, no
+  other run, no other table, nothing in a later transaction. The setting is a custom setting any session can set, so the
+  marker that matters is the definer context and the run purged in the same transaction; and the state `purged` itself is
+  guarded the same way (`import_runs_purged_by_purge`: only inside the purge, never left). The removal and purge of a
+  closed business keep their own way (`bms_erasing`), unchanged. `MigrationOrderIT` checks that each replaced guard is its
+  V146 body with only the purge's block added.
 - **Who and when.** The operator at stage 9 with the host command `purge-import --tenant <id> --run <id> --operator <email>
   --witness <email> [--dump-file <name> --dump-sha256 <hex>]` (`ImportPurges.purge`): a `signed_off` run only
   (`run_not_signed_off`), the operator and a different active platform operator as witness (`witness_is_operator`,
   `platform_operator_unknown`), and the pre-import dump they deleted on the host by its file name and SHA-256 as recorded on
-  the run (`pre_import_dump_confirmation_required`, `pre_import_dump_differs`, `no_pre_import_dump`). And the daily job
-  `core.imports.retention` (chapter 9 section 9.9): 30 days after the sign-off, and 90 days after the last activity of a run
-  never signed off once a warning a week old stands, never a `committing` run. Storage that refuses a delete is 503
-  `storage_unavailable` with nothing purged.
+  the run (`pre_import_dump_confirmation_required`, `pre_import_dump_differs`, `no_pre_import_dump`); the audit row records
+  the host and user the command ran as beside the two names, which are the operator's word. And the daily job
+  `core.imports.retention` (chapter 9 section 9.9), for every business with a run to purge, suspended ones too: on day 29
+  after the sign-off (warning in the same pass if none stands), and 90 days after the last activity of a run never signed
+  off once a warning a week old stands, never a `committing` run (its way out is a resume or the dev lead's restore).
+- **Failures.** Files are deleted first, with no transaction open, then the run is purged in one transaction. Storage that
+  refuses a delete is 503 `storage_unavailable`, and any failure after the deletes rolls the transaction back: either way
+  some files may be gone while the run, its key and its rows are unchanged, and running the purge again finishes it (a
+  missing object is not an error). An upload that finishes after the purge is refused under the run's lock (the run is not
+  open), and its stored file, which no batch names, goes with the daily cleanup's orphans.
 - **The certificate of deletion** (`import_deletion_certificates`, append-only, chapter 6 section 6.5) is stored with the
   purge in its transaction: the business, the run, when, why, the operator and the witness (none for the schedule), each file
   with its name, size, SHA-256 and deletion time and its staged row count, the counts of rows cleared, issue values deleted

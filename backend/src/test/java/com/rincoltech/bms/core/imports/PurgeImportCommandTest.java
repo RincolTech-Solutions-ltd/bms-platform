@@ -47,9 +47,11 @@ class PurgeImportCommandTest {
                 args("--dump-file", "pre-import-fabricated.dump", "--dump-sha256", "e".repeat(64)));
         assertThat(options.tenant()).isEqualTo(TENANT);
         assertThat(options.run()).isEqualTo(RUN);
-        assertThat(options.purge())
-                .isEqualTo(new ImportPurges.Purge(
-                        "operator@example.test", "witness@example.test", "pre-import-fabricated.dump", "e".repeat(64)));
+        assertThat(options.purge().operatorEmail()).isEqualTo("operator@example.test");
+        assertThat(options.purge().witnessEmail()).isEqualTo("witness@example.test");
+        assertThat(options.purge().dumpFile()).isEqualTo("pre-import-fabricated.dump");
+        assertThat(options.purge().dumpSha256()).isEqualTo("e".repeat(64));
+        assertThat(options.purge().origin()).startsWith("purge-import on ").contains(" as ");
         assertThat(PurgeImportCommand.Options.parse(args()).purge().dumpFile()).isNull();
     }
 
@@ -115,5 +117,23 @@ class PurgeImportCommandTest {
                 new ApiException(HttpStatus.CONFLICT, "run_not_signed_off", "Import not signed off", "x");
         assertThat(run(answering(null, refused), out, err)).isEqualTo(3);
         assertThat(err.toString(StandardCharsets.UTF_8)).contains("purge-import refused: run_not_signed_off");
+
+        // Any other failure is exit 3 too, with its class and never its message, which could hold a value.
+        ImportPurges failing = new ImportPurges() {
+            @Override
+            public Certificate purge(UUID runId, Purge request) {
+                throw new IllegalStateException("a message that must not be printed");
+            }
+
+            @Override
+            public Optional<Certificate> certificate(UUID runId) {
+                return Optional.empty();
+            }
+        };
+        err.reset();
+        assertThat(run(failing, out, err)).isEqualTo(3);
+        assertThat(err.toString(StandardCharsets.UTF_8))
+                .contains("purge-import failed: IllegalStateException")
+                .doesNotContain("must not be printed");
     }
 }

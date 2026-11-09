@@ -1466,10 +1466,17 @@ expand only:
   to the transaction, every statement naming the business: the run `purged` with `purged_at = now()` and its
   `data_key_wrapped` cleared; its `import_rows.raw` `{}`, `normalised` NULL and `source_ref` hashed; its
   `import_issues.original_value` NULL; its resolutions' `before_value`, `after_value` and `row_key` hashed (SHA-256 with a
-  salt kept nowhere). Refuses a run already purged or committing. Returns the counts.
+  salt kept nowhere). Refuses a run already purged or committing, and one whose batches still name a stored file (the
+  application deletes them first). Returns the counts.
+- **`import_runs_purged_by_purge`** (V147, #139): a `BEFORE INSERT OR UPDATE OF status` trigger on `import_runs`; a run
+  becomes `purged` only inside a definer function called by another role's session with `bms.purging_import_run` naming it
+  (`import_purge_run`), and never leaves `purged`; a migration's opt-in and `bms_erasing` keep their ways through.
+- **`imports_retention_tenants()`** (definer, V147, #139; `bms_app` may execute, unbound): the businesses holding a run not
+  purged and not committing, active or suspended, except one whose removal has begun; the daily job visits these.
 - **`bms_import_purging(table, old, new)`** (V147, #139): the only way past `import_rows_validation_kept`,
   `import_issues_batch_kept` and, for `import_issue_resolutions` only, `reject_mutation`, beside V102's `bms_erasing`. True
-  only for an UPDATE as the owner role (inside `import_purge_run`) with the transaction-local `bms.purging_import_run`
+  only for an UPDATE inside a definer function called by another role's session (`import_purge_run`: `current_user` the
+  owner, `session_user` not) with the transaction-local `bms.purging_import_run`
   naming the row's own run, the row of the bound business, that run purged in this transaction (`purged_at = now()`), and
   only the personal columns changed to what the purge writes.
 
@@ -2366,8 +2373,8 @@ the backfill in batches of 5,000 under `lock_timeout` 5s, and the index `import_
 `V146__import_rehearsals.sql` (#138; directly after `V145`) is expand only: `import_runs.fabricated` with its trigger
 `import_runs_fabricated_fixed`, and `import_rehearsals` with its index (section 6.5, Import tables), under `lock_timeout` 5s.
 `V147__import_purge.sql` (#139; directly after `V146`) is expand only: `import_runs.purge_warned_at`,
-`import_deletion_certificates` with its trigger, the functions `bms_import_purged_value`, `bms_import_purging` and
-`import_purge_run`, and the guards `import_issues_batch_kept`, `import_rows_validation_kept` and `reject_mutation` replaced
+`import_deletion_certificates` with its trigger, the functions `bms_import_purged_value`, `bms_import_purging`,
+`import_purge_run` and `imports_retention_tenants`, the trigger `import_runs_purged_by_purge`, and the guards `import_issues_batch_kept`, `import_rows_validation_kept` and `reject_mutation` replaced
 by their own bodies with the purge's way through added (section 6.5, Import tables), under `lock_timeout` 5s.
 The next migration takes the number above the highest on `main`
 (`MigrationOrderIT`, chapter 15 section 15.4.3).
