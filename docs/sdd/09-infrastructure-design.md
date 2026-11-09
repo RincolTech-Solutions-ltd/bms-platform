@@ -414,7 +414,10 @@ deletion 90 days after closing), all Africa/Kampala (ADR-024).
    so no deploy's migrate and second api start beside it, and it starts nothing from Saturday 21:30 to
    Sunday 07:00 or while a drill runs, and a watchdog removes its containers and fails it at its
    deadline, six hours after its start or Sunday 03:20 if sooner, so its 704 MB never meets the drill's
-   448 MB and it keeps a deploy waiting six hours at most. It writes none of
+   448 MB and it keeps a deploy waiting six hours at most. Its live sessions are named
+   `bms-rehearsal-<pid>` through `PGAPPNAME`, bounded by server timeouts and by `timeout -s KILL` in the
+   live container, and the watchdog ends those sessions only (`deploy/tests/rehearsal-sessions-test.sh`
+   checks this on a real PostgreSQL 16). It writes none of
    the drill's state files, so `monitor.sh` never reads a rehearsal as a drill. Runbook:
    `docs/runbooks/restore-from-backup.md` section 5.2.
 

@@ -145,10 +145,15 @@ cron: those run the script with no argument, which is the weekly drill above, un
    migrations and the commit. Its deadline, logged at the start, is six hours after the start, or the next Sunday 03:20
    host time (ten minutes before the drill) if that comes first, so it never keeps a deploy waiting more than six
    hours. A watchdog enforces it on every step, a hung one included: at the deadline it removes the rehearsal's
-   containers, ends the steps still running and every session the rehearsal opened on the live database (each is
-   named `bms-rehearsal-<pid>` and has its own statement and idle-in-transaction timeouts on the server), and the
-   rehearsal fails (exit 1) with nothing stored and its locks released. If the deadline comes as the row is being
-   stored, the script asks the live database and says which it is. No commit starts with less than 30 minutes left.
+   containers, ends the steps still running and every session the rehearsal opened on the live database, and the
+   rehearsal fails (exit 1) with nothing stored and its locks released. Each live session is named
+   `bms-rehearsal-<pid>` in `pg_stat_activity` (through `PGAPPNAME`: psql would override a name given in
+   `PGOPTIONS`), has its own statement and idle-in-transaction timeouts on the server, and runs under
+   `timeout -s KILL` inside the live container, so it ends even if its `docker exec` client is gone. The watchdog ends
+   only sessions with that name, of `bms_owner`, `bms_app` or `postgres`, opened since the rehearsal started. If a
+   stop (the deadline, Ctrl-C or TERM) comes as the row is being stored, the script reads the row back from the live
+   database and says whether it was stored; if that read fails it says the outcome is unknown and prints the query to
+   check it with. No commit starts with less than 30 minutes left.
    A rehearsal that needs longer is a sign to split the run's files. On staging it starts nothing
    unless `bms.slice` has 704 MB free below `MemoryHigh` (in use counted as `memory.current` less inactive page cache),
    and 448 MB again before the API container.
