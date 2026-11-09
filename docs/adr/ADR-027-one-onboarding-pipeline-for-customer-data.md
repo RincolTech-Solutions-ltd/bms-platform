@@ -114,18 +114,23 @@ tables and keeps in clear only codes, counts, hashes, statuses, ids and timestam
 | `import_batches` | `sheet_name`, `failure_reason` (hashed); the quarantined file and its `object_key` (deleted) |
 | `import_runs` | `allow_trading_reason` and each policy decision's confirmation (hashed), `data_key_wrapped` (cleared) |
 | `import_signoffs` | `signed_name` (hashed) |
+| `approval_requests` (the run's `import_commit`) | `decision_note`, `execution_error` (hashed) |
 
-The run has no notes and no halt or cancel reason (a boolean and a time, V127). The run's audit rows hold no typed text:
-the override's reason and a policy's confirmation are audited by their SHA-256 only. Kept readable, each for one reason:
+The run has no notes and no halt or cancel reason (a boolean and a time, V127). The audit rows, never purged, hold no
+typed text and no unsalted hash of one, which a guess of every phone number would undo (review of #886, MF3): the
+override's reason and a policy's confirmation are audited only as given, with their length. Every other text column of
+these tables holds codes only, and `ImportPurgeIT` names each column in one list, so a new column fails CI until it is
+classed. Kept readable, each for one reason:
 
 | Column | Why |
 |---|---|
 | `import_batches.source_filename`, `size_bytes`, `source_sha256`; `import_runs.pre_import_dump_file`, `pre_import_dump_sha256` | the certificate names the files and the dump it deletes |
 | `import_batches.source_headers` | the sheet's column names, which the business's mapping (not of the run) holds and a later run is mapped by |
-| `import_refs.source_key`, `source_ref` | the file, tab and reference code a later run matches its rows on |
+| `import_refs.source_key`, `source_ref` | the file, tab and reference code a later run matches its rows on; the mapping refuses a reference column that feeds a personal field (`SOURCE_REF_COLUMN_PERSONAL`) |
 | `import_reconciliations.report` | the signed document, codes, counts and amounts only, that the sign-off's SHA-256 names |
 | `import_rehearsals`, the dry run and batch reports | made by the application, codes, counts and amounts only |
 | `import_deletion_certificates.document` | the certificate itself, naming the platform operator, the witness and the files |
+| `approval_requests.payload` of the run's `import_commit` | the run's id, its file count and the application's notice |
 
 ## Note (8 November 2026, issue #138): decision 9 as built
 

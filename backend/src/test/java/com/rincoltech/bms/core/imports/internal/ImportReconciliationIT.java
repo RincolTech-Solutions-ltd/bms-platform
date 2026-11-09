@@ -161,6 +161,8 @@ class ImportReconciliationIT extends IntegrationTest {
         secondTillRoll = "";
         killAfterBatch = 0;
         seams.killAfter = 0;
+        typed = null;
+        CommitApproval.note = CommitApproval.NOTE;
         FixtureShopTemplate.SLOW_BOOKS = false;
         ReconciliationService.signOffTimeout = "60s";
     }
@@ -247,7 +249,13 @@ class ImportReconciliationIT extends IntegrationTest {
                     () -> runs.recordPolicy(
                             runId,
                             Policy.RECEIVABLE,
-                            new PolicyDecision(option, DAY, "Question list item 3, signed", operator, null, null)));
+                            new PolicyDecision(
+                                    option,
+                                    DAY,
+                                    typed == null ? "Question list item 3, signed" : typed,
+                                    operator,
+                                    null,
+                                    null)));
         }
         ImportRuns.DryRun dry = as(t, () -> runs.dryRun(runId, operator));
         assertThat(dry.report().failure()).as(dry.report().render()).isNull();
@@ -270,6 +278,12 @@ class ImportReconciliationIT extends IntegrationTest {
 
     /** The batch after which the commit is killed and then resumed; 0 for an unbroken commit. */
     volatile int killAfterBatch;
+
+    /**
+     * When set, the text typed at every step of the run (each review note, the policy decision's confirmation and the
+     * checker's note on the import_commit request), so the purge's scan sees it written by the services themselves.
+     */
+    String typed;
 
     @Autowired
     CommitTestSeams seams;
@@ -299,7 +313,13 @@ class ImportReconciliationIT extends IntegrationTest {
                     t,
                     () -> review.resolve(
                             issue.id(),
-                            new Resolution(kind, issue.version(), null, null, null, "Fabricated review note"),
+                            new Resolution(
+                                    kind,
+                                    issue.version(),
+                                    null,
+                                    null,
+                                    null,
+                                    typed == null ? "Fabricated review note" : typed),
                             operator));
         }
         throw new AssertionError("the review did not settle");
@@ -903,6 +923,12 @@ class ImportReconciliationIT extends IntegrationTest {
     @Autowired
     ImportPurges purges;
 
+    /** A fabricated phone inside the text typed at each step of the purged run. */
+    static final String TYPED_PHONE = "0700000188";
+
+    /** The fabricated text typed at each step of the purged run: a name and a phone, as a person might type them. */
+    static final String TYPED = "Fabricated Buyer Delta " + TYPED_PHONE;
+
     // JUSTIFICATION-A3: issue #139's acceptance test on the real commit, reconciliation and sign-off this class drives.
     /**
      * Issue #139 on the real pipeline: the golden run committed, reconciled and signed off in the app, then purged at stage
@@ -912,14 +938,25 @@ class ImportReconciliationIT extends IntegrationTest {
      */
     @Test
     void aSignedRunPurgedAtStage9KeepsItsSignedReconciliationAndNoPersonalValueOfTheFixture() throws IOException {
-        UUID run = committedGoldenRun(null);
+        // Every text a person types on the way is personal, written by the services themselves (review of #886, MF2):
+        // the review notes, the policy decision's confirmation, the checker's note on import_commit, the signer's name.
+        typed = TYPED;
+        CommitApproval.note = TYPED;
+        UUID run = committedGoldenRun(Policy.TREAT_AS_SETTLED);
         Report r = as(t, () -> reconciliation.latest(run)).orElseThrow();
-        assertThat(signOff(t, run, r, allSections(r), "Fabricated Signer", today(t))
-                        .getStatusCode())
+        assertThat(signOff(t, run, r, allSections(r), TYPED, today(t)).getStatusCode())
                 .isEqualTo(HttpStatus.OK);
-        assertThat(ImportPurgeIT.personalValuesOf(run, GoldenRun.PERSONAL))
-                .as("the scan finds the fixture's values before the purge")
-                .isNotEmpty();
+        List<String> personal = new ArrayList<>(GoldenRun.PERSONAL);
+        personal.add(TYPED_PHONE);
+        assertThat(ImportPurgeIT.personalValuesOf(run, personal))
+                .as("the scan finds the fixture's values and each typed text before the purge")
+                .contains(
+                        "import_issue_resolutions.note",
+                        "import_runs.policy",
+                        "import_signoffs.signed_name",
+                        "approval_requests.decision_note")
+                .as("and no audit row of the run holds a typed text")
+                .doesNotContain("audit_log.data");
         String kept = """
                 SELECT concat_ws(' / ',
                        (SELECT string_agg(CAST(sha256 AS text) || CAST(report AS text), '|' ORDER BY version)
@@ -947,7 +984,7 @@ class ImportReconciliationIT extends IntegrationTest {
                 t, () -> purges.purge(run, new Purge(operatorEmail, witnessEmail, "pre-import-fabricated.dump", SHA)));
 
         assertThat(status(run)).isEqualTo("purged");
-        assertThat(ImportPurgeIT.personalValuesOf(run, GoldenRun.PERSONAL))
+        assertThat(ImportPurgeIT.personalValuesOf(run, personal))
                 .as("columns still holding a personal value")
                 .isEmpty();
         assertThat(as(t, () -> {

@@ -41,6 +41,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -268,49 +270,30 @@ class ImportPurgeIT extends IntegrationTest {
      */
     static List<String> personalValuesOf(UUID run, List<String> values) {
         List<String> found = new ArrayList<>();
+        List<String> ids = new ArrayList<>();
         for (String table : runTables()) {
-            List<String> columns = TestDatabase.owner()
-                    .sql("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public'"
-                            + " AND table_name = ?")
-                    .param(table)
+            String scope = scopeOf(table);
+            ids.addAll(TestDatabase.owner()
+                    .sql("SELECT CAST(id AS text) FROM " + table + " WHERE " + scope)
+                    .param(run)
                     .query(String.class)
-                    .list();
-            String scope;
-            if (table.equals("import_runs")) {
-                scope = "id = ?";
-            } else if (columns.contains("run_id")) {
-                scope = "run_id = ?";
-            } else if (columns.contains("batch_id")) {
-                scope = "batch_id IN (SELECT id FROM import_batches WHERE run_id = ?)";
-            } else {
-                scope = "tenant_id = (SELECT tenant_id FROM import_runs WHERE id = ?)";
-            }
-            List<String> texts = TestDatabase.owner()
-                    .sql("""
-                            SELECT column_name FROM information_schema.columns
-                             WHERE table_schema = 'public' AND table_name = ?
-                               AND (data_type IN ('text', 'character varying', 'character', 'jsonb', 'json',
-                                                  'USER-DEFINED')
-                                    OR (data_type = 'ARRAY' AND udt_name IN ('_text', '_varchar')))
-                            """)
-                    .param(table)
-                    .query(String.class)
-                    .list();
-            for (String column : texts) {
-                String sql = "SELECT count(*) FROM " + table + " WHERE " + scope + " AND strpos(lower(CAST(\"" + column
-                        + "\" AS text)), lower(?)) > 0";
-                for (String value : values) {
-                    if (count(sql, run, value) > 0) {
-                        found.add(table + "." + column);
-                        break;
-                    }
-                }
-            }
+                    .list());
+            scan(table, scope, run, values, found);
         }
-        // And the rows that name the run without a foreign key (review of #886, S4): the audit rows of the run, its
-        // batches, issues and resolutions, and the outbox rows of its warning.
+        // The run's import_commit request, whose checker types a note (review of #886, MF2).
+        String approvals = "action_type = 'import_commit' AND subject_id = ?";
+        ids.addAll(TestDatabase.owner()
+                .sql("SELECT CAST(id AS text) FROM approval_requests WHERE " + approvals)
+                .param(run)
+                .query(String.class)
+                .list());
+        scan("approval_requests", approvals, run, values, found);
+        // And the rows that name the run without a foreign key (review of #886, S4 and MF2): every audit row of the
+        // business about the run or any row of its tables or its approval (the sign-off, the reconciliation, the
+        // request), or whose data names the run; and the outbox rows of its warning.
+        String in = "{" + String.join(",", ids) + "}";
         for (String value : values) {
-            if (count(AUDIT_OF_RUN, run, run, run, run, run, value) > 0) {
+            if (count(AUDIT_OF_RUN, run, in, run, value) > 0) {
                 found.add("audit_log.data");
                 break;
             }
@@ -324,17 +307,167 @@ class ImportPurgeIT extends IntegrationTest {
         return found;
     }
 
+    /** The rows of one table of the run: its own row, its rows by run, by batch, or (none today) by business. */
+    static String scopeOf(String table) {
+        List<String> columns = TestDatabase.owner()
+                .sql("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public'"
+                        + " AND table_name = ?")
+                .param(table)
+                .query(String.class)
+                .list();
+        if (table.equals("import_runs")) {
+            return "id = ?";
+        } else if (columns.contains("run_id")) {
+            return "run_id = ?";
+        } else if (columns.contains("batch_id")) {
+            return "batch_id IN (SELECT id FROM import_batches WHERE run_id = ?)";
+        }
+        return "tenant_id = (SELECT tenant_id FROM import_runs WHERE id = ?)";
+    }
+
+    /** Every text, character, JSON and text array column of a table, as the scan and the catalogue read them. */
+    static List<String> textColumns(String table) {
+        return TestDatabase.owner().sql("""
+                        SELECT column_name FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = ?
+                           AND (data_type IN ('text', 'character varying', 'character', 'jsonb', 'json',
+                                              'USER-DEFINED')
+                                OR (data_type = 'ARRAY' AND udt_name IN ('_text', '_varchar')))
+                         ORDER BY column_name
+                        """).param(table).query(String.class).list();
+    }
+
+    private static void scan(String table, String scope, UUID run, List<String> values, List<String> found) {
+        for (String column : textColumns(table)) {
+            String sql = "SELECT count(*) FROM " + table + " WHERE " + scope + " AND strpos(lower(CAST(\"" + column
+                    + "\" AS text)), lower(?)) > 0";
+            for (String value : values) {
+                if (count(sql, run, value) > 0) {
+                    found.add(table + "." + column);
+                    break;
+                }
+            }
+        }
+    }
+
     static final String AUDIT_OF_RUN = """
             SELECT count(*) FROM audit_log
-             WHERE entity_id IN (SELECT CAST(? AS uuid)
-                                 UNION SELECT id FROM import_batches WHERE run_id = ?
-                                 UNION SELECT i.id FROM import_issues i JOIN import_batches b ON b.id = i.batch_id
-                                        WHERE b.run_id = ?
-                                 UNION SELECT id FROM import_issue_resolutions WHERE run_id = ?
-                                 UNION SELECT w.id FROM import_rows w JOIN import_batches b ON b.id = w.batch_id
-                                        WHERE b.run_id = ?)
+             WHERE tenant_id = (SELECT tenant_id FROM import_runs WHERE id = ?)
+               AND (entity_id = ANY (CAST(? AS uuid[])) OR strpos(CAST(data AS text), CAST(? AS text)) > 0)
                AND strpos(lower(CAST(data AS text)), lower(?)) > 0
             """;
+
+    // JUSTIFICATION-A3: review of #886 MF1 asks for a catalogue test naming every text column of a run in one list.
+    // ---- The catalogue of every text column of a run (review of #886, MF1) ----
+
+    /** Hashed or cleared by import_purge_run, or deleted with the file: the typed and the staged text of the run. */
+    static final Set<String> HASHED_OR_CLEARED = Set.of(
+            "import_runs.allow_trading_reason",
+            "import_runs.policy",
+            "import_batches.sheet_name",
+            "import_batches.failure_reason",
+            "import_batches.object_key",
+            "import_rows.raw",
+            "import_rows.normalised",
+            "import_rows.source_ref",
+            "import_issues.message",
+            "import_issues.original_value",
+            "import_issues.suggested_value",
+            "import_issue_resolutions.row_key",
+            "import_issue_resolutions.before_value",
+            "import_issue_resolutions.after_value",
+            "import_issue_resolutions.note",
+            "import_signoffs.signed_name",
+            "approval_requests.decision_note",
+            "approval_requests.execution_error");
+
+    /** Kept readable, each for the one reason the V147 header and ADR-027 give. */
+    static final Set<String> KEPT_READABLE = Set.of(
+            "import_runs.pre_import_dump_file",
+            "import_runs.dry_run_report",
+            "import_batches.source_filename",
+            "import_batches.source_headers",
+            "import_batches.report",
+            "import_refs.source_key",
+            "import_refs.source_ref",
+            "import_reconciliations.report",
+            "import_rehearsals.report",
+            "import_rehearsals.reconciliation",
+            "import_deletion_certificates.body",
+            "import_deletion_certificates.document",
+            "approval_requests.payload");
+
+    /**
+     * Codes, hashes and statuses only, never typed: each is held to a code by a CHECK, written from a constant, or a hash.
+     * {@code import_runs.policy}'s other keys are an option code, dates and user ids; {@code import_rehearsals.failure} is
+     * an error code or an exception's class name ({@code RehearsalService}), never a message.
+     */
+    static final Set<String> CODES = Set.of(
+            "import_runs.status",
+            "import_runs.pre_import_dump_sha256",
+            "import_runs.dry_run_stamp",
+            "import_runs.dry_run_writer",
+            "import_runs.origin",
+            "import_batches.status",
+            "import_batches.counts",
+            "import_batches.source_sha256",
+            "import_batches.file_type",
+            "import_batches.encoding",
+            "import_batches.parse_warnings",
+            "import_batches.failure_code",
+            "import_batches.mapping_source",
+            "import_batches.template_key",
+            "import_issues.code",
+            "import_issues.severity",
+            "import_issues.field",
+            "import_issues.status",
+            "import_issue_resolutions.raw_sha256",
+            "import_issue_resolutions.code",
+            "import_issue_resolutions.field",
+            "import_issue_resolutions.resolution",
+            "import_refs.target_type",
+            "import_reconciliations.sha256",
+            "import_signoffs.report_sha256",
+            "import_signoffs.sections",
+            "import_rehearsals.backup",
+            "import_rehearsals.build",
+            "import_rehearsals.outcome",
+            "import_rehearsals.failure",
+            "import_rehearsals.timings",
+            "import_deletion_certificates.reason",
+            "import_deletion_certificates.sha256",
+            "approval_requests.action_type",
+            "approval_requests.subject_type",
+            "approval_requests.currency",
+            "approval_requests.status");
+
+    /**
+     * Every text, character, JSON and text array column of every table of a run (from the catalogue, so a column a later
+     * migration adds is found) and of its approval request is in exactly one of the three lists above: a new column fails
+     * here until it is hashed, kept for a stated reason, or shown to hold codes only.
+     */
+    @Test
+    void everyTextColumnOfARunIsHashedKeptForAReasonOrACode() {
+        Set<String> actual = new TreeSet<>();
+        for (String table : Stream.concat(runTables().stream(), Stream.of("approval_requests"))
+                .toList()) {
+            textColumns(table).forEach(c -> actual.add(table + "." + c));
+        }
+        Set<String> listed = new TreeSet<>();
+        for (Set<String> list : List.of(HASHED_OR_CLEARED, KEPT_READABLE, CODES)) {
+            for (String column : list) {
+                assertThat(listed.add(column))
+                        .as("%s is in one list only", column)
+                        .isTrue();
+            }
+        }
+        Set<String> unlisted = new TreeSet<>(actual);
+        unlisted.removeAll(listed);
+        Set<String> gone = new TreeSet<>(listed);
+        gone.removeAll(actual);
+        assertThat(unlisted).as("text columns of a run in no list").isEmpty();
+        assertThat(gone).as("listed columns that do not exist").isEmpty();
+    }
 
     static final String OUTBOX_OF_RUN =
             "SELECT count(*) FROM notification_outbox WHERE params ->> 'run' = CAST(? AS text)"

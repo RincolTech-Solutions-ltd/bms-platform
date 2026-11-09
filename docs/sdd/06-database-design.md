@@ -1468,8 +1468,8 @@ expand only:
   `import_rows.raw` `{}`, `normalised` NULL and `source_ref` hashed; its
   `import_issues.original_value` and `suggested_value` NULL and `message` hashed; its batches' `sheet_name` and
   `failure_reason` hashed; its resolutions' `before_value`, `after_value`, `row_key` and `note` hashed; its sign-off's
-  `signed_name` hashed (SHA-256 with a salt kept nowhere; one rule, every free-text column, listed in the V147 header and
-  ADR-027). Refuses a run already purged or committing, and one whose batches still name a stored file (the
+  `signed_name` hashed; the `decision_note` and `execution_error` of the run's `import_commit` approval request hashed
+  (SHA-256 with a salt kept nowhere; one rule, every free-text column, listed in the V147 header and ADR-027). Refuses a run already purged or committing, and one whose batches still name a stored file (the
   application deletes them first). Returns the counts.
 - **`import_runs_purged_by_purge`** (V147, #139): a `BEFORE INSERT OR UPDATE OF status` trigger on `import_runs`; a run
   becomes `purged` only inside a definer function called by another role's session with `bms.purging_import_run` naming it

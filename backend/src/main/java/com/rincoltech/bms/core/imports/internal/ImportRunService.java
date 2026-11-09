@@ -440,10 +440,12 @@ class ImportRunService implements ImportRuns {
                                    version = version + 1, updated_at = now()
                              WHERE id = ?
                             """).params(key, mapper.writeValueAsString(stored), runId).update();
-            // The confirmation is typed text the purge hashes; the append-only audit keeps only its hash (#139).
+            // The confirmation is typed text the purge hashes; the append-only audit, which is never purged, keeps only
+            // that it was given and its length, never the text nor an unsalted hash of it (#139, review of #886, MF3).
             Map<String, Object> audited = new LinkedHashMap<>(stored);
             audited.remove("confirmation");
-            audited.put("confirmation_sha256", PurgeService.sha256(confirmation));
+            audited.put("confirmation_given", true);
+            audited.put("confirmation_length", confirmation.length());
             audit(runId, "core.import_run.policy_recorded", Map.of(), Map.of("policy", key, "decision", audited));
             return find(runId, false);
         });
@@ -611,8 +613,9 @@ class ImportRunService implements ImportRuns {
                             runId,
                             null,
                             Map.of(),
-                            // Typed text the purge hashes on the run; the append-only audit keeps only its hash (#139).
-                            Map.of("allow_trading_tenant", true, "reason_sha256", PurgeService.sha256(why))),
+                            // Typed text the purge hashes on the run; the append-only audit, never purged, keeps only
+                            // that a reason was given and its length, never an unsalted hash (review of #886, MF3).
+                            Map.of("allow_trading_tenant", true, "reason_given", true, "reason_length", why.length())),
                     platformUserId,
                     "platform");
             return find(runId, false);

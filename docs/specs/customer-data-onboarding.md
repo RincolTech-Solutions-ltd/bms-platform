@@ -162,6 +162,7 @@ Every issue has:
 | `COLUMN_DUPLICATE` | blocking | Column {column} of source {source} is written twice in the mapping, ignoring case and spaces. (#129) |
 | `MAP_FIELD_UNMAPPED` | blocking | Source {source} maps values of {field}, which no column of it feeds. (#129) |
 | `SOURCE_REF_COLUMN_UNKNOWN` | blocking | The reference column {column} of source {source} is not a column the mapping keeps. (#129) |
+| `SOURCE_REF_COLUMN_PERSONAL` | blocking | The reference column {column} of source {source} feeds {field}, which is personal data; choose a business code such as an account or item number, or the row hash. (#139: the reference stays in clear in `import_refs` after the purge) |
 | `ZONE_UNKNOWN` | blocking | The time zone {zone} is not a known zone. (#129) |
 | `SOURCE_UNKNOWN` | request refused | The mapping has no source {source}. (#129) |
 | `BATCH_HAS_NO_MAPPING` | request refused | The file was read without a mapping; read it again with one before checking its columns. (#129) |

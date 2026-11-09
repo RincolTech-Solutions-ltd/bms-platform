@@ -45,22 +45,34 @@
 --   import_batches     sheet_name, failure_reason (hash); the quarantined file and its object_key (deleted)
 --   import_runs        allow_trading_reason (hash), each policy decision's confirmation (hash), data_key_wrapped (NULL)
 --   import_signoffs    signed_name (hash)
+--   approval_requests  decision_note, execution_error of the run's import_commit request (hash)
 -- The run has no notes, and no halt or cancel reason (V127: `halt_requested` is a boolean, `cancelled_at` a time). The
--- audit rows of the run hold no typed text: the override's reason and a policy's confirmation are audited by their SHA-256
--- only (ImportRunService), a resolution's audit holds no note, the sign-off's no name.
+-- audit rows, which are never purged, hold no typed text and no unsalted hash of one: the override's reason and a policy's
+-- confirmation are audited only as given, with their length (ImportRunService); a resolution's audit holds no note, the
+-- sign-off's no name, an approval's decision no note (ApprovalService), a failed batch only its code (UploadService).
+-- Every other text column of these tables holds codes only (a status, a code a CHECK holds, a hash, the writer's class
+-- name, a rehearsal's error code or exception class); ImportPurgeIT names every column in one of the three lists, so a
+-- new column fails CI until it is classed.
 -- Kept readable, each for one reason:
 --   import_batches.source_filename, size_bytes, source_sha256 and import_runs.pre_import_dump_file, pre_import_dump_sha256
 --     (and the dump's audit row): the certificate names the files and the dump it deletes (spec section 6.4).
 --   import_batches.source_headers: the sheet's column names, which the business's mapping document (not of the run) holds
 --     too and a later run is mapped by; a committed batch's mapping never changes (V139).
 --   import_refs.source_key and source_ref: the file, tab and reference code a later run of the business matches its rows
---     on (CHANGED_SINCE_IMPORT); the reference is a business code, the content hash covers a whole row.
+--     on (CHANGED_SINCE_IMPORT). The reference is a business code: the mapping refuses a reference column that feeds a
+--     personal field, a name, a phone or an ID number (SOURCE_REF_COLUMN_PERSONAL); the content hash covers a whole row.
+--     The tab's name is part of the key, so it stays here though import_batches.sheet_name is hashed.
 --   import_reconciliations.report: the signed document, made by the application with codes, counts and amounts only, which
 --     the sign-off's SHA-256 names and nothing may change (V144).
 --   import_rehearsals, import_runs.dry_run_report and dry_run_writer, import_batches.report: made by the application and
 --     the restore script, codes, counts and amounts only.
 --   import_deletion_certificates.document: the certificate itself, which names the platform operator and the witness (the
 --     team, never a customer's person) and the files.
+--   approval_requests.payload of the import_commit request: the run's id, its file count and the application's notice.
+--
+-- import_purge_run is granted to bms_app, so any code of the application could call it; only PurgeService does, after
+-- deleting the files, and the function refuses a run whose batches still name one. A caller that cleared `object_key`
+-- without deleting the file would purge with no certificate and leave the file to QuarantineCleanup.
 --
 -- Locks, said plainly. The new column takes ACCESS EXCLUSIVE on `import_runs` for milliseconds (no default, no rewrite);
 -- the new table takes SHARE ROW EXCLUSIVE on `tenants`, `import_runs` and `platform_users` (its foreign keys) until the
@@ -285,6 +297,16 @@ BEGIN
                        ELSE 'sha256:' || encode(sha256(v_salt || convert_to(x.note, 'UTF8')), 'hex') END
      WHERE x.tenant_id = v_tenant AND x.run_id = p_run;
     GET DIAGNOSTICS v_resolutions = ROW_COUNT;
+
+    -- The checker's note on the run's import_commit request, and the words of a failed execution (review of #886, MF2).
+    -- approval_requests is not append-only, so no guard needs a way through; its status, people and times stay.
+    UPDATE approval_requests
+       SET decision_note = CASE WHEN decision_note IS NULL THEN NULL
+                                ELSE 'sha256:' || encode(sha256(v_salt || convert_to(decision_note, 'UTF8')), 'hex') END,
+           execution_error = CASE WHEN execution_error IS NULL THEN NULL
+                                  ELSE 'sha256:' || encode(sha256(v_salt || convert_to(execution_error, 'UTF8')), 'hex')
+                                  END
+     WHERE tenant_id = v_tenant AND action_type = 'import_commit' AND subject_id = p_run;
 
     PERFORM set_config('bms.purging_import_run', '', true);
     RETURN jsonb_build_object('rows', v_rows, 'issues', v_issues, 'resolutions', v_resolutions);

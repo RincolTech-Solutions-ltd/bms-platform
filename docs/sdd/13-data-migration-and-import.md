@@ -961,7 +961,8 @@ operator's tooling calls the services, as it calls the upload and the commit.
   missing field), what a schema cannot say: a required field no column feeds
   (`REQUIRED_FIELD_UNMAPPED`), one field fed by two columns (`FIELD_MAPPED_TWICE`), a column written twice ignoring case and
   spaces (`COLUMN_DUPLICATE`), a value or enum map for a field no column feeds (`MAP_FIELD_UNMAPPED`), a `source_ref` column
-  the source does not keep (`SOURCE_REF_COLUMN_UNKNOWN`), an unknown zone (`ZONE_UNKNOWN`). Against a file's headers,
+  the source does not keep (`SOURCE_REF_COLUMN_UNKNOWN`), a `source_ref` column that feeds a personal field, a name, a
+  phone or an ID number (`SOURCE_REF_COLUMN_PERSONAL`, #139: the reference outlives the purge in `import_refs`), an unknown zone (`ZONE_UNKNOWN`). Against a file's headers,
   compared trimmed and ignoring case: one `COLUMN_UNMAPPED` per header neither mapped nor ignored, and
   `REQUIRED_COLUMN_MISSING` per required field whose column the file lacks. A mapping is valid only with no problem at all,
   so a column left unmapped and not ignored makes it invalid. The messages are the catalogue's, filled with the source,
@@ -1618,15 +1619,20 @@ section 4.1; coordinated with #110, which builds no second framework).**
 - **What it keeps.** The run, its batches with the file names, sizes and SHA-256, its staged rows and issues as records
   without values (so every count stays), its resolutions with hashes, the dry run and commit reports, the signed
   reconciliation and sign-off, the rehearsals, `import_refs` (the references of the records the import created, which a
-  later run of the business matches on: a mapping's reference column is a business code, never a personal value; its
+  later run of the business matches on: a mapping's reference column is a business code, never a personal value, and
+  the mapping refuses one that feeds a name, a phone or an ID number (`SOURCE_REF_COLUMN_PERSONAL`); its
   content hash is the first 32 hex digits of the SHA-256 of the whole mapped row's canonical JSON (`ImportRefs.contentHash`),
   which can confirm a guess of an entire row but reveals no value, and
   is what tells a later run that a row changed since its import), and the audit trail. The records the import created are the business's own and are not touched.
   One rule, no case by case (Lead on #886): every free-text column on the run's tables is hashed or cleared, and only
   codes, counts, hashes, statuses, ids and timestamps stay in clear. Besides the above, that is the trading override's
   reason and each policy decision's confirmation reference (`import_runs.allow_trading_reason` and the `confirmation` of
-  each entry of `import_runs.policy`); their audit rows record only the text's SHA-256 (`core.import_run.trading_override_set`,
-  `core.import_run.policy_recorded`). A run has no notes and no halt or cancel reason (V127). The columns kept readable,
+  each entry of `import_runs.policy`), and the checker's note and any execution error on the run's `import_commit`
+  request (`approval_requests.decision_note` and `execution_error`). Their audit rows, never purged, record only that
+  the text was given and its length (`core.import_run.trading_override_set`, `core.import_run.policy_recorded`), never
+  an unsalted hash a guess of every phone number would undo; an approval's decision is audited without its note. A run
+  has no notes and no halt or cancel reason (V127). `ImportPurgeIT` names every text column of the run's tables and its
+  request as hashed, kept or codes only, so a new column fails CI until it is classed. The columns kept readable,
   each with its one reason, are listed in the V147 header and the ADR-027 note of 9 November: the file names, sizes and
   hashes and the dump's name and hash (the certificate names them), the sheets' column names, `import_refs`, and the
   reports and certificate made by the application.
