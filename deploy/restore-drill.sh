@@ -69,18 +69,24 @@ rh_refuse() {
     exit 3
 }
 # The live database, as the drill reads it: bms_owner, one statement, read only.
-rh_live() { docker exec -e "PGOPTIONS=$(rh_pgoptions 60)" "$RH_LIVE_DB" psql -U bms_owner -d bms -v ON_ERROR_STOP=1 -tAc "$1"; }
-# rh_pgoptions <seconds>: every session the rehearsal opens on the live database is bounded on the server, whatever
-# happens to its client (killing a docker exec client never ends the psql inside the container), and named, so the
-# deadline and the clean-up can end it (review of d70e30f).
-rh_pgoptions() {
-    echo "-c application_name=${RH_APP} -c statement_timeout=${1}s -c idle_in_transaction_session_timeout=60s"
+rh_live() {
+    docker exec -e "PGAPPNAME=${RH_APP}" -e "PGOPTIONS=$(rh_pgoptions 60)" "$RH_LIVE_DB" \
+        psql -U bms_owner -d bms -v ON_ERROR_STOP=1 -tAc "$1"
 }
-# Ends every live session the rehearsal still has, by its name, as the superuser (the reads are bms_owner's, the
-# write bms_app's); itself bounded by a statement timeout.
+# rh_pgoptions <seconds>: every session the rehearsal opens on the live database is bounded on the server, whatever
+# happens to its client (killing a docker exec client never ends the psql inside the container), and is named by
+# PGAPPNAME, which libpq sends as application_name in place of psql's own (a -c application_name in PGOPTIONS would be
+# overridden by it), so the deadline and the clean-up can end it (reviews of d70e30f and 1ebe9e4).
+rh_pgoptions() {
+    echo "-c statement_timeout=${1}s -c idle_in_transaction_session_timeout=60s"
+}
+# Ends every live session the rehearsal still has: its name, one of the three roles it connects as, opened since it
+# started; as the superuser, itself bounded by a statement timeout.
 rh_terminate_live() {
-    docker exec -e "PGOPTIONS=-c statement_timeout=10s" "$RH_LIVE_DB" psql -U postgres -d bms -tAc \
-        "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE application_name = '${RH_APP}'" \
+    local sql="SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE application_name = '${RH_APP}'"
+    sql+=" AND usename IN ('bms_owner', 'bms_app', 'postgres') AND pid <> pg_backend_pid()"
+    sql+=" AND backend_start >= to_timestamp(${RH_STARTED_EPOCH})"
+    docker exec -e "PGOPTIONS=-c statement_timeout=10s" "$RH_LIVE_DB" psql -U postgres -d bms -tAc "$sql" \
         > /dev/null 2>&1 || true
 }
 # The throwaway database as its superuser: only ever the container this rehearsal started.
@@ -195,7 +201,7 @@ rh_require_scratch() {
     networks="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$RH_DB" 2> /dev/null)"
     [[ "$networks" == "${RH_NET} " ]] || rh_refuse "the target container is on other networks: ${networks}"
     sysid="$(rh_scratch "SELECT system_identifier FROM pg_control_system()" 2> /dev/null)"
-    live_sysid="$(docker exec -e "PGOPTIONS=$(rh_pgoptions 60)" "$RH_LIVE_DB" psql -U postgres -d bms -tAc "SELECT system_identifier FROM pg_control_system()" 2> /dev/null)"
+    live_sysid="$(docker exec -e "PGAPPNAME=${RH_APP}" -e "PGOPTIONS=$(rh_pgoptions 60)" "$RH_LIVE_DB" psql -U postgres -d bms -tAc "SELECT system_identifier FROM pg_control_system()" 2> /dev/null)"
     [[ "$sysid" =~ ^[0-9]+$ && "$live_sysid" =~ ^[0-9]+$ && "$sysid" != "$live_sysid" ]] \
         || rh_refuse "the target database is the live cluster, or the two cannot be told apart (${sysid:-none} and ${live_sysid:-none})"
 }
@@ -232,6 +238,8 @@ rh_watchdog() {
     while kill -0 "$$" 2> /dev/null; do
         [[ -e "$RH_TMP/storing" ]] && return
         if (( $(date +%s) >= RH_DEADLINE )); then
+            # Asked again at the last moment, so a write that has just begun is never killed for nothing.
+            [[ -e "$RH_TMP/storing" ]] && return
             kill -USR1 "$$" 2> /dev/null
             docker rm -f -v "$RH_API" "$RH_MIGRATE" "$RH_RCLONE" "$RH_DB" > /dev/null 2>&1
             rh_end_children
@@ -255,24 +263,35 @@ rh_end_children() {
     done
 }
 
-# The deadline, by USR1 rather than a file, so a full disk cannot turn it into a plain TERM. What it says is what the
-# live database holds: the rehearsal's row once the write began and reached it, else nothing.
-rh_on_deadline() {
+# rh_stopped <what> <exit status>: a stop (the deadline, TERM or INT) reports what the live database holds. Before the
+# one live write began, nothing; once it began, the rehearsal's row is looked up by its id: stored, not stored, or, if
+# the live database does not answer, unknown, with the query that tells (reviews of d70e30f and 1ebe9e4).
+rh_stopped() {
+    local found query
     IFS=$' \t\n'
-    if [[ -n "${RH_REHEARSAL_ID:-}" ]] \
-        && [[ "$(rh_live "SELECT count(*) FROM import_rehearsals WHERE id = '${RH_REHEARSAL_ID}'" 2> /dev/null)" == "1" ]]; then
-        rh_log "its deadline came as the rehearsal was stored; it is stored on live run ${RH_RUN} (${RH_REHEARSAL_ID})"
-        exit "${RH_COMMIT_STATUS:-1}"
+    if [[ -z "${RH_REHEARSAL_ID:-}" ]]; then
+        rh_log "${1}; nothing is stored"
+        exit "$2"
     fi
-    rh_log "FAILED: stopped at its deadline, $(date -d "@${RH_DEADLINE}" +%Y-%m-%dT%H:%M%z); nothing is stored"
-    exit 1
+    query="SELECT count(*) FROM import_rehearsals WHERE id = '${RH_REHEARSAL_ID}'"
+    found="$(rh_live "$query" 2> /dev/null)"
+    case "$found" in
+        1)
+            rh_log "${1}, as the rehearsal was stored; it is stored on live run ${RH_RUN} (${RH_REHEARSAL_ID})"
+            [[ "$2" == 1 ]] && exit "${RH_COMMIT_STATUS:-1}"
+            exit "$2" ;;
+        0)
+            rh_log "${1}; nothing is stored" ;;
+        *)
+            rh_log "${1}; whether the rehearsal was stored is unknown (the live database did not answer); check with: ${query}" ;;
+    esac
+    exit "$2"
 }
 
-rh_on_term() {
-    IFS=$' \t\n'
-    rh_log "terminated"
-    exit 143
-}
+# The deadline comes by USR1 rather than a file, so a full disk cannot turn it into a plain TERM.
+rh_on_deadline() { rh_stopped "FAILED: stopped at its deadline, $(date -d "@${RH_DEADLINE}" +%Y-%m-%dT%H:%M%z)" 1; }
+rh_on_term() { rh_stopped "terminated" 143; }
+rh_on_int() { rh_stopped "interrupted" 130; }
 
 # rh_require_env_target <env file>: the only database a container of the rehearsal is given is the throwaway one.
 rh_require_env_target() {
@@ -304,7 +323,7 @@ rehearse_import() {
         || rh_refuse "BMS_ENVIRONMENT is ${BMS_ENVIRONMENT}; a rehearsal runs only on staging or production"
     umask 077
     local started step status row tag initdb prefix owner_pw app_pw live_ver scratch_ver table cols scratch_cols ready
-    local prelude live_script old_ifs
+    local prelude live_script old_ifs left
     local -a cgroup=() timings=()
     started="$(rh_ms)"
     RH_DB="bms-rehearsal-db-$$"
@@ -316,10 +335,11 @@ rehearse_import() {
     RH_TMP=""
     RH_WATCHDOG=""
     trap rh_cleanup EXIT
-    trap 'rh_log "interrupted"; exit 130' INT
+    trap rh_on_int INT
     trap rh_on_term TERM
     trap rh_on_deadline USR1
     RH_APP="bms-rehearsal-$$"
+    RH_STARTED_EPOCH=$(( $(date +%s) - 60 ))
     RH_REHEARSAL_ID=""
     RH_COMMIT_STATUS=""
 
@@ -464,11 +484,14 @@ rehearse_import() {
     done
     live_script+="COMMIT;"$'\n'
     rh_log "copying the run's staged rows into the throwaway database"
+    left=$(( RH_DEADLINE - $(date +%s) > 1 ? RH_DEADLINE - $(date +%s) : 1 ))
     {
         printf '%s' "$prelude"
         # A live read that fails part way ends the stream with ROLLBACK, never COMMIT, and leaves its mark for below.
-        if docker exec -i -e "PGOPTIONS=$(rh_pgoptions $(( RH_DEADLINE - $(date +%s) > 1 ? RH_DEADLINE - $(date +%s) : 1 )))" \
-            "$RH_LIVE_DB" psql -U bms_owner -d bms -q -v ON_ERROR_STOP=1 <<< "$live_script"; then
+        # The live session ends by the deadline whatever its client does: psql is killed inside the container then, and
+        # each statement is held to at most 30 minutes on the server.
+        if docker exec -i -e "PGAPPNAME=${RH_APP}" -e "PGOPTIONS=$(rh_pgoptions $(( left < 1800 ? left : 1800 )))" \
+            "$RH_LIVE_DB" timeout -s KILL "$left" psql -U bms_owner -d bms -q -v ON_ERROR_STOP=1 <<< "$live_script"; then
             printf '%s\n' "COMMIT;"
         else
             : > "$RH_TMP/live-read.failed"
@@ -533,7 +556,8 @@ rehearse_import() {
     : > "$RH_TMP/storing"
     docker exec "$RH_DB" psql -U postgres -d bms -v ON_ERROR_STOP=1 \
         -c "COPY (SELECT ${cols} FROM import_rehearsals WHERE run_id = '${RH_RUN}') TO STDOUT" \
-        | docker exec -i -e "PGOPTIONS=$(rh_pgoptions 120)" "$RH_LIVE_DB" psql -U bms_app -d bms -q -v ON_ERROR_STOP=1 \
+        | docker exec -i -e "PGAPPNAME=${RH_APP}" -e "PGOPTIONS=$(rh_pgoptions 120)" "$RH_LIVE_DB" \
+            timeout -s KILL 150 psql -U bms_app -d bms -q -v ON_ERROR_STOP=1 \
             -c "SELECT set_config('app.tenant_id', '${RH_TENANT}', false)" \
             -c "CREATE TEMP TABLE rehearsal_in AS SELECT ${cols} FROM import_rehearsals WITH NO DATA" \
             -c "COPY rehearsal_in FROM STDIN" \

@@ -66,7 +66,9 @@ said() { grep -q -- "$1" <<< "$OUTPUT"; }
 nothing_started() { ! grep -q '^run ' "$FAKE/calls.log"; }
 nothing_restored() { ! grep -q 'pg_restore' "$FAKE/calls.log"; }
 no_commit() { ! grep -q 'rehearse-import' "$FAKE/calls.log"; }
-no_live_write() { [[ ! -s "$FAKE/live-writes" ]] && ! grep -q 'bms-postgres-1 psql -U bms_app' "$FAKE/calls.log"; }
+no_live_write() {
+    [[ ! -s "$FAKE/live-writes" ]] && ! grep -Eq 'bms-postgres-1 (timeout -s KILL [0-9]+ )?psql -U bms_app' "$FAKE/calls.log"
+}
 # Everything the rehearsal made is gone: containers, networks, volumes and the temp dir; and no drill state was written.
 all_removed() {
     [[ ! -s "$FAKE/containers" && ! -s "$FAKE/networks" && ! -s "$FAKE/volumes" ]] \
@@ -110,7 +112,7 @@ check "the copy into the throwaway database holds the deletes, the token and eve
         && [[ "$(grep -c "^COPY import_" "$FAKE/copy-stream")" == 6 && "$(grep -c "^staged row" "$FAKE/copy-stream")" == 6 ]] \
         && [[ "$(grep -cx "\\\\." "$FAKE/copy-stream")" == 6 ]]'
 check "the live database is written once: the rehearsal's row, as bms_app under the run's business" \
-    eval '[[ "$(grep -c "bms-postgres-1 psql -U bms_app" "$FAKE/calls.log")" == 1 ]] \
+    eval '[[ "$(grep -cE "bms-postgres-1 (timeout -s KILL [0-9]+ )?psql -U bms_app" "$FAKE/calls.log")" == 1 ]] \
         && grep -q "set_config(.app.tenant_id., .${FAKE_TENANT}., false).*INSERT INTO import_rehearsals" "$FAKE/calls.log" \
         && [[ "$(cat "$FAKE/live-writes")" == "row of bms-rehearsal-db-"* ]]'
 check "every other call on the live database only reads" \
@@ -270,14 +272,24 @@ check "a live read that hangs past the deadline is stopped (1), its client ended
     eval '[[ "$STATUS" == 1 ]] && said "stopped at its deadline" && no_commit && no_live_write && all_removed \
         && (( SECONDS - started_at < 15 ))'
 check "... the rehearsal's live sessions are ended on the server by their name, and the locks are free" \
-    eval 'grep -Eq "bms-postgres-1 psql -U postgres .*pg_terminate_backend.*application_name = .bms-rehearsal-[0-9]+." "$FAKE/calls.log" \
+    eval 'grep -Eq "bms-postgres-1 psql -U postgres .*pg_terminate_backend.*application_name = .bms-rehearsal-[0-9]+. +AND usename IN" "$FAKE/calls.log" \
         && flock --nonblock "$HOST/state/deploy.lock" true && flock --nonblock "$HOST/state/pull.lock" true'
-check "every session on the live database is named and bounded on the server (statement and idle timeouts)" \
-    eval '! grep "bms-postgres-1 psql -U bms_" "$FAKE/calls.log" | grep -vq "PGOPTIONS=-c application_name=bms-rehearsal-[0-9]* -c statement_timeout=[0-9]*s -c idle_in_transaction_session_timeout=60s"'
+check "every session on the live database is named by PGAPPNAME and bounded on the server (statement and idle timeouts)" \
+    eval '! grep -E "bms-postgres-1 (timeout -s KILL [0-9]+ )?psql -U (bms_|postgres -d bms -tAc SELECT system)" "$FAKE/calls.log" \
+        | grep -vq "PGAPPNAME=bms-rehearsal-[0-9]* -e PGOPTIONS=-c statement_timeout=[0-9]*s -c idle_in_transaction_session_timeout=60s"'
+check "the copy's and the write's live psql are killed inside the container at their limit" \
+    eval 'rehearse kill-limits && [[ "$(grep -cE "bms-postgres-1 timeout -s KILL [0-9]+ psql -U bms_(owner -d bms -q|app)" "$FAKE/calls.log")" == 2 ]]'
 
 FAKE_WRITE_SIGNAL=USR1 rehearse deadline-at-store
 check "a deadline that comes as the row is stored reports it stored (0), as the live database holds it" \
     eval '[[ "$STATUS" == 0 ]] && said "it is stored on live run" && ! said "nothing is stored" && [[ -s "$FAKE/live-writes" ]] && all_removed'
+FAKE_WRITE_SIGNAL=TERM rehearse term-at-store
+check "a TERM that comes as the row is stored says it is stored, and exits 143" \
+    eval '[[ "$STATUS" == 143 ]] && said "terminated, as the rehearsal was stored" && all_removed'
+FAKE_WRITE_SIGNAL=USR1 FAKE_LIVE_SILENT=1 rehearse deadline-unknown
+check "if the live database does not answer the read-back, the state is unknown (1), with the query that tells" \
+    eval '[[ "$STATUS" == 1 ]] && said "whether the rehearsal was stored is unknown" && said "check with: SELECT count" \
+        && ! said "nothing is stored" && all_removed'
 
 FAKE_MIGRATE_ADVANCE_TO=$(( 1793000000 + 21600 - 600 )) rehearse little-time-left
 check "a commit is not started with 10 minutes left before the deadline (exit 1, nothing stored, all removed)" \

@@ -19,7 +19,8 @@
 #   FAKE_ADVANCE_TO=<epoch> the clock jumps to that moment while the commit runs;
 #   FAKE_COPY_ADVANCE_TO=<epoch> it jumps there while the copy into the throwaway database hangs;
 #   FAKE_LIVE_HANG_ADVANCE_TO=<epoch> it jumps there while the live read of the run hangs;
-#   FAKE_WRITE_SIGNAL=<sig> the live write sends the script that signal once the row is stored.
+#   FAKE_WRITE_SIGNAL=<sig> the live write sends the script that signal once the row is stored;
+#   FAKE_LIVE_SILENT=1      the live database does not answer the read-back of the rehearsal's row.
 # JUSTIFICATION-A2: the fake host is shared by two test files and is not a tiny helper.
 
 FAKE_EPOCH=1793000000
@@ -276,6 +277,10 @@ case "$1" in
             *"SELECT id FROM tenants"*) echo "$FAKE_TENANT" ;;
             *information_schema.columns*) echo "id,tenant_id,run_id" ;;
             *"quote_literal(mapping_id"*) echo "'0b5e7a2c-0000-4000-8000-00000000b001'" ;;
+            *"FROM import_rehearsals WHERE id"*)
+                # The read-back after a stop: the live database may not answer.
+                [[ -n "${FAKE_LIVE_SILENT:-}" && "$container" == "$live_db" ]] && exit 1
+                echo 1 ;;
             *"count(*) FROM import_rehearsals"*) echo 1 ;;
             *"TO STDOUT"*) echo "row of ${container}" ;;
             *) echo "stub docker: unexpected exec $container $sql" >&2; exit 2 ;;
