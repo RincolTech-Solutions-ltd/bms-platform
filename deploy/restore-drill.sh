@@ -69,7 +69,20 @@ rh_refuse() {
     exit 3
 }
 # The live database, as the drill reads it: bms_owner, one statement, read only.
-rh_live() { docker exec "$RH_LIVE_DB" psql -U bms_owner -d bms -v ON_ERROR_STOP=1 -tAc "$1"; }
+rh_live() { docker exec -e "PGOPTIONS=$(rh_pgoptions 60)" "$RH_LIVE_DB" psql -U bms_owner -d bms -v ON_ERROR_STOP=1 -tAc "$1"; }
+# rh_pgoptions <seconds>: every session the rehearsal opens on the live database is bounded on the server, whatever
+# happens to its client (killing a docker exec client never ends the psql inside the container), and named, so the
+# deadline and the clean-up can end it (review of d70e30f).
+rh_pgoptions() {
+    echo "-c application_name=${RH_APP} -c statement_timeout=${1}s -c idle_in_transaction_session_timeout=60s"
+}
+# Ends every live session the rehearsal still has, by its name, as the superuser (the reads are bms_owner's, the
+# write bms_app's); itself bounded by a statement timeout.
+rh_terminate_live() {
+    docker exec -e "PGOPTIONS=-c statement_timeout=10s" "$RH_LIVE_DB" psql -U postgres -d bms -tAc \
+        "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE application_name = '${RH_APP}'" \
+        > /dev/null 2>&1 || true
+}
 # The throwaway database as its superuser: only ever the container this rehearsal started.
 rh_scratch() { docker exec "$RH_DB" psql -U postgres -d bms -v ON_ERROR_STOP=1 -tAc "$1"; }
 rh_columns() {
@@ -105,9 +118,12 @@ rh_pick_newest_backup() {
 
 rh_cleanup() {
     local status=$?
-    trap - EXIT INT TERM
+    trap - EXIT INT TERM USR1
+    IFS=$' \t\n'
     if [[ -n "${RH_WATCHDOG:-}" ]]; then
         kill "$RH_WATCHDOG" 2> /dev/null
+        rh_end_children
+        rh_terminate_live
     fi
     docker rm -f -v "$RH_API" "$RH_MIGRATE" "$RH_RCLONE" "$RH_DB" > /dev/null 2>&1 || true
     docker volume rm "$RH_VOL" > /dev/null 2>&1 || true
@@ -179,7 +195,7 @@ rh_require_scratch() {
     networks="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$RH_DB" 2> /dev/null)"
     [[ "$networks" == "${RH_NET} " ]] || rh_refuse "the target container is on other networks: ${networks}"
     sysid="$(rh_scratch "SELECT system_identifier FROM pg_control_system()" 2> /dev/null)"
-    live_sysid="$(docker exec "$RH_LIVE_DB" psql -U postgres -d bms -tAc "SELECT system_identifier FROM pg_control_system()" 2> /dev/null)"
+    live_sysid="$(docker exec -e "PGOPTIONS=$(rh_pgoptions 60)" "$RH_LIVE_DB" psql -U postgres -d bms -tAc "SELECT system_identifier FROM pg_control_system()" 2> /dev/null)"
     [[ "$sysid" =~ ^[0-9]+$ && "$live_sysid" =~ ^[0-9]+$ && "$sysid" != "$live_sysid" ]] \
         || rh_refuse "the target database is the live cluster, or the two cannot be told apart (${sysid:-none} and ${live_sysid:-none})"
 }
@@ -204,33 +220,56 @@ rh_deadline() {
     echo $(( now + RH_MAX_SECONDS < sunday ? now + RH_MAX_SECONDS : sunday ))
 }
 
-# The watchdog, a child of the script for its whole run: at the deadline it marks the temp dir, sends the script TERM
-# (handled as soon as its current command ends), removes the rehearsal's containers and ends the script's other
-# children, so a step in the foreground that hangs (a docker exec, the copy, a decryption) ends too. Nothing is stored.
+# The watchdog, a child of the script for its whole run, without the lock fds: at the deadline it sends the script USR1
+# (handled as soon as its current command ends), removes the rehearsal's containers, ends the script's other children,
+# so a step in the foreground that hangs (a docker exec, the copy, a decryption) ends too, and ends every live session
+# the rehearsal opened, which killing a docker exec client alone would leave open (review of d70e30f). Once the one live
+# write has begun it stands down: that write is bounded by its own statement timeout.
 rh_watchdog() {
     local child
     trap - EXIT INT TERM
+    exec 7>&- 8>&- 9>&-
     while kill -0 "$$" 2> /dev/null; do
+        [[ -e "$RH_TMP/storing" ]] && return
         if (( $(date +%s) >= RH_DEADLINE )); then
-            : > "$RH_TMP/deadline"
-            kill -TERM "$$" 2> /dev/null
+            kill -USR1 "$$" 2> /dev/null
             docker rm -f -v "$RH_API" "$RH_MIGRATE" "$RH_RCLONE" "$RH_DB" > /dev/null 2>&1
-            for child in $(pgrep -P "$$"); do
-                [[ "$child" == "$BASHPID" ]] && continue
-                pkill -TERM -P "$child" 2> /dev/null
-                kill -TERM "$child" 2> /dev/null
-            done
+            rh_end_children
+            rh_terminate_live
             return
         fi
         sleep 2
     done
 }
 
-rh_on_term() {
-    if [[ -n "${RH_TMP:-}" && -e "$RH_TMP/deadline" ]]; then
-        rh_log "FAILED: stopped at its deadline, $(date -d "@${RH_DEADLINE}" +%Y-%m-%dT%H:%M%z); nothing is stored"
-        exit 1
+# Ends the script's other children and theirs (a docker client, a subshell of the copy), never the caller itself.
+rh_end_children() {
+    local child grandchild
+    for child in $(pgrep -P "$$"); do
+        [[ "$child" == "$BASHPID" ]] && continue
+        for grandchild in $(pgrep -P "$child"); do
+            pkill -TERM -P "$grandchild" 2> /dev/null
+            kill -TERM "$grandchild" 2> /dev/null
+        done
+        kill -TERM "$child" 2> /dev/null
+    done
+}
+
+# The deadline, by USR1 rather than a file, so a full disk cannot turn it into a plain TERM. What it says is what the
+# live database holds: the rehearsal's row once the write began and reached it, else nothing.
+rh_on_deadline() {
+    IFS=$' \t\n'
+    if [[ -n "${RH_REHEARSAL_ID:-}" ]] \
+        && [[ "$(rh_live "SELECT count(*) FROM import_rehearsals WHERE id = '${RH_REHEARSAL_ID}'" 2> /dev/null)" == "1" ]]; then
+        rh_log "its deadline came as the rehearsal was stored; it is stored on live run ${RH_RUN} (${RH_REHEARSAL_ID})"
+        exit "${RH_COMMIT_STATUS:-1}"
     fi
+    rh_log "FAILED: stopped at its deadline, $(date -d "@${RH_DEADLINE}" +%Y-%m-%dT%H:%M%z); nothing is stored"
+    exit 1
+}
+
+rh_on_term() {
+    IFS=$' \t\n'
     rh_log "terminated"
     exit 143
 }
@@ -279,6 +318,10 @@ rehearse_import() {
     trap rh_cleanup EXIT
     trap 'rh_log "interrupted"; exit 130' INT
     trap rh_on_term TERM
+    trap rh_on_deadline USR1
+    RH_APP="bms-rehearsal-$$"
+    RH_REHEARSAL_ID=""
+    RH_COMMIT_STATUS=""
 
     # 1. The run, read on the live database.
     row="$(rh_live "SELECT tenant_id, status, fabricated, origin FROM import_runs WHERE id = '${RH_RUN}'" 2> /dev/null)" \
@@ -296,6 +339,10 @@ rehearse_import() {
     fi
     rh_log "rehearsing run ${RH_RUN} (${status}) of business ${RH_TENANT} on ${BMS_ENVIRONMENT}"
     rh_require_alone
+    # From here no docker client inherits the lock fds, so one left running after a kill (a docker exec client does not
+    # end with its process in the container) can never keep a deploy locked out after the script has gone (review of
+    # d70e30f). Defined only here, in the rehearsal: the drill below never runs this function.
+    docker() { command docker "$@" 7>&- 8>&- 9>&-; }
     RH_DEADLINE="$(rh_deadline)"
     rh_log "it must end by $(date -d "@${RH_DEADLINE}" +%Y-%m-%dT%H:%M%z): six hours at most, and before the weekly drill"
     mkdir -p backups
@@ -420,7 +467,8 @@ rehearse_import() {
     {
         printf '%s' "$prelude"
         # A live read that fails part way ends the stream with ROLLBACK, never COMMIT, and leaves its mark for below.
-        if docker exec -i "$RH_LIVE_DB" psql -U bms_owner -d bms -q -v ON_ERROR_STOP=1 <<< "$live_script"; then
+        if docker exec -i -e "PGOPTIONS=$(rh_pgoptions $(( RH_DEADLINE - $(date +%s) > 1 ? RH_DEADLINE - $(date +%s) : 1 )))" \
+            "$RH_LIVE_DB" psql -U bms_owner -d bms -q -v ON_ERROR_STOP=1 <<< "$live_script"; then
             printf '%s\n' "COMMIT;"
         else
             : > "$RH_TMP/live-read.failed"
@@ -455,6 +503,9 @@ rehearse_import() {
     rh_require_scratch
     rh_require_drill_clear
     [[ "$BMS_ENVIRONMENT" != "staging" ]] || rh_require_room 448
+    # A commit that cannot end before the deadline is not started: it would only be thrown away (review of d70e30f).
+    (( RH_DEADLINE - $(date +%s) >= 1800 )) \
+        || rh_fail "less than 30 minutes before its deadline; the commit is not started and nothing is stored"
     rh_log "running the real commit in ${RH_API}"
     old_ifs="$IFS"
     IFS=,
@@ -475,9 +526,14 @@ rehearse_import() {
         || rh_fail "the throwaway database does not hold one rehearsal of the run"
     cols="$(rh_scratch "$(rh_columns import_rehearsals)")"
     [[ -n "$cols" ]] || rh_fail "the throwaway database has no import_rehearsals"
+    # From here a deadline (USR1) is answered by what the live database holds, the row's id known first; the watchdog
+    # stands down, and the write is bounded by its own statement timeout.
+    RH_REHEARSAL_ID="$(rh_scratch "SELECT id FROM import_rehearsals WHERE run_id = '${RH_RUN}'")"
+    RH_COMMIT_STATUS="$status"
+    : > "$RH_TMP/storing"
     docker exec "$RH_DB" psql -U postgres -d bms -v ON_ERROR_STOP=1 \
         -c "COPY (SELECT ${cols} FROM import_rehearsals WHERE run_id = '${RH_RUN}') TO STDOUT" \
-        | docker exec -i "$RH_LIVE_DB" psql -U bms_app -d bms -q -v ON_ERROR_STOP=1 \
+        | docker exec -i -e "PGOPTIONS=$(rh_pgoptions 120)" "$RH_LIVE_DB" psql -U bms_app -d bms -q -v ON_ERROR_STOP=1 \
             -c "SELECT set_config('app.tenant_id', '${RH_TENANT}', false)" \
             -c "CREATE TEMP TABLE rehearsal_in AS SELECT ${cols} FROM import_rehearsals WITH NO DATA" \
             -c "COPY rehearsal_in FROM STDIN" \

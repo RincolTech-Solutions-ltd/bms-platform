@@ -67,7 +67,7 @@ class RehearsalService implements ImportRehearsals {
             runs.requireRehearsalDatabase(token);
             return runs.get(runId);
         });
-        if ("staging".equalsIgnoreCase(environment) && !run.fabricated()) {
+        if ("staging".equals(environment) && !run.fabricated()) {
             throw new ApiException(
                     HttpStatus.CONFLICT,
                     "run_not_fabricated",

@@ -17,7 +17,9 @@
 #   FAKE_LIVE_READ_FAIL=1   the live read of the run's rows dies part way; FAKE_COUNT_MISMATCH=1  the copy lost rows;
 #   FAKE_API_SIGNAL=<sig>   the commit sends the script that signal; FAKE_API_HANG=<s>  and then runs on for s seconds;
 #   FAKE_ADVANCE_TO=<epoch> the clock jumps to that moment while the commit runs;
-#   FAKE_COPY_ADVANCE_TO=<epoch> it jumps there while the copy into the throwaway database hangs.
+#   FAKE_COPY_ADVANCE_TO=<epoch> it jumps there while the copy into the throwaway database hangs;
+#   FAKE_LIVE_HANG_ADVANCE_TO=<epoch> it jumps there while the live read of the run hangs;
+#   FAKE_WRITE_SIGNAL=<sig> the live write sends the script that signal once the row is stored.
 # JUSTIFICATION-A2: the fake host is shared by two test files and is not a tiny helper.
 
 FAKE_EPOCH=1793000000
@@ -96,6 +98,14 @@ STUB
 # Logs the call, then answers it as a healthy host would.
 printf '%s\n' "$*" >> "$FAKE/calls.log"
 live_db=bms-postgres-1
+# The script itself: the topmost ancestor still running restore-drill.sh (its subshells carry the same command line).
+script_pid() {
+    local p="$PPID" q
+    while q="$(ps -o ppid= -p "$p" | tr -d ' ')" && grep -q restore-drill /proc/"$q"/cmdline 2> /dev/null; do
+        p="$q"
+    done
+    echo "$p"
+}
 has() { local n; for n in "${@:2}"; do [[ "$n" == "$1" ]] && return 0; done; return 1; }
 arg_after() { local want="$1"; shift; while (( $# )); do [[ "$1" == "$want" ]] && { echo "$2"; return; }; shift; done; }
 
@@ -137,6 +147,8 @@ case "$1" in
                 [[ -n "$envfile" ]] && cp "$envfile" "$FAKE/api-env.seen"
                 if has migrate "$@"; then
                     [[ -n "${FAKE_MIGRATE_FAIL:-}" ]] && { echo "migrate: FAILED: fabricated"; exit 1; }
+                    # Migrations that take most of the rehearsal's time.
+                    [[ -n "${FAKE_MIGRATE_ADVANCE_TO:-}" ]] && echo "$FAKE_MIGRATE_ADVANCE_TO" > "$FAKE/epoch"
                     echo "migrate: 1 migration(s) applied, schema now at 146"
                 elif has rehearse-import "$@"; then
                     echo "rehearsal of the import run: committed (fabricated report)"
@@ -145,7 +157,7 @@ case "$1" in
                     for lock in pull deploy rehearsal; do
                         if flock --nonblock "$FAKE_HOST/state/$lock.lock" true; then echo "$lock free"; else echo "$lock held"; fi
                     done > "$FAKE/locks-during-commit"
-                    [[ -n "${FAKE_API_SIGNAL:-}" ]] && kill -s "$FAKE_API_SIGNAL" "$PPID"
+                    [[ -n "${FAKE_API_SIGNAL:-}" ]] && kill -s "$FAKE_API_SIGNAL" "$(script_pid)"
                     # A commit that runs past the deadline: the clock moves on while it runs.
                     [[ -n "${FAKE_ADVANCE_TO:-}" ]] && echo "$FAKE_ADVANCE_TO" > "$FAKE/epoch"
                     # A commit that keeps running: the script must not wait for it before it cleans up.
@@ -190,7 +202,13 @@ case "$1" in
     exec)
         shift
         interactive=""
-        [[ "$1" == "-i" ]] && { interactive=1; shift; }
+        while [[ "$1" == -* ]]; do
+            case "$1" in
+                -i) interactive=1 ;;
+                -e | --env) shift ;;
+            esac
+            shift
+        done
         container="$1"; shift
         sql="$*"
         case "$sql" in
@@ -203,6 +221,13 @@ case "$1" in
         if [[ -n "$interactive" ]]; then
             if [[ "$container" == "$live_db" && "$(arg_after -U "$@")" == "bms_owner" ]]; then
                 # The read of the run's rows: echo what psql would print, a row for each COPY.
+                # A live read that stops answering while the clock passes the deadline: the client is killed, the
+                # server session (here, nothing) is what the terminate must end.
+                if [[ -n "${FAKE_LIVE_HANG_ADVANCE_TO:-}" ]]; then
+                    echo "$FAKE_LIVE_HANG_ADVANCE_TO" > "$FAKE/epoch"
+                    exec > /dev/null 2>&1
+                    "$REAL_SLEEP" 30
+                fi
                 copies=0
                 tee -a "$FAKE/live-reads" | while IFS= read -r line; do
                     case "$line" in
@@ -220,6 +245,8 @@ case "$1" in
                 exit "${PIPESTATUS[1]}"
             elif [[ "$container" == "$live_db" ]]; then
                 cat >> "$FAKE/live-writes"
+                # The deadline arrives just as the row is stored.
+                [[ -n "${FAKE_WRITE_SIGNAL:-}" ]] && kill -s "$FAKE_WRITE_SIGNAL" "$(script_pid)"
             else
                 cat >> "$FAKE/copy-stream"
                 # A copy that hangs while the clock passes the deadline.
@@ -235,6 +262,8 @@ case "$1" in
             *"count(*) || ':'"*)
                 # The run's rows in a table, live and copied: the same unless a test says the copy lost some.
                 if [[ -n "${FAKE_COUNT_MISMATCH:-}" && "$container" != "$live_db" ]]; then echo "2:0f0f"; else echo "3:0f0f"; fi ;;
+            *pg_terminate_backend*) echo 0 ;;
+            *"SELECT id FROM import_rehearsals"*) echo "0b5e7a2c-0000-4000-8000-00000000d001" ;;
             *pg_control_system*)
                 if [[ "$container" == "$live_db" || -n "${FAKE_SAME_SYSID:-}" ]]; then echo "$FAKE_LIVE_SYSID"; else echo "7400000000000000999"; fi ;;
             *"count(*) FROM import_runs WHERE id"*) echo 1 ;;

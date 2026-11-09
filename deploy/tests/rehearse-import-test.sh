@@ -110,7 +110,7 @@ check "the copy into the throwaway database holds the deletes, the token and eve
         && [[ "$(grep -c "^COPY import_" "$FAKE/copy-stream")" == 6 && "$(grep -c "^staged row" "$FAKE/copy-stream")" == 6 ]] \
         && [[ "$(grep -cx "\\\\." "$FAKE/copy-stream")" == 6 ]]'
 check "the live database is written once: the rehearsal's row, as bms_app under the run's business" \
-    eval '[[ "$(grep -c "exec -i bms-postgres-1 psql -U bms_app" "$FAKE/calls.log")" == 1 ]] \
+    eval '[[ "$(grep -c "bms-postgres-1 psql -U bms_app" "$FAKE/calls.log")" == 1 ]] \
         && grep -q "set_config(.app.tenant_id., .${FAKE_TENANT}., false).*INSERT INTO import_rehearsals" "$FAKE/calls.log" \
         && [[ "$(cat "$FAKE/live-writes")" == "row of bms-rehearsal-db-"* ]]'
 check "every other call on the live database only reads" \
@@ -261,6 +261,27 @@ sed -i 's/^BMS_ENVIRONMENT=staging$/BMS_ENVIRONMENT=stage/' "$HOST/.env"
 run_script --rehearse-import "$RUN"
 check "a BMS_ENVIRONMENT other than staging or production is refused (3) before anything is read" \
     eval '[[ "$STATUS" == 3 ]] && ! grep -q "^exec\|^run " "$FAKE/calls.log"'
+
+# Review of d70e30f: the live side ends too, and the deadline says what the live database holds.
+# shellcheck disable=SC2034 # read by the eval'd check below.
+started_at=$SECONDS
+FAKE_LIVE_HANG_ADVANCE_TO=$(( 1793000000 + 21600 + 60 )) rehearse live-read-hangs
+check "a live read that hangs past the deadline is stopped (1), its client ended at once, nothing stored, all removed" \
+    eval '[[ "$STATUS" == 1 ]] && said "stopped at its deadline" && no_commit && no_live_write && all_removed \
+        && (( SECONDS - started_at < 15 ))'
+check "... the rehearsal's live sessions are ended on the server by their name, and the locks are free" \
+    eval 'grep -Eq "bms-postgres-1 psql -U postgres .*pg_terminate_backend.*application_name = .bms-rehearsal-[0-9]+." "$FAKE/calls.log" \
+        && flock --nonblock "$HOST/state/deploy.lock" true && flock --nonblock "$HOST/state/pull.lock" true'
+check "every session on the live database is named and bounded on the server (statement and idle timeouts)" \
+    eval '! grep "bms-postgres-1 psql -U bms_" "$FAKE/calls.log" | grep -vq "PGOPTIONS=-c application_name=bms-rehearsal-[0-9]* -c statement_timeout=[0-9]*s -c idle_in_transaction_session_timeout=60s"'
+
+FAKE_WRITE_SIGNAL=USR1 rehearse deadline-at-store
+check "a deadline that comes as the row is stored reports it stored (0), as the live database holds it" \
+    eval '[[ "$STATUS" == 0 ]] && said "it is stored on live run" && ! said "nothing is stored" && [[ -s "$FAKE/live-writes" ]] && all_removed'
+
+FAKE_MIGRATE_ADVANCE_TO=$(( 1793000000 + 21600 - 600 )) rehearse little-time-left
+check "a commit is not started with 10 minutes left before the deadline (exit 1, nothing stored, all removed)" \
+    eval '[[ "$STATUS" == 1 ]] && said "less than 30 minutes before its deadline" && no_commit && no_live_write && all_removed'
 
 locks_match() {
     grep -q '^exec 8> state/pull.lock$' "$TESTS_HERE/../pull-staging.sh" \
