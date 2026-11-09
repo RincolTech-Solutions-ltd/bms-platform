@@ -1293,7 +1293,9 @@ public class RlsIsolationIT {
                         INSERT INTO import_defects (id, tenant_id, run_id, logged_by, description, expected_code,
                                                     known_code)
                         VALUES (?, ?, ?, ?, 'Test defect: line 2 imported as line 3', 'TEST_CODE', false)
-                        """).params(UUID.randomUUID(), t.tenantId(), committedRun, user).update();
+                        """)
+                .params(UUID.randomUUID(), t.tenantId(), committedRun, user)
+                .update();
     }
 
     /**

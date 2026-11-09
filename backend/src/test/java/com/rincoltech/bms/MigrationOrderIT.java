@@ -4226,8 +4226,7 @@ class MigrationOrderIT {
                                        'platform_import_runs_report(timestamptz, integer)', 'EXECUTE')
                                AND (SELECT prosecdef FROM pg_proc WHERE proname = 'platform_import_runs_report')
                                AND NOT (SELECT prosecdef FROM pg_proc WHERE proname = 'import_run_metrics')
-                            """).query(Boolean.class).single())
-                    .isTrue();
+                            """).query(Boolean.class).single()).isTrue();
         }
     }
 

@@ -58,6 +58,7 @@ class PlatformImportReportController {
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"import-runs.csv\"")
                 .contentType(MediaType.parseMediaType("text/csv; charset=UTF-8"))
-                .body(metrics.platformReportCsv(since, CurrentPrincipal.require().userId()));
+                .body(metrics.platformReportCsv(
+                        since, CurrentPrincipal.require().userId()));
     }
 }

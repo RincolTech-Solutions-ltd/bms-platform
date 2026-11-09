@@ -45,7 +45,8 @@ public final class MetricsCheck {
         assertThat(cutover.endedAt()).isEqualTo(m.stamps().committedAt());
         assertThat(cutover.seconds()).isNotNull().isNotNegative();
 
-        // The steps, as stored where each ended: every batch uploaded, read and committed; the run validated and dry run.
+        // The steps, as stored where each ended: every batch uploaded, read and committed; the run validated and its
+        // dry run.
         long batches = count("SELECT count(*) FROM import_batches WHERE run_id = ?", run);
         long committed = count("SELECT count(*) FROM import_batches WHERE run_id = ? AND status = 'committed'", run);
         assertThat(steps(m, "upload")).isEqualTo(batches);
@@ -90,14 +91,10 @@ public final class MetricsCheck {
                         i -> i.total() + "|" + i.open(),
                         (a, b) -> a,
                         TreeMap::new));
-        assertThat(issues)
-                .isEqualTo(pairs(
-                        """
-                        SELECT i.code || '|' || i.severity, count(*) || '|' || count(*) FILTER (WHERE i.status = 'open')
-                          FROM import_issues i JOIN import_batches b ON b.id = i.batch_id
-                         WHERE b.run_id = ? GROUP BY i.code, i.severity
-                        """,
-                        run));
+        String issuesSql = "SELECT i.code || '|' || i.severity, count(*) || '|' || count(*) FILTER (WHERE i.status ="
+                + " 'open') FROM import_issues i JOIN import_batches b ON b.id = i.batch_id WHERE b.run_id = ?"
+                + " GROUP BY i.code, i.severity";
+        assertThat(issues).isEqualTo(pairs(issuesSql, run));
         Map<String, String> resolutions = m.resolutions().stream()
                 .collect(Collectors.toMap(r -> r.kind(), r -> String.valueOf(r.count()), (a, b) -> a, TreeMap::new));
         assertThat(resolutions)
@@ -119,7 +116,10 @@ public final class MetricsCheck {
     }
 
     private static long steps(Metrics m, String step) {
-        return m.steps().stream().filter(s -> step.equals(s.step())).map(Step::millis).count();
+        return m.steps().stream()
+                .filter(s -> step.equals(s.step()))
+                .map(Step::millis)
+                .count();
     }
 
     private static long sum(CommitReport real, java.util.function.ToIntFunction<CommitReport.Source> of) {
@@ -146,7 +146,8 @@ public final class MetricsCheck {
     }
 
     private static Instant at(String sql, UUID run) {
-        Timestamp t = TestDatabase.owner().sql(sql).param(run).query(Timestamp.class).single();
+        Timestamp t =
+                TestDatabase.owner().sql(sql).param(run).query(Timestamp.class).single();
         return t == null ? null : t.toInstant();
     }
 }

@@ -119,18 +119,21 @@ class ImportMetricsIT extends IntegrationTest {
     @Test
     void aDefectIsLoggedAndClosedWithAnAuditTrailAndStaysClosed() {
         UUID run = run(t, "signed_off");
-        ResponseEntity<JsonNode> logged = log(
-                t, run, "Line 14 of the item list: a pack size of zero was imported as one", "PACK_SIZE_ZERO");
+        ResponseEntity<JsonNode> logged =
+                log(t, run, "Line 14 of the item list: a pack size of zero was imported as one", "PACK_SIZE_ZERO");
         assertThat(logged.getStatusCode()).as("%s", logged.getBody()).isEqualTo(HttpStatus.CREATED);
         JsonNode defect = logged.getBody();
         UUID id = UUID.fromString(defect.get("id").asString());
         assertThat(defect.get("status").asString()).isEqualTo("open");
         assertThat(defect.get("expected_code").asString()).isEqualTo("PACK_SIZE_ZERO");
-        assertThat(defect.get("known_code").asBoolean()).as("no template knows it: a new code").isFalse();
+        assertThat(defect.get("known_code").asBoolean())
+                .as("no template knows it: a new code")
+                .isFalse();
         assertThat(defect.get("logged_by").asString()).isEqualTo(staff.toString());
         assertThat(defect.get("version").asInt()).isZero();
 
-        ResponseEntity<JsonNode> listed = call(t, HttpMethod.GET, "/api/v1/imports/runs/" + run + "/defects", null, MANAGE);
+        ResponseEntity<JsonNode> listed =
+                call(t, HttpMethod.GET, "/api/v1/imports/runs/" + run + "/defects", null, MANAGE);
         assertThat(listed.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(listed.getBody().get("items")).hasSize(1);
 
@@ -174,7 +177,9 @@ class ImportMetricsIT extends IntegrationTest {
         Metrics m = TenantContext.callAs(t.tenantId(), () -> metrics.metrics(run));
         assertThat(m.defects().open()).isZero();
         assertThat(m.defects().closed()).isEqualTo(1);
-        assertThat(m.defects().codes()).extracting(ImportMetrics.CodeCount::code).containsExactly("PACK_SIZE_ZERO");
+        assertThat(m.defects().codes())
+                .extracting(ImportMetrics.CodeCount::code)
+                .containsExactly("PACK_SIZE_ZERO");
 
         // The database keeps it closed and keeps its run, code and author, for the owner role too.
         assertThatThrownBy(() -> TestDatabase.owner()
@@ -211,7 +216,8 @@ class ImportMetricsIT extends IntegrationTest {
         assertThat(badCode.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(badCode.getBody().get("code").asString()).isEqualTo("validation_failed");
         // A date and a line number are not personal.
-        assertThat(log(t, run, "Since 2026-10-01 line 14 kept the old price", "PRICE_STALE").getStatusCode())
+        assertThat(log(t, run, "Since 2026-10-01 line 14 kept the old price", "PRICE_STALE")
+                        .getStatusCode())
                 .isEqualTo(HttpStatus.CREATED);
 
         UUID notImported = run(t, "ready");
@@ -221,7 +227,8 @@ class ImportMetricsIT extends IntegrationTest {
 
         // Another business's run and defect are not found from this one.
         UUID theirs = run(other, "committed");
-        assertThat(log(t, theirs, "A defect of another business entirely", "X_CODE").getStatusCode())
+        assertThat(log(t, theirs, "A defect of another business entirely", "X_CODE")
+                        .getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(call(t, HttpMethod.GET, "/api/v1/imports/runs/" + theirs + "/metrics", null, MANAGE)
                         .getStatusCode())
@@ -231,7 +238,8 @@ class ImportMetricsIT extends IntegrationTest {
                 .get("id")
                 .asString());
         assertThat(close(t, theirDefect, 0, "#1").getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
-        assertThat(count("SELECT count(*) FROM import_defects WHERE run_id = ?", notImported)).isZero();
+        assertThat(count("SELECT count(*) FROM import_defects WHERE run_id = ?", notImported))
+                .isZero();
     }
 
     @Test
@@ -292,12 +300,12 @@ class ImportMetricsIT extends IntegrationTest {
         Session operator = platform.signIn(operatorId, email, Api.PASSWORD, null);
         String staffEmail = Api.email("metrics-admin");
         UUID staffId = Api.staff(t, staffEmail, new Api.Role("tenant_admin", null));
-        String staffToken = Api.tenant(http, t.slug()).signIn(staffId, staffEmail, Api.PASSWORD, null).accessToken();
+        String staffToken = Api.tenant(http, t.slug())
+                .signIn(staffId, staffEmail, Api.PASSWORD, null)
+                .accessToken();
 
         for (String path : List.of("/api/v1/platform/imports/report", "/api/v1/platform/imports/report.csv")) {
-            assertThat(status(path, null, null))
-                    .as("%s anonymous", path)
-                    .isEqualTo(HttpStatus.UNAUTHORIZED);
+            assertThat(status(path, null, null)).as("%s anonymous", path).isEqualTo(HttpStatus.UNAUTHORIZED);
             assertThat(status(path, staffToken, null))
                     .as("%s with a tenant's staff token on the platform host", path)
                     .isEqualTo(HttpStatus.UNAUTHORIZED);

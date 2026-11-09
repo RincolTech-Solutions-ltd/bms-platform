@@ -615,7 +615,7 @@ class ImportPurgeIT extends IntegrationTest {
         assertThat(PERSONAL).noneMatch(v -> audit.contains(v.toLowerCase(Locale.ROOT)));
     }
 
-    // JUSTIFICATION-A3: issue #140 asks that the metrics work on a purged run and that the defect's text is purged; a new case.
+    // JUSTIFICATION-A3: issue #140 asks that metrics work on a purged run and the defect's text is purged; a new case.
     // ---- The metrics and the defect log across the purge (issue #140) ----
 
     @Autowired
@@ -670,9 +670,12 @@ class ImportPurgeIT extends IntegrationTest {
         assertThat(deletion.endedAt()).isEqualTo(after.stamps().purgedAt());
 
         // The descriptions became their hash in the purge's transaction; nothing of the run names a person.
-        String hashed = "SELECT count(*) FROM import_defects WHERE run_id = ? AND description ~ '^sha256:[0-9a-f]{64}$'";
+        String hashed =
+                "SELECT count(*) FROM import_defects WHERE run_id = ? AND description ~ '^sha256:[0-9a-f]{64}$'";
         assertThat(count(hashed, run)).isEqualTo(2);
-        assertThat(personalValuesOf(run, PERSONAL)).as("columns still holding a personal value").isEmpty();
+        assertThat(personalValuesOf(run, PERSONAL))
+                .as("columns still holding a personal value")
+                .isEmpty();
 
         // The open one closes with its fix and stays a hash; one logged after the purge is readable until it closes.
         Defect closedNow = as(t, () -> metrics.closeDefect(open, 0, "#141", operator));

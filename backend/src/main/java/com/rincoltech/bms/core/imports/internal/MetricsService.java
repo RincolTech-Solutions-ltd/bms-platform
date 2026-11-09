@@ -196,7 +196,10 @@ class MetricsService implements ImportMetrics {
                     m.resolutions().stream().mapToLong(ResolutionCount::count).sum()));
             cells.add(String.valueOf(m.questions().asked()));
             cells.add(String.valueOf(m.questions().answered()));
-            cells.add(m.questions().medianDays() == null ? "" : m.questions().medianDays().toPlainString());
+            cells.add(
+                    m.questions().medianDays() == null
+                            ? ""
+                            : m.questions().medianDays().toPlainString());
             cells.add(String.valueOf(m.mappings().size()));
             cells.add(String.valueOf(m.mappingVersionsMade()));
             cells.add(String.valueOf(m.rehearsals().size()));
@@ -220,7 +223,11 @@ class MetricsService implements ImportMetrics {
     }
 
     private static long sum(List<TemplateRows> rows, Function<TemplateRows, Long> of) {
-        return rows.stream().map(of).filter(v -> v != null).mapToLong(Long::longValue).sum();
+        return rows.stream()
+                .map(of)
+                .filter(v -> v != null)
+                .mapToLong(Long::longValue)
+                .sum();
     }
 
     /** The JSON of {@code import_run_metrics} as the port's records; keys are the function's, read one by one. */
@@ -246,71 +253,107 @@ class MetricsService implements ImportMetrics {
                         at(st, "signed_off_at"),
                         at(st, "purged_at"),
                         at(st, "cancelled_at")),
-                list(m, "stages", x -> new Stage(
-                        x.path("number").asInt(),
-                        str(x, "key"),
-                        at(x, "started_at"),
-                        at(x, "ended_at"),
-                        num(x, "seconds"))),
-                list(m, "steps", x -> new Step(
-                        str(x, "step"),
-                        num(x, "batch_seq") == null ? null : num(x, "batch_seq").intValue(),
-                        x.path("millis").asLong())),
-                list(m, "rehearsal_timings", x -> new Timing(str(x, "step"), x.path("millis").asLong())),
-                list(m, "batches", x -> new BatchRows(
-                        x.path("seq").asInt(),
-                        str(x, "status"),
-                        str(x, "template_key"),
-                        num(x, "template_version") == null
-                                ? null
-                                : num(x, "template_version").intValue(),
-                        str(x, "mapping_source"),
-                        num(x, "rows"),
-                        x.path("excluded").asLong(),
-                        num(x, "read"),
-                        num(x, "written"),
-                        num(x, "existing"),
-                        num(x, "skipped"))),
-                list(m, "templates", x -> new TemplateRows(
-                        str(x, "template_key"),
-                        x.path("template_version").asInt(),
-                        x.path("batches").asLong(),
-                        num(x, "rows"),
-                        num(x, "excluded"),
-                        num(x, "read"),
-                        num(x, "written"),
-                        num(x, "existing"),
-                        num(x, "skipped"))),
-                list(m, "issues", x -> new IssueCount(
-                        str(x, "code"),
-                        str(x, "severity"),
-                        x.path("total").asLong(),
-                        x.path("open").asLong())),
-                list(m, "resolutions", x -> new ResolutionCount(str(x, "kind"), x.path("count").asLong())),
+                list(
+                        m,
+                        "stages",
+                        x -> new Stage(
+                                x.path("number").asInt(),
+                                str(x, "key"),
+                                at(x, "started_at"),
+                                at(x, "ended_at"),
+                                num(x, "seconds"))),
+                list(
+                        m,
+                        "steps",
+                        x -> new Step(
+                                str(x, "step"),
+                                num(x, "batch_seq") == null
+                                        ? null
+                                        : num(x, "batch_seq").intValue(),
+                                x.path("millis").asLong())),
+                list(
+                        m,
+                        "rehearsal_timings",
+                        x -> new Timing(str(x, "step"), x.path("millis").asLong())),
+                list(
+                        m,
+                        "batches",
+                        x -> new BatchRows(
+                                x.path("seq").asInt(),
+                                str(x, "status"),
+                                str(x, "template_key"),
+                                num(x, "template_version") == null
+                                        ? null
+                                        : num(x, "template_version").intValue(),
+                                str(x, "mapping_source"),
+                                num(x, "rows"),
+                                x.path("excluded").asLong(),
+                                num(x, "read"),
+                                num(x, "written"),
+                                num(x, "existing"),
+                                num(x, "skipped"))),
+                list(
+                        m,
+                        "templates",
+                        x -> new TemplateRows(
+                                str(x, "template_key"),
+                                x.path("template_version").asInt(),
+                                x.path("batches").asLong(),
+                                num(x, "rows"),
+                                num(x, "excluded"),
+                                num(x, "read"),
+                                num(x, "written"),
+                                num(x, "existing"),
+                                num(x, "skipped"))),
+                list(
+                        m,
+                        "issues",
+                        x -> new IssueCount(
+                                str(x, "code"),
+                                str(x, "severity"),
+                                x.path("total").asLong(),
+                                x.path("open").asLong())),
+                list(
+                        m,
+                        "resolutions",
+                        x -> new ResolutionCount(str(x, "kind"), x.path("count").asLong())),
                 new Questions(
                         q.path("asked").asLong(),
                         q.path("answered").asLong(),
                         q.path("open").asLong(),
                         decimal(q, "median_days"),
                         decimal(q, "max_days")),
-                list(m, "mappings", x -> new MappingVersion(
-                        str(x, "name"),
-                        x.path("version").asInt(),
-                        str(x, "template_key"),
-                        x.path("template_version").asInt())),
+                list(
+                        m,
+                        "mappings",
+                        x -> new MappingVersion(
+                                str(x, "name"),
+                                x.path("version").asInt(),
+                                str(x, "template_key"),
+                                x.path("template_version").asInt())),
                 m.path("mapping_versions_made").asLong(),
-                list(m, "rehearsals", x -> new Rehearsal(
-                        at(x, "at"),
-                        str(x, "outcome"),
-                        x.path("matches_dry_run").isBoolean()
-                                ? x.path("matches_dry_run").asBoolean()
-                                : null)),
-                list(m, "rehearsal_differences", x -> new Difference(
-                        str(x, "source"), str(x, "measure"), num(x, "rehearsal"), num(x, "cutover"))),
+                list(
+                        m,
+                        "rehearsals",
+                        x -> new Rehearsal(
+                                at(x, "at"),
+                                str(x, "outcome"),
+                                x.path("matches_dry_run").isBoolean()
+                                        ? x.path("matches_dry_run").asBoolean()
+                                        : null)),
+                list(
+                        m,
+                        "rehearsal_differences",
+                        x -> new Difference(
+                                str(x, "source"), str(x, "measure"), num(x, "rehearsal"), num(x, "cutover"))),
                 new Defects(
                         d.path("open").asLong(),
                         d.path("closed").asLong(),
-                        list(d, "codes", x -> new CodeCount(str(x, "code"), x.path("count").asLong()))));
+                        list(
+                                d,
+                                "codes",
+                                x -> new CodeCount(
+                                        str(x, "code"), x.path("count").asLong()))));
     }
 
     private static <T> List<T> list(JsonNode parent, String key, Function<JsonNode, T> each) {
@@ -351,7 +394,8 @@ class MetricsService implements ImportMetrics {
         TenantContext.require();
         return tx.execute(s -> {
             runStatus(runId, false);
-            return jdbc.sql("SELECT " + DEFECT_COLUMNS + " FROM import_defects WHERE run_id = ? ORDER BY created_at, id")
+            return jdbc.sql("SELECT " + DEFECT_COLUMNS
+                            + " FROM import_defects WHERE run_id = ? ORDER BY created_at, id")
                     .param(runId)
                     .query(MetricsService::defect)
                     .list();
@@ -364,11 +408,13 @@ class MetricsService implements ImportMetrics {
         if (by == null) {
             throw new IllegalArgumentException("a defect needs who logs it");
         }
-        String description = defect.description() == null ? "" : defect.description().strip();
+        String description =
+                defect.description() == null ? "" : defect.description().strip();
         String code = defect.expectedCode() == null ? "" : defect.expectedCode().strip();
         return tx.execute(s -> {
             String status = runStatus(runId, true);
-            if (!List.of(RunStates.COMMITTED, RunStates.SIGNED_OFF, RunStates.PURGED).contains(status)) {
+            if (!List.of(RunStates.COMMITTED, RunStates.SIGNED_OFF, RunStates.PURGED)
+                    .contains(status)) {
                 throw new ApiException(
                         HttpStatus.CONFLICT,
                         "run_not_imported",
@@ -387,9 +433,7 @@ class MetricsService implements ImportMetrics {
                             INSERT INTO import_defects (id, tenant_id, run_id, logged_by, description, expected_code,
                                                         known_code)
                             VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
-                            """)
-                    .params(id, runId, by, description, code, known)
-                    .update();
+                            """).params(id, runId, by, description, code, known).update();
             Map<String, Object> after = new LinkedHashMap<>();
             after.put("defect_id", id);
             after.put("expected_code", code);
@@ -425,9 +469,7 @@ class MetricsService implements ImportMetrics {
                             UPDATE import_defects SET status = 'closed', fix_ref = ?, closed_by = ?, closed_at = now(),
                                    version = version + 1
                              WHERE id = ?
-                            """)
-                    .params(fixRef.strip(), by, defectId)
-                    .update();
+                            """).params(fixRef.strip(), by, defectId).update();
             Map<String, Object> after = new LinkedHashMap<>();
             after.put("defect_id", defectId);
             after.put("status", "closed");

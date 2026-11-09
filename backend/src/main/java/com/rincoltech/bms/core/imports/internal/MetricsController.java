@@ -54,7 +54,8 @@ class MetricsController {
     record DefectRequest(
             @NotBlank
             @Size(min = 10, max = 500)
-            @Schema(description = "What went wrong, by file, line, field and code; never a person's name, phone, ID"
+            @Schema(
+                    description = "What went wrong, by file, line, field and code; never a person's name, phone, ID"
                             + " number or email")
             String description,
 
@@ -65,7 +66,8 @@ class MetricsController {
 
     @Schema(name = "ImportDefectCloseRequest")
     record CloseRequest(
-            @NotNull @Schema(description = "The defect's version as read") Integer version,
+            @NotNull @Schema(description = "The defect's version as read")
+            Integer version,
 
             @NotBlank
             @Size(max = 200)
@@ -109,6 +111,9 @@ class MetricsController {
     @Operation(summary = "Close a defect with its fix's reference, once; audited", operationId = "closeImportDefect")
     Defect close(@PathVariable("defect_id") UUID defectId, @Valid @RequestBody CloseRequest request) {
         return metrics.closeDefect(
-                defectId, request.version(), request.fixRef(), CurrentPrincipal.require().userId());
+                defectId,
+                request.version(),
+                request.fixRef(),
+                CurrentPrincipal.require().userId());
     }
 }

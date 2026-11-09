@@ -61,37 +61,49 @@ public interface ImportMetrics {
             Instant loggedAt,
             UUID loggedBy,
 
-            @Schema(description = "What went wrong, naming nobody; its hash once the run is purged and the defect closed")
+            @Schema(
+                    description =
+                            "What went wrong, naming nobody; its hash once the run is purged and the defect closed")
             String description,
 
-            @Schema(description = "The issue code the row should have had") String expectedCode,
+            @Schema(description = "The issue code the row should have had")
+            String expectedCode,
 
-            @Schema(description = "False when the code is not in the catalogue of the run's template: a new code to add")
+            @Schema(
+                    description =
+                            "False when the code is not in the catalogue of the run's template: a new code to add")
             boolean knownCode,
 
             @Schema(description = "open or closed") String status,
 
-            @Schema(description = "The fix: #123, a commit hash or a GitHub link; null while open") String fixRef,
+            @Schema(description = "The fix: #123, a commit hash or a GitHub link; null while open")
+            String fixRef,
 
             UUID closedBy,
             Instant closedAt,
             int version) {}
 
-    @Schema(name = "ImportRunMetrics", description = "The metrics of an import run, from its stored data (spec section 8)")
+    @Schema(
+            name = "ImportRunMetrics",
+            description = "The metrics of an import run, from its stored data (spec section 8)")
     record Metrics(
             UUID runId,
             String status,
 
-            @Schema(description = "framework, import_retail or retail_import_refs") String origin,
+            @Schema(description = "framework, import_retail or retail_import_refs")
+            String origin,
 
             boolean fabricated,
             Stamps stamps,
 
-            @Schema(description = "The ten stages of spec section 2, in order") List<Stage> stages,
+            @Schema(description = "The ten stages of spec section 2, in order")
+            List<Stage> stages,
 
-            @Schema(description = "The time each pipeline step took, as stored where it ended") List<Step> steps,
+            @Schema(description = "The time each pipeline step took, as stored where it ended")
+            List<Step> steps,
 
-            @Schema(description = "The newest committed rehearsal's timings, by step") List<Timing> rehearsalTimings,
+            @Schema(description = "The newest committed rehearsal's timings, by step")
+            List<Timing> rehearsalTimings,
 
             List<BatchRows> batches,
             List<TemplateRows> templates,
@@ -99,14 +111,17 @@ public interface ImportMetrics {
             List<ResolutionCount> resolutions,
             Questions questions,
 
-            @Schema(description = "The mapping versions the run's batches were read with") List<MappingVersion> mappings,
+            @Schema(description = "The mapping versions the run's batches were read with")
+            List<MappingVersion> mappings,
 
             @Schema(description = "Versions of those mappings saved while the run was open")
             long mappingVersionsMade,
 
             List<Rehearsal> rehearsals,
 
-            @Schema(description = "Per source, each count of the newest committed rehearsal that differs from the cutover")
+            @Schema(
+                    description =
+                            "Per source, each count of the newest committed rehearsal that differs from the cutover")
             List<Difference> rehearsalDifferences,
 
             Defects defects) {}
@@ -130,27 +145,33 @@ public interface ImportMetrics {
     record Stage(
             int number,
 
-            @Schema(description = "discovery, field_mapping, cleaning_and_review, rehearsal, dry_run, cutover,"
+            @Schema(
+                    description = "discovery, field_mapping, cleaning_and_review, rehearsal, dry_run, cutover,"
                             + " reconciliation, sign_off, source_deletion or hypercare")
             String key,
 
             Instant startedAt,
             Instant endedAt,
 
-            @Schema(description = "Null unless both ends are recorded") Long seconds) {}
+            @Schema(description = "Null unless both ends are recorded")
+            Long seconds) {}
 
     @Schema(name = "ImportRunStep", description = "One pipeline step")
     record Step(
-            @Schema(description = "upload, parse, validate, dry_run or commit") String step,
+            @Schema(description = "upload, parse, validate, dry_run or commit")
+            String step,
 
-            @Schema(description = "The batch, or null for a step of the whole run") Integer batchSeq,
+            @Schema(description = "The batch, or null for a step of the whole run")
+            Integer batchSeq,
 
             long millis) {}
 
     @Schema(name = "ImportRunTiming")
     record Timing(String step, long millis) {}
 
-    @Schema(name = "ImportBatchRows", description = "Rows by outcome of one batch; the commit's counts null until committed")
+    @Schema(
+            name = "ImportBatchRows",
+            description = "Rows by outcome of one batch; the commit's counts null until committed")
     record BatchRows(
             int seq,
             String status,
@@ -159,14 +180,17 @@ public interface ImportMetrics {
             String mappingSource,
             Long rows,
 
-            @Schema(description = "Rows left out in the review") long excluded,
+            @Schema(description = "Rows left out in the review")
+            long excluded,
 
             Long read,
             Long written,
             Long existing,
             Long skipped) {}
 
-    @Schema(name = "ImportTemplateRows", description = "Rows by outcome of a template's batches, not failed or cancelled")
+    @Schema(
+            name = "ImportTemplateRows",
+            description = "Rows by outcome of a template's batches, not failed or cancelled")
     record TemplateRows(
             String templateKey,
             int templateVersion,
@@ -183,8 +207,10 @@ public interface ImportMetrics {
 
     @Schema(name = "ImportResolutionCount")
     record ResolutionCount(
-            @Schema(description = "edit_value, exclude_row, accept_suggestion, link_row, link_member, override, map_value"
-                            + " or ask_customer")
+            @Schema(
+                    description =
+                            "edit_value, exclude_row, accept_suggestion, link_row, link_member, override, map_value"
+                                    + " or ask_customer")
             String kind,
 
             long count) {}
@@ -202,7 +228,8 @@ public interface ImportMetrics {
     record Difference(
             String source,
 
-            @Schema(description = "read, written, existing or skipped") String measure,
+            @Schema(description = "read, written, existing or skipped")
+            String measure,
 
             Long rehearsal,
             Long cutover) {}
