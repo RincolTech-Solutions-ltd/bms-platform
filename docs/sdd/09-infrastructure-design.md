@@ -412,8 +412,9 @@ deletion 90 days after closing), all Africa/Kampala (ADR-024).
    On staging it takes only a run marked fabricated and only while `bms.slice` has 704 MB free below
    `MemoryHigh` (section 9.13). It holds its own lock and the puller's and deploy's locks to the end,
    so no deploy's migrate and second api start beside it, and it starts nothing from Saturday 21:30 to
-   Sunday 07:00 or while a drill runs, and removes its containers and fails at its deadline, the next
-   Sunday 03:20, so its 704 MB never meets the drill's 448 MB. It writes none of
+   Sunday 07:00 or while a drill runs, and a watchdog removes its containers and fails it at its
+   deadline, six hours after its start or Sunday 03:20 if sooner, so its 704 MB never meets the drill's
+   448 MB and it keeps a deploy waiting six hours at most. It writes none of
    the drill's state files, so `monitor.sh` never reads a rehearsal as a drill. Runbook:
    `docs/runbooks/restore-from-backup.md` section 5.2.
 

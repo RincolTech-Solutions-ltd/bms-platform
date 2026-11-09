@@ -24,8 +24,9 @@
 #   1. reads the run on the live database, read only: a run of the import screens, in review or ready, and on staging
 #      marked fabricated by its uploader;
 #   2. holds its own lock and the puller's and deploy's locks to the end, so no deploy runs beside it; starts nothing
-#      from Saturday 21:30 to Sunday 07:00 (the weekly drill) or while a drill runs; and on staging goes on only while
-#      bms.slice has room for its two containers by their limits (RH_NEEDED_MB);
+#      from Saturday 21:30 to Sunday 07:00 (the weekly drill) or while a drill runs; ends, nothing stored, at its
+#      deadline, six hours after its start or Sunday 03:20 if sooner (a watchdog, rh_watchdog); and on staging goes on
+#      only while bms.slice has room for its two containers by their limits (RH_NEEDED_MB);
 #   3. fetches and decrypts the newest backup as the drill does, into a mode-0700 temp dir under backups/;
 #   4. starts a throwaway PostgreSQL on an internal network of its own, restores into it, and goes on only while that
 #      database is provably not the live one: another name, container and cluster, this run's label, this network only;
@@ -48,6 +49,7 @@ set -uo pipefail
 
 RH_LIVE_DB=bms-postgres-1
 RH_NEEDED_MB=704
+RH_MAX_SECONDS=21600
 # The staging API's JVM (compose.pi-staging.yml) with its 224 MB heap, on which the big file test commits a batch of
 # 2,500 rows (SDD chapter 15 section 15.7), so a rehearsal holds the batches the live API holds.
 RH_JAVA_OPTS="-Xmx224m -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=48m -XX:TieredStopAtLevel=1 -XX:+UseSerialGC"
@@ -104,6 +106,9 @@ rh_pick_newest_backup() {
 rh_cleanup() {
     local status=$?
     trap - EXIT INT TERM
+    if [[ -n "${RH_WATCHDOG:-}" ]]; then
+        kill "$RH_WATCHDOG" 2> /dev/null
+    fi
     docker rm -f -v "$RH_API" "$RH_MIGRATE" "$RH_RCLONE" "$RH_DB" > /dev/null 2>&1 || true
     docker volume rm "$RH_VOL" > /dev/null 2>&1 || true
     docker network rm "$RH_NET" > /dev/null 2>&1 || true
@@ -136,8 +141,8 @@ rh_require_room() {
 #     the script exits, so no deploy (a migrate and a second api) starts meanwhile: the puller just ends its run;
 #   - the weekly drill (unchanged, so it takes no lock) is kept out by time: no rehearsal starts from Saturday 21:30 to
 #     Sunday 07:00 host time, the drill's 03:30 start, its 10 minute random delay and its 3 hour limit with room for a
-#     rehearsal of up to 6 hours started just before; and one already running, seen by its process or its container,
-#     is refused too.
+#     rehearsal of up to 6 hours (RH_MAX_SECONDS, which the watchdog enforces) started just before; and one already
+#     running, seen by its process or its container, is refused too.
 # JUSTIFICATION-A3: the review's finding 1 asks for the locks, the drill's window and the process check together.
 # Asked again before the migrations and before the commit, so a long rehearsal stops rather than run into the drill.
 rh_require_drill_clear() {
@@ -181,33 +186,53 @@ rh_require_scratch() {
 
 # rh_bg <command...>: runs it in the background and waits for it, so INT or TERM reaches the trap at once and the clean-up
 # removes the container while it still runs, instead of after it (review of #882, finding 5). Its exit status.
-# It also keeps the run inside its time (review of d98fd0b, must-fix 2): at the deadline it removes the rehearsal's
-# containers and fails, nothing stored, so the weekly drill, which takes no lock, never starts beside it.
-# JUSTIFICATION-A3: the review's must-fix 2 asks for the deadline on every long step, which all run through here.
 rh_bg() {
-    local pid
     "$@" 0<&0 &
-    pid=$!
-    while kill -0 "$pid" 2> /dev/null; do
-        if (( $(date +%s) >= RH_DEADLINE )); then
-            docker rm -f -v "$RH_API" "$RH_MIGRATE" "$RH_RCLONE" "$RH_DB" > /dev/null 2>&1
-            wait "$pid"
-            rh_fail "stopped at its deadline, Sunday 03:20 host time, so the weekly drill never runs beside it; nothing is stored"
-        fi
-        sleep 2 &
-        wait "$!"
-    done
-    wait "$pid"
+    wait "$!"
 }
 
-# The deadline: the next Sunday 03:20 host time, ten minutes before the weekly drill (Uganda keeps no summer time).
+# The deadline (reviews of d98fd0b and 305673f): six hours after the start (RH_MAX_SECONDS, the length the drill's
+# window leaves room for), or the next Sunday 03:20 host time, ten minutes before the weekly drill, whichever comes first
+# (Uganda keeps no summer time). So the locks a rehearsal holds keep a deploy out for six hours at most.
 rh_deadline() {
-    local now since_midnight days
+    local now since_midnight days sunday
     now="$(date +%s)"
     since_midnight=$(( 10#$(date +%H) * 3600 + 10#$(date +%M) * 60 + 10#$(date +%S) ))
     days=$(( (7 - $(date +%u)) % 7 ))
     (( days > 0 )) || days=7
-    echo $(( now - since_midnight + days * 86400 + 3 * 3600 + 20 * 60 ))
+    sunday=$(( now - since_midnight + days * 86400 + 3 * 3600 + 20 * 60 ))
+    echo $(( now + RH_MAX_SECONDS < sunday ? now + RH_MAX_SECONDS : sunday ))
+}
+
+# The watchdog, a child of the script for its whole run: at the deadline it marks the temp dir, sends the script TERM
+# (handled as soon as its current command ends), removes the rehearsal's containers and ends the script's other
+# children, so a step in the foreground that hangs (a docker exec, the copy, a decryption) ends too. Nothing is stored.
+rh_watchdog() {
+    local child
+    trap - EXIT INT TERM
+    while kill -0 "$$" 2> /dev/null; do
+        if (( $(date +%s) >= RH_DEADLINE )); then
+            : > "$RH_TMP/deadline"
+            kill -TERM "$$" 2> /dev/null
+            docker rm -f -v "$RH_API" "$RH_MIGRATE" "$RH_RCLONE" "$RH_DB" > /dev/null 2>&1
+            for child in $(pgrep -P "$$"); do
+                [[ "$child" == "$BASHPID" ]] && continue
+                pkill -TERM -P "$child" 2> /dev/null
+                kill -TERM "$child" 2> /dev/null
+            done
+            return
+        fi
+        sleep 2
+    done
+}
+
+rh_on_term() {
+    if [[ -n "${RH_TMP:-}" && -e "$RH_TMP/deadline" ]]; then
+        rh_log "FAILED: stopped at its deadline, $(date -d "@${RH_DEADLINE}" +%Y-%m-%dT%H:%M%z); nothing is stored"
+        exit 1
+    fi
+    rh_log "terminated"
+    exit 143
 }
 
 # rh_require_env_target <env file>: the only database a container of the rehearsal is given is the throwaway one.
@@ -235,6 +260,9 @@ rehearse_import() {
     set +a
     : "${BMS_ENVIRONMENT:?}" "${BACKUP_ENCRYPTION_KEY:?}" "${R2_ENDPOINT:?}" "${R2_ACCESS_KEY_ID:?}"
     : "${R2_SECRET_ACCESS_KEY:?}" "${R2_BACKUP_BUCKET:?}" "${RCLONE_IMAGE:?}" "${POSTGRES_IMAGE:?}"
+    # Exactly staging or production (review of 305673f): any other value would skip staging's fabricated check and slice.
+    [[ "$BMS_ENVIRONMENT" == "staging" || "$BMS_ENVIRONMENT" == "production" ]] \
+        || rh_refuse "BMS_ENVIRONMENT is ${BMS_ENVIRONMENT}; a rehearsal runs only on staging or production"
     umask 077
     local started step status row tag initdb prefix owner_pw app_pw live_ver scratch_ver table cols scratch_cols ready
     local prelude live_script old_ifs
@@ -247,9 +275,10 @@ rehearse_import() {
     RH_NET="bms-rehearsal-net-$$"
     RH_VOL="bms-rehearsal-data-$$"
     RH_TMP=""
+    RH_WATCHDOG=""
     trap rh_cleanup EXIT
     trap 'rh_log "interrupted"; exit 130' INT
-    trap 'rh_log "terminated"; exit 143' TERM
+    trap rh_on_term TERM
 
     # 1. The run, read on the live database.
     row="$(rh_live "SELECT tenant_id, status, fabricated, origin FROM import_runs WHERE id = '${RH_RUN}'" 2> /dev/null)" \
@@ -268,7 +297,12 @@ rehearse_import() {
     rh_log "rehearsing run ${RH_RUN} (${status}) of business ${RH_TENANT} on ${BMS_ENVIRONMENT}"
     rh_require_alone
     RH_DEADLINE="$(rh_deadline)"
-    rh_log "it must end by $(date -d "@${RH_DEADLINE}" +%Y-%m-%dT%H:%M%z), before the weekly drill"
+    rh_log "it must end by $(date -d "@${RH_DEADLINE}" +%Y-%m-%dT%H:%M%z): six hours at most, and before the weekly drill"
+    mkdir -p backups
+    RH_TMP="$(mktemp -d "$PWD/backups/rehearsal.XXXXXX")" || rh_fail "cannot make a temp dir under backups/"
+    chmod 700 "$RH_TMP"
+    rh_watchdog &
+    RH_WATCHDOG=$!
     RH_LIVE_API="$(docker ps --filter label=com.docker.compose.project=bms --filter label=com.docker.compose.service=api \
         --format '{{.Names}}' | head -n 1)"
     [[ -n "$RH_LIVE_API" ]] || rh_fail "no running api container of the bms project: the rehearsal runs the live API's image"
@@ -283,10 +317,7 @@ rehearse_import() {
         rh_require_room
     fi
 
-    # 3. The newest backup, fetched and decrypted inside a mode-0700 temp dir only.
-    mkdir -p backups
-    RH_TMP="$(mktemp -d "$PWD/backups/rehearsal.XXXXXX")" || rh_fail "cannot make a temp dir under backups/"
-    chmod 700 "$RH_TMP"
+    # 3. The newest backup, fetched and decrypted inside the mode-0700 temp dir only.
     prefix="r2:${R2_BACKUP_BUCKET}/${BMS_ENVIRONMENT}"
     # The R2 keys go in an env file in the temp dir, never on a command line `ps` shows (review of #882, finding 3).
     printf '%s\n' RCLONE_CONFIG_R2_TYPE=s3 RCLONE_CONFIG_R2_PROVIDER=Cloudflare "RCLONE_CONFIG_R2_ENDPOINT=${R2_ENDPOINT}" \
@@ -435,6 +466,7 @@ rehearse_import() {
     case "$status" in
         0) ;;
         1) rh_log "the rehearsal's commit did not complete; its outcome is stored on the run" ;;
+        3) rh_refuse "rehearse-import refused the run (its reason is above); nothing is stored on the live run" ;;
         *) rh_fail "rehearse-import exited ${status}; nothing is stored on the live run" ;;
     esac
 

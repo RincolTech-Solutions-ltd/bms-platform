@@ -16,7 +16,8 @@
 #   FAKE_ENV_DB_URL=<url>   an extra SPRING_DATASOURCE_URL in the live API's environment;
 #   FAKE_LIVE_READ_FAIL=1   the live read of the run's rows dies part way; FAKE_COUNT_MISMATCH=1  the copy lost rows;
 #   FAKE_API_SIGNAL=<sig>   the commit sends the script that signal; FAKE_API_HANG=<s>  and then runs on for s seconds;
-#   FAKE_ADVANCE_TO=<epoch> the clock jumps to that moment while the commit runs.
+#   FAKE_ADVANCE_TO=<epoch> the clock jumps to that moment while the commit runs;
+#   FAKE_COPY_ADVANCE_TO=<epoch> it jumps there while the copy into the throwaway database hangs.
 # JUSTIFICATION-A2: the fake host is shared by two test files and is not a tiny helper.
 
 FAKE_EPOCH=1793000000
@@ -221,6 +222,12 @@ case "$1" in
                 cat >> "$FAKE/live-writes"
             else
                 cat >> "$FAKE/copy-stream"
+                # A copy that hangs while the clock passes the deadline.
+                if [[ -n "${FAKE_COPY_ADVANCE_TO:-}" ]]; then
+                    echo "$FAKE_COPY_ADVANCE_TO" > "$FAKE/epoch"
+                    exec > /dev/null 2>&1
+                    "$REAL_SLEEP" 30
+                fi
             fi
             exit 0
         fi

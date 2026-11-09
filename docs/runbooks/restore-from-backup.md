@@ -142,9 +142,11 @@ cron: those run the script with no argument, which is the weekly drill above, un
    `state/deploy.lock`) and holds them to the end, so no deploy starts beside it (the puller just ends its run and the
    next one deploys); it refuses while a deploy, the puller, the weekly drill (by its process or container) or another
    rehearsal runs; it starts nothing from Saturday 21:30 to Sunday 07:00 host time, and asks again before the
-   migrations and the commit. Its deadline is the next Sunday 03:20 host time, ten minutes before the drill, which it
-   logs at the start: a download, restore, migration or commit still running then has its container removed and the
-   rehearsal fails with nothing stored (start a long one early in the week). On staging it starts nothing
+   migrations and the commit. Its deadline, logged at the start, is six hours after the start, or the next Sunday 03:20
+   host time (ten minutes before the drill) if that comes first, so it never keeps a deploy waiting more than six
+   hours. A watchdog enforces it on every step, a hung one included: at the deadline it removes the rehearsal's
+   containers, ends the steps still running and the rehearsal fails (exit 1) with nothing stored and its locks
+   released. A rehearsal that needs longer is a sign to split the run's files. On staging it starts nothing
    unless `bms.slice` has 704 MB free below `MemoryHigh` (in use counted as `memory.current` less inactive page cache),
    and 448 MB again before the API container.
 3. Fetches and decrypts the newest backup, as the drill does, into a mode-0700 temp dir `backups/rehearsal.XXXXXX`; the

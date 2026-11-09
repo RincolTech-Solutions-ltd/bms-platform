@@ -167,8 +167,8 @@ FAKE_API_EXIT=1 rehearse commit-fails
 check "a commit that fails is stored on the run as such, exits 1 and removes everything" \
     eval '[[ "$STATUS" == 1 ]] && [[ -s "$FAKE/live-writes" ]] && all_removed'
 FAKE_API_EXIT=3 rehearse command-refuses
-check "a command that refuses stores nothing, exits 1 and removes everything" \
-    eval '[[ "$STATUS" == 1 ]] && no_live_write && all_removed'
+check "a command that refuses stores nothing, exits 3 (refused) and removes everything" \
+    eval '[[ "$STATUS" == 3 ]] && no_live_write && all_removed'
 FAKE_API_SIGNAL=TERM rehearse terminated
 check "a TERM during the commit exits 143, stores nothing and removes everything" \
     eval '[[ "$STATUS" == 143 ]] && said terminated && no_live_write && all_removed'
@@ -244,6 +244,23 @@ check "a commit still running at the deadline (Sunday 03:20) is stopped, fails (
     eval '[[ "$STATUS" == 1 ]] && said "stopped at its deadline" && no_live_write && all_removed \
         && grep -q "^rm -f -v bms-rehearsal-api-" "$FAKE/calls.log"'
 check "the run states its deadline, the next Sunday 03:20" said "it must end by 2026-10-25T03:20"
+
+# Review of 305673f: six hours at most, whatever the day, and a step in the foreground that hangs ends too.
+# shellcheck disable=SC2034 # read by the eval'd check below.
+started_at=$SECONDS
+FAKE_COPY_ADVANCE_TO=$(( 1793000000 + 21600 + 60 )) rehearse copy-past-six-hours
+check "the deadline of a Monday 07:33 start is 13:33, six hours on" said "it must end by 2026-10-26T13:33"
+check "a copy that hangs past six hours is stopped: exit 1, no commit, nothing stored, all removed, at once" \
+    eval '[[ "$STATUS" == 1 ]] && said "stopped at its deadline" && no_commit && no_live_write && all_removed \
+        && (( SECONDS - started_at < 15 ))'
+check "... and the puller's and deploy's locks are free again" \
+    eval 'flock --nonblock "$HOST/state/deploy.lock" true && flock --nonblock "$HOST/state/pull.lock" true'
+
+fake_host "$WORK/odd-environment"
+sed -i 's/^BMS_ENVIRONMENT=staging$/BMS_ENVIRONMENT=stage/' "$HOST/.env"
+run_script --rehearse-import "$RUN"
+check "a BMS_ENVIRONMENT other than staging or production is refused (3) before anything is read" \
+    eval '[[ "$STATUS" == 3 ]] && ! grep -q "^exec\|^run " "$FAKE/calls.log"'
 
 locks_match() {
     grep -q '^exec 8> state/pull.lock$' "$TESTS_HERE/../pull-staging.sh" \

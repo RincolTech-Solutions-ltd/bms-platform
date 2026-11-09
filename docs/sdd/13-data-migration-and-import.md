@@ -1597,7 +1597,7 @@ section 4.1; coordinated with #110, which builds no second framework).**
   `fixtures/retail/import-sample/`, checked file by file against the SHA-256 the code holds. It stands in for the upload
   form until #141.
 - **Running alone** (review of #882): the script holds its own lock and the puller's and deploy's locks to the end,
-  starts nothing in the weekly drill's window or beside a drill, stops at its deadline (the next Sunday 03:20), loads the copy in one transaction committed only when
+  starts nothing in the weekly drill's window or beside a drill, stops at its deadline (six hours, or Sunday 03:20 if sooner, by a watchdog), loads the copy in one transaction committed only when
   the live read succeeded and compares every table's count and ids, keeps keys off command lines, and runs its
   containers in the background so a stop removes them at once.
 - **Not built here:** the upload form's fabricated confirmation (the operator screens, #141, pass it to `open`), and the
