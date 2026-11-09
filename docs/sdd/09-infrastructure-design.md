@@ -410,8 +410,11 @@ deletion 90 days after closing), all Africa/Kampala (ADR-024).
    row on the live run as `bms_app` (its only write there), and removes the containers, network,
    volume and the mode-0700 temp dir that held the decrypted dump on success, failure and interrupt.
    On staging it takes only a run marked fabricated and only while `bms.slice` has 704 MB free below
-   `MemoryHigh` (section 9.13). It writes none of the drill's state files, so `monitor.sh` never reads
-   a rehearsal as a drill. Runbook: `docs/runbooks/restore-from-backup.md` section 5.2.
+   `MemoryHigh` (section 9.13). It holds its own lock and the puller's and deploy's locks to the end,
+   so no deploy's migrate and second api start beside it, and it starts nothing from Saturday 21:30 to
+   Sunday 07:00 or while a drill runs, so its 704 MB never meets the drill's 448 MB. It writes none of
+   the drill's state files, so `monitor.sh` never reads a rehearsal as a drill. Runbook:
+   `docs/runbooks/restore-from-backup.md` section 5.2.
 
 The R2 token is scoped to the backup bucket; on a host built by `infra/production/` it is an account token
 with object read and write on that bucket only, limited to the VM's addresses if Cloudflare enforces the IP condition, and the lock and
@@ -527,7 +530,7 @@ Staging runs on an ARM64 host that already exists at a Rincol home site: a Raspb
   | second `api`, `web` | 448 MB, 32 MB | Only during a switch, beside the old ones until they are healthy (ADR-083). The second api starts only while its own limit plus 64 MB (512 MB) is free below the slice's `MemoryHigh` and on the host, so its start-up peak can never bring the slice's OOM killer onto the old api or PostgreSQL (reclaim, a slowdown, stays possible); otherwise the api restarts in place, with the old gap. Measured 24 Oct 2026: about 790 MB in use, so about 710 MB free below the 1500 MB `MemoryHigh`: staging overlaps on every deploy. `BMS_ROLL_MIN_FREE_MB` can replace the limit with a measured start-up peak |
   | restore drill `postgres`, `rclone` | 384 MB, 64 MB | Sunday 03:30 only (section 9.10 item 6) |
   | rehearsal `postgres` | 256 MB, 1 CPU | Only during an import rehearsal (section 9.10 item 7, issue #138): `shared_buffers=64MB`, `max_connections=20`, `work_mem=4MB`, `maintenance_work_mem=64MB`, no network but its own internal one |
-  | rehearsal `api` (and its `migrate` before it) | 448 MB, 1 CPU | The staging api's JVM with a 224 MB heap, the heap the big file test commits 2,500 rows a batch on (chapter 15 section 15.7). With the rehearsal `postgres`, 704 MB by limits; the script starts nothing unless that much is free below `MemoryHigh` (in use counted as `memory.current` less inactive page cache), refuses while a drill or another rehearsal runs, and is not run during a deploy. `rclone` (64 MB) runs before both |
+  | rehearsal `api` (and its `migrate` before it) | 448 MB, 1 CPU | The staging api's JVM with a 224 MB heap, the heap the big file test commits 2,500 rows a batch on (chapter 15 section 15.7). With the rehearsal `postgres`, 704 MB by limits; the script starts nothing unless that much is free below `MemoryHigh` (in use counted as `memory.current` less inactive page cache), holds the puller's and deploy's locks for its whole run (so never beside a deploy's `migrate` and second `api`), and starts nothing from Saturday 21:30 to Sunday 07:00 or while a drill or another rehearsal runs. `rclone` (64 MB) runs before both |
   | **Total** | 736 MB steady, 896 MB while migrations run, 1216 MB by limits during an overlap, 1440 MB by limits during a rehearsal (736 + 704) | `bms.slice`: `MemoryMax=1600M`, `MemoryHigh=1500M` (decision D37), no swap, `CPUQuota=250%` |
 
   Every container is started with `cgroup_parent: bms.slice`, so the slice is a hard cap for the
