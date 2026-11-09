@@ -16,6 +16,7 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -170,7 +171,10 @@ class RehearsalSettingsIT {
         app.setEnvironment(environment);
         app.setRegisterShutdownHook(false);
         // The test JVM's logging is left as it is: the command's WARN level and the server profile's JSON lines would
-        // otherwise stay for every later test in this JVM, and some of them read INFO lines.
+        // otherwise stay for every later test in this JVM, and some of them read INFO lines. The start also writes the
+        // logging system properties (the structured console format among them), so every system property is restored.
+        Properties before = new Properties();
+        before.putAll(System.getProperties());
         System.setProperty(LoggingSystem.SYSTEM_PROPERTY, LoggingSystem.NONE);
         try (ConfigurableApplicationContext context = app.run()) {
             assertThat(context.getBean(ApplicationAvailability.class).getReadinessState())
@@ -178,7 +182,7 @@ class RehearsalSettingsIT {
             assertThat(context.getEnvironment().getProperty("bms.storage.r2.endpoint"))
                     .isEqualTo("http://rehearsal-storage.invalid");
         } finally {
-            System.clearProperty(LoggingSystem.SYSTEM_PROPERTY);
+            System.setProperties(before);
         }
     }
 
