@@ -364,6 +364,15 @@ quarantined file no batch names once storage wrote it more than `BMS_IMPORTS_ORP
 encrypted work files of the same age. Audited per removal (`core.import_batch.quarantine_deleted`, actor `system`); logs carry
 counts only. A run simply left open is not removed here: that is the retention of #139.
 
+`core.imports.retention` (issue #139, daily at 04:40 Kampala time, per active business, on the business clock; spec section
+6.4): purges a signed off import run 30 days after its sign-off, and a run never signed off (any state but `committing`) 90
+days after its last activity (the newest of the run's own change, a file added or read, and a resolution), once a warning a
+week old stands since that activity. The warning goes a week before the deadline to the operators' Telegram chat through the
+outbox (`imports.purge_warning`, the run id and the business's slug only) with an audit row (`core.import_run.purge_warned`,
+actor `system`); activity after it starts the clock again. The purge is the operator's (chapter 13 section 13.14.1 13/16):
+files first, then the run, its certificate of deletion and `core.import_run.purged` in one transaction. A run that fails is
+logged by id and class only and retried the next night; `bms.imports.retention-enabled=false` removes the job.
+
 Platform jobs (no tenant bound): `core.notifications.outbox-sender` every 30 seconds (at most 50
 rows a run), `core.notifications.outbox-purge` nightly at 03:15 (sent rows after 30 days) and
 `core.onboarding.application-housekeeping` nightly at 02:45 (expiry after 14 days unconfirmed,

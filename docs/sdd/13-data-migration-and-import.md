@@ -783,7 +783,7 @@ retail command. ADR-027 makes the framework the one pipeline for every tenant's 
 - **Reconciliation and deletion.** The reconciliation of 13.11 gains stock quantity and value,
   receivables, arrears buckets and a balanced ledger check, and is signed in the app. Sign-off starts
   the deletion of the quarantined files, the per-run key, the staging personal values and the
-  pre-import dump within 30 days, with a certificate of deletion.
+  pre-import dump within 30 days, with a certificate of deletion (built in #139, section 13.14.1 13/16).
 - **Rehearsal.** Each run is rehearsed against last night's production backup restored into a
   throwaway database before cutover day.
 
@@ -1602,3 +1602,50 @@ section 4.1; coordinated with #110, which builds no second framework).**
   containers in the background so a stop removes them at once.
 - **Not built here:** the upload form's fabricated confirmation (the operator screens, #141, pass it to `open`), and the
   production refusal of files carrying the fabricated fixture marker (spec section 5.4).
+
+**13/16, retention, purge and the certificate of deletion (#139, migration `V147`, ADR-027 decision 8, spec section 6.4).**
+
+- **What the purge deletes.** The run's quarantined files from object storage (each batch's `object_key` cleared and
+  `quarantine_deleted_at` stamped), its wrapped data key (`import_runs.data_key_wrapped`, so any copy of a file left
+  anywhere no longer opens), the cells and typed values of its staged rows (`import_rows.raw` becomes `{}`, `normalised`
+  NULL, `source_ref` its hash), the original cell values of its issues (`import_issues.original_value` NULL), and the values
+  before and after and the row key of its resolutions (`import_issue_resolutions.before_value`, `after_value` and
+  `row_key`), which become their hash: SHA-256 over a salt made for the purge and kept nowhere, so equal values keep equal
+  hashes within the run and nobody can find a phone number again by hashing every number. The run becomes `purged` with
+  `purged_at`; a run is never purged twice.
+- **What it keeps.** The run, its batches with the file names, sizes and SHA-256, its staged rows and issues as records
+  without values (so every count stays), its resolutions with hashes, the dry run and commit reports, the signed
+  reconciliation and sign-off, the rehearsals, `import_refs` (the references of the records the import created, which a
+  later run of the business matches on: a mapping's reference column is a business code, never a personal value), and the
+  audit trail. The records the import created are the business's own and are not touched.
+- **The way past the guards** of a committed batch (Lead ruling on #867): the purge is one definer function,
+  `import_purge_run(run)`, called in the business's transaction. `bms_import_purging` lets an UPDATE of a staged row, an
+  issue or a resolution through `import_rows_validation_kept`, `import_issues_batch_kept` and `reject_mutation` only as the
+  owner role (inside the definer function), with the transaction-local `bms.purging_import_run` naming the row's own run,
+  the row of the bound business, that run purged in this very transaction (`purged_at = now()`), and only the personal
+  columns changed, to exactly what the purge writes. No delete, no other run, no other table, nothing in a later
+  transaction. The removal and purge of a closed business keep their own way (`bms_erasing`), unchanged.
+- **Who and when.** The operator at stage 9 with the host command `purge-import --tenant <id> --run <id> --operator <email>
+  --witness <email> [--dump-file <name> --dump-sha256 <hex>]` (`ImportPurges.purge`): a `signed_off` run only
+  (`run_not_signed_off`), the operator and a different active platform operator as witness (`witness_is_operator`,
+  `platform_operator_unknown`), and the pre-import dump they deleted on the host by its file name and SHA-256 as recorded on
+  the run (`pre_import_dump_confirmation_required`, `pre_import_dump_differs`, `no_pre_import_dump`). And the daily job
+  `core.imports.retention` (chapter 9 section 9.9): 30 days after the sign-off, and 90 days after the last activity of a run
+  never signed off once a warning a week old stands, never a `committing` run. Storage that refuses a delete is 503
+  `storage_unavailable` with nothing purged.
+- **The certificate of deletion** (`import_deletion_certificates`, append-only, chapter 6 section 6.5) is stored with the
+  purge in its transaction: the business, the run, when, why, the operator and the witness (none for the schedule), each file
+  with its name, size, SHA-256 and deletion time and its staged row count, the counts of rows cleared, issue values deleted
+  and resolutions hashed, the pre-import dump's name and hash and whether the operator confirmed its deletion, and what is
+  retained, as JSON and as the plain text the command prints, with the text's SHA-256. The scheduled purge cannot reach the
+  host, so its certificate says the dump's deletion is not confirmed; the operator's later `purge-import` with the dump
+  issues the next version, signed by them and the witness, and changes nothing else. The operator sends the text to the
+  customer (runbook section 6.2); a download from the screens comes with #141.
+- **Audit and logs.** `core.import_run.purged` (counts, the reason, whether the dump was confirmed and the certificate's
+  hash; actor `platform` with the operator, or `system`), `core.import_run.deletion_certificate_reissued` and
+  `core.import_run.purge_warned`; logs carry run ids, counts and classes of failure only.
+- **Tests.** `ImportPurgeIT` scans every text, JSON and text array column of every table that refers to the run (found from
+  the foreign keys, so a table added later is scanned too) and the object store, before and after; `ImportReconciliationIT`
+  does the same after the real commit, reconciliation and sign-off; `ImportRetentionIT` fixes the business clock for both
+  deadlines and the warning; `ImportPurgeIT` also proves the guards let nothing else through and that another run and
+  another business are untouched.

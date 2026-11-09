@@ -184,13 +184,40 @@ Record every decision, its time and who made it in the cutover record.
 ### 6.2 Source deletion (stage 9), within 30 days of sign-off
 
 - [ ] Plaintext export deleted from the host: `rm -r /opt/bms/import/<slug>`.
-- [ ] Pre-import dump deleted: `rm /opt/bms/backups/pre-import-<slug>.*`.
-- [ ] Quarantined files, per-run key and staging personal values purged (framework: run state
-      `purged`).
+- [ ] Note the pre-import dump's file name and SHA-256 recorded on the run (cutover record header),
+      then delete it: `rm /opt/bms/backups/pre-import-<slug>.*`.
+- [ ] Quarantined files, per-run key and staging personal values purged, with a second platform
+      operator as witness (issue #139; SDD chapter 13 section 13.14.1 13/16). On the host, from
+      `/opt/bms`, in a short-lived API container as `import-retail` runs (its runbook, section 3);
+      it starts no web server and no scheduler:
+
+      ```bash
+      cd /opt/bms
+      docker compose --project-name bms -f compose.yml run --rm --no-deps \
+        api purge-import --tenant <business id> --run <run id> \
+        --operator <your sign-in email> --witness <the witness's sign-in email> \
+        --dump-file <dump file name as recorded> --dump-sha256 <its SHA-256> \
+        | tee ~/certificate-of-deletion-<slug>.txt
+      ```
+
+      The certificate holds no value of a row; keep it with the cutover record, not on the host,
+      once sent.
+
+      Only a `signed_off` run is purged this way; a run without a dump takes no `--dump-*`. Exit 0
+      prints the certificate of deletion and its `sha256`; exit 3 names the refusal
+      (`run_not_signed_off`, `pre_import_dump_differs`, `witness_is_operator`,
+      `platform_operator_unknown`, `storage_unavailable`) and nothing was purged. Running it again
+      prints the same certificate.
 - [ ] Any copy on the operator's own device deleted, and the channel's copy removed.
-- [ ] Certificate of deletion issued (spec section 6.4): files with sizes and SHA-256, staging row
-      counts, the dump's name and hash, time, operator and witness, what is retained. Sent to the
-      customer.
+- [ ] Certificate of deletion (spec section 6.4): the printed text, with files, sizes and SHA-256,
+      staging row counts, the dump's name and hash, time, operator and witness, what is retained.
+      Stored on the run; saved with the cutover record and sent to the customer.
+- [ ] If you do not purge within 30 days of the sign-off, the daily `core.imports.retention` does
+      (a warning reaches the operators' Telegram chat a week before). Its certificate says the dump
+      was not confirmed: delete the dump, then run `purge-import` as above with the dump, which
+      issues the certificate's next version with your confirmation and the witness. A run never
+      signed off is purged 90 days after its last activity, after the same warning; working on it
+      again starts that clock again.
 
 ### 6.3 Hypercare (stage 10), two weeks
 

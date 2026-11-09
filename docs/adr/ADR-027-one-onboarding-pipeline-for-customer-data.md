@@ -83,6 +83,17 @@ use it); the batch transaction timeout against real volumes (the big file test s
 mappings drifting from the template version a run started with; operators bypassing the app with
 host-side files after self service exists.
 
+## Note (9 November 2026, issue #139): decision 8 as built
+
+The deletion is a purge of the run, not of its records: the staged rows and issues stay without their values, so every
+count of the run and its certificate can still be checked, and the review's resolutions keep a salted hash of each value
+(the salt kept nowhere) in place of the value. The append-only guards of a committed batch, which nothing else may pass,
+let the purge through only inside one definer function, for the run it purges and in its own transaction (Lead ruling on
+#867); the removal of a closed business keeps its own way. The dump lives on the host, out of the application's reach: the
+operator confirms its deletion by name and hash at stage 9, with a witness, and a scheduled purge's certificate says it was
+not confirmed until they do, which issues the certificate's next version. The certificate is stored append-only on the run
+as JSON and as the plain text the operator sends, with the text's SHA-256, as the reconciliation is (note of 7 November).
+
 ## Note (8 November 2026, issue #138): decision 9 as built
 
 The rehearsal is `deploy/restore-drill.sh --rehearse-import <run id>`, opt in by its flag; with no argument the script is

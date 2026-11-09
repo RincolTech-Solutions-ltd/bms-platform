@@ -522,6 +522,16 @@ customer's date of birth when the module does not use it) are ignored by default
   by whom, witnessed by whom, and what is retained. It is stored on the run and sent to the
   customer.
 
+Built in #139 (migration V147, SDD chapter 13 section 13.14.1 13/16): the operator's stage 9 is the host command
+`purge-import` with a second platform operator as witness and the dump's file name and SHA-256 as recorded on the run; the
+daily job `core.imports.retention` purges 30 days after the sign-off, and 90 days after the last activity of a run never
+signed off once a warning to the operators' chat is a week old (activity after the warning starts the clock again; a run
+`committing` is never purged). The staged rows and issues stay as records without values, so every count stays; the
+resolutions' values and row keys become a hash salted with a value kept nowhere. The certificate is stored append-only
+(`import_deletion_certificates`) with its text and that text's SHA-256; a scheduled purge cannot reach the host, so its
+certificate says the dump is not confirmed until the operator confirms it with `purge-import`, which issues the next
+version. The operator sends the printed text to the customer; a download from the screens comes with #141.
+
 ### 6.5 Audit, logs and environments
 
 - Audit rows (`imports.*`) for upload, mapping version, every resolution, dry run, commit request,
