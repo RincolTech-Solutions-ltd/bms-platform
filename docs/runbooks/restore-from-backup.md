@@ -145,8 +145,11 @@ cron: those run the script with no argument, which is the weekly drill above, un
    migrations and the commit. Its deadline, logged at the start, is six hours after the start, or the next Sunday 03:20
    host time (ten minutes before the drill) if that comes first, so it never keeps a deploy waiting more than six
    hours. A watchdog enforces it on every step, a hung one included: at the deadline it removes the rehearsal's
-   containers, ends the steps still running and the rehearsal fails (exit 1) with nothing stored and its locks
-   released. A rehearsal that needs longer is a sign to split the run's files. On staging it starts nothing
+   containers, ends the steps still running and every session the rehearsal opened on the live database (each is
+   named `bms-rehearsal-<pid>` and has its own statement and idle-in-transaction timeouts on the server), and the
+   rehearsal fails (exit 1) with nothing stored and its locks released. If the deadline comes as the row is being
+   stored, the script asks the live database and says which it is. No commit starts with less than 30 minutes left.
+   A rehearsal that needs longer is a sign to split the run's files. On staging it starts nothing
    unless `bms.slice` has 704 MB free below `MemoryHigh` (in use counted as `memory.current` less inactive page cache),
    and 448 MB again before the API container.
 3. Fetches and decrypts the newest backup, as the drill does, into a mode-0700 temp dir `backups/rehearsal.XXXXXX`; the
