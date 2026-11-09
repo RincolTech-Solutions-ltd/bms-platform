@@ -1199,9 +1199,11 @@ Detailed requirements are NFR-DP-01 to NFR-DP-08 in chapter 4. Design consequenc
   sign-off, or 90 days after the last activity of a run never signed off; the operators are warned a week before, and if
   that warning never went the purge still happens on the deadline and tells the operators and the Owner. The purge
   deletes the encrypted files and the run's data key, clears the cells and typed values of the staged rows and the issues'
-  original values, and replaces the values, row keys and notes of the review's resolutions by a hash salted with a value kept
-  nowhere (so a phone number cannot be found again by hashing every number); counts, file hashes, reports and the signed
-  reconciliation stay. The append-only guards of a committed import let that change through only inside the definer
+  original and suggested values, and replaces every other free-text column of the run's tables (issue messages, batch
+  sheet names and failure reasons, the resolutions' values, row keys and notes, the trading override's reason, the
+  policy confirmations, the signer's name) by a hash salted with a value kept nowhere (so a phone number cannot be found
+  again by hashing every number); only codes, counts, hashes, statuses, ids and timestamps stay in clear, with the file
+  names and the reports the certificate needs (the list is in the V147 header and ADR-027). The append-only guards of a committed import let that change through only inside the definer
   function `import_purge_run`, for the run it purges, in its own transaction, and nothing else; a business's removal keeps
   its own path (`bms_erasing`). Each purge stores a certificate of deletion with the files, sizes, SHA-256, row counts, the
   pre-import dump as the operator confirmed it, the operator and the witness; it names no customer's person. Tests scan

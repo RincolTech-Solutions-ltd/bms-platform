@@ -4128,7 +4128,8 @@ class MigrationOrderIT {
     private static final String PURGE_BLOCK_ISSUES = " IF TG_OP = 'UPDATE' THEN" + PURGE_BLOCK + " END IF;";
 
     private static final String PURGE_BLOCK_REJECT =
-            " IF TG_OP = 'UPDATE' AND TG_TABLE_NAME = 'import_issue_resolutions' THEN" + PURGE_BLOCK + " END IF;";
+            " IF TG_OP = 'UPDATE' AND TG_TABLE_NAME IN ('import_issue_resolutions', 'import_signoffs') THEN"
+                    + PURGE_BLOCK + " END IF;";
 
     /** The migrator's settings, optionally stopped at a target version. */
     private static Flyway flyway(PostgreSQLContainer postgres, String target) {

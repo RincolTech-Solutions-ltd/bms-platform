@@ -924,7 +924,8 @@ class ImportReconciliationIT extends IntegrationTest {
                 SELECT concat_ws(' / ',
                        (SELECT string_agg(CAST(sha256 AS text) || CAST(report AS text), '|' ORDER BY version)
                           FROM import_reconciliations WHERE run_id = ?),
-                       (SELECT CAST(reconciliation_id AS text) || CAST(report_sha256 AS text) || signed_name
+                       (SELECT CAST(reconciliation_id AS text) || CAST(report_sha256 AS text)
+                               || array_to_string(sections, ',') || CAST(signed_on AS text)
                           FROM import_signoffs WHERE run_id = ?),
                        (SELECT string_agg(source_ref || CAST(target_id AS text), '|' ORDER BY source_ref, target_id)
                           FROM import_refs WHERE run_id = ?),
@@ -936,7 +937,7 @@ class ImportReconciliationIT extends IntegrationTest {
                 .params(run, run, run, run)
                 .query(String.class)
                 .single();
-        assertThat(before).contains(r.sha256(), "Fabricated Signer");
+        assertThat(before).contains(r.sha256());
         String operatorEmail = Api.email("purge-operator");
         String witnessEmail = Api.email("purge-witness");
         Api.platformUser(operatorEmail);
@@ -964,6 +965,13 @@ class ImportReconciliationIT extends IntegrationTest {
                         .single())
                 .as("the signed reconciliation, the sign-off, the references and the reports are kept")
                 .isEqualTo(before);
+        // The name the administrator typed is typed text like any other (Lead on #886): it becomes its hash.
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT signed_name FROM import_signoffs WHERE run_id = ?")
+                        .param(run)
+                        .query(String.class)
+                        .single())
+                .matches("sha256:[0-9a-f]{64}");
         assertThat(certificate.dumpConfirmed()).isTrue();
         assertThat(certificate.document()).contains("fab-buyers.csv", "pre-import-fabricated.dump, SHA-256 " + SHA);
     }

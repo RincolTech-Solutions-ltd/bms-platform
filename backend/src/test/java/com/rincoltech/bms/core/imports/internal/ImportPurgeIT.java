@@ -152,15 +152,50 @@ class ImportPurgeIT extends IntegrationTest {
                 .sql("UPDATE import_runs SET policy = CAST(? AS jsonb) WHERE id = ?")
                 .params(policy, run)
                 .update();
+        // Every other text column of the run's tables holds a personal value too (Lead on #886: one rule), written as
+        // the owner where the application would never put one: an issue's message and suggestion, a batch's tab name
+        // and failure reason.
+        String personal = "Fabricated Buyer Gamma " + TYPED_PHONE;
+        TestDatabase.owner().sql("""
+                        UPDATE import_issues SET message = message || ' ' || ?,
+                               suggested_value = jsonb_build_object('value', CAST(? AS text))
+                         WHERE id = (SELECT i.id FROM import_issues i JOIN import_batches b ON b.id = i.batch_id
+                                      WHERE b.run_id = ? ORDER BY i.id LIMIT 1)
+                        """).params(personal, personal, run).update();
+        TestDatabase.owner()
+                .sql("UPDATE import_batches SET sheet_name = ?, failure_reason = ? WHERE run_id = ?")
+                .params(personal, personal, run)
+                .update();
         TestDatabase.owner()
                 .sql("UPDATE import_batches SET status = 'committed', committed_at = now() WHERE run_id = ?")
                 .param(run)
                 .update();
         TestDatabase.owner().sql("""
-                        UPDATE import_runs SET status = 'signed_off', committed_at = now(), signed_off_at = now(),
+                        UPDATE import_runs SET status = 'committed', committed_at = now(),
                                pre_import_dump_file = ?, pre_import_dump_at = now(), pre_import_dump_sha256 = ?
                          WHERE id = ?
                         """).params(DUMP, DUMP_SHA, run).update();
+        // A reconciliation and its sign-off, the name typed a personal value.
+        UUID reconciliation = UUID.randomUUID();
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO import_reconciliations (id, tenant_id, run_id, version, as_at, report, sha256, signable)
+                        VALUES (?, ?, ?, 1, DATE '2026-10-01', '{"sections": []}', ?, true)
+                        """)
+                .params(reconciliation, f.tenantId(), run, DUMP_SHA)
+                .update();
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO import_signoffs (id, tenant_id, run_id, reconciliation_id, report_sha256, sections,
+                                                     signed_name, signed_on, signed_by)
+                        VALUES (?, ?, ?, ?, ?, ARRAY['counts'], ?, DATE '2026-10-02', ?)
+                        """)
+                .params(UUID.randomUUID(), f.tenantId(), run, reconciliation, DUMP_SHA, personal, operator)
+                .update();
+        TestDatabase.owner()
+                .sql("UPDATE import_runs SET status = 'signed_off', signed_off_at = now() WHERE id = ?")
+                .param(run)
+                .update();
         return run;
     }
 
@@ -357,7 +392,12 @@ class ImportPurgeIT extends IntegrationTest {
                         "import_issue_resolutions.after_value",
                         "import_issue_resolutions.note",
                         "import_runs.allow_trading_reason",
-                        "import_runs.policy")
+                        "import_runs.policy",
+                        "import_issues.message",
+                        "import_issues.suggested_value",
+                        "import_batches.sheet_name",
+                        "import_batches.failure_reason",
+                        "import_signoffs.signed_name")
                 .as("and never the audit rows, which keep only the typed text's hash")
                 .doesNotContain("audit_log.data");
         assertThat(objectsOf(t, run)).hasSize(GoldenRun.FILES.size());
@@ -380,8 +420,9 @@ class ImportPurgeIT extends IntegrationTest {
         String cleared = "SELECT count(*)" + ROWS_OF_RUN + " AND w.raw = '{}'::jsonb AND w.normalised IS NULL"
                 + " AND (w.source_ref IS NULL OR w.source_ref ~ '^sha256:[0-9a-f]{64}$')";
         assertThat(count(cleared, run)).isEqualTo(rows);
-        assertThat(count("SELECT count(*)" + ISSUES_OF_RUN + " AND i.original_value IS NULL", run))
-                .isEqualTo(issues);
+        String issuesCleared = "SELECT count(*)" + ISSUES_OF_RUN + " AND i.original_value IS NULL"
+                + " AND i.suggested_value IS NULL AND i.message ~ '^sha256:[0-9a-f]{64}$'";
+        assertThat(count(issuesCleared, run)).isEqualTo(issues);
         String hashed = "SELECT count(*) FROM import_issue_resolutions WHERE run_id = ?"
                 + " AND row_key ~ '^sha256:[0-9a-f]{64}$'"
                 + " AND (after_value IS NULL OR after_value ->> 'sha256' ~ '^[0-9a-f]{64}$')"
@@ -645,7 +686,10 @@ class ImportPurgeIT extends IntegrationTest {
         String appendOnly = "append-only";
         String purgedOnly = "import_runs_purged_by_purge";
         String hashRun = hashResolutions(run);
-        String issuesOfRun = "UPDATE import_issues SET original_value = NULL" + inBatches(run);
+        String aHash = "'sha256:" + "a".repeat(64) + "'";
+        String issuesOfRun = "UPDATE import_issues SET original_value = NULL, suggested_value = NULL, message = "
+                + aHash + inBatches(run);
+        String signOffOfRun = "UPDATE import_signoffs SET signed_name = " + aHash + " WHERE run_id = " + quote(run);
         String rowsOfRun = "UPDATE import_rows SET raw = '{}', normalised = NULL, source_ref = NULL" + inBatches(run);
 
         // Not purged in this transaction: refused by each guard.
@@ -661,12 +705,17 @@ class ImportPurgeIT extends IntegrationTest {
         refused(run, run, "UPDATE import_issue_resolutions SET note = 'x'" + resolutionsOfRun, appendOnly);
         refused(run, run, "UPDATE import_issue_resolutions SET row_key = 'x'" + resolutionsOfRun, appendOnly);
         refused(run, run, "DELETE FROM import_issues" + inBatches(run), issuesKept);
+        refused(run, run, "UPDATE import_issues SET message = 'x'" + inBatches(run), issuesKept);
+        refused(run, run, "UPDATE import_signoffs SET signed_name = 'x' WHERE run_id = " + quote(run), appendOnly);
+        refused(run, run, "UPDATE import_signoffs SET sections = ARRAY['x'] WHERE run_id = " + quote(run), appendOnly);
+        refused(null, run, signOffOfRun, appendOnly);
         refused(run, run, "DELETE FROM import_issue_resolutions" + resolutionsOfRun, appendOnly);
         // Any other append-only table stays closed under the setting (review M5).
         refused(run, run, "UPDATE audit_log SET action = 'x' WHERE tenant_id = " + quote(t.tenantId()), appendOnly);
         // Its own run's personal columns, to what the purge writes, in the transaction that purged it: through.
         asDefiner(run, run, hashRun);
         asDefiner(run, run, issuesOfRun);
+        asDefiner(run, run, signOffOfRun);
         asDefiner(run, run, rowsOfRun);
 
         // A session of the owner role (a migration's) cannot mark a run purged nor use the way through.

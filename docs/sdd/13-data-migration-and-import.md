@@ -1608,7 +1608,9 @@ section 4.1; coordinated with #110, which builds no second framework).**
 - **What the purge deletes.** The run's quarantined files from object storage (each batch's `object_key` cleared and
   `quarantine_deleted_at` stamped), its wrapped data key (`import_runs.data_key_wrapped`, so any copy of a file left
   anywhere no longer opens), the cells and typed values of its staged rows (`import_rows.raw` becomes `{}`, `normalised`
-  NULL, `source_ref` its hash), the original cell values of its issues (`import_issues.original_value` NULL), and the values
+  NULL, `source_ref` its hash), the original and suggested values of its issues (`import_issues.original_value` and
+  `suggested_value` NULL, `message` its hash), its batches' `sheet_name` and `failure_reason` (their hash), the signer's
+  name (`import_signoffs.signed_name`, its hash), and the values
   before and after, the row key and the operator's note of its resolutions (`import_issue_resolutions.before_value`,
   `after_value`, `row_key` and `note`), which become their hash: SHA-256 over a salt made for the purge and kept nowhere, so equal values keep equal
   hashes within the run and nobody can find a phone number again by hashing every number. The run becomes `purged` with
@@ -1620,13 +1622,14 @@ section 4.1; coordinated with #110, which builds no second framework).**
   content hash is the first 32 hex digits of the SHA-256 of the whole mapped row's canonical JSON (`ImportRefs.contentHash`),
   which can confirm a guess of an entire row but reveals no value, and
   is what tells a later run that a row changed since its import), and the audit trail. The records the import created are the business's own and are not touched.
-  Every piece of text a person typed on the run's tables is hashed too: a resolution's note, the trading override's
+  One rule, no case by case (Lead on #886): every free-text column on the run's tables is hashed or cleared, and only
+  codes, counts, hashes, statuses, ids and timestamps stay in clear. Besides the above, that is the trading override's
   reason and each policy decision's confirmation reference (`import_runs.allow_trading_reason` and the `confirmation` of
   each entry of `import_runs.policy`); their audit rows record only the text's SHA-256 (`core.import_run.trading_override_set`,
-  `core.import_run.policy_recorded`). A run has no halt or cancel reason (V127). The text kept is written by the
-  application: an issue's message (built from the catalogue without a value, the catalogue test of #130) and a batch's
-  failure reason (a limit, a line or a column number). The name the tenant administrator typed on the sign-off stays with
-  the signed reconciliation it signs and goes with the removal of the business (V144).
+  `core.import_run.policy_recorded`). A run has no notes and no halt or cancel reason (V127). The columns kept readable,
+  each with its one reason, are listed in the V147 header and the ADR-027 note of 9 November: the file names, sizes and
+  hashes and the dump's name and hash (the certificate names them), the sheets' column names, `import_refs`, and the
+  reports and certificate made by the application.
 - **The way past the guards** of a committed batch (Lead ruling on #867): the purge is one definer function,
   `import_purge_run(run)`, called in the business's transaction, which refuses while a file of the run is still in
   storage. `bms_import_purging` lets an UPDATE of a staged row, an issue or a resolution through

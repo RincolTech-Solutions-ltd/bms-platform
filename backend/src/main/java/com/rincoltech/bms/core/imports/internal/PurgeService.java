@@ -634,6 +634,10 @@ class PurgeService implements ImportPurges {
             SIGNED_OFF_30_DAYS, "by the scheduled purge, 30 days after the customer's sign-off",
             INACTIVE_90_DAYS, "by the scheduled purge, 90 days after the import's last activity");
 
+    private static final String OTHER_TEXT = "- Every other text typed on the import, each replaced by its hash: its"
+            + " tabs' names and failure reasons, the trading override's reason, the policy decisions' confirmations"
+            + " and the name typed on the sign-off.\n";
+
     private static final String UNCONFIRMED_DUMP = "; its deletion on the host NOT confirmed: the scheduled purge does"
             + " not reach the host. The operator deletes it and confirms it with purge-import, which issues the next"
             + " version.\n";
@@ -689,9 +693,10 @@ class PurgeService implements ImportPurges {
                 .append(" staged rows (of ")
                 .append(body.get("staged_rows"))
                 .append(" staged); each row's reference is replaced by its hash.\n");
-        out.append("- The original cell values of ")
+        out.append("- The original cell values, suggestions and messages of ")
                 .append(body.get("issue_values_deleted"))
                 .append(" issues.\n");
+        out.append(OTHER_TEXT);
         out.append("- The values before and after, the row key and the note of ")
                 .append(body.get("resolutions_hashed"))
                 .append(" resolutions, replaced by their hash (SHA-256 with a salt kept nowhere).\n");

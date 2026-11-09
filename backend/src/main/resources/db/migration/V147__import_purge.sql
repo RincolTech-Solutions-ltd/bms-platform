@@ -16,14 +16,13 @@
 --
 -- The purge itself is `import_purge_run(run)`, a definer function called in the business's transaction (app.tenant_id
 -- bound, every statement names the business): the run becomes `purged` with `purged_at = now()` and its wrapped data key
--- cleared; its staged rows lose their cells and typed values (`raw` becomes {}, `normalised` NULL) and their reference
--- becomes its hash; its issues lose their original cell values; its resolutions' values before and after, their row key
--- and the operator's note become their hash. The hash is SHA-256 over a salt made for the purge and kept nowhere, so equal values keep equal
--- hashes within the run and nobody can find a phone number again by hashing every number. The quarantined files are removed
+-- cleared, and every free-text column of the run's tables is hashed or cleared (the list below, under Personal data).
+-- The hash is SHA-256 over a salt made for the purge and kept nowhere, so equal values keep equal hashes within the run and
+-- nobody can find a phone number again by hashing every number. The quarantined files are removed
 -- from object storage by the application before it calls the function.
 --
--- The narrow way past the guards (Lead ruling on #867). The staged rows, the issues and the resolutions of a committed
--- batch never change (import_rows_validation_kept, import_issues_batch_kept, reject_mutation). `bms_import_purging`
+-- The narrow way past the guards (Lead ruling on #867). The staged rows, the issues, the resolutions and the sign-off of a
+-- committed batch never change (import_rows_validation_kept, import_issues_batch_kept, reject_mutation). `bms_import_purging`
 -- lets one change through, and only when all of these hold: it runs as bms_owner inside a definer function called by
 -- another role's session (current_user bms_owner, session_user not: a session of the owner itself, which a migration
 -- uses, never passes this way); the transaction-local setting `bms.purging_import_run`, which import_purge_run sets for its own
@@ -38,15 +37,30 @@
 -- `imports_retention_tenants()` lists the businesses the daily job visits: every one with a run to purge, suspended ones
 -- included, except one whose removal has begun.
 --
--- Personal data: the certificate's text names the platform operator and the witness of a stage 9 purge (the team, never a
--- customer's person), the files by the names the customer gave them, and counts and hashes; never a value of a row. Every
--- piece of free text a person typed on the run's tables is hashed by the purge: a resolution's note, the trading
--- override's reason and each policy decision's confirmation reference (and their audit rows record only their SHA-256,
--- ImportRunService). The run has no halt or cancel reason (V127: `halt_requested` is a boolean, `cancelled_at` a time).
--- The text kept is written by the application, never typed: an issue's message (built from the catalogue without a
--- value, the catalogue test of #130) and a batch's failure reason (a limit, a line or a column number, V129). The name a
--- tenant administrator typed on the sign-off stays with the signed reconciliation it signs and goes with the removal of
--- the business (V144).
+-- Personal data, one rule (Lead on #886): the purge hashes or clears every free-text column of the run's tables, and
+-- keeps in clear only codes, counts, hashes, statuses, ids and timestamps. Hashed or cleared:
+--   import_rows        raw ({}), normalised (NULL), source_ref (hash)
+--   import_issues      original_value (NULL), suggested_value (NULL), message (hash)
+--   import_issue_resolutions  before_value, after_value (hash or NULL), row_key, note (hash)
+--   import_batches     sheet_name, failure_reason (hash); the quarantined file and its object_key (deleted)
+--   import_runs        allow_trading_reason (hash), each policy decision's confirmation (hash), data_key_wrapped (NULL)
+--   import_signoffs    signed_name (hash)
+-- The run has no notes, and no halt or cancel reason (V127: `halt_requested` is a boolean, `cancelled_at` a time). The
+-- audit rows of the run hold no typed text: the override's reason and a policy's confirmation are audited by their SHA-256
+-- only (ImportRunService), a resolution's audit holds no note, the sign-off's no name.
+-- Kept readable, each for one reason:
+--   import_batches.source_filename, size_bytes, source_sha256 and import_runs.pre_import_dump_file, pre_import_dump_sha256
+--     (and the dump's audit row): the certificate names the files and the dump it deletes (spec section 6.4).
+--   import_batches.source_headers: the sheet's column names, which the business's mapping document (not of the run) holds
+--     too and a later run is mapped by; a committed batch's mapping never changes (V139).
+--   import_refs.source_key and source_ref: the file, tab and reference code a later run of the business matches its rows
+--     on (CHANGED_SINCE_IMPORT); the reference is a business code, the content hash covers a whole row.
+--   import_reconciliations.report: the signed document, made by the application with codes, counts and amounts only, which
+--     the sign-off's SHA-256 names and nothing may change (V144).
+--   import_rehearsals, import_runs.dry_run_report and dry_run_writer, import_batches.report: made by the application and
+--     the restore script, codes, counts and amounts only.
+--   import_deletion_certificates.document: the certificate itself, which names the platform operator and the witness (the
+--     team, never a customer's person) and the files.
 --
 -- Locks, said plainly. The new column takes ACCESS EXCLUSIVE on `import_runs` for milliseconds (no default, no rewrite);
 -- the new table takes SHARE ROW EXCLUSIVE on `tenants`, `import_runs` and `platform_users` (its foreign keys) until the
@@ -141,8 +155,11 @@ BEGIN
         SELECT b.run_id INTO v_row_run FROM import_batches b
          WHERE b.id = (p_old ->> 'batch_id')::uuid AND b.tenant_id = (p_old ->> 'tenant_id')::uuid;
     ELSIF p_table = 'import_issues' THEN
-        IF (p_new - 'original_value') <> (p_old - 'original_value')
-           OR coalesce(jsonb_typeof(p_new -> 'original_value'), '') <> 'null' THEN
+        IF (p_new - ARRAY['original_value', 'suggested_value', 'message'])
+               <> (p_old - ARRAY['original_value', 'suggested_value', 'message'])
+           OR coalesce(jsonb_typeof(p_new -> 'original_value'), '') <> 'null'
+           OR coalesce(jsonb_typeof(p_new -> 'suggested_value'), '') <> 'null'
+           OR NOT coalesce(p_new ->> 'message', '') ~ '^sha256:[0-9a-f]{64}$' THEN
             RETURN false;
         END IF;
         SELECT b.run_id INTO v_row_run FROM import_batches b
@@ -154,6 +171,12 @@ BEGIN
            OR NOT bms_import_purged_value(p_new -> 'after_value')
            OR NOT coalesce(p_new ->> 'row_key', '') ~ '^sha256:[0-9a-f]{64}$'
            OR NOT coalesce(p_new ->> 'note', 'sha256:' || repeat('0', 64)) ~ '^sha256:[0-9a-f]{64}$' THEN
+            RETURN false;
+        END IF;
+        v_row_run := (p_old ->> 'run_id')::uuid;
+    ELSIF p_table = 'import_signoffs' THEN
+        IF (p_new - 'signed_name') <> (p_old - 'signed_name')
+           OR NOT coalesce(p_new ->> 'signed_name', '') ~ '^sha256:[0-9a-f]{64}$' THEN
             RETURN false;
         END IF;
         v_row_run := (p_old ->> 'run_id')::uuid;
@@ -227,12 +250,27 @@ BEGIN
      WHERE w.tenant_id = v_tenant AND b.tenant_id = v_tenant AND b.id = w.batch_id AND b.run_id = p_run;
     GET DIAGNOSTICS v_rows = ROW_COUNT;
 
+    -- An issue keeps its code, severity, field, line and status; its original cell, its suggestion and its message go.
     UPDATE import_issues i
-       SET original_value = NULL
+       SET original_value = NULL,
+           suggested_value = NULL,
+           message = 'sha256:' || encode(sha256(v_salt || convert_to(i.message, 'UTF8')), 'hex')
       FROM import_batches b
-     WHERE i.tenant_id = v_tenant AND b.tenant_id = v_tenant AND b.id = i.batch_id AND b.run_id = p_run
-       AND i.original_value IS NOT NULL;
+     WHERE i.tenant_id = v_tenant AND b.tenant_id = v_tenant AND b.id = i.batch_id AND b.run_id = p_run;
     GET DIAGNOSTICS v_issues = ROW_COUNT;
+
+    -- A batch keeps the file's name, size and SHA-256 for the certificate; the tab's name and the failure's words go.
+    UPDATE import_batches
+       SET sheet_name = CASE WHEN sheet_name IS NULL THEN NULL
+                             ELSE 'sha256:' || encode(sha256(v_salt || convert_to(sheet_name, 'UTF8')), 'hex') END,
+           failure_reason = CASE WHEN failure_reason IS NULL THEN NULL
+                                 ELSE 'sha256:' || encode(sha256(v_salt || convert_to(failure_reason, 'UTF8')), 'hex') END
+     WHERE tenant_id = v_tenant AND run_id = p_run;
+
+    -- The name the tenant administrator typed on the sign-off (Lead on #886: every typed text of the run).
+    UPDATE import_signoffs
+       SET signed_name = 'sha256:' || encode(sha256(v_salt || convert_to(signed_name, 'UTF8')), 'hex')
+     WHERE tenant_id = v_tenant AND run_id = p_run;
 
     UPDATE import_issue_resolutions x
        SET before_value = CASE WHEN x.before_value IS NULL THEN NULL
@@ -352,15 +390,15 @@ BEGIN
 END
 $$;
 
--- Append-only tables (V1, with V102's bms_erasing): the purge's way through is for the resolutions of the run it purges, by
--- UPDATE only; every other append-only table, and every DELETE, is refused as before.
+-- Append-only tables (V1, with V102's bms_erasing): the purge's way through is for the resolutions and the sign-off of the
+-- run it purges, by UPDATE only; every other append-only table, and every DELETE, is refused as before.
 CREATE OR REPLACE FUNCTION reject_mutation() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
     IF (session_user = 'bms_owner' AND coalesce(current_setting('bms.allow_mutation', true), '') = 'on') OR bms_erasing(to_jsonb(OLD)) THEN
         RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
     END IF;
-    IF TG_OP = 'UPDATE' AND TG_TABLE_NAME = 'import_issue_resolutions' THEN
+    IF TG_OP = 'UPDATE' AND TG_TABLE_NAME IN ('import_issue_resolutions', 'import_signoffs') THEN
         IF bms_import_purging(TG_TABLE_NAME, to_jsonb(OLD), to_jsonb(NEW)) THEN
             RETURN NEW;
         END IF;

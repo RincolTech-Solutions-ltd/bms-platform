@@ -103,6 +103,30 @@ hear of it. The daily job purges a signed run on day 29, so it is never late by 
 a later run of the business matches its rows on them, and their content hash covers a whole mapped row, so it can confirm
 a guess of an entire row but reveals no value.
 
+One rule for typed text (Lead on #886): the purge hashes or clears every free-text column a person can type on the run's
+tables and keeps in clear only codes, counts, hashes, statuses, ids and timestamps. Hashed or cleared:
+
+| Table | Columns |
+|---|---|
+| `import_rows` | `raw` (emptied), `normalised` (cleared), `source_ref` (hashed) |
+| `import_issues` | `original_value`, `suggested_value` (cleared), `message` (hashed) |
+| `import_issue_resolutions` | `before_value`, `after_value`, `row_key`, `note` (hashed) |
+| `import_batches` | `sheet_name`, `failure_reason` (hashed); the quarantined file and its `object_key` (deleted) |
+| `import_runs` | `allow_trading_reason` and each policy decision's confirmation (hashed), `data_key_wrapped` (cleared) |
+| `import_signoffs` | `signed_name` (hashed) |
+
+The run has no notes and no halt or cancel reason (a boolean and a time, V127). The run's audit rows hold no typed text:
+the override's reason and a policy's confirmation are audited by their SHA-256 only. Kept readable, each for one reason:
+
+| Column | Why |
+|---|---|
+| `import_batches.source_filename`, `size_bytes`, `source_sha256`; `import_runs.pre_import_dump_file`, `pre_import_dump_sha256` | the certificate names the files and the dump it deletes |
+| `import_batches.source_headers` | the sheet's column names, which the business's mapping (not of the run) holds and a later run is mapped by |
+| `import_refs.source_key`, `source_ref` | the file, tab and reference code a later run matches its rows on |
+| `import_reconciliations.report` | the signed document, codes, counts and amounts only, that the sign-off's SHA-256 names |
+| `import_rehearsals`, the dry run and batch reports | made by the application, codes, counts and amounts only |
+| `import_deletion_certificates.document` | the certificate itself, naming the platform operator, the witness and the files |
+
 ## Note (8 November 2026, issue #138): decision 9 as built
 
 The rehearsal is `deploy/restore-drill.sh --rehearse-import <run id>`, opt in by its flag; with no argument the script is

@@ -1429,7 +1429,7 @@ expand only:
 - **`import_signoffs`** (V144, #134; RLS forced, `SELECT, INSERT`, append-only): the customer's sign-off, one per run:
   `id`, `tenant_id`, `created_at`, `run_id` (unique), `reconciliation_id` (FK `(tenant_id, reconciliation_id)`),
   `report_sha256` (as read), `sections text[]` (the sections ticked), `signed_name varchar(120)` (the name typed: the only
-  personal value of these tables), `signed_on date` (the date typed) and `signed_by` (the staff user).
+  personal value of these tables, replaced by its salted hash when the run is purged, V147), `signed_on date` (the date typed) and `signed_by` (the staff user).
 - **`import_signoff_rules()`**, a `BEFORE INSERT` trigger on both tables, for every role: a sign-off needs the run
   `committed`, the run's newest reconciliation, `signable` true and the stored SHA-256; a reconciliation needs the run
   `committed` and not signed. Both take the run `FOR UPDATE` first, so the two never pass each other and the signed
@@ -1466,8 +1466,10 @@ expand only:
   to the transaction, every statement naming the business: the run `purged` with `purged_at = now()` and its
   `data_key_wrapped` cleared, its `allow_trading_reason` and each policy decision's `confirmation` hashed; its
   `import_rows.raw` `{}`, `normalised` NULL and `source_ref` hashed; its
-  `import_issues.original_value` NULL; its resolutions' `before_value`, `after_value`, `row_key` and `note` hashed (SHA-256 with a
-  salt kept nowhere). Refuses a run already purged or committing, and one whose batches still name a stored file (the
+  `import_issues.original_value` and `suggested_value` NULL and `message` hashed; its batches' `sheet_name` and
+  `failure_reason` hashed; its resolutions' `before_value`, `after_value`, `row_key` and `note` hashed; its sign-off's
+  `signed_name` hashed (SHA-256 with a salt kept nowhere; one rule, every free-text column, listed in the V147 header and
+  ADR-027). Refuses a run already purged or committing, and one whose batches still name a stored file (the
   application deletes them first). Returns the counts.
 - **`import_runs_purged_by_purge`** (V147, #139): a `BEFORE INSERT OR UPDATE OF status` trigger on `import_runs`; a run
   becomes `purged` only inside a definer function called by another role's session with `bms.purging_import_run` naming it
