@@ -143,6 +143,15 @@ class ImportPurgeIT extends IntegrationTest {
      */
     UUID signedRun(TestDatabase.Fixture f) throws IOException {
         UUID run = validatedRun(f);
+        // The run's own typed text carries personal values on purpose (review of #886, round 3): the trading override's
+        // reason, set through the service so its audit row is written too, and a policy decision's confirmation.
+        as(f, () -> runs.allowTradingTenant(run, operatorId, "Fabricated Buyer Gamma " + TYPED_PHONE + " still buys"));
+        String policy =
+                "{\"receivable\": {\"option\": \"defer\", \"confirmation\": \"Confirmed by " + TYPED_PHONE + "\"}}";
+        TestDatabase.owner()
+                .sql("UPDATE import_runs SET policy = CAST(? AS jsonb) WHERE id = ?")
+                .params(policy, run)
+                .update();
         TestDatabase.owner()
                 .sql("UPDATE import_batches SET status = 'committed', committed_at = now() WHERE run_id = ?")
                 .param(run)
@@ -346,7 +355,11 @@ class ImportPurgeIT extends IntegrationTest {
                         "import_rows.normalised",
                         "import_issues.original_value",
                         "import_issue_resolutions.after_value",
-                        "import_issue_resolutions.note");
+                        "import_issue_resolutions.note",
+                        "import_runs.allow_trading_reason",
+                        "import_runs.policy")
+                .as("and never the audit rows, which keep only the typed text's hash")
+                .doesNotContain("audit_log.data");
         assertThat(objectsOf(t, run)).hasSize(GoldenRun.FILES.size());
         long rows = count("SELECT count(*)" + ROWS_OF_RUN, run);
         long issues = count("SELECT count(*)" + ISSUES_OF_RUN, run);
@@ -374,6 +387,13 @@ class ImportPurgeIT extends IntegrationTest {
                 + " AND (after_value IS NULL OR after_value ->> 'sha256' ~ '^[0-9a-f]{64}$')"
                 + " AND (note IS NULL OR note ~ '^sha256:[0-9a-f]{64}$')";
         assertThat(count(hashed, run)).isEqualTo(resolutions);
+        assertThat(count(
+                        "SELECT count(*) FROM import_runs WHERE id = ? AND allow_trading_reason ~ '^sha256:[0-9a-f]{64}$'"
+                                + " AND policy -> 'receivable' ->> 'confirmation' ~ '^sha256:[0-9a-f]{64}$'"
+                                + " AND policy -> 'receivable' ->> 'option' = 'defer'",
+                        run))
+                .as("the run's own typed text hashed, its decisions kept")
+                .isEqualTo(1);
         // The certificate: on the run, its hash its text's, the files with sizes and hashes, the counts, the dump as
         // confirmed, the operator and the witness, and what is kept.
         String stored = """

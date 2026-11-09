@@ -20,8 +20,10 @@ import org.springframework.context.ConfigurableApplicationContext;
  * the run and prints its certificate of deletion, which holds file names, sizes, hashes and counts, never a value of a
  * row. On a run the schedule already purged, the dump given issues the certificate's next version.
  *
- * <p>Exit status: 0 purged (or already purged, the certificate printed), 2 for a usage error, 3 refused or failed (no
- * certificate; some files may be deleted already, and running the command again finishes the purge).
+ * <p>Exit status: 0 purged (or already purged, the certificate printed), 2 for a usage error, 3 refused or failed, with no
+ * certificate. A refusal of the run, the operator, the witness or the dump comes before anything is deleted; a storage
+ * failure, a run that changed meanwhile or any other failure comes after the files began to be deleted, and running the
+ * command again finishes the purge.
  */
 public final class PurgeImportCommand {
 

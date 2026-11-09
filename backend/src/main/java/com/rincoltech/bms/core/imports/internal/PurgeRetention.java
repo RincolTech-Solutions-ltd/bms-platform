@@ -165,9 +165,9 @@ class PurgeRetention {
             return false;
         }
         CurrentTenant.Profile business = tenant.profile();
+        // The deadline wins (Lead ruling on #886): the warning names it, even when the warning itself is late.
         LocalDate day = LocalDate.ofInstant(
-                c.dueAt().isBefore(now.plus(PurgeService.WARNING)) ? now.plus(PurgeService.WARNING) : c.dueAt(),
-                business.timezone() == null ? BusinessClock.DEFAULT_ZONE : business.timezone());
+                c.dueAt(), business.timezone() == null ? BusinessClock.DEFAULT_ZONE : business.timezone());
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("reason", c.reason());
         after.put("purge_on", day.toString());

@@ -1620,11 +1620,13 @@ section 4.1; coordinated with #110, which builds no second framework).**
   content hash is the first 32 hex digits of the SHA-256 of the whole mapped row's canonical JSON (`ImportRefs.contentHash`),
   which can confirm a guess of an entire row but reveals no value, and
   is what tells a later run that a row changed since its import), and the audit trail. The records the import created are the business's own and are not touched.
-  The other free text kept is not a customer's personal value by construction: an issue's message (built from the
-  catalogue without a value, the catalogue test of #130), a batch's failure reason (a limit, a line or a column number),
-  the trading override's reason (an operator's words about the business, V127) and a policy decision's confirmation
-  reference (the question list or a document). The name the tenant administrator typed on the sign-off stays with the
-  signed reconciliation and goes with the removal of the business (V144).
+  Every piece of text a person typed on the run's tables is hashed too: a resolution's note, the trading override's
+  reason and each policy decision's confirmation reference (`import_runs.allow_trading_reason` and the `confirmation` of
+  each entry of `import_runs.policy`); their audit rows record only the text's SHA-256 (`core.import_run.trading_override_set`,
+  `core.import_run.policy_recorded`). A run has no halt or cancel reason (V127). The text kept is written by the
+  application: an issue's message (built from the catalogue without a value, the catalogue test of #130) and a batch's
+  failure reason (a limit, a line or a column number). The name the tenant administrator typed on the sign-off stays with
+  the signed reconciliation it signs and goes with the removal of the business (V144).
 - **The way past the guards** of a committed batch (Lead ruling on #867): the purge is one definer function,
   `import_purge_run(run)`, called in the business's transaction, which refuses while a file of the run is still in
   storage. `bms_import_purging` lets an UPDATE of a staged row, an issue or a resolution through

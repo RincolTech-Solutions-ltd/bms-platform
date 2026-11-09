@@ -440,7 +440,11 @@ class ImportRunService implements ImportRuns {
                                    version = version + 1, updated_at = now()
                              WHERE id = ?
                             """).params(key, mapper.writeValueAsString(stored), runId).update();
-            audit(runId, "core.import_run.policy_recorded", Map.of(), Map.of("policy", key, "decision", stored));
+            // The confirmation is typed text the purge hashes; the append-only audit keeps only its hash (#139).
+            Map<String, Object> audited = new LinkedHashMap<>(stored);
+            audited.remove("confirmation");
+            audited.put("confirmation_sha256", PurgeService.sha256(confirmation));
+            audit(runId, "core.import_run.policy_recorded", Map.of(), Map.of("policy", key, "decision", audited));
             return find(runId, false);
         });
     }
@@ -607,7 +611,8 @@ class ImportRunService implements ImportRuns {
                             runId,
                             null,
                             Map.of(),
-                            Map.of("allow_trading_tenant", true, "reason", why)),
+                            // Typed text the purge hashes on the run; the append-only audit keeps only its hash (#139).
+                            Map.of("allow_trading_tenant", true, "reason_sha256", PurgeService.sha256(why))),
                     platformUserId,
                     "platform");
             return find(runId, false);

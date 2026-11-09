@@ -39,12 +39,14 @@
 -- included, except one whose removal has begun.
 --
 -- Personal data: the certificate's text names the platform operator and the witness of a stage 9 purge (the team, never a
--- customer's person), the files by the names the customer gave them, and counts and hashes; never a value of a row. The
--- other free text the run's tables keep is not a customer's personal value by construction: an issue's message (built
--- from the catalogue without a value, the catalogue test of #130), a batch's failure reason (a limit, a line or a column
--- number), the trading override's reason (an operator's words about the business, V127) and a policy decision's
--- confirmation reference (the question list or a document, ImportRuns.recordPolicy); the name a tenant administrator typed on the sign-off
--- stays with the signed reconciliation and goes with the removal of the business (V144).
+-- customer's person), the files by the names the customer gave them, and counts and hashes; never a value of a row. Every
+-- piece of free text a person typed on the run's tables is hashed by the purge: a resolution's note, the trading
+-- override's reason and each policy decision's confirmation reference (and their audit rows record only their SHA-256,
+-- ImportRunService). The run has no halt or cancel reason (V127: `halt_requested` is a boolean, `cancelled_at` a time).
+-- The text kept is written by the application, never typed: an issue's message (built from the catalogue without a
+-- value, the catalogue test of #130) and a batch's failure reason (a limit, a line or a column number, V129). The name a
+-- tenant administrator typed on the sign-off stays with the signed reconciliation it signs and goes with the removal of
+-- the business (V144).
 --
 -- Locks, said plainly. The new column takes ACCESS EXCLUSIVE on `import_runs` for milliseconds (no default, no rewrite);
 -- the new table takes SHARE ROW EXCLUSIVE on `tenants`, `import_runs` and `platform_users` (its foreign keys) until the
@@ -199,8 +201,21 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
     PERFORM set_config('bms.purging_import_run', p_run::text, true);
+    -- The run's own operator free text goes too (review of #886, round 3): the trading override's reason and each policy
+    -- decision's confirmation reference become their hash, as a resolution's note does.
     UPDATE import_runs
-       SET status = 'purged', purged_at = now(), data_key_wrapped = NULL, version = version + 1, updated_at = now()
+       SET status = 'purged', purged_at = now(), data_key_wrapped = NULL, version = version + 1, updated_at = now(),
+           allow_trading_reason = CASE WHEN allow_trading_reason IS NULL THEN NULL
+                                       ELSE 'sha256:' || encode(sha256(v_salt || convert_to(allow_trading_reason, 'UTF8')),
+                                                                'hex') END,
+           policy = coalesce((SELECT jsonb_object_agg(
+                                         e.key,
+                                         CASE WHEN jsonb_typeof(e.value -> 'confirmation') = 'string'
+                                              THEN jsonb_set(e.value, '{confirmation}', to_jsonb('sha256:' || encode(
+                                                       sha256(v_salt || convert_to(e.value ->> 'confirmation', 'UTF8')),
+                                                       'hex')))
+                                              ELSE e.value END)
+                                FROM jsonb_each(policy) AS e), '{}'::jsonb)
      WHERE tenant_id = v_tenant AND id = p_run;
 
     UPDATE import_rows w
