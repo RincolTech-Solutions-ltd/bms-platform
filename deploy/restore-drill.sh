@@ -307,25 +307,25 @@ rh_require_env_target() {
 # finding 6). Kept: the data key and the signing key, which the application needs to start and to read its own sealed
 # columns. Issue #889: a placeholder has the shape its setting is checked for at start, and its address is on .invalid,
 # which no resolver answers; an empty value stays empty, so a service off on the live API stays off; push is off (no
-# placeholder is a VAPID key pair); base URLs the startup guards hold to the provider's own host (SMS, payments, Ask BMS)
-# are not secrets and are kept. The container has no route out either way. RehearsalSettingsIT starts the application
+# placeholder is a VAPID key pair). The Resend and AI URLs are always set, as their empty value means a real host
+# (review of #890). Base URLs the startup guards hold to the provider's own host (SMS, payments, Ask BMS) are not secrets
+# and are kept, with placeholder keys; the container's network is --internal. RehearsalSettingsIT starts the application
 # with these lines.
 # JUSTIFICATION-A3: the lines moved out of rehearse_import unchanged in purpose, so CI can start the API with exactly them.
 rh_api_env() {
-    grep -Ev '^(BMS_DB_URL|BMS_APP_USER|BMS_APP_PASSWORD|BMS_SCHEDULER_ENABLED|BMS_IMPORTS_CLEANUP_ENABLED|BMS_DOCUMENTS_ORPHAN_SWEEP_ENABLED|BMS_REHEARSAL_TOKEN|BMS_IMPORT_KEY|JAVA_TOOL_OPTIONS)=|^$' \
+    grep -Ev '^(BMS_DB_URL|BMS_APP_USER|BMS_APP_PASSWORD|BMS_SCHEDULER_ENABLED|BMS_IMPORTS_CLEANUP_ENABLED|BMS_DOCUMENTS_ORPHAN_SWEEP_ENABLED|BMS_REHEARSAL_TOKEN|BMS_IMPORT_KEY|JAVA_TOOL_OPTIONS|BMS_RESEND_API_URL|BMS_AI_BASE_URL)=|^$' \
         | awk -F= '$1 == "BMS_PUSH_VAPID_PUBLIC_KEY" || $1 == "BMS_PUSH_VAPID_PRIVATE_KEY" { print $1 "="; next }
             $0 == $1 "=" || $1 == "BMS_DATA_KEY" { print; next }
             $1 == "R2_ENDPOINT" { print $1 "=http://rehearsal-storage.invalid"; next }
             $1 == "BMS_SMTP_HOST" { print $1 "=rehearsal-mail.invalid"; next }
-            $1 == "BMS_RESEND_API_URL" { print $1 "=https://rehearsal-mail.invalid"; next }
-            $1 == "BMS_AI_BASE_URL" { print $1 "=https://rehearsal-ai.invalid"; next }
             $1 ~ /_IPN_TOKEN$/ { print $1 "=rehearsal-placeholder-ipn-token"; next }
             $1 ~ /^R2_|SECRET|PASSWORD|PRIVATE|WEBHOOK|ACCESS_KEY|_TOKEN$|_KEY$/ { print $1 "=rehearsal-placeholder"; next }
             { print }' \
         || return 1
     printf '%s\n' "BMS_DB_URL=jdbc:postgresql://${RH_DB}:5432/bms" BMS_APP_USER=bms_app "BMS_APP_PASSWORD=${1}" \
         BMS_SCHEDULER_ENABLED=false BMS_IMPORTS_CLEANUP_ENABLED=false BMS_DOCUMENTS_ORPHAN_SWEEP_ENABLED=false \
-        BMS_IMPORT_KEY= "BMS_REHEARSAL_TOKEN=${RH_TOKEN}" "JAVA_TOOL_OPTIONS=${RH_JAVA_OPTS}"
+        BMS_IMPORT_KEY= "BMS_REHEARSAL_TOKEN=${RH_TOKEN}" "JAVA_TOOL_OPTIONS=${RH_JAVA_OPTS}" \
+        BMS_RESEND_API_URL=https://rehearsal-mail.invalid BMS_AI_BASE_URL=https://rehearsal-ai.invalid
 }
 
 rehearse_import() {
@@ -559,7 +559,9 @@ rehearse_import() {
         0) ;;
         # 1 is also a JVM whose application did not start (issue #889): then the throwaway database holds no outcome.
         1)
-            [[ "$(rh_scratch "SELECT count(*) FROM import_rehearsals WHERE run_id = '${RH_RUN}'")" == "1" ]] \
+            row="$(rh_scratch "SELECT count(*) FROM import_rehearsals WHERE run_id = '${RH_RUN}'")" \
+                || rh_fail "rehearse-import exited 1 and the throwaway database did not say whether it recorded an outcome; nothing is stored on the live run"
+            [[ "$row" == "1" ]] \
                 || rh_fail "rehearse-import exited 1 without recording an outcome (the API container did not start or stopped early; its log is above); nothing is stored on the live run"
             rh_log "the rehearsal's commit did not complete; its outcome (halted or failed) is stored on the live run next" ;;
         3) rh_refuse "rehearse-import refused the run (its reason is above); nothing is stored on the live run" ;;

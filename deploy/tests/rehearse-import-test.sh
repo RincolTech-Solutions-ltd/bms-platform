@@ -172,6 +172,10 @@ FAKE_API_EXIT=1 FAKE_NO_OUTCOME=1 rehearse api-never-starts
 check "an API container that exits 1 without an outcome (#889) says nothing is stored, exits 1 and removes everything" \
     eval '[[ "$STATUS" == 1 ]] && said "without recording an outcome" && ! said "is stored on the live run next" \
         && no_live_write && all_removed'
+FAKE_API_EXIT=1 FAKE_NO_OUTCOME=fail rehearse outcome-unknown
+check "... and when the throwaway database does not answer, it says so (not 'without recording an outcome'), exits 1" \
+    eval '[[ "$STATUS" == 1 ]] && said "did not say whether it recorded an outcome" && ! said "without recording an outcome" \
+        && no_live_write && all_removed'
 FAKE_API_EXIT=3 rehearse command-refuses
 check "a command that refuses stores nothing, exits 3 (refused) and removes everything" \
     eval '[[ "$STATUS" == 3 ]] && no_live_write && all_removed'
