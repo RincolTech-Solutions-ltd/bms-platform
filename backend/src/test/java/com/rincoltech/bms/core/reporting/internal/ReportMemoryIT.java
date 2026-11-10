@@ -92,6 +92,8 @@ class ReportMemoryIT extends IntegrationTest {
                 .as("the child finished within 30 minutes; its output: %s", output)
                 .isTrue();
         String lines = output.lines().filter(l -> l.startsWith("MEMORY ")).reduce("", (a, b) -> a + b + "\n");
+        // Every figure in the job's log, a pass included (issue #899): startup, baseline, each run's peak.
+        System.out.print(lines);
         assertThat(child.exitValue()).as(lines.isEmpty() ? output : lines).isZero();
         // -Xmx224m: the serial collector reports a little less (it keeps one survivor space out of the figure).
         Matcher heapMax = Pattern.compile("MEMORY maxHeapMb=(\\d+)").matcher(output);
