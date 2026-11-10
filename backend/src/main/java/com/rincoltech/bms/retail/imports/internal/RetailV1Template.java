@@ -491,6 +491,7 @@ class RetailV1Template implements ImportTemplate {
 
         /** The costs of new items this forecast's own products rows gave. */
         private final Map<String, Long> added = new HashMap<>();
+
         private final Map<String, Map<String, BigDecimal>> qty = new TreeMap<>();
         private final Set<String> opened = new HashSet<>();
         private final List<Journal> journals = new ArrayList<>();
