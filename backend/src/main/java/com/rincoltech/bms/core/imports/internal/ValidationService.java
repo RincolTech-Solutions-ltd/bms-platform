@@ -308,6 +308,7 @@ class ValidationService implements ImportValidation {
                     documents.get(b.mappingId()),
                     b.source()));
         }
+        engine.batches(inputs);
         // Each copy of a line repeated verbatim is counted in the run's order (batch, then line), so a decision on one
         // copy never reaches another, and the run's number of such copies is known before any decision is applied (Lead
         // ruling on #868). With no resolution in the run this is pass 1 itself; with some, the rows are read once more.

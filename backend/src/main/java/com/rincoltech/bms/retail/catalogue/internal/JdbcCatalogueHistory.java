@@ -183,12 +183,12 @@ class JdbcCatalogueHistory implements CatalogueHistory {
             return out;
         }
         // Both sides by indexed columns: the id, then the name key (V63); never lower(code), which row-level security
-        // keeps from its index (issue #880).
+        // keeps from its index, nor id = ANY(?), whose generic plan tests every product against the whole page (#880).
         jdbc.sql("""
                         SELECT n.id AS product, o.id, o.code, o.cost_minor, o.sell_minor
-                          FROM retail_products n
+                          FROM unnest(CAST(? AS uuid[])) AS made(id)
+                          JOIN retail_products n ON n.id = made.id
                           JOIN retail_products o ON o.name_key = n.name_key AND o.unit_id = n.unit_id AND o.id <> n.id
-                         WHERE n.id = ANY(?)
                          ORDER BY o.code, o.id
                         """)
                 .param(productIds.toArray(UUID[]::new))

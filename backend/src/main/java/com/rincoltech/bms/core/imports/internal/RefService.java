@@ -39,6 +39,15 @@ class RefService {
     /** The source module of the opening journals, which the ledger's trading probe does not count as trading. */
     static final String MODULE = "core.imports";
 
+    /**
+     * The rest of a read of the {@code import_refs} rows {@code r} of a page of keys, after its columns: one parameter, a
+     * text array of distinct keys. A join with the keys, never {@code source_key = ANY(?)}: once the statement is prepared
+     * on the server, its generic plan tests rows against the whole array, which the big file test measured growing with
+     * every row the run registered (issue #880).
+     */
+    static final String BY_KEYS =
+            " FROM unnest(CAST(? AS text[])) AS k(key) JOIN import_refs r ON r.source_key = k.key";
+
     private final JdbcClient jdbc;
     private final JdbcTemplate batch;
     private final PreviewService preview;
@@ -111,7 +120,7 @@ class RefService {
         if (!refs.isEmpty()) {
             String[] keys =
                     refs.keySet().stream().map(ImportRefs::keyOf).distinct().toArray(String[]::new);
-            jdbc.sql("SELECT source_key, source_ref, target_type, target_id FROM import_refs WHERE source_key = ANY(?)")
+            jdbc.sql("SELECT r.source_key, r.source_ref, r.target_type, r.target_id" + BY_KEYS)
                     .param(keys)
                     .query((rs, n) -> {
                         heldRefs.computeIfAbsent(rs.getString(1), k -> new HashSet<>())
@@ -180,7 +189,7 @@ class RefService {
             rows.add(
                     new Object[] {UUID.randomUUID(), runId, batchId, key, r.sourceRef(), r.targetType(), r.targetId()});
         }
-        boolean other = jdbc.sql("SELECT source_key, source_ref FROM import_refs WHERE source_key = ANY(?)")
+        boolean other = jdbc.sql("SELECT r.source_key, r.source_ref" + BY_KEYS)
                 .param(refByKey.keySet().toArray(String[]::new))
                 .query((rs, n) -> !rs.getString(2).equals(refByKey.get(rs.getString(1))))
                 .list()

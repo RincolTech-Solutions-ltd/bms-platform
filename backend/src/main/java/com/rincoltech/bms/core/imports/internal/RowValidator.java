@@ -22,6 +22,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -159,6 +160,9 @@ final class RowValidator {
     private final Map<String, Set<String>> wanted = new TreeMap<>();
     private final Map<String, Set<String>> existing = new HashMap<>();
 
+    /** The mapping sources more than one batch of the run reads, once {@link #batches} named them; null: not known. */
+    private Set<String> sharedSources;
+
     /**
      * @param catalogue the template's whole catalogue ({@link ImportTemplates#catalogue})
      * @param cutoverAt the run's cutover moment, or null when none is agreed yet
@@ -167,6 +171,26 @@ final class RowValidator {
         this.template = template;
         catalogue.forEach(c -> this.catalogue.put(c.code(), c));
         this.cutoverAt = cutoverAt;
+    }
+
+    /**
+     * The run's batches, before pass 1 (issue #880). A {@code row_hash} reference holds its source and line, so two rows
+     * share one only from two batches of one source; the references of a source only one batch reads are not indexed for
+     * {@code DUPLICATE_SOURCE_REF}, which they can never be, and a batch at the row limit does not hold them all.
+     */
+    void batches(Collection<BatchInput> batches) {
+        Map<String, Integer> bySource = new HashMap<>();
+        batches.forEach(b -> bySource.merge(b.sourceKey(), 1, Integer::sum));
+        sharedSources = new HashSet<>();
+        bySource.forEach((source, n) -> {
+            if (n > 1) {
+                sharedSources.add(source);
+            }
+        });
+    }
+
+    private boolean shared(String sourceKey) {
+        return sharedSources == null || sharedSources.contains(sourceKey);
     }
 
     /** Pass 1: learns the row's code, reference, NINs and the codes its references name. */
@@ -191,7 +215,7 @@ final class RowValidator {
                 wanted.computeIfAbsent(f.type().ref(), k -> new TreeSet<>()).add(compare(s));
             }
         }
-        if (t.sourceRef != null) {
+        if (t.sourceRef != null && (!t.sourceRef.startsWith("row:") || shared(p.sourceKey))) {
             firstRef.computeIfAbsent(p.set.key(), k -> new HashMap<>()).putIfAbsent(t.sourceRef, here);
         }
         ImportTemplate.SetRules rules = rules(p);
