@@ -19,9 +19,9 @@ class UploadServiceTest {
         assertThat(UploadService.truncate("short", 300)).isEqualTo("short");
     }
 
-    /** Issues #137 and #880: production holds the row limit the big file test measured as safe on the staging heap. */
+    /** Issues #137, #880 and #900: production holds the row limit the big file test measured safe on the staging heap. */
     @Test
-    void theRowLimitIsTheMeasuredTwentyFiveThousandUntil880() throws java.io.IOException {
+    void theRowLimitIsTheMeasuredTwentyFiveThousandUntil900() throws java.io.IOException {
         assertThat(new UploadSettings.Properties(null, null, null, null, null, null).maxRows())
                 .isEqualTo(25_000);
         assertThat(java.nio.file.Files.readString(java.nio.file.Path.of("src/main/resources/application.yml")))

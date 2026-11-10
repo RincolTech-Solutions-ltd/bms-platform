@@ -366,10 +366,10 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
     the old generation's peak a tenth below its limit. It found #880 at the row limit of 100,000: the loader looked each
     item up by `lower(code)`, which row-level security keeps from its index, so a batch took four times as long for twice
     the rows (2,500 items committed in 53 to 125 s, 10,000 in 1,036 s), and the validation and the loader held a map entry
-    per row until 100,000 rows filled the old generation. The first round of #880 streams the loader in pages of 250
+    per row until 100,000 rows filled the old generation. The fix of #880 streams the loader in pages of 250
     rows, writes and registers each page in statement batches, plans each statement of a batch for its tables as they
     are (`plan_cache_mode = force_custom_plan`), looks each key up by its index, reads a template's forecast inputs once
-    for the reconciliation, and holds the per-row keys compactly (`CompactKeys`). Until #880 is closed the configured row
+    for the reconciliation, and holds the per-row keys compactly (`CompactKeys`). Until #900 is closed the configured row
     limit per batch is **25,000** (spec section 3.1, `bms.imports.max-rows`): the largest measured size whose dry run and
     commit fit their limits with a tenth of the old generation to spare in every case of the job. Times on the runner of
     the `import-big-file` job, 10 November 2026 (CI run 42824679713), the cases in one database, in the order shown:
@@ -384,12 +384,12 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
     | CSV, 20,000 rows, 200 columns (193 ignored), 20.6 MB (column limit) | 224 MB | 3.0 s | 16.5 s | 0.7 s | 116 s | 149 s | 101 of 149 MB |
     | XLSX, the 100,000 rows, 3.3 MB, up to the preview | 224 MB | 9.0 s | 99 s | 1.4 s | not run | not run | 110 of 149 MB |
 
-    What is left of #880, and why the limit is not yet 100,000: the batch's lookups of `import_refs` by key and of the
+    What is left, #900, and why the limit is not yet 100,000: the batch's lookups of `import_refs` by key and of the
     items of the same name still grow with its rows once the database holds other businesses' imports (the first case
     of a job, in a database nearly empty, dry runs 10,000 items in 11 s; the later ones grow faster than their rows), and
     at 100,000 rows in a database nearly empty the dry run (77 s) and the commit (64 s, of which the batch 60.5 s) fit
     their limits, but the commit fills the old generation (149 of 149 MB; CI run 42816727582). Those two cases at
-    100,000 are disabled with #880; the validation and preview at 100,000 run, judged, in a child at that limit. The
+    100,000 are disabled with #900; the validation and preview at 100,000 run, judged, in a child at that limit. The
     cases at each measured size up to the configured limit run in every `import-big-file` job, with one row over the
     limit refused with `TOO_MANY_ROWS` in the same child. A larger file is split (the cutover runbook, stage 2).
 - **Normalisation tables.** Every table of examples in chapter 13 section 13.6 is a

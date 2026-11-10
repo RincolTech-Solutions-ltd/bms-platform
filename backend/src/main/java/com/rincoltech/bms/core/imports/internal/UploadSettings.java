@@ -27,7 +27,7 @@ import org.springframework.util.unit.DataSize;
 class UploadSettings {
 
     /**
-     * The rows a batch may hold: 25,000 until #880 lets it go to 100,000 (spec section 3.1), the largest size the big file
+     * The rows a batch may hold: 25,000 until #900 lets it go to 100,000 (spec section 3.1), the largest size the big file
      * test commits on the staging heap inside the time limits with a tenth of the old generation to spare (SDD chapter 15
      * section 15.7).
      */

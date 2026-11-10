@@ -41,10 +41,10 @@ import tools.jackson.databind.json.JsonMapper;
  *   <li>a product master at the column limit (200 columns, 193 of them ignored with a reason), committed.
  * </ul>
  *
- * <p>They found #880. Its first round (the streamed loader, the batched writes, the lookups by index, the validation's
- * compact indexes) brought the validation and preview at 100,000 rows inside the staging heap and the dry run and commit
+ * <p>They found #880. Its fix (the streamed loader, the batched writes, the lookups by index, the validation's compact
+ * indexes) brought the validation and preview at 100,000 rows inside the staging heap and the dry run and commit
  * at that size inside their time limits, but the commit there still fills the old generation, and in a database other
- * businesses' imports already fill the dry run still stops at its limit: those two cases stay disabled with #880. The
+ * businesses' imports already fill the dry run still stops at its limit: those two cases are disabled with #900. The
  * configured row limit, {@link UploadSettings#DEFAULT_MAX_ROWS}, is the largest of the measured sizes that commits with a
  * tenth of the old generation to spare (the Lead's fallback on #880); a case over it runs the child at its own size.
  *
@@ -88,7 +88,7 @@ class ImportBigFileIT extends IntegrationTest {
     Path dir;
 
     @Test
-    @Disabled("#880: at 100,000 rows the dry run (77 s) and the commit (64 s) fit their limits, but the commit fills"
+    @Disabled("#900: at 100,000 rows the dry run (77 s) and the commit (64 s) fit their limits, but the commit fills"
             + " the old generation of the staging heap (149 of 149 MB)")
     void aCsvAtTheRowAndSizeLimitsIsCommittedOnTheStagingHeapInsideTheBatchTimeout() throws Exception {
         String output = child("commit", "items=" + limitsCsv(), STAGING_HEAP_MB, ROW_LIMIT);
@@ -104,7 +104,7 @@ class ImportBigFileIT extends IntegrationTest {
      * inside the batch timeout, and the times of every step are printed for chapter 15. The heap is not judged here.
      */
     @Test
-    @Disabled("#880: in a database other businesses' imports already fill, the key lookups of a batch at 100,000 rows"
+    @Disabled("#900: in a database other businesses' imports already fill, the key lookups of a batch at 100,000 rows"
             + " still grow with its rows, and the dry run stops at its 900 s limit")
     void aCsvAtTheRowAndSizeLimitsIsCommittedInsideTheBatchTimeoutOnTwiceTheStagingHeap() throws Exception {
         String output = child("commit", "items=" + limitsCsv(), 2 * STAGING_HEAP_MB, ROW_LIMIT);
@@ -137,7 +137,7 @@ class ImportBigFileIT extends IntegrationTest {
 
     /**
      * The upload, validation and preview at the row and size limits of spec section 3.1, on the staging heap, judged and
-     * timed (#880: these fit; the commit at that size does not yet, so the configured limit is lower).
+     * timed (#880: these fit; the commit at that size does not yet, #900, so the configured limit is lower).
      */
     @Test
     void aCsvAtTheRowAndSizeLimitsIsUploadedValidatedAndPreviewedOnTheStagingHeap() throws Exception {
