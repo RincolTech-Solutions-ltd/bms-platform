@@ -1,0 +1,109 @@
+// @vitest-environment jsdom
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ImportRun, PlatformRunState, RunAction } from '../../api/imports';
+import { router as appRouter } from '../../app/router';
+
+// The stop button of the operator portal (issue #141, spec sections 3.7 and 11): while an import is being brought in the one action
+// is Stop; it asks first and sends nothing until confirmed, sends once even when pressed twice, then says the import stops before
+// its next file and offers Resume. A run that is ready, approved and has a checked dump offers Start; a run without its dump check
+// offers neither. Fabricated data only.
+
+const base: ImportRun = {
+  id: 'r-1',
+  status: 'committing',
+  version: 4,
+  halt_requested: false,
+  commit_approved: true,
+  pre_import_dump_file: 'test-pre-import.dump',
+  pre_import_dump_verified: true,
+  trading_override_set: false,
+  trading_override_approved: false,
+};
+let state: PlatformRunState;
+const sent: RunAction[] = [];
+let release: (() => void) | null = null;
+
+vi.mock('../../api/imports', async (original) => {
+  const real = await original<typeof import('../../api/imports')>();
+  return {
+    ...real,
+    platformRun: () => Promise.resolve(state),
+    platformAction: (_slug: string, _run: string, action: RunAction) => {
+      sent.push(action);
+      return new Promise<PlatformRunState>((resolve) => {
+        release = () => {
+          state = { ...state, run: { ...state.run, halt_requested: action === 'stop' ? true : state.run?.halt_requested } };
+          resolve(state);
+        };
+      });
+    },
+  };
+});
+
+const { OperatorImportRun, operatorAction } = await import('./import-run');
+
+function show() {
+  const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/platform/imports'] }) });
+  render(
+    <RouterContextProvider router={router}>
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <OperatorImportRun slug="test-shop-five" runId="r-1" />
+      </QueryClientProvider>
+    </RouterContextProvider>,
+  );
+}
+
+beforeEach(() => {
+  state = { tenant_slug: 'test-shop-five', run: { ...base }, commit_enabled: true };
+  sent.length = 0;
+  release = null;
+});
+
+afterEach(() => cleanup());
+
+describe('the stop button', () => {
+  it('asks first, sends one stop, then says it stops before the next file and offers Resume', async () => {
+    show();
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop the import' }));
+    expect(sent).toEqual([]);
+    expect(screen.getByText(/Stop this import before its next file/)).toBeTruthy();
+
+    const confirm = screen.getByRole('button', { name: 'Yes, stop the import' });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    await waitFor(() => expect(sent).toEqual(['stop']));
+    release?.();
+
+    expect(await screen.findByText('Stop pressed. The import stops before its next file.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Stop the import' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Resume the import' })).toBeTruthy();
+    expect(sent).toEqual(['stop']);
+  });
+
+  it('cancels without sending anything', async () => {
+    show();
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop the import' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(sent).toEqual([]);
+    expect(screen.getByRole('button', { name: 'Stop the import' })).toBeTruthy();
+  });
+});
+
+describe('the operator’s one action', () => {
+  it('is Stop while it is being brought in, Resume once stopped, none while every import is stopped', () => {
+    expect(operatorAction(base, true)?.action).toBe('stop');
+    expect(operatorAction({ ...base, halt_requested: true }, true)?.action).toBe('resume');
+    expect(operatorAction({ ...base, halt_requested: true }, false)).toBeNull();
+  });
+
+  it('is Start only for a ready run that a second person approved, with its dump checked', () => {
+    const ready = { ...base, status: 'ready' };
+    expect(operatorAction(ready, true)?.action).toBe('start');
+    expect(operatorAction({ ...ready, pre_import_dump_verified: false }, true)).toBeNull();
+    expect(operatorAction({ ...ready, commit_approved: false }, true)).toBeNull();
+    expect(operatorAction(ready, false)).toBeNull();
+  });
+});
