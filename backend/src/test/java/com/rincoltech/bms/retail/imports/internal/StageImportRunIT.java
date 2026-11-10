@@ -150,9 +150,7 @@ class StageImportRunIT extends IntegrationTest {
         owner.sql("""
                         INSERT INTO plans (id, code, name, max_branches, max_staff_users, max_active_members, allowed_modules)
                         VALUES (?, ?, 'Test One Shop Plan', 1, 10, 0, '{retail}')
-                        """)
-                .params(UUID.randomUUID(), "one-shop-" + t.slug())
-                .update();
+                        """).params(UUID.randomUUID(), "one-shop-" + t.slug()).update();
         owner.sql("UPDATE tenants SET plan_id = (SELECT id FROM plans WHERE code = ?) WHERE id = ?")
                 .params("one-shop-" + t.slug(), t.tenantId())
                 .update();
