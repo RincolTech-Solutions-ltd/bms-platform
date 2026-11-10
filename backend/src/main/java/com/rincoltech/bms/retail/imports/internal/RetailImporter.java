@@ -339,54 +339,10 @@ public class RetailImporter {
                 ImportReport.Counts counts = report.file(name);
                 ExportFile file = ExportFile.staged(name, List.of());
                 int after = 0;
-                // TEMPORARY #880 measurement, removed before the pull request is ready.
-                long[] timing = new long[3];
-                int pages = 0;
                 while (true) {
-                    long t0 = System.nanoTime();
                     List<ImportRefs.StagedRow> page = checkpoint.rows(after, PAGE);
-                    timing[0] += System.nanoTime() - t0;
                     if (page.isEmpty()) {
                         break;
-                    }
-                    if (++pages % 10 == 0) {
-                        log.info(
-                                "#880 timing {} page {}: read {} ms, write {} ms (create {} ms, twins {} ms),"
-                                        + " register {} ms",
-                                entitySet,
-                                pages,
-                                timing[0] / 1_000_000,
-                                timing[1] / 1_000_000,
-                                run.createNanos / 1_000_000,
-                                run.twinNanos / 1_000_000,
-                                timing[2] / 1_000_000);
-                        java.util.Arrays.fill(timing, 0);
-                        run.createNanos = 0;
-                        run.twinNanos = 0;
-                        // JUSTIFICATION-A3: TEMPORARY #880 measurement of the planner's choice, removed before ready.
-                        if (pages % 40 == 0) {
-                            String[] keys = page.stream()
-                                    .map(r -> ImportRefs.keyOf(r.sourceRef()))
-                                    .distinct()
-                                    .toArray(String[]::new);
-                            log.info(
-                                    "#880 timing plan refs: {}",
-                                    plan(
-                                            "EXPLAIN SELECT r.source_key FROM unnest(CAST(? AS text[])) AS k(key)"
-                                                    + " CROSS JOIN LATERAL (SELECT * FROM import_refs i"
-                                                    + " WHERE i.source_key = k.key OFFSET 0) r",
-                                            keys));
-                            log.info(
-                                    "#880 timing plan twins: {}",
-                                    plan(
-                                            "EXPLAIN SELECT o.id FROM unnest(CAST(? AS uuid[])) AS made(id)"
-                                                    + " CROSS JOIN LATERAL (SELECT p.id, p.name_key, p.unit_id"
-                                                    + " FROM retail_products p WHERE p.id = made.id OFFSET 0) n"
-                                                    + " CROSS JOIN LATERAL (SELECT p.id FROM retail_products p"
-                                                    + " WHERE p.name_key = n.name_key AND p.unit_id = n.unit_id"
-                                                    + " AND p.id <> n.id OFFSET 0) o",
-                                            run.lastMade));
-                        }
                     }
                     after = page.getLast().line();
                     List<Map.Entry<Integer, Map<String, Object>>> toWrite = new ArrayList<>(page.size());
@@ -402,12 +358,8 @@ public class RetailImporter {
                     if (whole) {
                         file.addStaged(toWrite);
                     } else if (!toWrite.isEmpty()) {
-                        long t1 = System.nanoTime();
                         run.write(name, ExportFile.staged(name, toWrite));
-                        long t2 = System.nanoTime();
                         refs.flush();
-                        timing[1] += t2 - t1;
-                        timing[2] += System.nanoTime() - t2;
                     }
                 }
                 if (whole) {
@@ -434,12 +386,6 @@ public class RetailImporter {
                         + RetailImporter.class.getName();
             }
         };
-    }
-
-    // TEMPORARY #880 measurement, removed before the pull request is ready.
-    private String plan(String explain, Object array) {
-        return String.join(
-                " | ", jdbc.sql(explain).param(array).query(String.class).list());
     }
 
     /** Every file of the export directory, read once; an absent file is an empty one. */
@@ -710,12 +656,6 @@ public class RetailImporter {
         final Map<String, UUID> categoryIds = new HashMap<>();
         final Map<String, UUID> unitIds = new HashMap<>();
 
-        // TEMPORARY #880 measurement, removed before the pull request is ready.
-        long createNanos;
-
-        long twinNanos;
-
-        UUID[] lastMade = new UUID[0];
         ZoneId zone;
         Map<String, UUID> branchByCode = Map.of();
         /** Branches that keep no goods (issue #329): a balance for one is refused, never written. */
@@ -968,17 +908,12 @@ public class RetailImporter {
                     .map(ItemRow::made)
                     .filter(java.util.Objects::nonNull)
                     .toList();
-            long t0 = System.nanoTime();
             catalogue.createProducts(made);
-            long t1 = System.nanoTime();
             Map<UUID, Integer> madeAt = new HashMap<>();
             items.stream()
                     .filter(i -> i.made() != null)
                     .forEach(i -> madeAt.put(i.made().id(), i.row().line()));
             Map<UUID, List<Product>> twins = catalogue.sameName(madeAt.keySet());
-            createNanos += t1 - t0;
-            twinNanos += System.nanoTime() - t1;
-            lastMade = madeAt.keySet().toArray(UUID[]::new);
             for (ItemRow i : items) {
                 int line = i.row().line();
                 if (i.problem() != null) {
