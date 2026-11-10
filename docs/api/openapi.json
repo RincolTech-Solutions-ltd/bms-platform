@@ -3611,6 +3611,7 @@
         "required" : [ "fix_ref", "version" ]
       },
       "ImportDefectCodeCount" : {
+        "description" : "By catalogue code",
         "properties" : {
           "code" : {
             "type" : "string"

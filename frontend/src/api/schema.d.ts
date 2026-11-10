@@ -10567,6 +10567,7 @@ export interface components {
              */
             version: number;
         };
+        /** @description By catalogue code */
         ImportDefectCodeCount: {
             code?: string;
             /** Format: int64 */
