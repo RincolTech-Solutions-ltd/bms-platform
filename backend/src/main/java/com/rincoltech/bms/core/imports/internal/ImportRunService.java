@@ -1042,11 +1042,7 @@ class ImportRunService implements ImportRuns {
                             // The business's import key is taken: answered at once, nothing stored (Lead ruling 5).
                             throw e;
                         }
-                        // A coded refusal, such as a plan limit, names its code and its message (issue #885), the
-                        // message screened as every text a writer gives the report: a personal value hides it.
-                        String said = privacy.holds(e.getMessage()) ? CommitReport.HIDDEN : e.getMessage();
-                        failure[0] = "batch " + batch.seq() + " failed (" + e.code()
-                                + (said == null || said.isBlank() ? "" : ": " + said.strip()) + ")";
+                        failure[0] = refused(batch.seq(), e);
                         break;
                     } catch (RuntimeException e) {
                         // As a real run, the first batch that fails stops it; the report names the batch and the kind
@@ -1576,6 +1572,19 @@ class ImportRunService implements ImportRuns {
             failure.addSuppressed(auditFailure);
         }
         return failure;
+    }
+
+    // JUSTIFICATION-A3: review of #902 asks for an allowlist of value-free messages, proven by a unit test.
+    /** The codes whose message holds no typed value: the plan limit names the plan's number and the limit's key. */
+    static final Set<String> VALUE_FREE_MESSAGES = Set.of("plan_limit_reached");
+
+    /**
+     * A dry run's failure for a batch a coded refusal stopped (issue #885): the batch and the refusal's code, and its
+     * message only for a code of {@link #VALUE_FREE_MESSAGES}, since another's may quote a row (review of #902).
+     */
+    static String refused(int seq, ApiException e) {
+        String message = VALUE_FREE_MESSAGES.contains(e.code()) ? e.getMessage() : null;
+        return "batch " + seq + " failed (" + e.code() + (message == null ? "" : ": " + message.strip()) + ")";
     }
 
     /** Throws {@link Halted} when the kill switch is off or the run's halt is set, read with a fresh snapshot. */

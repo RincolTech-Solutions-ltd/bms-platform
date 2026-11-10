@@ -173,6 +173,12 @@ class StageImportRunIT extends IntegrationTest {
                 .contains("max_branches")
                 .doesNotContain("ApiException");
         assertThat(as(() -> runs.get(run)).status()).isNotEqualTo("ready");
+
+        // With room for the branches, staging again works beside the refused run (review of #902).
+        owner.sql("UPDATE plans SET max_branches = 10 WHERE code = ?").param("one-shop-" + t.slug()).update();
+        UUID again = on("staging").stage(t.slug(), RetailImportIT.SAMPLE);
+        assertThat(again).isNotEqualTo(run);
+        assertThat(as(() -> runs.get(again)).status()).isEqualTo("ready");
     }
 
     /** The business's runs: none is opened by a refused staging. */
