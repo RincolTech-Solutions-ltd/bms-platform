@@ -791,9 +791,8 @@ class ReconciliationService implements ImportReconciliation {
             if (!refs.isEmpty()) {
                 // By the indexed key (import_refs_by_key), never by source_ref, which no index covers.
                 Set<String> wanted = new HashSet<>(refs.values());
-                // Joined with the keys, as RefService reads a page of them (issue #880).
-                jdbc.sql("SELECT r.source_ref, r.run_id = ? FROM unnest(CAST(? AS text[])) AS k(key)"
-                                + " JOIN import_refs r ON r.source_key = k.key")
+                // Each key by the index, as RefService reads a page of them (issue #880).
+                jdbc.sql("SELECT r.source_ref, r.run_id = ?" + RefService.BY_KEYS)
                         .params(
                                 runId,
                                 wanted.stream()

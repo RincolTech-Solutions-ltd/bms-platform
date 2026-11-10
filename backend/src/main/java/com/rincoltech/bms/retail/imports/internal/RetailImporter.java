@@ -215,8 +215,11 @@ public class RetailImporter {
 
     private static final Logger log = LoggerFactory.getLogger(RetailImporter.class);
 
-    /** The rows read and written at a time (issue #880): a page of the checkpoint's rows, and of the items a file makes. */
-    static final int PAGE = 1_000;
+    /**
+     * The rows read and written at a time (issue #880): a page of the checkpoint's rows, and of the items a file makes. Small
+     * enough that a page's objects die young on the staging heap, so the old generation holds no page.
+     */
+    static final int PAGE = 250;
 
     private final TenantJobs tenants;
     private final TransactionTemplate transactions;
@@ -672,7 +675,7 @@ public class RetailImporter {
         final Set<String> branchCodes = new HashSet<>();
 
         final Set<String> buyerNames = new HashSet<>();
-        final Map<String, Integer> itemLines = new HashMap<>();
+        final ItemCodes itemLines = new ItemCodes();
         final Map<String, UUID> categoryIds = new HashMap<>();
         final Map<String, UUID> unitIds = new HashMap<>();
 
@@ -2385,6 +2388,92 @@ public class RetailImporter {
                 throw new IllegalStateException("no staged row at line " + row.line());
             }
             return s;
+        }
+    }
+
+    // JUSTIFICATION-A3: issue #880 holds a batch's item codes in three arrays, not a map of 100,000 strings.
+    /**
+     * The item codes a file's rows gave, each with the line of its first row: what a map of the codes to their lines would
+     * answer, held as the codes' UTF-8 bytes and two tables of ints, so a batch at the row limit keeps about a quarter of
+     * that map's heap for the whole of its write (issue #880). Open addressing, linear probing, at most half full.
+     */
+    static final class ItemCodes {
+
+        private byte[] bytes = new byte[1 << 12];
+        private int used;
+
+        /** Per slot, one more than where its code starts in {@link #bytes}; 0 for a free slot. */
+        private int[] slots = new int[1 << 8];
+
+        private int[] lines = new int[1 << 8];
+        private int size;
+
+        /** The line of the first row with this code, or null when it is new, and from now on this row's. */
+        Integer putIfAbsent(String code, int line) {
+            byte[] key = code.getBytes(StandardCharsets.UTF_8);
+            int i = slot(slots, key, 0, key.length);
+            if (slots[i] != 0) {
+                return lines[i];
+            }
+            if (used + 2 + key.length > bytes.length) {
+                bytes = java.util.Arrays.copyOf(bytes, Math.max(bytes.length * 2, used + 2 + key.length));
+            }
+            bytes[used] = (byte) (key.length >>> 8);
+            bytes[used + 1] = (byte) key.length;
+            System.arraycopy(key, 0, bytes, used + 2, key.length);
+            slots[i] = used + 1;
+            lines[i] = line;
+            used += 2 + key.length;
+            if (++size * 2 > slots.length) {
+                grow();
+            }
+            return null;
+        }
+
+        void clear() {
+            bytes = new byte[1 << 12];
+            used = 0;
+            slots = new int[1 << 8];
+            lines = new int[1 << 8];
+            size = 0;
+        }
+
+        private int length(int at) {
+            return ((bytes[at] & 0xff) << 8) | (bytes[at + 1] & 0xff);
+        }
+
+        /** The slot of {@code table} that holds these bytes, or the free slot where they go. */
+        private int slot(int[] table, byte[] key, int from, int to) {
+            int h = 1;
+            for (int k = from; k < to; k++) {
+                h = 31 * h + key[k];
+            }
+            h ^= h >>> 16;
+            int mask = table.length - 1;
+            int i = h & mask;
+            while (table[i] != 0) {
+                int at = table[i] - 1;
+                if (java.util.Arrays.equals(bytes, at + 2, at + 2 + length(at), key, from, to)) {
+                    return i;
+                }
+                i = (i + 1) & mask;
+            }
+            return i;
+        }
+
+        private void grow() {
+            int[] table = new int[slots.length * 2];
+            int[] moved = new int[slots.length * 2];
+            for (int i = 0; i < slots.length; i++) {
+                if (slots[i] != 0) {
+                    int at = slots[i] - 1;
+                    int j = slot(table, bytes, at + 2, at + 2 + length(at));
+                    table[j] = slots[i];
+                    moved[j] = lines[i];
+                }
+            }
+            slots = table;
+            lines = moved;
         }
     }
 

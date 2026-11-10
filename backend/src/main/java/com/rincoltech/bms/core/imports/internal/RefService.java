@@ -41,12 +41,13 @@ class RefService {
 
     /**
      * The rest of a read of the {@code import_refs} rows {@code r} of a page of keys, after its columns: one parameter, a
-     * text array of distinct keys. A join with the keys, never {@code source_key = ANY(?)}: once the statement is prepared
-     * on the server, its generic plan tests rows against the whole array, which the big file test measured growing with
-     * every row the run registered (issue #880).
+     * text array of distinct keys. Each key is looked up by the index on its own ({@code OFFSET 0} keeps the planner from
+     * turning the lateral lookup into a join it may scan the table for), never {@code source_key = ANY(?)}: once the
+     * statement is prepared on the server, its generic plan tests rows against the whole array, which the big file test
+     * measured growing with every row the run registered (issue #880).
      */
-    static final String BY_KEYS =
-            " FROM unnest(CAST(? AS text[])) AS k(key) JOIN import_refs r ON r.source_key = k.key";
+    static final String BY_KEYS = " FROM unnest(CAST(? AS text[])) AS k(key) CROSS JOIN LATERAL"
+            + " (SELECT * FROM import_refs i WHERE i.source_key = k.key OFFSET 0) r";
 
     private final JdbcClient jdbc;
     private final JdbcTemplate batch;

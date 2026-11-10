@@ -182,13 +182,17 @@ class JdbcCatalogueHistory implements CatalogueHistory {
         if (productIds.isEmpty()) {
             return out;
         }
-        // Both sides by indexed columns: the id, then the name key (V63); never lower(code), which row-level security
-        // keeps from its index, nor id = ANY(?), whose generic plan tests every product against the whole page (#880).
+        // Each product by its id, then its twins by the name key (V63), each an index lookup of its own: OFFSET 0 keeps
+        // the planner from joining them by a scan of every product, which the big file test measured (issue #880).
+        // Never lower(code), which row-level security keeps from its index, nor id = ANY(?).
         jdbc.sql("""
                         SELECT n.id AS product, o.id, o.code, o.cost_minor, o.sell_minor
                           FROM unnest(CAST(? AS uuid[])) AS made(id)
-                          JOIN retail_products n ON n.id = made.id
-                          JOIN retail_products o ON o.name_key = n.name_key AND o.unit_id = n.unit_id AND o.id <> n.id
+                         CROSS JOIN LATERAL (SELECT p.id, p.name_key, p.unit_id FROM retail_products p
+                                              WHERE p.id = made.id OFFSET 0) n
+                         CROSS JOIN LATERAL (SELECT p.id, p.code, p.cost_minor, p.sell_minor FROM retail_products p
+                                              WHERE p.name_key = n.name_key AND p.unit_id = n.unit_id AND p.id <> n.id
+                                             OFFSET 0) o
                          ORDER BY o.code, o.id
                         """)
                 .param(productIds.toArray(UUID[]::new))
