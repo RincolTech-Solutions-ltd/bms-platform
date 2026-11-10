@@ -12,6 +12,7 @@ import com.rincoltech.bms.core.tenancy.Branches;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.BusinessClock;
+import com.rincoltech.bms.kernel.CompactKeys;
 import com.rincoltech.bms.retail.cashbook.CashBookHistory;
 import com.rincoltech.bms.retail.cashbook.CashBookHistory.ExpenseItem;
 import com.rincoltech.bms.retail.catalogue.CatalogueHistory;
@@ -362,6 +363,30 @@ public class RetailImporter {
                         java.util.Arrays.fill(timing, 0);
                         run.createNanos = 0;
                         run.twinNanos = 0;
+                        // JUSTIFICATION-A3: TEMPORARY #880 measurement of the planner's choice, removed before ready.
+                        if (pages % 40 == 0) {
+                            String[] keys = page.stream()
+                                    .map(r -> ImportRefs.keyOf(r.sourceRef()))
+                                    .distinct()
+                                    .toArray(String[]::new);
+                            log.info(
+                                    "#880 timing plan refs: {}",
+                                    plan(
+                                            "EXPLAIN SELECT r.source_key FROM unnest(CAST(? AS text[])) AS k(key)"
+                                                    + " CROSS JOIN LATERAL (SELECT * FROM import_refs i"
+                                                    + " WHERE i.source_key = k.key OFFSET 0) r",
+                                            keys));
+                            log.info(
+                                    "#880 timing plan twins: {}",
+                                    plan(
+                                            "EXPLAIN SELECT o.id FROM unnest(CAST(? AS uuid[])) AS made(id)"
+                                                    + " CROSS JOIN LATERAL (SELECT p.id, p.name_key, p.unit_id"
+                                                    + " FROM retail_products p WHERE p.id = made.id OFFSET 0) n"
+                                                    + " CROSS JOIN LATERAL (SELECT p.id FROM retail_products p"
+                                                    + " WHERE p.name_key = n.name_key AND p.unit_id = n.unit_id"
+                                                    + " AND p.id <> n.id OFFSET 0) o",
+                                            run.lastMade));
+                        }
                     }
                     after = page.getLast().line();
                     List<Map.Entry<Integer, Map<String, Object>>> toWrite = new ArrayList<>(page.size());
@@ -409,6 +434,12 @@ public class RetailImporter {
                         + RetailImporter.class.getName();
             }
         };
+    }
+
+    // TEMPORARY #880 measurement, removed before the pull request is ready.
+    private String plan(String explain, Object array) {
+        return String.join(
+                " | ", jdbc.sql(explain).param(array).query(String.class).list());
     }
 
     /** Every file of the export directory, read once; an absent file is an empty one. */
@@ -675,7 +706,7 @@ public class RetailImporter {
         final Set<String> branchCodes = new HashSet<>();
 
         final Set<String> buyerNames = new HashSet<>();
-        final ItemCodes itemLines = new ItemCodes();
+        CompactKeys itemLines = new CompactKeys();
         final Map<String, UUID> categoryIds = new HashMap<>();
         final Map<String, UUID> unitIds = new HashMap<>();
 
@@ -683,6 +714,8 @@ public class RetailImporter {
         long createNanos;
 
         long twinNanos;
+
+        UUID[] lastMade = new UUID[0];
         ZoneId zone;
         Map<String, UUID> branchByCode = Map.of();
         /** Branches that keep no goods (issue #329): a balance for one is refused, never written. */
@@ -762,7 +795,7 @@ public class RetailImporter {
         void begin() {
             branchCodes.clear();
             buyerNames.clear();
-            itemLines.clear();
+            itemLines = new CompactKeys();
             categoryIds.clear();
             unitIds.clear();
             zone = currentTenant.profile().timezone();
@@ -945,6 +978,7 @@ public class RetailImporter {
             Map<UUID, List<Product>> twins = catalogue.sameName(madeAt.keySet());
             createNanos += t1 - t0;
             twinNanos += System.nanoTime() - t1;
+            lastMade = madeAt.keySet().toArray(UUID[]::new);
             for (ItemRow i : items) {
                 int line = i.row().line();
                 if (i.problem() != null) {
@@ -988,7 +1022,7 @@ public class RetailImporter {
                 throw row.problem("code is longer than 40 characters after normalisation");
             }
             String key = code.toLowerCase(Locale.ROOT);
-            Integer first = itemLines.putIfAbsent(key, row.line());
+            Long first = itemLines.putIfAbsent(key, row.line());
             if (first != null) {
                 throw row.problem(
                         "duplicate product code " + code + " (same as line " + first + " ignoring case and spaces)");
@@ -2388,92 +2422,6 @@ public class RetailImporter {
                 throw new IllegalStateException("no staged row at line " + row.line());
             }
             return s;
-        }
-    }
-
-    // JUSTIFICATION-A3: issue #880 holds a batch's item codes in three arrays, not a map of 100,000 strings.
-    /**
-     * The item codes a file's rows gave, each with the line of its first row: what a map of the codes to their lines would
-     * answer, held as the codes' UTF-8 bytes and two tables of ints, so a batch at the row limit keeps about a quarter of
-     * that map's heap for the whole of its write (issue #880). Open addressing, linear probing, at most half full.
-     */
-    static final class ItemCodes {
-
-        private byte[] bytes = new byte[1 << 12];
-        private int used;
-
-        /** Per slot, one more than where its code starts in {@link #bytes}; 0 for a free slot. */
-        private int[] slots = new int[1 << 8];
-
-        private int[] lines = new int[1 << 8];
-        private int size;
-
-        /** The line of the first row with this code, or null when it is new, and from now on this row's. */
-        Integer putIfAbsent(String code, int line) {
-            byte[] key = code.getBytes(StandardCharsets.UTF_8);
-            int i = slot(slots, key, 0, key.length);
-            if (slots[i] != 0) {
-                return lines[i];
-            }
-            if (used + 2 + key.length > bytes.length) {
-                bytes = java.util.Arrays.copyOf(bytes, Math.max(bytes.length * 2, used + 2 + key.length));
-            }
-            bytes[used] = (byte) (key.length >>> 8);
-            bytes[used + 1] = (byte) key.length;
-            System.arraycopy(key, 0, bytes, used + 2, key.length);
-            slots[i] = used + 1;
-            lines[i] = line;
-            used += 2 + key.length;
-            if (++size * 2 > slots.length) {
-                grow();
-            }
-            return null;
-        }
-
-        void clear() {
-            bytes = new byte[1 << 12];
-            used = 0;
-            slots = new int[1 << 8];
-            lines = new int[1 << 8];
-            size = 0;
-        }
-
-        private int length(int at) {
-            return ((bytes[at] & 0xff) << 8) | (bytes[at + 1] & 0xff);
-        }
-
-        /** The slot of {@code table} that holds these bytes, or the free slot where they go. */
-        private int slot(int[] table, byte[] key, int from, int to) {
-            int h = 1;
-            for (int k = from; k < to; k++) {
-                h = 31 * h + key[k];
-            }
-            h ^= h >>> 16;
-            int mask = table.length - 1;
-            int i = h & mask;
-            while (table[i] != 0) {
-                int at = table[i] - 1;
-                if (java.util.Arrays.equals(bytes, at + 2, at + 2 + length(at), key, from, to)) {
-                    return i;
-                }
-                i = (i + 1) & mask;
-            }
-            return i;
-        }
-
-        private void grow() {
-            int[] table = new int[slots.length * 2];
-            int[] moved = new int[slots.length * 2];
-            for (int i = 0; i < slots.length; i++) {
-                if (slots[i] != 0) {
-                    int at = slots[i] - 1;
-                    int j = slot(table, bytes, at + 2, at + 2 + length(at));
-                    table[j] = slots[i];
-                    moved[j] = lines[i];
-                }
-            }
-            slots = table;
-            lines = moved;
         }
     }
 

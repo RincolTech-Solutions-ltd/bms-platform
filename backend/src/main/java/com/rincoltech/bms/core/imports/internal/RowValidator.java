@@ -8,6 +8,7 @@ import com.rincoltech.bms.core.imports.ImportTemplate.Kind;
 import com.rincoltech.bms.core.imports.ImportTemplate.RowCheck;
 import com.rincoltech.bms.core.imports.ImportTemplate.RowFinding;
 import com.rincoltech.bms.core.imports.ImportTemplates;
+import com.rincoltech.bms.kernel.CompactKeys;
 import com.rincoltech.bms.kernel.NationalIds;
 import com.rincoltech.bms.kernel.PhoneNumbers;
 import java.math.BigDecimal;
@@ -154,7 +155,17 @@ final class RowValidator {
     private final Map<String, IssueCode> catalogue = new HashMap<>();
     private final Instant cutoverAt;
     private final Map<UUID, Plan> plans = new HashMap<>();
-    private final Map<String, Map<String, Location>> firstKey = new HashMap<>();
+    /**
+     * Per entity set, each code's first row as {@link #packed}: one entry per row of a product master, so held compactly
+     * (issue #880).
+     */
+    private final Map<String, CompactKeys> firstKey = new HashMap<>();
+
+    /** The batches a location names, by the index {@link #packed} keeps, each as its location's batch and file. */
+    private final List<Location> located = new ArrayList<>();
+
+    private final Map<UUID, Integer> batchIndex = new HashMap<>();
+
     private final Map<String, Map<String, Location>> firstRef = new HashMap<>();
     private final Map<String, Map<String, Location>> firstNin = new HashMap<>();
     private final Map<String, Set<String>> wanted = new TreeMap<>();
@@ -207,7 +218,7 @@ final class RowValidator {
                 continue;
             }
             if (f.key()) {
-                firstKey.computeIfAbsent(p.set.key(), k -> new HashMap<>()).putIfAbsent(compare(s), here);
+                firstKey.computeIfAbsent(p.set.key(), k -> new CompactKeys()).putIfAbsent(compare(s), packed(here));
             } else if (f.type().kind() == Kind.NIN) {
                 firstNin.computeIfAbsent(p.set.key() + "." + f.name(), k -> new HashMap<>())
                         .putIfAbsent(s, here);
@@ -269,9 +280,8 @@ final class RowValidator {
     Map<String, Set<String>> missingReferences() {
         Map<String, Set<String>> out = new LinkedHashMap<>();
         wanted.forEach((set, keys) -> {
-            Set<String> held = firstKey.getOrDefault(set, Map.of()).keySet();
             Set<String> missing = new TreeSet<>(keys);
-            missing.removeAll(held);
+            missing.removeIf(key -> holdsKey(set, key));
             if (!missing.isEmpty()) {
                 out.put(set, Collections.unmodifiableSet(missing));
             }
@@ -317,13 +327,15 @@ final class RowValidator {
             if (f.type().kind() == Kind.REF) {
                 String target = f.type().ref();
                 String key = compare(s);
-                if (!firstKey.getOrDefault(target, Map.of()).containsKey(key)
+                if (!holdsKey(target, key)
                         && !existing.getOrDefault(target, Set.of()).contains(key)) {
                     t.add("REF_UNKNOWN", f.name(), Map.of("entity", target), original);
                 }
             }
             if (f.key()) {
-                Location first = firstKey.getOrDefault(p.set.key(), Map.of()).get(compare(s));
+                CompactKeys keys = firstKey.get(p.set.key());
+                long at = keys == null ? -1 : keys.get(compare(s), -1);
+                Location first = at < 0 ? null : location(at);
                 if (first != null && !first.equals(here)) {
                     t.add(
                             "CODE_DUPLICATE",
@@ -477,6 +489,25 @@ final class RowValidator {
             }
         }
         return false;
+    }
+
+    private boolean holdsKey(String entitySet, String key) {
+        CompactKeys keys = firstKey.get(entitySet);
+        return keys != null && keys.contains(key);
+    }
+
+    /** A location as one number: its batch's index in {@link #located} and its line. */
+    private long packed(Location here) {
+        int index = batchIndex.computeIfAbsent(here.batchId(), id -> {
+            located.add(new Location(here.batchId(), here.file(), 0));
+            return located.size() - 1;
+        });
+        return ((long) index << 32) | (here.line() & 0xffffffffL);
+    }
+
+    private Location location(long packed) {
+        Location batch = located.get((int) (packed >>> 32));
+        return new Location(batch.batchId(), batch.file(), (int) packed);
     }
 
     private static String other(Location first, Location here) {

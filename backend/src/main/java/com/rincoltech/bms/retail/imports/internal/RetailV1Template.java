@@ -5,6 +5,7 @@ import com.rincoltech.bms.core.imports.ImportBooks;
 import com.rincoltech.bms.core.imports.ImportForecast;
 import com.rincoltech.bms.core.imports.ImportTemplate;
 import com.rincoltech.bms.core.tenancy.Branches;
+import com.rincoltech.bms.kernel.CompactKeys;
 import com.rincoltech.bms.retail.catalogue.CatalogueHistory;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.stock.Quantities;
@@ -489,8 +490,8 @@ class RetailV1Template implements ImportTemplate {
         /** The business's costs as read, shared by every forecast of one read and never changed (issue #880). */
         private final Map<String, Long> held;
 
-        /** The costs of new items this forecast's own products rows gave. */
-        private final Map<String, Long> added = new HashMap<>();
+        /** The costs of new items this forecast's own products rows gave: one per row of a product master (#880). */
+        private final CompactKeys added = new CompactKeys();
 
         private final Map<String, Map<String, BigDecimal>> qty = new TreeMap<>();
         private final Set<String> opened = new HashSet<>();
@@ -526,7 +527,7 @@ class RetailV1Template implements ImportTemplate {
 
         private long cost(String product) {
             Long c = held.get(product);
-            return c != null ? c : added.getOrDefault(product, 0L);
+            return c != null ? c : added.get(product, 0L);
         }
 
         @Override
