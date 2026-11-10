@@ -45,7 +45,7 @@ class MetricsService implements ImportMetrics {
     private static final Pattern DIGITS = Pattern.compile("(?<!\\d)\\d{7,}(?!\\d)");
 
     private static final String DEFECT_COLUMNS = """
-            id, run_id, created_at, logged_by, description, expected_code, known_code, status, fix_ref, closed_by,
+            id, run_id, created_at, logged_by, description, expected_code, new_code_needed, status, fix_ref, closed_by,
             closed_at, version
             """;
 
@@ -356,6 +356,7 @@ class MetricsService implements ImportMetrics {
                 new Defects(
                         d.path("open").asLong(),
                         d.path("closed").asLong(),
+                        d.path("new_codes_needed").asLong(),
                         list(
                                 d,
                                 "codes",
@@ -417,7 +418,10 @@ class MetricsService implements ImportMetrics {
         }
         String description =
                 defect.description() == null ? "" : defect.description().strip();
-        String code = defect.expectedCode() == null ? "" : defect.expectedCode().strip();
+        // No code: a new one is needed and the operator proposes it in the description (Lead on #888).
+        String code = defect.expectedCode() == null || defect.expectedCode().isBlank()
+                ? null
+                : defect.expectedCode().strip();
         return tx.execute(s -> {
             String status = runStatus(runId, true);
             if (!List.of(RunStates.COMMITTED, RunStates.SIGNED_OFF, RunStates.PURGED)
@@ -434,17 +438,24 @@ class MetricsService implements ImportMetrics {
                         "Describe the defect by file, line, field and code, never by a person's name, phone, ID number"
                                 + " or email, and with no number of seven digits or more (write a date as 2026-10-01).");
             }
-            boolean known = catalogueOf(runId).contains(code);
+            // Only a code of the platform's own catalogue, never one the business typed: so the purge keeps it and the
+            // platform report shows it (review of #888, M1).
+            if (code != null && !catalogueOf(runId).contains(code)) {
+                throw ApiException.rule(
+                        "expected_code_unknown",
+                        "That code is not in the issue-code catalogue of this import's template. Leave the code empty"
+                                + " and write the code you propose in the description.");
+            }
             UUID id = UUID.randomUUID();
             jdbc.sql("""
                             INSERT INTO import_defects (id, tenant_id, run_id, logged_by, description, expected_code,
-                                                        known_code)
+                                                        new_code_needed)
                             VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
-                            """).params(id, runId, by, description, code, known).update();
+                            """).params(id, runId, by, description, code, code == null).update();
             Map<String, Object> after = new LinkedHashMap<>();
             after.put("defect_id", id);
-            after.put("expected_code", code);
-            after.put("known_code", known);
+            after.put("expected_code", code == null ? "none" : code);
+            after.put("new_code_needed", code == null);
             audit.record(AuditLog.Entry.created("core.import_run.defect_logged", "import_run", runId, null, after));
             return defect(id);
         });
@@ -515,22 +526,19 @@ class MetricsService implements ImportMetrics {
     /** The issue codes of the templates the run's batches were read with. */
     private List<String> catalogueOf(UUID runId) {
         List<String> codes = new ArrayList<>();
-        jdbc.sql("""
+        List<Map<String, Object>> used = jdbc.sql("""
                         SELECT DISTINCT template_key, template_version FROM import_batches
                          WHERE run_id = ? AND template_key IS NOT NULL
-                        """)
-                .param(runId)
-                .query((rs, n) -> {
-                    String key = rs.getString(1);
-                    int version = rs.getInt(2);
-                    if (templates.find(key, version).isPresent()) {
-                        templates.catalogue(key, version).stream()
-                                .map(ImportTemplate.IssueCode::code)
-                                .forEach(codes::add);
-                    }
-                    return key;
-                })
-                .list();
+                        """).param(runId).query().listOfRows();
+        for (Map<String, Object> t : used) {
+            String key = (String) t.get("template_key");
+            int version = ((Number) t.get("template_version")).intValue();
+            if (templates.find(key, version).isPresent()) {
+                templates.catalogue(key, version).stream()
+                        .map(ImportTemplate.IssueCode::code)
+                        .forEach(codes::add);
+            }
+        }
         return codes;
     }
 
@@ -550,7 +558,7 @@ class MetricsService implements ImportMetrics {
                 rs.getObject("logged_by", UUID.class),
                 rs.getString("description"),
                 rs.getString("expected_code"),
-                rs.getBoolean("known_code"),
+                rs.getBoolean("new_code_needed"),
                 rs.getString("status"),
                 rs.getString("fix_ref"),
                 rs.getObject("closed_by", UUID.class),

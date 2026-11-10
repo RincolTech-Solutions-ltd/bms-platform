@@ -4169,10 +4169,19 @@ class MigrationOrderIT {
                     .isEqualTo(10);
 
             String insert = """
-                    INSERT INTO import_defects (id, tenant_id, run_id, logged_by, description, expected_code, known_code,
-                                                status)
-                    VALUES (?, ?, ?, ?, 'Test defect: line 2 was imported as line 3', 'TEST_CODE', false, ?)
+                    INSERT INTO import_defects (id, tenant_id, run_id, logged_by, description, expected_code,
+                                                new_code_needed, status)
+                    VALUES (?, ?, ?, ?, 'Test defect: line 2 was imported as line 3', 'TYPE_INVALID', false, ?)
                     """;
+            // A code and a new code needed are never both, and never neither (import_defects_code_or_new).
+            assertThatThrownBy(() -> owner.sql("""
+                            INSERT INTO import_defects (id, tenant_id, run_id, logged_by, description, expected_code,
+                                                        new_code_needed)
+                            VALUES (?, ?, ?, ?, 'Test defect: no code and none needed', NULL, false)
+                            """)
+                            .params(UUID.randomUUID(), tenant, run, UUID.randomUUID())
+                            .update())
+                    .hasMessageContaining("import_defects_code_or_new");
             assertThatThrownBy(() -> owner.sql(insert)
                             .params(UUID.randomUUID(), tenant, draft, UUID.randomUUID(), "open")
                             .update())

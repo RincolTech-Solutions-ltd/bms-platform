@@ -1216,7 +1216,9 @@ Detailed requirements are NFR-DP-01 to NFR-DP-08 in chapter 4. Design consequenc
   holds seven digits in a row (422 `description_names_personal_data`); and it is one of the purge's free-text columns,
   hashed with a salt kept nowhere when the run is purged (trigger `import_defects_purged`), open or closed, or, for a defect
   logged against a run already purged, as it is stored, and written "Removed" by the removal of a closed business. Its audit rows hold the code and the
-  fix's reference, never the description. The platform report reads every business's runs through one definer function
+  fix's reference, never the description. The code is only ever one of the platform's issue-code catalogue, refused
+  otherwise (a code still to be made is proposed in the description), so it holds nothing a business typed (Lead on
+  #888). The platform report reads every business's runs through one definer function
   that refuses a call bound to a business (`platform_import_runs_report`), on the platform host only, and names each
   business by its slug, never its name (`ImportMetricsIT` sends no token and a tenant's staff token to both routes).
 - Staff free text on a loan (purpose text, return, rejection and cancellation notes, visit notes)

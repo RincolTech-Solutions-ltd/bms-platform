@@ -1705,8 +1705,10 @@ section 4.1; coordinated with #110, which builds no second framework).**
   `dry_run_ms` (the last stored dry run). NULL for what ran before V148; the metrics leave such a step out.
 - **The defect log** (`import_defects`, chapter 6 section 6.5): during hypercare a holder of `core.imports.manage` logs a
   defect against an imported run (`committed`, `signed_off` or `purged`; otherwise 409 `run_not_imported`) with a
-  description that names nobody and the issue code it should have had, marked `known_code` false when the run's template
-  has no such code (a new code to add, spec section 8), and closes it once with the fix's reference (`#123`, a commit hash
+  description that names nobody and the issue code it should have had, which must be a code of the issue-code catalogue
+  of the run's template (otherwise 422 `expected_code_unknown`; Lead on #888, so no business types a code). When no code
+  fits, the defect is logged with none and `new_code_needed`, and the code proposed goes in the description, which is
+  screened and hashed (spec section 8: each defect becomes a new rule or a new code). It closes once with the fix's reference (`#123`, a commit hash
   or a GitHub link). Both are audited (`core.import_run.defect_logged` with the code, `core.import_run.defect_closed` with
   the reference), never with the description. The trigger `import_defects_kept` holds the rules for every role: logged
   open against an imported run, closed whole and never opened again, its run, code, author and time fixed.

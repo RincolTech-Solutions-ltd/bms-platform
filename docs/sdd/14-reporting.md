@@ -413,7 +413,7 @@ Parameters: the run. Sections:
 | Questions to the customer | asked, answered, open, median and longest days to answer | `import_issues.ask_customer`, `status` and `resolution_id`; the times of the resolutions |
 | Mappings | the mapping versions the batches were read with; the versions of those mappings saved while the run was open | `import_batches.mapping_id`, `import_mappings` |
 | Rehearsal against cutover | each rehearsal's time, outcome and match with the dry run; per source, each count of the newest committed rehearsal that differs from the cutover | `import_rehearsals`, `import_batches.report` |
-| Defects | open and closed, by the code they should have had | `import_defects` |
+| Defects | open and closed, by the catalogue code they should have had, and how many need a new code | `import_defects` |
 
 Holds no personal value: codes, counts, times, file sources by their mapping's source name. Tests: the golden runs of
 `retail_v1` (`RetailV1TemplateIT`) and `lending_loans_v1` (`LendingLoansV1TemplateIT`) check every figure against the
@@ -426,7 +426,10 @@ mappings change, which codes recur, how long the customers take to answer and ho
 the platform host only: `GET /platform/imports/report` (JSON, `since` and `limit` up to 500) and
 `GET /platform/imports/report.csv` (chapter 7 section 7.11.3). It reads across businesses through the definer function
 `platform_import_runs_report`, which refuses a call bound to a business, and names each business by its slug, never its
-name, in the JSON and the CSV. The CSV, one row per run (slug, run, status, origin, fabricated, templates, the created,
+name, in the JSON and the CSV; the business's own labels (mapping names, batches' mapping sources and rehearsal source
+file names) are left out of the JSON, in that function (`bms_import_platform_view`) and in the application (review of
+#888). Defect codes on it are always codes of the issue-code catalogue (Lead on #888). The JSON is a read like the other
+platform lists and is not audited; the CSV, which leaves the platform host as a file, is. The CSV, one row per run (slug, run, status, origin, fabricated, templates, the created,
 committed, signed off and purged moments, batches, rows, excluded, written, existing, skipped, issues, blocking issues,
 resolutions, questions asked and answered, median days to answer, mapping versions used and made, rehearsals, rehearsal
 differences, defects open and closed, cutover seconds), is recorded in the platform audit log

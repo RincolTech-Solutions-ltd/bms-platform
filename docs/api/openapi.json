@@ -3556,7 +3556,7 @@
             "type" : "string"
           },
           "expected_code" : {
-            "description" : "The issue code the row should have had",
+            "description" : "The catalogue code the row should have had; null when a new code is needed",
             "type" : "string"
           },
           "fix_ref" : {
@@ -3567,10 +3567,6 @@
             "format" : "uuid",
             "type" : "string"
           },
-          "known_code" : {
-            "description" : "False when the code is not in the catalogue of the run's template: a new code to add",
-            "type" : "boolean"
-          },
           "logged_at" : {
             "format" : "date-time",
             "type" : "string"
@@ -3578,6 +3574,10 @@
           "logged_by" : {
             "format" : "uuid",
             "type" : "string"
+          },
+          "new_code_needed" : {
+            "description" : "True when no catalogue code fits; the code proposed is in the description",
+            "type" : "boolean"
           },
           "run_id" : {
             "format" : "uuid",
@@ -3628,10 +3628,16 @@
             "type" : "integer"
           },
           "codes" : {
+            "description" : "By catalogue code",
             "items" : {
               "$ref" : "#/components/schemas/ImportDefectCodeCount"
             },
             "type" : "array"
+          },
+          "new_codes_needed" : {
+            "description" : "Defects that need a code the catalogue does not have yet",
+            "format" : "int64",
+            "type" : "integer"
           },
           "open" : {
             "format" : "int64",
@@ -3659,13 +3665,12 @@
             "type" : "string"
           },
           "expected_code" : {
-            "description" : "The issue code the row should have had, of the template or a new one",
-            "minLength" : 1,
+            "description" : "The code of the issue-code catalogue the row should have had; leave it out when a new code is needed and propose that code in the description",
             "pattern" : "[A-Z][A-Z0-9_]{1,59}",
             "type" : "string"
           }
         },
-        "required" : [ "description", "expected_code" ]
+        "required" : [ "description" ]
       },
       "ImportIssue" : {
         "description" : "One issue of the review queue; its message never holds a value of a row",

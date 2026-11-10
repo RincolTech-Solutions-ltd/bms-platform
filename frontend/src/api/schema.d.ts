@@ -10539,18 +10539,18 @@ export interface components {
             closed_by?: string;
             /** @description What went wrong, naming nobody; its hash once the run is purged (open or closed) */
             description?: string;
-            /** @description The issue code the row should have had */
+            /** @description The catalogue code the row should have had; null when a new code is needed */
             expected_code?: string;
             /** @description The fix: #123, a commit hash or a GitHub link; null while open */
             fix_ref?: string;
             /** Format: uuid */
             id?: string;
-            /** @description False when the code is not in the catalogue of the run's template: a new code to add */
-            known_code?: boolean;
             /** Format: date-time */
             logged_at?: string;
             /** Format: uuid */
             logged_by?: string;
+            /** @description True when no catalogue code fits; the code proposed is in the description */
+            new_code_needed?: boolean;
             /** Format: uuid */
             run_id?: string;
             /** @description open or closed */
@@ -10575,7 +10575,13 @@ export interface components {
         ImportDefectCounts: {
             /** Format: int64 */
             closed?: number;
+            /** @description By catalogue code */
             codes?: components["schemas"]["ImportDefectCodeCount"][];
+            /**
+             * Format: int64
+             * @description Defects that need a code the catalogue does not have yet
+             */
+            new_codes_needed?: number;
             /** Format: int64 */
             open?: number;
         };
@@ -10586,8 +10592,8 @@ export interface components {
         ImportDefectRequest: {
             /** @description What went wrong, by file, line, field and code; never a person's name, phone, ID number or email */
             description: string;
-            /** @description The issue code the row should have had, of the template or a new one */
-            expected_code: string;
+            /** @description The code of the issue-code catalogue the row should have had; leave it out when a new code is needed and propose that code in the description */
+            expected_code?: string;
         };
         /** @description One issue of the review queue; its message never holds a value of a row */
         ImportIssue: {

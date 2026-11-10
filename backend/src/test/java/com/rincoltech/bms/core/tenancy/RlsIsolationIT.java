@@ -1291,8 +1291,8 @@ public class RlsIsolationIT {
         // The defect log of the run's hypercare (migration V148, #140): one open defect, its description fabricated.
         owner.sql("""
                         INSERT INTO import_defects (id, tenant_id, run_id, logged_by, description, expected_code,
-                                                    known_code)
-                        VALUES (?, ?, ?, ?, 'Test defect: line 2 imported as line 3', 'TEST_CODE', false)
+                                                    new_code_needed)
+                        VALUES (?, ?, ?, ?, 'Test defect: line 2 imported as line 3', NULL, true)
                         """)
                 .params(UUID.randomUUID(), t.tenantId(), committedRun, user)
                 .update();

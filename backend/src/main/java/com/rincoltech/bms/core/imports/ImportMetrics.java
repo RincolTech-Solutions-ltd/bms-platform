@@ -34,8 +34,9 @@ public interface ImportMetrics {
 
     /**
      * Logs a defect against a run: 409 {@code run_not_imported} unless it is committed, signed off or purged; 422
-     * {@code description_names_personal_data} for a description that names a personal value; audited
-     * {@code core.import_run.defect_logged} with the code and never the description.
+     * {@code expected_code_unknown} for a code outside the issue-code catalogue of the run's template (none given: a new
+     * code is needed, proposed in the description); 422 {@code description_names_personal_data} for a description that
+     * names a personal value; audited {@code core.import_run.defect_logged} with the code and never the description.
      */
     Defect logDefect(UUID runId, NewDefect defect, UUID by);
 
@@ -51,7 +52,7 @@ public interface ImportMetrics {
     /** The same as CSV, at most 500 runs, each business by its slug only; recorded in the platform audit log. */
     String platformReportCsv(Instant since, UUID operatorId);
 
-    /** A defect as the operator writes it. */
+    /** A defect as the operator writes it; a null or blank code means a new code is needed. */
     record NewDefect(String description, String expectedCode) {}
 
     @Schema(name = "ImportDefect", description = "A defect found after the cutover, logged against the run")
@@ -64,13 +65,11 @@ public interface ImportMetrics {
             @Schema(description = "What went wrong, naming nobody; its hash once the run is purged (open or closed)")
             String description,
 
-            @Schema(description = "The issue code the row should have had")
+            @Schema(description = "The catalogue code the row should have had; null when a new code is needed")
             String expectedCode,
 
-            @Schema(
-                    description =
-                            "False when the code is not in the catalogue of the run's template: a new code to add")
-            boolean knownCode,
+            @Schema(description = "True when no catalogue code fits; the code proposed is in the description")
+            boolean newCodeNeeded,
 
             @Schema(description = "open or closed") String status,
 
@@ -233,7 +232,14 @@ public interface ImportMetrics {
             Long cutover) {}
 
     @Schema(name = "ImportDefectCounts")
-    record Defects(long open, long closed, List<CodeCount> codes) {}
+    record Defects(
+            long open,
+            long closed,
+
+            @Schema(description = "Defects that need a code the catalogue does not have yet")
+            long newCodesNeeded,
+
+            @Schema(description = "By catalogue code") List<CodeCount> codes) {}
 
     @Schema(name = "ImportDefectCodeCount")
     record CodeCount(String code, long count) {}

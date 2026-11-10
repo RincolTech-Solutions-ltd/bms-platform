@@ -59,9 +59,11 @@ class MetricsController {
                             + " number or email")
             String description,
 
-            @NotBlank
             @Pattern(regexp = "[A-Z][A-Z0-9_]{1,59}")
-            @Schema(description = "The issue code the row should have had, of the template or a new one")
+            @Schema(
+                    description =
+                            "The code of the issue-code catalogue the row should have had; leave it out when a new"
+                                    + " code is needed and propose that code in the description")
             String expectedCode) {}
 
     @Schema(name = "ImportDefectCloseRequest")

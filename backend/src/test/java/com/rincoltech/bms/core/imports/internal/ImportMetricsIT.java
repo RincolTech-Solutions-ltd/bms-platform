@@ -45,6 +45,9 @@ class ImportMetricsIT extends IntegrationTest {
     ImportMetrics metrics;
 
     @Autowired
+    com.rincoltech.bms.core.imports.ImportTemplates templates;
+
+    @Autowired
     TestRestTemplate http;
 
     @Autowired
@@ -92,13 +95,36 @@ class ImportMetricsIT extends IntegrationTest {
         return http.exchange(path, method, new HttpEntity<>(body, h), JsonNode.class);
     }
 
+    /** A defect as a member of staff logs it; a null code means a new code is needed. */
     ResponseEntity<JsonNode> log(TestDatabase.Fixture f, UUID run, String description, String code) {
-        return call(
-                f,
-                HttpMethod.POST,
-                "/api/v1/imports/runs/" + run + "/defects",
-                Map.of("description", description, "expected_code", code),
-                MANAGE);
+        Map<String, Object> body = new java.util.HashMap<>();
+        body.put("description", description);
+        body.put("expected_code", code);
+        return call(f, HttpMethod.POST, "/api/v1/imports/runs/" + run + "/defects", body, MANAGE);
+    }
+
+    /**
+     * A batch of the run read with a mapping of the fixture template, as the owner, so the run has the issue-code
+     * catalogue of {@code fixture_shop_v1} (the shared codes, {@code TYPE_INVALID} among them).
+     */
+    static void catalogued(TestDatabase.Fixture f, UUID run, String mappingName, String source) {
+        UUID mapping = UUID.randomUUID();
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO import_mappings (id, tenant_id, name, version, template_key, template_version,
+                                                     document, created_by)
+                        VALUES (?, ?, ?, 1, 'fixture_shop', 1, '{"template": "fixture_shop", "template_version": 1}', ?)
+                        """)
+                .params(mapping, f.tenantId(), mappingName, UUID.randomUUID())
+                .update();
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO import_batches (id, tenant_id, run_id, seq, status, row_count, mapping_id,
+                                                    mapping_source, template_key, template_version)
+                        VALUES (?, ?, ?, 1, 'parsed', 2, ?, ?, 'fixture_shop', 1)
+                        """)
+                .params(UUID.randomUUID(), f.tenantId(), run, mapping, source)
+                .update();
     }
 
     ResponseEntity<JsonNode> close(TestDatabase.Fixture f, UUID defect, int version, String fixRef) {
@@ -119,16 +145,15 @@ class ImportMetricsIT extends IntegrationTest {
     @Test
     void aDefectIsLoggedAndClosedWithAnAuditTrailAndStaysClosed() {
         UUID run = run(t, "signed_off");
+        catalogued(t, run, "fab-shop-log", "item_list");
         ResponseEntity<JsonNode> logged =
-                log(t, run, "Line 14 of the item list: a pack size of zero was imported as one", "PACK_SIZE_ZERO");
+                log(t, run, "Line 14 of the item list: a pack size of zero was imported as one", "TYPE_INVALID");
         assertThat(logged.getStatusCode()).as("%s", logged.getBody()).isEqualTo(HttpStatus.CREATED);
         JsonNode defect = logged.getBody();
         UUID id = UUID.fromString(defect.get("id").asString());
         assertThat(defect.get("status").asString()).isEqualTo("open");
-        assertThat(defect.get("expected_code").asString()).isEqualTo("PACK_SIZE_ZERO");
-        assertThat(defect.get("known_code").asBoolean())
-                .as("no template knows it: a new code")
-                .isFalse();
+        assertThat(defect.get("expected_code").asString()).isEqualTo("TYPE_INVALID");
+        assertThat(defect.get("new_code_needed").asBoolean()).isFalse();
         assertThat(defect.get("logged_by").asString()).isEqualTo(staff.toString());
         assertThat(defect.get("version").asInt()).isZero();
 
@@ -166,7 +191,7 @@ class ImportMetricsIT extends IntegrationTest {
         assertThat(trail).hasSize(2);
         assertThat(trail.get(0))
                 .startsWith("core.import_run.defect_logged|" + staff)
-                .contains(id.toString(), "PACK_SIZE_ZERO")
+                .contains(id.toString(), "TYPE_INVALID")
                 .doesNotContain("item list");
         assertThat(trail.get(1))
                 .startsWith("core.import_run.defect_closed|" + staff)
@@ -179,7 +204,8 @@ class ImportMetricsIT extends IntegrationTest {
         assertThat(m.defects().closed()).isEqualTo(1);
         assertThat(m.defects().codes())
                 .extracting(ImportMetrics.CodeCount::code)
-                .containsExactly("PACK_SIZE_ZERO");
+                .containsExactly("TYPE_INVALID");
+        assertThat(m.defects().newCodesNeeded()).isZero();
 
         // The database keeps it closed and keeps its run, code and author, for the owner role too.
         assertThatThrownBy(() -> TestDatabase.owner()
@@ -189,7 +215,7 @@ class ImportMetricsIT extends IntegrationTest {
                         .update())
                 .hasStackTraceContaining("a closed defect stays closed");
         assertThatThrownBy(() -> TestDatabase.owner()
-                        .sql("UPDATE import_defects SET expected_code = 'OTHER_CODE' WHERE id = ?")
+                        .sql("UPDATE import_defects SET expected_code = 'REQUIRED_MISSING' WHERE id = ?")
                         .param(id)
                         .update())
                 .hasStackTraceContaining("a defect keeps its run, code, author and time");
@@ -215,10 +241,19 @@ class ImportMetricsIT extends IntegrationTest {
         ResponseEntity<JsonNode> badCode = log(t, run, "A code that is not a code at all here", "not a code");
         assertThat(badCode.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(badCode.getBody().get("code").asString()).isEqualTo("validation_failed");
-        // A date and a line number are not personal.
-        assertThat(log(t, run, "Since 2026-10-01 line 14 kept the old price", "PRICE_STALE")
-                        .getStatusCode())
-                .isEqualTo(HttpStatus.CREATED);
+        // Only a code of the run's issue-code catalogue (Lead on #888): one the business typed is refused, and none
+        // means a new code is needed, proposed in the description. A date and a line number are not personal.
+        catalogued(t, run, "fab-shop-refusals", "item_list");
+        ResponseEntity<JsonNode> unknown = log(t, run, "Line 3 of the item list kept a stale price", "BRANDNAME_DUP");
+        assertThat(unknown.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(unknown.getBody().get("code").asString()).isEqualTo("expected_code_unknown");
+        ResponseEntity<JsonNode> fresh =
+                log(t, run, "Since 2026-10-01 line 14 kept the old price; propose PRICE_STALE", null);
+        assertThat(fresh.getStatusCode()).as("%s", fresh.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(fresh.getBody().get("new_code_needed").asBoolean()).isTrue();
+        assertThat(fresh.getBody().get("expected_code").isNull()).isTrue();
+        assertThat(count("SELECT count(*) FROM import_defects WHERE expected_code = 'BRANDNAME_DUP'"))
+                .isZero();
 
         UUID notImported = run(t, "ready");
         ResponseEntity<JsonNode> early = log(t, notImported, "Found before the cutover, which is too early", "X_CODE");
@@ -233,7 +268,7 @@ class ImportMetricsIT extends IntegrationTest {
         assertThat(call(t, HttpMethod.GET, "/api/v1/imports/runs/" + theirs + "/metrics", null, MANAGE)
                         .getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
-        UUID theirDefect = UUID.fromString(log(other, theirs, "A defect of the other business itself", "X_CODE")
+        UUID theirDefect = UUID.fromString(log(other, theirs, "A defect of the other business itself", null)
                 .getBody()
                 .get("id")
                 .asString());
@@ -289,22 +324,15 @@ class ImportMetricsIT extends IntegrationTest {
         UUID ours = run(t, "committed");
         UUID theirs = run(other, "signed_off");
         // JUSTIFICATION-A3: review of #888 finding 3 asks to prove the platform view leaves out the business's labels.
-        // The business's own labels: a mapping and a source it named after its trading name (review of #888).
-        UUID mapping = UUID.randomUUID();
-        TestDatabase.owner().sql("""
-                        INSERT INTO import_mappings (id, tenant_id, name, version, template_key, template_version,
-                                                     document, created_by)
-                        VALUES (?, ?, 'brandname-stock', 1, 'fixture_shop', 1,
-                                '{"template": "fixture_shop", "template_version": 1}', ?)
-                        """).params(mapping, t.tenantId(), staff).update();
-        TestDatabase.owner()
-                .sql("""
-                        INSERT INTO import_batches (id, tenant_id, run_id, seq, status, row_count, mapping_id,
-                                                    mapping_source, template_key, template_version)
-                        VALUES (?, ?, ?, 1, 'parsed', 2, ?, 'brandname_items', 'fixture_shop', 1)
-                        """)
-                .params(UUID.randomUUID(), t.tenantId(), ours, mapping)
-                .update();
+        // The business's own labels: a mapping and a source it named after its trading name (review of #888). A defect
+        // with a catalogue code, and one the business tries to give a code of its own, which is refused (M1).
+        catalogued(t, ours, "brandname-stock", "brandname_items");
+        assertThat(log(t, ours, "Line 2 of the item list was read as text", "TYPE_INVALID")
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        assertThat(log(t, ours, "Line 2 of the item list was read as text", "BRANDNAME_DUP")
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(call(t, HttpMethod.GET, "/api/v1/imports/runs/" + ours + "/metrics", null, MANAGE)
                         .getBody()
                         .toString())
@@ -341,7 +369,23 @@ class ImportMetricsIT extends IntegrationTest {
         assertThat(report.getStatusCode()).as("%s", report.getBody()).isEqualTo(HttpStatus.OK);
         String body = report.getBody().toString();
         assertThat(body).contains(t.slug(), other.slug(), ours.toString(), theirs.toString());
-        assertThat(body).doesNotContain(ourName).doesNotContain("brandname");
+        // Only the slug, and no code outside the catalogue: the defect's code is the catalogue's TYPE_INVALID.
+        assertThat(body)
+                .doesNotContain(ourName)
+                .doesNotContainIgnoringCase("brandname")
+                .contains("TYPE_INVALID");
+        // Every defect code anywhere on the report is a code of a registered template's catalogue (Lead on #888).
+        java.util.Set<String> catalogue = new java.util.HashSet<>();
+        for (com.rincoltech.bms.core.imports.ImportTemplate tpl : templates.list()) {
+            templates.catalogue(tpl.key(), tpl.version()).forEach(c -> catalogue.add(c.code()));
+        }
+        for (JsonNode row : report.getBody().get("items")) {
+            for (JsonNode c : row.get("metrics").get("defects").get("codes")) {
+                assertThat(catalogue)
+                        .as("a defect code on the platform report")
+                        .contains(c.get("code").asString());
+            }
+        }
         JsonNode ourRow = null;
         for (JsonNode row : report.getBody().get("items")) {
             if (row.get("metrics").get("run_id").asString().equals(ours.toString())) {

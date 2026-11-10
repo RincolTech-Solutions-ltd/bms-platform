@@ -25,8 +25,8 @@
 -- (never its name) with the run's metrics, newest first.
 --
 -- `import_defects`: the defect log of a run during hypercare (spec section 2 stage 10 and section 8): a problem found after
--- the cutover, the issue code it should have had (an existing code of the run's template, or a new one to add), and once
--- fixed the fix's reference. Logged and closed by a holder of core.imports.manage, both audited by the application. A
+-- the cutover, the issue code it should have had (a code of the run's issue-code catalogue, checked by the application;
+-- or none and new_code_needed, the code proposed in the description, Lead on #888), and once fixed the fix's reference. Logged and closed by a holder of core.imports.manage, both audited by the application. A
 -- defect is logged only against an imported run (committed, signed off or purged), is logged open, closes once with its
 -- fix reference, who and when, and never opens again or changes its run, code, author or time (trigger
 -- import_defects_kept). bms_app may update only status, fix_ref, closed_by, closed_at and version (a column grant).
@@ -37,8 +37,9 @@
 -- description hashed at once (import_defects_kept), so a purged run never holds a defect's words. Before that the application
 -- refuses a description that names a personal value of the run's staged rows or holds a phone-like run of digits or an
 -- email address (MetricsService). The removal of a closed business writes "Removed" (imports_erase_personal_data, below).
--- expected_code is held to an issue code's form by a CHECK and fix_ref to an issue or pull request number, a commit hash
--- or a GitHub link by another; neither can carry a name.
+-- expected_code is only ever a code of the platform's own issue-code catalogue (the application refuses any other, so
+-- no business types it), which is why the purge keeps it and the platform report shows it. fix_ref is held by a CHECK to
+-- an issue or pull request number, a commit hash or a GitHub link.
 --
 -- Locks, said plainly. Each ADD COLUMN takes ACCESS EXCLUSIVE on its table for milliseconds (nullable, no default, no
 -- rewrite; the CHECKs scan the import tables, which are small); the new table takes SHARE ROW EXCLUSIVE on `tenants` and
@@ -68,16 +69,19 @@ CREATE TABLE import_defects (
     logged_by     uuid         NOT NULL,
     -- What went wrong, without personal data (see the header); its hash once the run is purged.
     description   varchar(500) NOT NULL CHECK (btrim(description) <> ''),
-    -- The issue code the row should have had: a code of the run's template, or a new code to add to it.
-    expected_code text         NOT NULL CHECK (expected_code ~ '^[A-Z][A-Z0-9_]{1,59}$'),
-    -- Whether expected_code was in the catalogue of the run's template when the defect was logged (false: a new code).
-    known_code    boolean      NOT NULL,
+    -- The issue code the row should have had: a code of the issue-code catalogue of the run's template, which the
+    -- application checks when the defect is logged (Lead on #888: never a code the business typed). NULL when the code
+    -- does not exist yet: then new_code_needed is true and the code the operator proposes goes in the description.
+    expected_code text         CHECK (expected_code ~ '^[A-Z][A-Z0-9_]{1,59}$'),
+    new_code_needed boolean    NOT NULL,
     status        text         NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
     -- The fix: an issue or pull request number (#123), a commit hash, or a GitHub link to one.
     fix_ref       varchar(200) CHECK (fix_ref ~ '^(#[0-9]{1,7}|[0-9a-f]{7,40}|https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/(pull|issues|commit)/[0-9a-f]{1,40})$'),
     closed_by     uuid,
     closed_at     timestamptz,
     UNIQUE (tenant_id, id),
+    -- A catalogue code, or none and a new code needed: never both, never neither.
+    CONSTRAINT import_defects_code_or_new CHECK ((expected_code IS NULL) = new_code_needed),
     CONSTRAINT import_defects_closed_whole
         CHECK ((status = 'closed') = (closed_at IS NOT NULL)
                AND (closed_at IS NULL) = (closed_by IS NULL)
@@ -426,14 +430,17 @@ BEGIN
          WHERE m.rehearsal_n IS DISTINCT FROM m.cutover_n;
     END IF;
 
-    -- The defects logged against the run during hypercare, by the code they should have had.
+    -- The defects logged against the run during hypercare, by the catalogue code they should have had, and how many need
+    -- a code the catalogue does not have yet.
     SELECT jsonb_build_object(
                'open', count(*) FILTER (WHERE d.status = 'open'),
                'closed', count(*) FILTER (WHERE d.status = 'closed'),
+               'new_codes_needed', count(*) FILTER (WHERE d.new_code_needed),
                'codes', coalesce((SELECT jsonb_agg(jsonb_build_object('code', c.expected_code, 'count', c.n)
                                                    ORDER BY c.expected_code)
                                     FROM (SELECT d2.expected_code, count(*) AS n FROM import_defects d2
                                            WHERE d2.tenant_id = v_r.tenant_id AND d2.run_id = v_r.id
+                                             AND d2.expected_code IS NOT NULL
                                            GROUP BY d2.expected_code) c), '[]'::jsonb))
       INTO v_defects
       FROM import_defects d WHERE d.tenant_id = v_r.tenant_id AND d.run_id = v_r.id;
@@ -474,8 +481,24 @@ $$;
 REVOKE ALL ON FUNCTION import_run_metrics(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION import_run_metrics(uuid) TO bms_app;
 
--- The platform report: every business's runs, newest first, each business by its slug only, with the run's metrics. Read
--- across businesses by the platform operator's route alone: a call bound to a business is refused.
+-- The metrics as the platform may see them (review of #888, N2): the business's own labels left out, here as well as in
+-- the application, so no caller of the report can read them. A mapping's name, a batch's mapping source and a rehearsal
+-- source's file name are typed by the business and may carry its trading name; only the slug names the business.
+CREATE FUNCTION bms_import_platform_view(p jsonb) RETURNS jsonb
+LANGUAGE sql IMMUTABLE SET search_path = public, pg_temp AS $$
+    SELECT p || jsonb_build_object(
+        'mappings', coalesce((SELECT jsonb_agg(e.v || jsonb_build_object('name', NULL::text) ORDER BY e.n)
+                                FROM jsonb_array_elements(p -> 'mappings') WITH ORDINALITY AS e(v, n)), '[]'::jsonb),
+        'batches', coalesce((SELECT jsonb_agg(e.v || jsonb_build_object('mapping_source', NULL::text) ORDER BY e.n)
+                               FROM jsonb_array_elements(p -> 'batches') WITH ORDINALITY AS e(v, n)), '[]'::jsonb),
+        'rehearsal_differences',
+            coalesce((SELECT jsonb_agg(e.v || jsonb_build_object('source', NULL::text) ORDER BY e.n)
+                        FROM jsonb_array_elements(p -> 'rehearsal_differences') WITH ORDINALITY AS e(v, n)), '[]'::jsonb))
+$$;
+REVOKE ALL ON FUNCTION bms_import_platform_view(jsonb) FROM PUBLIC;
+
+-- The platform report: every business's runs, newest first, each business by its slug only, with the run's metrics without
+-- its labels. Read across businesses by the platform operator's route alone: a call bound to a business is refused.
 CREATE FUNCTION platform_import_runs_report(p_since timestamptz, p_limit integer)
 RETURNS TABLE (tenant_slug text, run_id uuid, metrics jsonb)
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
@@ -485,7 +508,7 @@ BEGIN
             USING ERRCODE = 'insufficient_privilege';
     END IF;
     RETURN QUERY
-    SELECT CAST(t.slug AS text), r.id, import_run_metrics(r.id)
+    SELECT CAST(t.slug AS text), r.id, bms_import_platform_view(import_run_metrics(r.id))
       FROM import_runs r
       JOIN tenants t ON t.id = r.tenant_id
      WHERE p_since IS NULL OR r.created_at >= p_since

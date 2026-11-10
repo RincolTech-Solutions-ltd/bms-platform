@@ -1491,7 +1491,9 @@ Added by `V148__import_metrics_and_defects.sql` (issue #140, spec section 8, cha
 - **`import_defects`** (RLS forced, `SELECT, INSERT`, and `UPDATE` on `status`, `fix_ref`, `closed_by`, `closed_at` and
   `version` only, a column grant): the defect log of a run's hypercare. `id`, `tenant_id`, `created_at`, `version`,
   `run_id` (FK `(tenant_id, run_id)`), `logged_by`, `description varchar(500)` (the operator's words, naming nobody),
-  `expected_code` (an issue code's form, a CHECK), `known_code` (whether the run's template had it when logged), `status`
+  `expected_code` (a code of the run's issue-code catalogue, checked by the application when logged; NULL when none fits)
+  and `new_code_needed` (true exactly when `expected_code` is NULL, the CHECK `import_defects_code_or_new`; the code
+  proposed then goes in the description; Lead on #888), `status`
   [`open`, `closed`], `fix_ref varchar(200)` (`#123`, a commit hash or a GitHub link to a pull request, issue or commit, a
   CHECK), `closed_by`, `closed_at` (the CHECK `import_defects_closed_whole`: closed exactly when all three are set). Plain
   index `import_defects_by_run (tenant_id, run_id, created_at)`. The trigger `import_defects_kept` (every role): logged open

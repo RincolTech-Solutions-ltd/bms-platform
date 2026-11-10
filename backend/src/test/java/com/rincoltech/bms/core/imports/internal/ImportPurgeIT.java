@@ -443,8 +443,9 @@ class ImportPurgeIT extends IntegrationTest {
             "import_rehearsals.timings",
             "import_deletion_certificates.reason",
             "import_deletion_certificates.sha256",
-            // V148 (#140): an issue code's form, open or closed, and a fix reference's form (#123, a commit hash or a
-            // GitHub link), each held by a CHECK.
+            // V148 (#140): a code of the platform's issue-code catalogue only, refused otherwise when logged (Lead on
+            // #888, never typed by the business), open or closed, and a fix reference's form (#123, a commit hash or a
+            // GitHub link) held by a CHECK.
             "import_defects.expected_code",
             "import_defects.status",
             "import_defects.fix_ref",
@@ -627,8 +628,8 @@ class ImportPurgeIT extends IntegrationTest {
         TestDatabase.owner()
                 .sql("""
                         INSERT INTO import_defects (id, tenant_id, run_id, logged_by, description, expected_code,
-                                                    known_code)
-                        VALUES (?, ?, ?, ?, ?, 'BUYER_DUPLICATE', false)
+                                                    new_code_needed)
+                        VALUES (?, ?, ?, ?, ?, 'TYPE_INVALID', false)
                         """)
                 .params(id, t.tenantId(), run, operator, description)
                 .update();
@@ -685,9 +686,10 @@ class ImportPurgeIT extends IntegrationTest {
         Defect late = as(
                 t,
                 () -> metrics.logDefect(
-                        run, new NewDefect("Fabricated Buyer Gamma was imported twice", "BUYER_DUPLICATE"), operator));
+                        run, new NewDefect("Fabricated Buyer Gamma was imported twice", null), operator));
         assertThat(late.description()).matches("sha256:[0-9a-f]{64}");
         assertThat(late.status()).isEqualTo("open");
+        assertThat(late.newCodeNeeded()).isTrue();
         assertThat(personalValuesOf(run, PERSONAL))
                 .as("columns holding a personal value after a defect logged on the purged run")
                 .isEmpty();
