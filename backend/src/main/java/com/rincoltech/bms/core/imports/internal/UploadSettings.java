@@ -26,8 +26,12 @@ import org.springframework.util.unit.DataSize;
 @EnableConfigurationProperties(UploadSettings.Properties.class)
 class UploadSettings {
 
-    /** The rows a batch may hold (spec section 3.1), proven on the staging heap by #880 (SDD chapter 15 section 15.7). */
-    static final int DEFAULT_MAX_ROWS = 100_000;
+    /**
+     * The rows a batch may hold: 25,000 until #880 lets it go to 100,000 (spec section 3.1), the largest size the big file
+     * test commits on the staging heap inside the time limits with a tenth of the old generation to spare (SDD chapter 15
+     * section 15.7).
+     */
+    static final int DEFAULT_MAX_ROWS = 25_000;
 
     @ConfigurationProperties("bms.imports")
     record Properties(
