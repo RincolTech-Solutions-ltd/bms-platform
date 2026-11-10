@@ -68,8 +68,11 @@ class ImportBigFileIT extends IntegrationTest {
     /** The staging API's heap: a 448 MB container at {@code MaxRAMPercentage=50}. */
     static final int STAGING_HEAP_MB = 224;
 
-    /** How long a child may take; the test's own timeout is a little longer. */
-    static final int CHILD_LIMIT_MINUTES = 90;
+    /**
+     * How long a child may take: a little more than its limits allow (the validation, the dry run's 15 minutes and the
+     * batch's 10), so a child that overruns them is stopped and its step lines printed while the fork's 90 minutes last.
+     */
+    static final int CHILD_LIMIT_MINUTES = 35;
 
     /** The batch's statement timeout (spec section 3.7): the commit of one batch must finish inside it. */
     static final long BATCH_TIMEOUT_MS = 10 * 60 * 1000L;
