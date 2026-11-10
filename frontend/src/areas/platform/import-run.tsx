@@ -30,7 +30,7 @@ const runKey = (slug: string, runId: string) => ['platform-import-run', slug, ru
 /** The one main action an operator has on the run now, or null. */
 export function operatorAction(run: ImportRun, commitEnabled: boolean): { action: RunAction; label: string; danger: boolean; sentence: string } | null {
   if (run.status === 'committing' && !run.halt_requested) {
-    return { action: 'stop', label: 'Stop the import', danger: true, sentence: 'Stop this import before its next file? What is already in stays in; it can be resumed.' };
+    return { action: 'stop', label: 'Stop the import', danger: true, sentence: 'Stop this import before its next file, if it is still running? What is already in stays in; it can be resumed.' };
   }
   if (run.status === 'committing' && run.halt_requested) {
     return commitEnabled
@@ -41,6 +41,14 @@ export function operatorAction(run: ImportRun, commitEnabled: boolean): { action
     return { action: 'start', label: 'Start the import', danger: false, sentence: 'Bring this business’s data in now, file by file?' };
   }
   return null;
+}
+
+/**
+ * Whether to offer Resume beside Stop: a run being brought in whose stop was not pressed may have stopped by itself (a failed
+ * file, a restart), with no loop alive. The server answers IMPORT_IN_PROGRESS while one is, so offering it is safe.
+ */
+export function stoppedBySelf(run: ImportRun, commitEnabled: boolean): boolean {
+  return run.status === 'committing' && !run.halt_requested && commitEnabled;
 }
 
 /** The facts an operator checks before the start, each in plain words. */
@@ -168,6 +176,26 @@ export function OperatorImportRun({ slug, runId }: { slug: string; runId: string
               onConfirm={() => act.mutate(main.action)}
               onCancel={() => setConfirming(false)}
             />
+          )}
+          {/* JUSTIFICATION-A3: the review of e3f95b2 asks Resume for a run that stopped by itself; one card beside Stop. */}
+          {canAct && stoppedBySelf(r, s.commit_enabled ?? false) && !confirming && (
+            <section className="card stack" aria-labelledby="resume-title">
+              <h2 id="resume-title">Stopped by itself?</h2>
+              <p>
+                After a failed file or a restart the import waits here with nothing running. Resume goes on from the first file
+                not yet brought in; while it is still running, nothing changes and you are told so.
+              </p>
+              <p>
+                <BusyButton type="button" className="btn" busy={act.isPending && act.variables === 'resume'} onClick={() => act.mutate('resume')}>
+                  Resume the import
+                </BusyButton>
+              </p>
+              {act.isError && act.variables === 'resume' && (
+                <p role="alert" className="alert alert-danger">
+                  {act.error instanceof Error ? act.error.message : 'Could not resume it.'}
+                </p>
+              )}
+            </section>
           )}
           {canAct && (r.status === 'draft' || r.status === 'uploaded' || r.status === 'in_review' || r.status === 'ready') && (
             <>

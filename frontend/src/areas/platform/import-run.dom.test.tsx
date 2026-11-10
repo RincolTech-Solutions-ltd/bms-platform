@@ -99,6 +99,23 @@ describe('the stop button', () => {
   });
 });
 
+describe('a run that stopped by itself (review of e3f95b2 on #895)', () => {
+  it('offers Resume beside Stop and sends one resume', async () => {
+    show();
+    fireEvent.click(await screen.findByRole('button', { name: 'Resume the import' }));
+    await waitFor(() => expect(sent).toEqual(['resume']));
+    release?.();
+    expect(await screen.findByText('Resumed. It goes on from the first file not yet brought in.')).toBeTruthy();
+  });
+
+  it('offers no Resume once the stop was pressed, but the one main action', async () => {
+    state = { ...state, run: { ...base, halt_requested: true } };
+    show();
+    expect(await screen.findAllByRole('button', { name: 'Resume the import' })).toHaveLength(1);
+    expect(screen.queryByRole('heading', { name: 'Stopped by itself?' })).toBeNull();
+  });
+});
+
 describe('the route permission (review of 1c9568b on #895)', () => {
   it('shows a read-only operator the facts and no action', async () => {
     permissions = ['platform.tenants.read'];

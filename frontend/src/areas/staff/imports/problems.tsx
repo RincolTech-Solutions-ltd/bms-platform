@@ -138,7 +138,8 @@ function FixForm({ runId, issue, seesRaw, onDone }: { runId: string; issue: Impo
   const [note, setNote] = useState('');
   const [tried, setTried] = useState(false);
   const [rawShown, setRawShown] = useState(false);
-  const raw = useQuery({ queryKey: ['import-raw', issue.id], queryFn: () => rawRow(issue.id ?? ''), enabled: rawShown, staleTime: Infinity });
+  const raw = useQuery({ queryKey: ['import-raw', issue.id], queryFn: () => rawRow(issue.id ?? ''), enabled: rawShown, staleTime: 0, gcTime: 0 });
+  // Never kept: each opening asks the server again, which records it (spec section 6.3), and the cells leave memory with the sheet.
   const save = useMutation({
     meta: { success: `Line ${issue.line} fixed` },
     mutationFn: () =>

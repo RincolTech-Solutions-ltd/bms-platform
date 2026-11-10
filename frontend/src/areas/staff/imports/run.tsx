@@ -502,7 +502,7 @@ function BalancesList({ balances, currency }: { balances: Balances | undefined; 
         <Figure
           key={`journal-${j.branch}-${j.kind}`}
           label={`Opening ${(j.kind ?? '').split('_').join(' ')} at ${j.branch}`}
-          value={`In ${formatMinor(j.debit_minor ?? 0, currency)}, out ${formatMinor(j.credit_minor ?? 0, currency)}`}
+          value={`Debit ${formatMinor(j.debit_minor ?? 0, currency)}, credit ${formatMinor(j.credit_minor ?? 0, currency)}`}
         />
       ))}
     </dl>

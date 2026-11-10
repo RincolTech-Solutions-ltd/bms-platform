@@ -122,13 +122,30 @@ function KillSwitchCard({ canAct }: { canAct: boolean }) {
   const [open, setOpen] = useState(false);
   // toast-exempt: success note: the card's heading turns to say whether imports may run
   const change = useMutation({
-    mutationFn: (reason: string) => setKillSwitch(!(enabled.data ?? true), reason),
+    mutationFn: (reason: string) => setKillSwitch(!on, reason),
     onSuccess: (now) => {
       setOpen(false);
       queryClient.setQueryData(['platform-import-kill-switch'], now);
     },
   });
-  const on = enabled.data ?? true;
+  // Never assumed: while the switch is not known the card says so and offers nothing to press.
+  if (enabled.data === undefined) {
+    return (
+      <section className="card stack" aria-labelledby="kill-switch-title" data-tour="imports-kill-switch">
+        <h2 id="kill-switch-title">Imports on the platform</h2>
+        {enabled.isError ? (
+          <p role="alert" className="alert alert-danger">
+            Could not load whether imports may run.
+          </p>
+        ) : (
+          <p role="status" className="loading">
+            Loading
+          </p>
+        )}
+      </section>
+    );
+  }
+  const on = enabled.data;
   return (
     <section className="card stack" aria-labelledby="kill-switch-title" data-tour="imports-kill-switch">
       <h2 id="kill-switch-title">{on ? 'Imports may run' : 'Every import is stopped'}</h2>
