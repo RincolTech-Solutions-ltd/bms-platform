@@ -50,7 +50,8 @@ class ImportRunServiceTest {
 
         assertThat(ImportRunService.refused(2, quoting)).isEqualTo("batch 2 failed (duplicate_sku)");
         assertThat(ImportRunService.refused(3, silent)).isEqualTo("batch 3 failed (fabricated_refusal)");
-        assertThat(ImportRunService.refused(1, limit)).isEqualTo("batch 1 failed (" + limit.code() + ": " + MESSAGE + ")");
+        String kept = ImportRunService.refused(1, limit);
+        assertThat(kept).isEqualTo("batch 1 failed (plan_limit_reached: " + MESSAGE + ")");
     }
 
     @Test
