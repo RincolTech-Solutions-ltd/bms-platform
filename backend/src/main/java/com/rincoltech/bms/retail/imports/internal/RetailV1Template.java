@@ -401,8 +401,9 @@ class RetailV1Template implements ImportTemplate {
                 .collect(Collectors.toSet()));
         Map<String, Long> costs = held == null ? Map.of() : Map.copyOf(held);
         Set<String> openedBefore = opened == null ? Set.of() : opened;
-        Set<String> closed = inactive == null ? Set.of() : inactive;
-        Map<String, Map<String, BigDecimal>> legacyBefore = legacy == null ? Map.of() : legacy;
+        // Copied once here, so each forecast's own Set.copyOf and Map.copyOf return these (review of 12e9d33 on #898).
+        Set<String> closed = inactive == null ? Set.of() : Set.copyOf(inactive);
+        Map<String, Map<String, BigDecimal>> legacyBefore = legacy == null ? Map.of() : Map.copyOf(legacy);
         return () -> new StockForecast(costs, openedBefore, closed, legacyBefore);
     }
 

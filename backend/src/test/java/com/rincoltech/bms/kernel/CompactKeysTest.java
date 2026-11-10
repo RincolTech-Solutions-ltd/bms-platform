@@ -27,6 +27,27 @@ class CompactKeysTest {
         assertThat(keys.get("", -1)).isEqualTo(7);
     }
 
+    // JUSTIFICATION-A3: the review of 12e9d33 on #898 asks a key over 64 KiB proven.
+    /** A key as long as a cell may be (32,767 characters, three bytes each in UTF-8), beside short ones. */
+    @Test
+    void aKeyOverSixtyFourKibibytesIsHeld() {
+        CompactKeys keys = new CompactKeys();
+        String longKey = "碼".repeat(32_767);
+        String other = "碼".repeat(32_766) + "x";
+        assertThat(longKey.getBytes(java.nio.charset.StandardCharsets.UTF_8).length)
+                .isGreaterThan(64 * 1024);
+        assertThat(keys.putIfAbsent("fab-0001", 1)).isNull();
+        assertThat(keys.putIfAbsent(longKey, 2)).isNull();
+        assertThat(keys.putIfAbsent(other, 3)).isNull();
+        assertThat(keys.putIfAbsent(longKey, 9)).isEqualTo(2L);
+        for (int n = 0; n < 1_000; n++) {
+            keys.putIfAbsent("fab-" + n + "-more", n);
+        }
+        assertThat(keys.get(longKey, -1)).isEqualTo(2);
+        assertThat(keys.get(other, -1)).isEqualTo(3);
+        assertThat(keys.get("fab-0001", -1)).isEqualTo(1);
+    }
+
     @Test
     void manyKeysAnswerAsAMapWould() {
         CompactKeys keys = new CompactKeys();

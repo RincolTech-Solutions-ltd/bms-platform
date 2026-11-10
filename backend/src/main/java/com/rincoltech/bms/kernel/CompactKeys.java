@@ -7,9 +7,13 @@ import java.util.Arrays;
  * Text keys, each with a {@code long}, held as the keys' UTF-8 bytes in one array and two tables of numbers: what a
  * {@code Map<String, Long>} answers for keys that are only added, in about a quarter of its heap (issue #880: the import of
  * a batch at the row limit keeps one entry per row, on the staging heap). Open addressing, linear probing, at most half full.
- * A key is at most 65,535 bytes. Not thread safe.
+ * Each key's bytes follow their length in four bytes, so a key may be as long as a cell (review of 12e9d33 on #898). Not
+ * thread safe.
  */
 public final class CompactKeys {
+
+    /** The bytes before each key's own: its length. */
+    private static final int LENGTH = 4;
 
     private byte[] bytes = new byte[1 << 12];
     private int used;
@@ -41,22 +45,21 @@ public final class CompactKeys {
     /** The key's value when it was added before (and it keeps it), or null when it is new and now has this value. */
     public Long putIfAbsent(String key, long value) {
         byte[] k = key.getBytes(StandardCharsets.UTF_8);
-        if (k.length > 0xffff) {
-            throw new IllegalArgumentException("a key of " + k.length + " bytes");
-        }
         int i = slot(slots, k, 0, k.length);
         if (slots[i] != 0) {
             return values[i];
         }
-        if (used + 2 + k.length > bytes.length) {
-            bytes = Arrays.copyOf(bytes, Math.max(bytes.length * 2, used + 2 + k.length));
+        int end = Math.addExact(used, LENGTH + k.length);
+        if (end > bytes.length) {
+            bytes = Arrays.copyOf(bytes, Math.max(bytes.length * 2, end));
         }
-        bytes[used] = (byte) (k.length >>> 8);
-        bytes[used + 1] = (byte) k.length;
-        System.arraycopy(k, 0, bytes, used + 2, k.length);
+        for (int b = 0; b < LENGTH; b++) {
+            bytes[used + b] = (byte) (k.length >>> (8 * (LENGTH - 1 - b)));
+        }
+        System.arraycopy(k, 0, bytes, used + LENGTH, k.length);
         slots[i] = used + 1;
         values[i] = value;
-        used += 2 + k.length;
+        used = end;
         if (++size * 2 > slots.length) {
             grow();
         }
@@ -64,7 +67,11 @@ public final class CompactKeys {
     }
 
     private int length(int at) {
-        return ((bytes[at] & 0xff) << 8) | (bytes[at + 1] & 0xff);
+        int n = 0;
+        for (int b = 0; b < LENGTH; b++) {
+            n = (n << 8) | (bytes[at + b] & 0xff);
+        }
+        return n;
     }
 
     /** The slot of {@code table} that holds these bytes, or the free slot where they go. */
@@ -78,7 +85,7 @@ public final class CompactKeys {
         int i = h & mask;
         while (table[i] != 0) {
             int at = table[i] - 1;
-            if (Arrays.equals(bytes, at + 2, at + 2 + length(at), key, from, to)) {
+            if (Arrays.equals(bytes, at + LENGTH, at + LENGTH + length(at), key, from, to)) {
                 return i;
             }
             i = (i + 1) & mask;
@@ -92,7 +99,7 @@ public final class CompactKeys {
         for (int i = 0; i < slots.length; i++) {
             if (slots[i] != 0) {
                 int at = slots[i] - 1;
-                int j = slot(table, bytes, at + 2, at + 2 + length(at));
+                int j = slot(table, bytes, at + LENGTH, at + LENGTH + length(at));
                 table[j] = slots[i];
                 moved[j] = values[i];
             }
