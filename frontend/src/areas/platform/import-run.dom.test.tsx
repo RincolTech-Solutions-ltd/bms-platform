@@ -43,6 +43,11 @@ vi.mock('../../api/imports', async (original) => {
   };
 });
 
+vi.mock('../../api/onboarding', async (original) => {
+  const real = await original<typeof import('../../api/onboarding')>();
+  return { ...real, platformMe: () => Promise.resolve({ full_name: 'Test Operator 01', permissions: ['platform.tenants.read', 'platform.tenants.manage'] }) };
+});
+
 const { OperatorImportRun, operatorAction } = await import('./import-run');
 
 function show() {

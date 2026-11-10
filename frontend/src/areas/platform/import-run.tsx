@@ -14,7 +14,8 @@ import {
 import { BusyButton } from '../../app/ui/BusyButton';
 import { Field, FieldsNeededNote } from '../../app/ui/Field';
 import { Breadcrumbs } from '../../components/breadcrumbs';
-import { stateWords } from '../staff/imports/pipeline';
+import { platformMe } from '../../api/onboarding';
+import { mayOpen, stateWords } from '../staff/imports/pipeline';
 import { StageProgress } from '../staff/imports/stage-progress';
 import { ConfirmPanel, TourButton } from './operator-parts';
 
@@ -63,6 +64,8 @@ export function runFacts(state: PlatformRunState): { label: string; value: strin
 
 export function OperatorImportRun({ slug, runId }: { slug: string; runId: string }) {
   const queryClient = useQueryClient();
+  const me = useQuery({ queryKey: ['platform-me-imports'], queryFn: platformMe });
+  const allowed = me.data ? mayOpen(me.data, '/platform/imports/$slug/$runId') : true;
   const state = useQuery({
     queryKey: runKey(slug, runId),
     queryFn: () => platformRun(slug, runId),
@@ -94,6 +97,7 @@ export function OperatorImportRun({ slug, runId }: { slug: string; runId: string
         <h1>Import for {slug}</h1>
         <TourButton />
       </div>
+      {!allowed && <p role="alert">Your operator account cannot see the imports.</p>}
       {state.isPending && (
         <p role="status" className="loading">
           Loading
