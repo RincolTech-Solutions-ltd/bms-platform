@@ -7,8 +7,8 @@ import com.rincoltech.bms.core.imports.ImportMappings.Mapping;
 import com.rincoltech.bms.core.imports.ImportPreview;
 import com.rincoltech.bms.core.imports.ImportPurges;
 import com.rincoltech.bms.core.imports.ImportReview;
+import com.rincoltech.bms.core.imports.ImportRunView;
 import com.rincoltech.bms.core.imports.ImportRuns;
-import com.rincoltech.bms.core.imports.ImportRuns.Run;
 import com.rincoltech.bms.core.imports.ImportUploads;
 import com.rincoltech.bms.core.imports.ImportUploads.Batch;
 import com.rincoltech.bms.core.imports.ImportValidation;
@@ -77,59 +77,8 @@ class RunController {
         this.review = review;
     }
 
-    @Schema(name = "ImportRun", description = "An import run and where it stands")
-    record RunResponse(
-            UUID id,
-
-            @Schema(
-                    description = "draft, uploaded, in_review, ready, committing, committed, signed_off, purged or"
-                            + " cancelled")
-            String status,
-
-            int version,
-            Instant cutoverAt,
-
-            @Schema(description = "The stop button was pressed; the commit stops before the next batch")
-            boolean haltRequested,
-
-            @Schema(description = "A platform operator allowed this run into a business that already trades")
-            boolean tradingOverrideSet,
-
-            @Schema(description = "A second platform operator approved that override")
-            boolean tradingOverrideApproved,
-
-            @Schema(description = "The file name of the pre-import dump recorded, or null")
-            String preImportDumpFile,
-
-            boolean preImportDumpVerified,
-
-            @Schema(description = "import_commit is approved for the run as it is now")
-            boolean commitApproved,
-
-            Instant committingAt,
-            Instant committedAt,
-            boolean fabricated) {
-
-        static RunResponse of(Run r) {
-            return new RunResponse(
-                    r.id(),
-                    r.status(),
-                    r.version(),
-                    r.cutoverAt(),
-                    r.haltRequested(),
-                    r.allowTradingTenant(),
-                    r.tradingOverrideApproved(),
-                    r.preImportDumpFile(),
-                    r.preImportDumpVerified(),
-                    r.commitApproved(),
-                    r.committingAt(),
-                    r.committedAt(),
-                    r.fabricated());
-        }
-    }
-
     @Schema(name = "ImportRunList")
-    record RunList(List<RunResponse> items) {}
+    record RunList(List<ImportRunView> items) {}
 
     @Schema(name = "ImportFile", description = "One uploaded file of a run (a batch), without any value of a row")
     record FileResponse(
@@ -407,22 +356,22 @@ class RunController {
     @RequiresPermission("core.imports.manage")
     @Operation(summary = "The business's import runs, newest first, at most 50", operationId = "listImportRuns")
     RunList list() {
-        return new RunList(runs.list().stream().map(RunResponse::of).toList());
+        return new RunList(runs.list().stream().map(ImportRunView::of).toList());
     }
 
     @PostMapping("/runs")
     @ResponseStatus(HttpStatus.CREATED)
     @RequiresPermission("core.imports.manage")
     @Operation(summary = "Start a new import run, in draft; audited", operationId = "openImportRun")
-    RunResponse open() {
-        return RunResponse.of(runs.open(CurrentPrincipal.require().userId()));
+    ImportRunView open() {
+        return ImportRunView.of(runs.open(CurrentPrincipal.require().userId()));
     }
 
     @GetMapping("/runs/{run_id}")
     @RequiresPermission("core.imports.manage")
     @Operation(summary = "One import run and where it stands", operationId = "getImportRun")
-    RunResponse get(@PathVariable("run_id") UUID runId) {
-        return RunResponse.of(runs.get(runId));
+    ImportRunView get(@PathVariable("run_id") UUID runId) {
+        return ImportRunView.of(runs.get(runId));
     }
 
     @GetMapping("/runs/{run_id}/files")
@@ -528,8 +477,8 @@ class RunController {
                     "Mark the run ready: no open blocking or warning issue and a dry run that still counts and matched"
                             + " the preview",
             operationId = "markImportRunReady")
-    RunResponse ready(@PathVariable("run_id") UUID runId) {
-        return RunResponse.of(runs.transition(runId, RunStates.READY));
+    ImportRunView ready(@PathVariable("run_id") UUID runId) {
+        return ImportRunView.of(runs.transition(runId, RunStates.READY));
     }
 
     @PostMapping("/runs/{run_id}/commit-request")

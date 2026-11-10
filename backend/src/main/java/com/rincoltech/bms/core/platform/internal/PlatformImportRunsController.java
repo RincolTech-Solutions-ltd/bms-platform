@@ -1,5 +1,6 @@
-package com.rincoltech.bms.core.imports.internal;
+package com.rincoltech.bms.core.platform.internal;
 
+import com.rincoltech.bms.core.imports.ImportRunView;
 import com.rincoltech.bms.core.imports.ImportRuns;
 import com.rincoltech.bms.core.imports.ImportRuns.Run;
 import com.rincoltech.bms.kernel.ApiException;
@@ -34,8 +35,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * {@code /api/v1/platform/imports} (chapter 7 section 7.11.3, issue #141, spec section 11, ADR-024 decision 8): the actions
- * of the operator portal's run queue, for platform operators only, on the platform host. The queue itself is the platform
- * report ({@code PlatformImportReportController}), which names each business by its slug; an action names the business by
+ * of the operator portal's run queue, for platform operators only, on the platform host, through the public port
+ * {@link ImportRuns} of {@code core.imports}; it lives in the platform console because only the console acts inside one tenant
+ * ({@code SecurityArchitectureTest}). The queue itself is the platform report of {@code core.imports}, which names each
+ * business by its slug; an action names the business by
  * that slug and the run by its id, and runs for that business alone ({@code TenantContext.callAs}), so row-level security
  * holds as on the business's own host. Only a platform principal reaches a platform path (the authentication filter), so
  * the operator id the service records is always an operator's (comment on #141); the service checks again that it is an
@@ -62,7 +65,7 @@ class PlatformImportRunsController {
             description = "One run as the operator portal shows it, with the kill switch")
     record RunState(
             String tenantSlug,
-            RunController.RunResponse run,
+            ImportRunView run,
 
             @Schema(description = "The platform kill switch: false stops every commit before its next batch")
             boolean commitEnabled) {}
@@ -129,7 +132,7 @@ class PlatformImportRunsController {
     RunState start(@PathVariable("slug") String slug, @PathVariable("run_id") UUID runId) {
         UUID tenant = tenant(slug);
         Run run = TenantContext.callAs(tenant, () -> runs.get(runId));
-        if (!RunStates.READY.equals(run.status()) || !run.commitApproved() || !run.preImportDumpVerified()) {
+        if (!"ready".equals(run.status()) || !run.commitApproved() || !run.preImportDumpVerified()) {
             throw conflict(
                     "import_not_startable",
                     "The import starts once it is ready, a second person approved it and the dump is checked.");
@@ -148,7 +151,7 @@ class PlatformImportRunsController {
     RunState resume(@PathVariable("slug") String slug, @PathVariable("run_id") UUID runId) {
         UUID tenant = tenant(slug);
         Run run = TenantContext.callAs(tenant, () -> runs.get(runId));
-        if (!RunStates.COMMITTING.equals(run.status())) {
+        if (!"committing".equals(run.status())) {
             throw conflict(
                     "import_not_resumable", "Only an import that was stopped while being imported can be resumed.");
         }
@@ -227,7 +230,7 @@ class PlatformImportRunsController {
     }
 
     private RunState state(String slug, Run run) {
-        return new RunState(slug, RunController.RunResponse.of(run), runs.commitEnabled());
+        return new RunState(slug, ImportRunView.of(run), runs.commitEnabled());
     }
 
     private <T> T as(String slug, Supplier<T> work) {
