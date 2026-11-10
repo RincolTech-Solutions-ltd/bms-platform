@@ -335,10 +335,30 @@ public class RetailImporter {
                 ImportReport.Counts counts = report.file(name);
                 ExportFile file = ExportFile.staged(name, List.of());
                 int after = 0;
+                // TEMPORARY #880 measurement, removed before the pull request is ready.
+                long[] timing = new long[3];
+                int pages = 0;
                 while (true) {
+                    long t0 = System.nanoTime();
                     List<ImportRefs.StagedRow> page = checkpoint.rows(after, PAGE);
+                    timing[0] += System.nanoTime() - t0;
                     if (page.isEmpty()) {
                         break;
+                    }
+                    if (++pages % 10 == 0) {
+                        log.info(
+                                "#880 timing {} page {}: read {} ms, write {} ms (create {} ms, twins {} ms),"
+                                        + " register {} ms",
+                                entitySet,
+                                pages,
+                                timing[0] / 1_000_000,
+                                timing[1] / 1_000_000,
+                                run.createNanos / 1_000_000,
+                                run.twinNanos / 1_000_000,
+                                timing[2] / 1_000_000);
+                        java.util.Arrays.fill(timing, 0);
+                        run.createNanos = 0;
+                        run.twinNanos = 0;
                     }
                     after = page.getLast().line();
                     List<Map.Entry<Integer, Map<String, Object>>> toWrite = new ArrayList<>(page.size());
@@ -354,8 +374,12 @@ public class RetailImporter {
                     if (whole) {
                         file.addStaged(toWrite);
                     } else if (!toWrite.isEmpty()) {
+                        long t1 = System.nanoTime();
                         run.write(name, ExportFile.staged(name, toWrite));
+                        long t2 = System.nanoTime();
                         refs.flush();
+                        timing[1] += t2 - t1;
+                        timing[2] += System.nanoTime() - t2;
                     }
                 }
                 if (whole) {
@@ -651,6 +675,11 @@ public class RetailImporter {
         final Map<String, Integer> itemLines = new HashMap<>();
         final Map<String, UUID> categoryIds = new HashMap<>();
         final Map<String, UUID> unitIds = new HashMap<>();
+
+        // TEMPORARY #880 measurement, removed before the pull request is ready.
+        long createNanos;
+
+        long twinNanos;
         ZoneId zone;
         Map<String, UUID> branchByCode = Map.of();
         /** Branches that keep no goods (issue #329): a balance for one is refused, never written. */
@@ -903,12 +932,16 @@ public class RetailImporter {
                     .map(ItemRow::made)
                     .filter(java.util.Objects::nonNull)
                     .toList();
+            long t0 = System.nanoTime();
             catalogue.createProducts(made);
+            long t1 = System.nanoTime();
             Map<UUID, Integer> madeAt = new HashMap<>();
             items.stream()
                     .filter(i -> i.made() != null)
                     .forEach(i -> madeAt.put(i.made().id(), i.row().line()));
             Map<UUID, List<Product>> twins = catalogue.sameName(madeAt.keySet());
+            createNanos += t1 - t0;
+            twinNanos += System.nanoTime() - t1;
             for (ItemRow i : items) {
                 int line = i.row().line();
                 if (i.problem() != null) {

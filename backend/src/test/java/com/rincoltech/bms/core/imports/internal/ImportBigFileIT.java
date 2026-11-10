@@ -285,7 +285,10 @@ class ImportBigFileIT extends IntegrationTest {
         }
         String output = Files.readString(log.toPath(), StandardCharsets.UTF_8);
         Files.delete(log.toPath());
-        String lines = output.lines().filter(l -> l.startsWith("BIGFILE ")).reduce("", (a, b) -> a + b + "\n");
+        // TEMPORARY #880 measurement: the loader's "#880 timing" lines too, removed before the pull request is ready.
+        String lines = output.lines()
+                .filter(l -> l.startsWith("BIGFILE ") || l.contains("#880 timing"))
+                .reduce("", (a, b) -> a + b + "\n");
         System.out.println("IMPORT BIG FILE " + bigFile.substring(bigFile.lastIndexOf('/') + 1) + " heap " + heapMb
                 + " MB\n" + lines);
         assertThat(finished)

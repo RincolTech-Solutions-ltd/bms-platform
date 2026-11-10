@@ -28,6 +28,9 @@ import java.util.UUID;
 import java.util.function.Supplier;
 import org.springframework.boot.SpringApplication;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -180,8 +183,18 @@ public final class ImportBigFileMain {
         CommitReport real = as(tenant, () -> runs.commitReport(runId));
         int written =
                 real.sources().stream().mapToInt(CommitReport.Source::written).sum();
+        // Each batch's own commit transaction, so the commit's time is told from the reconciliation after it (#880).
+        String batchMs = as(
+                tenant,
+                () -> new TransactionTemplate(ctx.getBean(PlatformTransactionManager.class))
+                        .execute(s -> ctx.getBean(JdbcClient.class)
+                                .sql("SELECT string_agg(seq || ':' || commit_ms, ',' ORDER BY seq) FROM import_batches"
+                                        + " WHERE run_id = ?")
+                                .param(runId)
+                                .query(String.class)
+                                .single()));
         System.out.println("BIGFILE step=commit ms=" + commitMs + " outcome=" + outcome + " written=" + written
-                + " failure=" + real.failure() + heap());
+                + " failure=" + real.failure() + " batchCommitMs=" + batchMs + heap());
         return outcome == ImportRuns.CommitOutcome.COMMITTED && real.failure() == null;
     }
 
