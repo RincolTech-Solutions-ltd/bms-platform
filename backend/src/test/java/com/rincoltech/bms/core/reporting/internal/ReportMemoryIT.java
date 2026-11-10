@@ -99,9 +99,10 @@ class ReportMemoryIT extends IntegrationTest {
         Matcher heapMax = Pattern.compile("MEMORY maxHeapMb=(\\d+)").matcher(output);
         assertThat(heapMax.find()).as(output).isTrue();
         assertThat(Integer.parseInt(heapMax.group(1))).isBetween(minHeapMb, maxHeapMb);
-        // The old generation's peak stays clear of the heap limit with a tenth spare
-        // (promoted garbage counts in the peak, so this is a ceiling, not the live set; an out of memory error would
-        // have ended the child).
+        // The old generation's peak during the runs, from the baseline collection on (issue #899, as in
+        // ImportBigFileIT), stays clear of the heap limit with a tenth spare (promoted garbage counts in the peak, so
+        // this is a ceiling, not the live set; an out of memory error would have ended the child). The context's own
+        // startup peak is printed as "MEMORY startup" and recorded in SDD chapter 15 section 15.7.
         Matcher heapUse = Pattern.compile("oldPeakMb=(\\d+) oldMaxMb=(\\d+)").matcher(output);
         Matcher base = Pattern.compile("MEMORY oldBaselineMb=(\\d+)").matcher(output);
         if (!gate) {

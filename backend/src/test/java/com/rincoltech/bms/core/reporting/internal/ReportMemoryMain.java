@@ -192,7 +192,10 @@ public final class ReportMemoryMain {
                 }
             }
             System.out.println("MEMORY peaks startupOldPeakMb=" + startupPeak + " runsOldPeakMb=" + runsPeak);
-            oldPeak = Math.max(oldPeak / 1024 / 1024, Math.max(startupPeak, runsPeak));
+            // Issue #899: the judged peak is the runs', from the baseline collection on, as in ImportBigFileMain. The
+            // startup peak is garbage the context promotes while it starts (twice the live baseline); it is printed
+            // above and recorded in SDD 15.7, not counted against the reports.
+            oldPeak = Math.max(oldPeak / 1024 / 1024, runsPeak);
             System.out.println("MEMORY maxHeapMb=" + Runtime.getRuntime().maxMemory() / 1024 / 1024 + " peakHeapMb="
                     + peak / 1024 / 1024 + " oldPeakMb=" + oldPeak + " oldMaxMb=" + oldMax / 1024 / 1024);
             System.out.println("MEMORY upload maxReadBytes="
@@ -203,7 +206,7 @@ public final class ReportMemoryMain {
         System.exit(failures == 0 ? 0 : 1);
     }
 
-    // JUSTIFICATION-A3: issue #899 asks the baseline and each report measured apart; these are the three probes it needs.
+    // JUSTIFICATION-A3: issue #899 asks the baseline and each run measured apart; these are the three probes it needs.
     private static long oldPeakMb() {
         return ManagementFactory.getMemoryPoolMXBeans().stream()
                 .filter(p -> p.getName().contains("Tenured") || p.getName().contains("Old"))
@@ -223,6 +226,6 @@ public final class ReportMemoryMain {
                         "gcClassHistogram",
                         new Object[] {new String[0]},
                         new String[] {String[].class.getName()});
-        histo.toString().lines().limit(60).forEach(l -> System.out.println("MEMORY histo " + l));
+        histo.toString().lines().limit(25).forEach(l -> System.out.println("MEMORY histo " + l));
     }
 }
