@@ -1131,29 +1131,32 @@ class ImportCommitIT extends IntegrationTest {
             List<BatchWriter.Registration> before,
             List<BatchWriter.Registration> records,
             boolean page) {
-        return as(t, () -> new TransactionTemplate(transactionManager).execute(s -> {
-            s.setRollbackOnly();
-            try {
-                before.forEach(r -> refs.register(run, batch, r.sourceRef(), r.targetType(), r.targetId()));
-                if (page) {
-                    refs.registerAll(run, batch, records);
-                } else {
-                    records.forEach(r -> refs.register(run, batch, r.sourceRef(), r.targetType(), r.targetId()));
-                }
-            } catch (ApiException e) {
-                return e.code() + " " + e.getMessage();
-            } catch (org.springframework.dao.DataIntegrityViolationException e) {
-                return "refused by the unique key";
-            } catch (IllegalArgumentException e) {
-                return "refused: " + e.getMessage();
-            }
-            return jdbc.sql("SELECT string_agg(source_key || ' ' || source_ref || ' ' || target_type || ' '"
-                            + " || target_id, ',' ORDER BY source_ref, target_type, target_id)"
-                            + " FROM import_refs WHERE run_id = ?")
-                    .param(run)
-                    .query(String.class)
-                    .single();
-        }));
+        return as(
+                t,
+                () -> new TransactionTemplate(transactionManager).execute(s -> {
+                    s.setRollbackOnly();
+                    try {
+                        before.forEach(r -> refs.register(run, batch, r.sourceRef(), r.targetType(), r.targetId()));
+                        if (page) {
+                            refs.registerAll(run, batch, records);
+                        } else {
+                            records.forEach(
+                                    r -> refs.register(run, batch, r.sourceRef(), r.targetType(), r.targetId()));
+                        }
+                    } catch (ApiException e) {
+                        return e.code() + " " + e.getMessage();
+                    } catch (org.springframework.dao.DataIntegrityViolationException e) {
+                        return "refused by the unique key";
+                    } catch (IllegalArgumentException e) {
+                        return "refused: " + e.getMessage();
+                    }
+                    return jdbc.sql("SELECT string_agg(source_key || ' ' || source_ref || ' ' || target_type || ' '"
+                                    + " || target_id, ',' ORDER BY source_ref, target_type, target_id)"
+                                    + " FROM import_refs WHERE run_id = ?")
+                            .param(run)
+                            .query(String.class)
+                            .single();
+                }));
     }
 
     // ---------------------------------------------------------------------------------------------
