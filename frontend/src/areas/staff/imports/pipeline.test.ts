@@ -106,7 +106,7 @@ describe('problems by kind', () => {
 
   it('offers accepting as it is for warnings only, and the suggestion only when every line has one', () => {
     const warnings = { code: 'NEGATIVE_BALANCE', severity: 'warning', issues: [issue('NEGATIVE_BALANCE', 'warning')] };
-    const blocking = { code: 'MONEY_FRACTION', severity: 'blocking', issues: [issue('MONEY_FRACTION', 'blocking', { suggestion: { value: '1501' } })] };
+    const blocking = { code: 'MONEY_FRACTION', severity: 'blocking', issues: [issue('MONEY_FRACTION', 'blocking', { suggestion: { value: '1501' } as unknown as ImportIssue['suggestion'] })] };
     expect(bulkWays(warnings).map((w) => w.value)).toEqual(['exclude_row', 'override', 'ask_customer']);
     expect(bulkWays(blocking).map((w) => w.value)).toEqual(['accept_suggestion', 'exclude_row', 'ask_customer']);
   });
