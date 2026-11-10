@@ -96,7 +96,8 @@ describe('problems by kind', () => {
   it('names each kind in plain words, an unknown code as its words, without a dash', () => {
     expect(codeTitle('TYPE_INVALID')).toBe('Not the right kind of value');
     expect(codeTitle('SOME_NEW_CODE')).toBe('Some new code');
-    for (const code of ['REQUIRED_MISSING', 'NEGATIVE_BALANCE', 'DATE_AFTER_CUTOVER', 'X_Y']) expect(codeTitle(code)).not.toMatch(/[-–—]/);
+    const dashes = new RegExp(`[-${String.fromCharCode(0x2013)}${String.fromCharCode(0x2014)}]`);
+    for (const code of ['REQUIRED_MISSING', 'NEGATIVE_BALANCE', 'DATE_AFTER_CUTOVER', 'X_Y']) expect(codeTitle(code)).not.toMatch(dashes);
   });
 
   it('counts only blocking problems and warnings as holding the import', () => {
