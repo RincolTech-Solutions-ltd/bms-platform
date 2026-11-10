@@ -950,7 +950,10 @@ class ReviewService implements ImportReview {
                     .query((rs, n) -> {
                         String file = rs.getString("source_filename");
                         List<RawValue> cells = new ArrayList<>();
-                        JSON.readValue(rs.getString("raw"), OBJECT).forEach((column, cell) -> {
+                        // The purge leaves {} (V147); a row read with no cells answers none, never a failure.
+                        String raw = rs.getString("raw");
+                        Map<String, Object> kept = raw == null ? Map.of() : JSON.readValue(raw, OBJECT);
+                        kept.forEach((column, cell) -> {
                             Object value = cell instanceof Map<?, ?> m ? m.get("value") : cell;
                             Object type = cell instanceof Map<?, ?> m ? m.get("type") : null;
                             cells.add(new RawValue(

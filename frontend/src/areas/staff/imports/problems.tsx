@@ -75,7 +75,7 @@ export function ImportProblems({ runId }: { runId: string }) {
         <button type="button" /* busy-exempt: a download, shown as busy by its own text */ className="btn" disabled={questions.isPending} onClick={() => questions.mutate()}>
           {questions.isPending ? 'Downloading the questions' : 'Download the questions'}
         </button>
-        {questions.isError && <p role="alert">{questions.error instanceof Error ? questions.error.message : 'Could not download the questions.'}</p>}
+        {questions.isError && <p role="alert" className="alert alert-danger">{questions.error instanceof Error ? questions.error.message : 'Could not download the questions.'}</p>}
       </section>
       <Sheet open={fixing !== null} onClose={() => setFixing(null)} title="Fix this line">
         {fixing && <FixForm runId={runId} issue={fixing} seesRaw={seesRaw} onDone={() => setFixing(null)} />}
@@ -175,7 +175,7 @@ function FixForm({ runId, issue, seesRaw, onDone }: { runId: string; issue: Impo
         </button>
       )}
       {rawShown && raw.isPending && <Skeleton loading rows={2} />}
-      {raw.isError && <p role="alert">{raw.error instanceof Error ? raw.error.message : 'Could not show the line.'}</p>}
+      {raw.isError && <p role="alert" className="alert alert-danger">{raw.error instanceof Error ? raw.error.message : 'Could not show the line.'}</p>}
       {raw.data && (
         <dl className="import-figures" data-testid="import-raw">
           {(raw.data.cells ?? []).map((c) => (

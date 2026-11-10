@@ -367,8 +367,10 @@ On the screens (#141) the one main action of a run's screen is always its next s
 (`uploaded`), fix the open blocking and warning issues, then try the import (a dry run, again while the stored one no longer
 counts, failed or did not match the preview), then mark it ready (`in_review`); ask for approval (`ready`). The operator
 portal then records the dump and its check, asks for and approves the trading override when the business trades, and
-starts the commit once the approval and the checked dump are both on the run; the start and a resume run on their own thread
-(one transaction per batch can take minutes) and the portal follows the state. The stop button is offered while the run is
+starts the commit once the approval and the checked dump are both on the run. The start and a resume check and move the run
+in the request, with the operator named in the audit row, and only the batches go on in the background (one transaction
+per batch can take minutes) while the portal follows the state; a second start, or a resume while a commit is still
+writing, is refused at once. The stop button is offered while the run is
 `committing` and the halt is not yet asked; once asked, Resume (while the kill switch allows commits).
 
 ## 4. Templates as versioned data

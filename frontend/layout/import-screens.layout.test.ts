@@ -49,6 +49,8 @@ describe.each([1, 2])('the import screens at 412px, font scale %i', (font) => {
       return {
         // A label squeezed by a long value reads one letter a line (seen on the first draft of the operator's facts).
         squeezed: [...document.querySelectorAll('main dt')].filter((dt) => dt.getBoundingClientRect().width < 120).length,
+        // Every figure lines up digit for digit (rule 8): money and counts in tabular figures.
+        proportional: [...document.querySelectorAll('main dd')].filter((dd) => !getComputedStyle(dd).fontVariantNumeric.includes('tabular-nums')).length,
         primaries: [...document.querySelectorAll('main .btn-primary')].filter(shown).length,
         small: buttons.filter((b) => b.height < 48 || b.width < 48).length,
         outside: buttons.filter((b) => b.right > 412.5).length,
@@ -56,6 +58,7 @@ describe.each([1, 2])('the import screens at 412px, font scale %i', (font) => {
       };
     });
     expect(found.squeezed, 'labels squeezed by their values').toBe(0);
+    expect(found.proportional, 'figures not in tabular figures').toBe(0);
     expect(found.primaries, 'primary actions').toBeLessThanOrEqual(1);
     expect(found.small, 'buttons under 48px').toBe(0);
     expect(found.outside, 'buttons past the edge').toBe(0);

@@ -92,9 +92,11 @@ reading the quarantine leaves a trail per row, not per screen. The operator port
 trading override, the dump record) are platform routes that name the business by its slug and run bound to it, rather than a
 second set of definer functions: the run's own service already holds every rule and the business's row-level security still
 applies, and only a platform principal reaches a platform path, so the operator ids the service records are always operators'.
-The commit and its resume take one transaction per batch and can outlast a request, so the portal starts them on their own
-thread and follows the run's state; a failure is logged by run id and kind and leaves the run `committing` and resumable, as
-decision 4 already provides. The approval of the commit stays a tenant approval (decision 4); the platform operator as
+The commit and its resume take one transaction per batch and can outlast a request, so the portal splits them: the
+business's commit loop is claimed and the guards, the move to `committing` and its audit row (the operator as actor) run in
+the request, which answers every refusal, and only the batches go on on their own thread, holding the loop until they end.
+So a second start, or a resume while a loop is alive, is refused at once and never undoes a stop; a batch that fails
+afterwards is logged by run id and kind and leaves the run `committing` and resumable, as decision 4 already provides. The approval of the commit stays a tenant approval (decision 4); the platform operator as
 checker of a first import is self service's (#142).
 
 ## Note (10 November 2026, issue #140): metrics and the defect log

@@ -43,9 +43,10 @@ vi.mock('../../api/imports', async (original) => {
   };
 });
 
+let permissions: string[] = [];
 vi.mock('../../api/onboarding', async (original) => {
   const real = await original<typeof import('../../api/onboarding')>();
-  return { ...real, platformMe: () => Promise.resolve({ full_name: 'Test Operator 01', permissions: ['platform.tenants.read', 'platform.tenants.manage'] }) };
+  return { ...real, platformMe: () => Promise.resolve({ full_name: 'Test Operator 01', permissions }) };
 });
 
 const { OperatorImportRun, operatorAction } = await import('./import-run');
@@ -65,6 +66,7 @@ beforeEach(() => {
   state = { tenant_slug: 'test-shop-five', run: { ...base }, commit_enabled: true };
   sent.length = 0;
   release = null;
+  permissions = ['platform.tenants.read', 'platform.tenants.manage'];
 });
 
 afterEach(() => cleanup());
@@ -94,6 +96,23 @@ describe('the stop button', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(sent).toEqual([]);
     expect(screen.getByRole('button', { name: 'Stop the import' })).toBeTruthy();
+  });
+});
+
+describe('the route permission (review of 1c9568b on #895)', () => {
+  it('shows a read-only operator the facts and no action', async () => {
+    permissions = ['platform.tenants.read'];
+    show();
+    expect(await screen.findByRole('heading', { name: 'Before it starts' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Stop the import' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Business already trading' })).toBeNull();
+  });
+
+  it('shows an operator without the read permission only a refusal', async () => {
+    permissions = [];
+    show();
+    expect(await screen.findByText('Your operator account cannot see the imports.')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Before it starts' })).toBeNull();
   });
 });
 

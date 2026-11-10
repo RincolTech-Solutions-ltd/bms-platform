@@ -546,6 +546,7 @@
 .import-figures dd {
   margin: 0;
   font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
 

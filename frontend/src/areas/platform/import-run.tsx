@@ -15,7 +15,7 @@ import { BusyButton } from '../../app/ui/BusyButton';
 import { Field, FieldsNeededNote } from '../../app/ui/Field';
 import { Breadcrumbs } from '../../components/breadcrumbs';
 import { platformMe } from '../../api/onboarding';
-import { mayOpen, stateWords } from '../staff/imports/pipeline';
+import { mayAct, mayOpen, stateWords } from '../staff/imports/pipeline';
 import { StageProgress } from '../staff/imports/stage-progress';
 import { ConfirmPanel, TourButton } from './operator-parts';
 
@@ -50,7 +50,7 @@ export function runFacts(state: PlatformRunState): { label: string; value: strin
     { label: 'State', value: stateWords(r.status) },
     { label: 'Approval', value: r.commit_approved ? 'Approved by a second person' : 'Not approved yet; it is given in the business’s Approvals' },
     {
-      label: 'Pre-import dump',
+      label: 'Backup before the import',
       value: r.pre_import_dump_file ? `${r.pre_import_dump_file}, ${r.pre_import_dump_verified ? 'checked' : 'not checked yet'}` : 'None recorded',
     },
     {
@@ -65,10 +65,12 @@ export function runFacts(state: PlatformRunState): { label: string; value: strin
 export function OperatorImportRun({ slug, runId }: { slug: string; runId: string }) {
   const queryClient = useQueryClient();
   const me = useQuery({ queryKey: ['platform-me-imports'], queryFn: platformMe });
-  const allowed = me.data ? mayOpen(me.data, '/platform/imports/$slug/$runId') : true;
+  const allowed = me.data ? mayOpen(me.data, '/platform/imports/$slug/$runId') : false;
+  const canAct = mayAct(me.data);
   const state = useQuery({
     queryKey: runKey(slug, runId),
     queryFn: () => platformRun(slug, runId),
+    enabled: allowed,
     refetchInterval: (q) => (q.state.data?.run?.status === 'committing' ? 5000 : false),
   });
   const [confirming, setConfirming] = useState(false);
@@ -89,15 +91,36 @@ export function OperatorImportRun({ slug, runId }: { slug: string; runId: string
 
   const s = state.data;
   const r = s?.run;
-  const main = r && s ? operatorAction(r, s.commit_enabled ?? false) : null;
-  return (
-    <main className="stack">
+  // Only an operator who may change businesses is offered an action; one who may only read sees the facts.
+  const main = r && s && canAct ? operatorAction(r, s.commit_enabled ?? false) : null;
+  const head = (
+    <>
       <Breadcrumbs items={[{ label: 'Operator portal', to: '/platform' }, { label: 'Imports', to: '/platform/imports' }, { label: slug }]} />
       <div className="page-header">
         <h1>Import for {slug}</h1>
         <TourButton />
       </div>
-      {!allowed && <p role="alert">Your operator account cannot see the imports.</p>}
+    </>
+  );
+  if (!me.data || !allowed) {
+    return (
+      <main className="stack">
+        {head}
+        {me.isPending ? (
+          <p role="status" className="loading">
+            Loading
+          </p>
+        ) : (
+          <p role="alert" className="alert alert-danger">
+            {me.isError ? 'Could not load your operator account.' : 'Your operator account cannot see the imports.'}
+          </p>
+        )}
+      </main>
+    );
+  }
+  return (
+    <main className="stack">
+      {head}
       {state.isPending && (
         <p role="status" className="loading">
           Loading
@@ -146,7 +169,7 @@ export function OperatorImportRun({ slug, runId }: { slug: string; runId: string
               onCancel={() => setConfirming(false)}
             />
           )}
-          {(r.status === 'draft' || r.status === 'uploaded' || r.status === 'in_review' || r.status === 'ready') && (
+          {canAct && (r.status === 'draft' || r.status === 'uploaded' || r.status === 'in_review' || r.status === 'ready') && (
             <>
               <OverrideCard slug={slug} runId={runId} run={r} onDone={settle} onApprove={() => act.mutate('approve-override')} approving={act.isPending} />
               <DumpCard slug={slug} runId={runId} run={r} onDone={settle} />
@@ -233,13 +256,13 @@ function DumpCard({ slug, runId, run, onDone }: { slug: string; runId: string; r
     onSuccess: (next) => {
       setTried(false);
       setSha('');
-      onDone(next, checking ? 'Dump check recorded.' : 'Dump recorded. Check it with pg_restore --list next.');
+      onDone(next, checking ? 'Backup check recorded.' : 'Backup recorded. Count its entries with the restore list next.');
     },
   });
-  const shaProblem = SHA256.test(sha.trim()) ? null : 'Paste the 64 letters and digits of the SHA-256, in lower case.';
-  const fileProblem = checking || file.trim() !== '' ? null : 'Type the file name of the dump.';
-  const timeProblem = checking || takenAt !== '' ? null : 'Pick when the dump was taken.';
-  const entriesProblem = !checking || Number(entries) > 0 ? null : 'Type how many entries pg_restore --list listed.';
+  const shaProblem = SHA256.test(sha.trim()) ? null : 'Paste the 64 letters and digits of the fingerprint, in lower case.';
+  const fileProblem = checking || file.trim() !== '' ? null : 'Type the file name of the backup.';
+  const timeProblem = checking || takenAt !== '' ? null : 'Pick when the backup was taken.';
+  const entriesProblem = !checking || Number(entries) > 0 ? null : 'Type how many entries the restore list counted.';
 
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -250,14 +273,14 @@ function DumpCard({ slug, runId, run, onDone }: { slug: string; runId: string; r
   if (run.pre_import_dump_verified) {
     return (
       <section className="card stack" aria-labelledby="dump-title" data-tour="import-run-dump">
-        <h2 id="dump-title">Pre-import dump</h2>
-        <p>{run.pre_import_dump_file} is recorded and checked. Recording another dump needs a new check and a new approval.</p>
+        <h2 id="dump-title">Backup before the import</h2>
+        <p>{run.pre_import_dump_file} is recorded and checked. Recording another backup needs a new check and a new approval.</p>
       </section>
     );
   }
   return (
     <section className="card stack" aria-labelledby="dump-title" data-tour="import-run-dump">
-      <h2 id="dump-title">{checking ? 'Check the pre-import dump' : 'Record the pre-import dump'}</h2>
+      <h2 id="dump-title">{checking ? 'Check the backup before the import' : 'Record the backup before the import'}</h2>
       <form className="form-stack" onSubmit={submit} noValidate>
         <FieldsNeededNote />
         {!checking && (
@@ -266,7 +289,7 @@ function DumpCard({ slug, runId, run, onDone }: { slug: string; runId: string; r
             <Field label="Taken at" required type="datetime-local" value={takenAt} onChange={(e) => setTakenAt(e.target.value)} error={timeProblem} showError={tried} />
           </>
         )}
-        <Field label="SHA-256" required value={sha} onChange={(e) => setSha(e.target.value)} error={shaProblem} showError={tried} autoComplete="off" />
+        <Field label="Fingerprint (SHA256)" required value={sha} onChange={(e) => setSha(e.target.value)} error={shaProblem} showError={tried} autoComplete="off" />
         {checking && (
           <Field
             label="Entries listed"
@@ -284,7 +307,7 @@ function DumpCard({ slug, runId, run, onDone }: { slug: string; runId: string; r
           </p>
         )}
         <BusyButton type="submit" className="btn-primary" busy={save.isPending}>
-          {checking ? 'Record the check' : 'Record the dump'}
+          {checking ? 'Record the check' : 'Record the backup'}
         </BusyButton>
       </form>
     </section>

@@ -174,6 +174,23 @@ class ImportScreensIT extends IntegrationTest {
 
         assertThat(call(other, HttpMethod.GET, path, "core.imports.view_raw").getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
+
+        // As the purge leaves them (V147: the cells become {} and the issue's original value is deleted), the row
+        // answers no cells and no value, never a failure (review of 1c9568b on #895).
+        TestDatabase.owner()
+                .sql("UPDATE import_rows SET raw = '{}'::jsonb, normalised = NULL WHERE batch_id IN"
+                        + " (SELECT id FROM import_batches WHERE run_id = ?)")
+                .param(run)
+                .update();
+        TestDatabase.owner()
+                .sql("UPDATE import_issues SET original_value = NULL WHERE id = ?")
+                .param(issue)
+                .update();
+        ResponseEntity<JsonNode> purged = call(t, HttpMethod.GET, path, "core.imports.view_raw");
+        assertThat(purged.getStatusCode()).as("%s", purged.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(purged.getBody().get("cells")).isEmpty();
+        JsonNode original = purged.getBody().get("original_value");
+        assertThat(original == null || original.isNull()).isTrue();
     }
 
     @Test
@@ -207,7 +224,7 @@ class ImportScreensIT extends IntegrationTest {
 
         ResponseEntity<JsonNode> notStartable = platform.post(base + "/start", null, a.accessToken());
         assertThat(notStartable.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-        assertThat(notStartable.getBody().get("code").asString()).isEqualTo("import_not_startable");
+        assertThat(notStartable.getBody().get("code").asString()).isEqualTo("invalid_status_transition");
 
         assertThat(platform.post(
                                 base + "/trading-override",

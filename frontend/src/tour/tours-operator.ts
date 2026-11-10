@@ -316,7 +316,7 @@ export const importQueuePage: Tour = {
       id: 'open',
       target: 'imports-open',
       title: 'Open one',
-      body: 'Tap the business to stop, start or resume its import, ask for the trading override or record the dump.',
+      body: 'Tap the business to stop, start or resume its import, ask for the trading override or record the backup.',
     },
   ],
 };
@@ -339,7 +339,7 @@ export const importRunPage: Tour = {
       id: 'facts',
       target: 'import-run-facts',
       title: 'Before it starts',
-      body: 'Check the approval, the dump and its check, and the trading override. All must be in place before the start.',
+      body: 'Check the approval, the backup and its check, and the trading override. All must be in place before the start.',
     },
     {
       id: 'action',

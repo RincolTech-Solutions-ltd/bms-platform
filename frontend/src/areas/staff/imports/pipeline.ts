@@ -19,6 +19,12 @@ export type ImportRoute = keyof typeof IMPORT_ROUTE_PERMISSION;
 /** Whether this person may open the route. */
 export const mayOpen = (me: Pick<Me, 'permissions'>, route: ImportRoute) => (me.permissions ?? []).includes(IMPORT_ROUTE_PERMISSION[route]);
 
+/** The operator portal's actions on a run (stop, start, resume, the override, the backup record, the kill switch) need this. */
+export const PLATFORM_MANAGE = 'platform.tenants.manage';
+
+/** Whether this operator may use the portal's import actions, not only read them. */
+export const mayAct = (me: Pick<Me, 'permissions'> | undefined) => (me?.permissions ?? []).includes(PLATFORM_MANAGE);
+
 /** The raw cells of a row are for this permission alone (spec section 6.3); every opening is audited by the server. */
 export const VIEW_RAW = 'core.imports.view_raw';
 

@@ -131,14 +131,14 @@ class PlatformImportRunsController {
             operationId = "platformStartImportRun")
     RunState start(@PathVariable("slug") String slug, @PathVariable("run_id") UUID runId) {
         UUID tenant = tenant(slug);
-        Run run = TenantContext.callAs(tenant, () -> runs.get(runId));
-        if (!"ready".equals(run.status()) || !run.commitApproved() || !run.preImportDumpVerified()) {
-            throw conflict(
-                    "import_not_startable",
-                    "The import starts once it is ready, a second person approved it and the dump is checked.");
-        }
+        UUID operator = CurrentPrincipal.require().userId();
         requireSwitchOn();
-        background(tenant, runId, "commit", () -> runs.commit(runId));
+        // The guards, the move to committing and its audit row (with this operator as actor) run here, so every refusal
+        // is this request's answer; only the batches go on in the background (review of 1c9568b on #895).
+        Run run = TenantContext.callAs(tenant, () -> {
+            runs.startCommit(runId, operator, work -> background(tenant, runId, "commit", work));
+            return runs.get(runId);
+        });
         return state(slug, run);
     }
 
@@ -150,13 +150,14 @@ class PlatformImportRunsController {
             operationId = "platformResumeImportRun")
     RunState resume(@PathVariable("slug") String slug, @PathVariable("run_id") UUID runId) {
         UUID tenant = tenant(slug);
-        Run run = TenantContext.callAs(tenant, () -> runs.get(runId));
-        if (!"committing".equals(run.status())) {
-            throw conflict(
-                    "import_not_resumable", "Only an import that was stopped while being imported can be resumed.");
-        }
+        UUID operator = CurrentPrincipal.require().userId();
         requireSwitchOn();
-        background(tenant, runId, "resume", () -> runs.resume(runId));
+        // Refused here while any commit loop of the business is alive (IMPORT_IN_PROGRESS), so a stop is never undone
+        // under a commit still finishing its batch, and a second resume never starts a second writer.
+        Run run = TenantContext.callAs(tenant, () -> {
+            runs.startResume(runId, operator, work -> background(tenant, runId, "resume", work));
+            return runs.get(runId);
+        });
         return state(slug, run);
     }
 

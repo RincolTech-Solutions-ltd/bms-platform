@@ -230,8 +230,16 @@ function NextAction({ next, runId, busy, certificate, onUpload, onCheck, onTry, 
         </ActionBar>
       );
     case 'certificate':
+      // Offered once the certificate has loaded, so the button never does nothing.
+      if (!certificate) {
+        return (
+          <p role="status" className="loading" data-tour="import-run-next">
+            Loading the certificate
+          </p>
+        );
+      }
       return button('Download the certificate', () =>
-        certificate ? saveFile(new Blob([certificate.document ?? ''], { type: 'text/plain' }), `certificate-of-deletion-${certificate.version ?? 1}.txt`) : undefined,
+        saveFile(new Blob([certificate.document ?? ''], { type: 'text/plain' }), `certificate-of-deletion-${certificate.version ?? 1}.txt`),
       );
   }
 }
@@ -344,7 +352,11 @@ function UploadForm({ runId, onDone }: { runId: string; onDone: () => Promise<vo
         error={chosen ? null : 'Pick the layout of this file.'}
         showError={tried}
       />
-      {mappings.isError && <p role="alert">Could not load the sheet layouts.</p>}
+      {mappings.isError && (
+        <p role="alert" className="alert alert-danger">
+          Could not load the sheet layouts.
+        </p>
+      )}
       {mappings.data && mappings.data.length === 0 && <p>No sheet layout yet. Rincol Tech makes one from the columns of your sheet first.</p>}
       <fieldset className="stack import-choices" aria-label="Sheet layouts">
         {choices.map((c) => (
@@ -416,7 +428,11 @@ function PreviewCard({ runId, currency }: { runId: string; currency: string }) {
           Show what will come in
         </button>
       )}
-      {preview.isError && <p role="alert">Could not show what will come in.</p>}
+      {preview.isError && (
+        <p role="alert" className="alert alert-danger">
+          Could not show what will come in.
+        </p>
+      )}
       {shown && <Skeleton loading={preview.isPending} rows={3} />}
       {preview.data && (
         <>
@@ -483,7 +499,11 @@ function BalancesList({ balances, currency }: { balances: Balances | undefined; 
         <Figure key={`loans-${a.branch}`} label={`Loans at ${a.branch}`} value={formatMinor(a.amount_minor ?? 0, currency)} />
       ))}
       {(balances.journals ?? []).map((j) => (
-        <Figure key={`journal-${j.branch}-${j.kind}`} label={`Opening ${(j.kind ?? '').split('_').join(' ')} at ${j.branch}`} value={formatMinor(j.debit_minor ?? 0, currency)} />
+        <Figure
+          key={`journal-${j.branch}-${j.kind}`}
+          label={`Opening ${(j.kind ?? '').split('_').join(' ')} at ${j.branch}`}
+          value={`In ${formatMinor(j.debit_minor ?? 0, currency)}, out ${formatMinor(j.credit_minor ?? 0, currency)}`}
+        />
       ))}
     </dl>
   );

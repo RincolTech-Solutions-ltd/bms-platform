@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { killSwitch, platformRuns, setKillSwitch, type PlatformRun } from '../../api/imports';
 import { platformMe } from '../../api/onboarding';
 import { Breadcrumbs } from '../../components/breadcrumbs';
-import { currentStage, mayOpen, stateWords, STEPS } from '../staff/imports/pipeline';
+import { currentStage, mayAct, mayOpen, stateWords, STEPS } from '../staff/imports/pipeline';
 import { ConfirmPanel, TourButton } from './operator-parts';
 import { formatMoment } from './operator-state';
 
@@ -25,18 +25,48 @@ export const QUEUE_KEY = ['platform-import-runs'] as const;
 
 export function ImportQueue() {
   const me = useQuery({ queryKey: ['platform-me-imports'], queryFn: platformMe });
-  const allowed = me.data ? mayOpen(me.data, '/platform/imports') : true;
-  const runs = useQuery({ queryKey: QUEUE_KEY, queryFn: platformRuns, refetchInterval: 15000 });
+  const allowed = me.data ? mayOpen(me.data, '/platform/imports') : false;
+  const runs = useQuery({ queryKey: QUEUE_KEY, queryFn: platformRuns, refetchInterval: 15000, enabled: allowed });
   const groups = byState(runs.data ?? []);
-  return (
-    <main className="stack">
+  const head = (
+    <>
       <Breadcrumbs items={[{ label: 'Operator portal', to: '/platform' }, { label: 'Imports' }]} />
       <div className="cluster">
         <h1>Imports</h1>
         <TourButton />
       </div>
-      {!allowed && <p role="alert">Your operator account cannot see the imports.</p>}
-      <KillSwitchCard />
+    </>
+  );
+  if (!me.data) {
+    return (
+      <main className="stack">
+        {head}
+        {me.isError ? (
+          <p role="alert" className="alert alert-danger">
+            Could not load your operator account.
+          </p>
+        ) : (
+          <p role="status" className="loading">
+            Loading
+          </p>
+        )}
+      </main>
+    );
+  }
+  if (!allowed) {
+    return (
+      <main className="stack">
+        {head}
+        <p role="alert" className="alert alert-danger">
+          Your operator account cannot see the imports.
+        </p>
+      </main>
+    );
+  }
+  return (
+    <main className="stack">
+      {head}
+      <KillSwitchCard canAct={mayAct(me.data)} />
       {runs.isError && (
         <p role="alert" className="alert alert-danger">
           Could not load the imports.
@@ -86,7 +116,7 @@ function QueueRow({ run }: { run: PlatformRun }) {
   );
 }
 
-function KillSwitchCard() {
+function KillSwitchCard({ canAct }: { canAct: boolean }) {
   const queryClient = useQueryClient();
   const enabled = useQuery({ queryKey: ['platform-import-kill-switch'], queryFn: killSwitch });
   const [open, setOpen] = useState(false);
@@ -107,7 +137,8 @@ function KillSwitchCard() {
           ? 'Stopping every import halts each one before its next file. Runs being imported stay where they are and can be resumed later.'
           : 'No import brings data in until this is allowed again.'}
       </p>
-      {!open && (
+      {!canAct && <p>Only an operator who may change businesses can switch this.</p>}
+      {canAct && !open && (
         <p>
           <button type="button" /* busy-exempt: opens the confirm, sends nothing */ className={on ? 'btn-danger' : 'btn-primary'} onClick={() => setOpen(true)}>
             {on ? 'Stop every import' : 'Allow imports again'}

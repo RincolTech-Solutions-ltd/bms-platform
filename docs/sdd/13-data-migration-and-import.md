@@ -1749,8 +1749,11 @@ section 4.1; coordinated with #110, which builds no second framework).**
   start, the trading override asked by one operator and approved by another, and the pre-import dump recorded and checked.
   Each action names the business by its slug and runs bound to it, so row-level security holds as on its own host; only a
   platform principal reaches a platform path, so the operator ids the service records are always operators' (comment on
-  #141). The commit and its resume take one transaction per batch and may run for minutes, so the start and the resume run
-  on their own thread and answer 202; the queue follows the run's state. The `import_commit` approval is still given in the
+  #141). The commit and its resume take one transaction per batch and may run for minutes, so the portal splits them
+  (`ImportRuns.startCommit`, `startResume`): the business's commit loop is claimed and the guards, the move to
+  `committing` (or the cleared halt) and its audit row, with the operator as actor, run in the request, whose answer is
+  every refusal; only the batches go on on their own thread, which holds the loop until they end, so a second start or a
+  resume while a loop is alive is refused at once (review of 1c9568b on #895). The queue follows the run's state. The `import_commit` approval is still given in the
   business's Approvals by a holder of `core.imports.approve_commit`; the portal shows whether it is given.
 - **Not in this build:** recording a policy decision (spec section 3.8) and saving a mapping from a screen. A run that
   needs a decision is refused with `CREDIT_DECISION_MISSING`, whose words the screen shows; the decision and the mapping
