@@ -1,5 +1,6 @@
 package com.rincoltech.bms.core.imports.internal;
 
+import com.rincoltech.bms.core.imports.BatchWriter;
 import com.rincoltech.bms.core.imports.ImportRefs;
 import com.rincoltech.bms.core.imports.ImportRefs.Opening;
 import com.rincoltech.bms.core.imports.ImportRefs.StagedRow;
@@ -18,7 +19,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import javax.sql.DataSource;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 
@@ -37,12 +40,19 @@ class RefService {
     static final String MODULE = "core.imports";
 
     private final JdbcClient jdbc;
+    private final JdbcTemplate batch;
     private final PreviewService preview;
     private final LedgerPosting ledger;
     private final LedgerAccounts accounts;
 
-    RefService(JdbcClient jdbc, PreviewService preview, LedgerPosting ledger, LedgerAccounts accounts) {
+    RefService(
+            JdbcClient jdbc,
+            DataSource dataSource,
+            PreviewService preview,
+            LedgerPosting ledger,
+            LedgerAccounts accounts) {
         this.jdbc = jdbc;
+        this.batch = new JdbcTemplate(dataSource);
         this.preview = preview;
         this.ledger = ledger;
         this.accounts = accounts;
@@ -145,6 +155,43 @@ class RefService {
             throw new IllegalArgumentException("a journal is registered only as an opening journal");
         }
         insert(runId, batchId, sourceRef, targetType, targetId);
+    }
+
+    // JUSTIFICATION-A3: issue #880 registers a page of rows in two round trips instead of two per row.
+    /**
+     * {@link #register} of each record with the same refusals, in two round trips for the lot (issue #880): a key held, or
+     * named earlier in the list, with another reference is refused before anything is inserted.
+     */
+    void registerAll(UUID runId, UUID batchId, List<BatchWriter.Registration> records) {
+        if (records.isEmpty()) {
+            return;
+        }
+        Map<String, String> refByKey = new HashMap<>();
+        List<Object[]> rows = new ArrayList<>(records.size());
+        for (BatchWriter.Registration r : records) {
+            if (JOURNAL.equals(r.targetType())) {
+                throw new IllegalArgumentException("a journal is registered only as an opening journal");
+            }
+            String key = ImportRefs.keyOf(r.sourceRef());
+            String before = refByKey.putIfAbsent(key, r.sourceRef());
+            if (before != null && !before.equals(r.sourceRef())) {
+                throw changedSinceImport(0);
+            }
+            rows.add(
+                    new Object[] {UUID.randomUUID(), runId, batchId, key, r.sourceRef(), r.targetType(), r.targetId()});
+        }
+        boolean other = jdbc.sql("SELECT source_key, source_ref FROM import_refs WHERE source_key = ANY(?)")
+                .param(refByKey.keySet().toArray(String[]::new))
+                .query((rs, n) -> !rs.getString(2).equals(refByKey.get(rs.getString(1))))
+                .list()
+                .contains(true);
+        if (other) {
+            throw changedSinceImport(0);
+        }
+        batch.batchUpdate("""
+                INSERT INTO import_refs (id, tenant_id, run_id, batch_id, source_key, source_ref, target_type, target_id)
+                VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?)
+                """, rows);
     }
 
     private void insert(UUID runId, UUID batchId, String sourceRef, String targetType, UUID targetId) {

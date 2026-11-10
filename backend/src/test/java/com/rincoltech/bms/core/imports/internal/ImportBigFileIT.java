@@ -16,14 +16,10 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.io.TempDir;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -42,13 +38,11 @@ import tools.jackson.databind.json.JsonMapper;
  *   <li>a product master at the column limit (200 columns, 193 of them ignored with a reason), committed.
  * </ul>
  *
- * <p>They found #880. On the staging heap the dry run at the row limit runs out of memory, the workbook's validation
- * fills the old generation, and the dry run of the 20,000 items at the column limit stops at its 15 minute limit. On
- * twice the staging heap the dry run at the row limit stops at that limit too, and the validation of the CSV at the row
- * limit fills the old generation as the workbook's does. Those cases wait for #880 and are disabled with its number.
- * Until #880 the configured row limit is 2,500 (review of 74bfe3e): a size measured to dry run and commit well inside the
- * time limits on the staging heap with the old generation under 90 percent. The child runs at that limit, and the
- * whole path is judged at it for seven columns and for the 200 of the column limit.
+ * <p>They found #880: the validation held per row maps for the review, and the loader held every staged row and looked
+ * each item up by {@code lower(code)}, which row-level security keeps from its index, so the commit grew with the square
+ * of the rows. Since #880 the child runs at the configured row limit, {@link UploadSettings#DEFAULT_MAX_ROWS}, 100,000
+ * again, and every case below is judged on the staging heap, with the times in SDD chapter 15 section 15.7. The case on
+ * twice the staging heap is kept as a measurement.
  *
  * <p><b>Not part of {@code mvn verify}.</b> The commits and their dry runs take longer than
  * the backend job can spare, and on the shared runner a stalled machine would fail the job for a reason that is not a
@@ -84,7 +78,6 @@ class ImportBigFileIT extends IntegrationTest {
     Path dir;
 
     @Test
-    @Disabled("#880: the dry run at the row limit runs out of the staging heap (the loader holds every staged row)")
     void aCsvAtTheRowAndSizeLimitsIsCommittedOnTheStagingHeapInsideTheBatchTimeout() throws Exception {
         String output = child("commit", "items=" + limitsCsv(), STAGING_HEAP_MB);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "outcome=COMMITTED");
@@ -94,14 +87,11 @@ class ImportBigFileIT extends IntegrationTest {
                 .isLessThan(BATCH_TIMEOUT_MS);
     }
 
-    // JUSTIFICATION-A3: #880 disables the staging case; the row limit's times are still recorded, on twice the heap.
     /**
-     * The same file on twice the staging heap, a measurement while #880 is open: the commit of the batch at the row limit
-     * must still finish inside the batch timeout, and the times of every step are printed for chapter 15. The heap is not
-     * judged here.
+     * The same file on twice the staging heap, a measurement: the commit of the batch at the row limit must still finish
+     * inside the batch timeout, and the times of every step are printed for chapter 15. The heap is not judged here.
      */
     @Test
-    @Disabled("#880: on twice the staging heap too, the dry run at the row limit stops at its 15 minute limit")
     void aCsvAtTheRowAndSizeLimitsIsCommittedInsideTheBatchTimeoutOnTwiceTheStagingHeap() throws Exception {
         String output = child("commit", "items=" + limitsCsv(), 2 * STAGING_HEAP_MB);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "outcome=COMMITTED");
@@ -112,7 +102,6 @@ class ImportBigFileIT extends IntegrationTest {
     }
 
     @Test
-    @Disabled("#880: validating a workbook at the row limit fills the old generation of the staging heap")
     void aWorkbookAtTheRowLimitIsValidatedAndPreviewedOnTheStagingHeap() throws Exception {
         Path xlsx = dir.resolve("fab-items-at-the-row-limit.xlsx");
         TestFiles.writeXlsx(xlsx, ITEM_HEADER, items(ROW_LIMIT, 0));
@@ -121,7 +110,6 @@ class ImportBigFileIT extends IntegrationTest {
     }
 
     @Test
-    @Disabled("#880: the dry run of 20,000 items stops at its 15 minute limit on the staging heap")
     void aCsvAtTheColumnLimitIsCommittedOnTheStagingHeap() throws Exception {
         String output = child("commit", "wide_items=" + columnLimitCsv(), STAGING_HEAP_MB);
         assertThat(output).contains("columns=" + COLUMN_LIMIT, "outcome=COMMITTED");
@@ -129,46 +117,11 @@ class ImportBigFileIT extends IntegrationTest {
         assertThat(stepMillis(output, "commit")).isLessThan(BATCH_TIMEOUT_MS);
     }
 
-    // JUSTIFICATION-A3: #880 holds the commits back; these keep the limits' upload, validation and preview proven.
     /** The upload, validation and preview at the row and size limits, on the staging heap, judged and timed. */
     @Test
-    @Disabled("#880: validating 100,000 rows fills the old generation of the staging heap")
     void aCsvAtTheRowAndSizeLimitsIsUploadedValidatedAndPreviewedOnTheStagingHeap() throws Exception {
         String output = child("preview", "items=" + limitsCsv(), STAGING_HEAP_MB);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "step=preview");
-    }
-
-    // JUSTIFICATION-A3: the review of 74bfe3e (must-fix 4) asks a measured safe row limit while #880 is open.
-    /**
-     * The whole path, commit included, at and below the configured row limit of 2,500 (production's until #880), on the
-     * staging heap and judged there: 2,500 rows of the seven columns of a product master and of the 200 columns of the
-     * column limit. Measured at 5,000 rows too (commit up to 473 s, 79 percent of the batch timeout, so too thin a margin)
-     * and once at 10,000 (17 minutes, the old generation at 137 of 149 MB, over both bounds; SDD chapter 15 section 15.7).
-     */
-    @ParameterizedTest(name = "{0} rows of {1} columns")
-    @MethodSource("atTheConfiguredLimit")
-    void aProductMasterAtTheConfiguredRowLimitIsCommittedOnTheStagingHeapInsideTheTimeLimits(int rows, int columns)
-            throws Exception {
-        int extra = columns - ITEM_HEADER.size();
-        List<String> header = new ArrayList<>(ITEM_HEADER);
-        for (int c = 1; c <= extra; c++) {
-            header.add(extraColumn(c));
-        }
-        Path csv = dir.resolve("fab-items-" + rows + "-by-" + columns + ".csv");
-        TestFiles.writeCsv(csv, header, items(rows, extra));
-        String output = child("commit", (extra > 0 ? "wide_items=" : "items=") + csv, STAGING_HEAP_MB);
-        assertThat(output).contains("rows=" + rows, "outcome=COMMITTED");
-        assertThat(written(output)).isGreaterThanOrEqualTo(rows);
-        assertThat(stepMillis(output, "commit")).isLessThan(BATCH_TIMEOUT_MS);
-    }
-
-    /** Half the configured limit and the limit itself at seven columns, and the limit at the column limit. */
-    static java.util.stream.Stream<Arguments> atTheConfiguredLimit() {
-        int limit = UploadSettings.DEFAULT_MAX_ROWS;
-        return java.util.stream.Stream.of(
-                Arguments.of(limit / 2, ITEM_HEADER.size()),
-                Arguments.of(limit, ITEM_HEADER.size()),
-                Arguments.of(limit, COLUMN_LIMIT));
     }
 
     /** One row over the configured limit is refused at the upload with TOO_MANY_ROWS, in the child at that limit. */

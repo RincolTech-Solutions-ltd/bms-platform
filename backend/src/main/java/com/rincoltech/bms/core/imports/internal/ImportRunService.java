@@ -1642,6 +1642,11 @@ class ImportRunService implements ImportRuns {
         }
 
         @Override
+        public void registerAll(List<BatchWriter.Registration> records) {
+            refs.registerAll(runId, batchId, records);
+        }
+
+        @Override
         public String openingJournal(ImportRefs.Opening opening) {
             RefService.Posted posted = refs.openingJournal(runId, batchId, opening);
             journal(

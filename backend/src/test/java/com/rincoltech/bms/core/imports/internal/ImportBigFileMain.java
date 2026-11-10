@@ -79,12 +79,11 @@ public final class ImportBigFileMain {
             System.gc();
             System.out.println("BIGFILE oldBaselineMb=" + oldUsed() / 1024 / 1024);
             ManagementFactory.getMemoryPoolMXBeans().forEach(MemoryPoolMXBean::resetPeakUsage);
+            gcBefore = gcMillis();
             ok = run(ctx, tenant, slug, document, commit, args);
-            long gcMs = ManagementFactory.getGarbageCollectorMXBeans().stream()
-                    .mapToLong(java.lang.management.GarbageCollectorMXBean::getCollectionTime)
-                    .sum();
             System.out.println("BIGFILE maxHeapMb=" + Runtime.getRuntime().maxMemory() / 1024 / 1024 + " oldPeakMb="
-                    + oldPeak() / 1024 / 1024 + " oldMaxMb=" + oldMax() / 1024 / 1024 + " gcMs=" + gcMs);
+                    + Math.max(worst, oldPeak()) / 1024 / 1024 + " oldMaxMb=" + oldMax() / 1024 / 1024 + " gcMs="
+                    + gcMillis());
         }
         System.exit(ok ? 0 : 1);
     }
@@ -126,7 +125,7 @@ public final class ImportBigFileMain {
             });
             System.out.println("BIGFILE step=upload source=" + source + " ms=" + millis(started) + " bytes="
                     + batch.sizeBytes() + " rows=" + batch.rowCount() + " columns=" + batch.columnCount() + " status="
-                    + batch.status() + " failure=" + batch.failureCode());
+                    + batch.status() + " failure=" + batch.failureCode() + heap());
             if (!"parsed".equals(batch.status())) {
                 // In refuse mode the file over the row limit must end here, with its code.
                 return "refuse".equals(args[5]) && Parsing.TOO_MANY_ROWS.equals(batch.failureCode());
@@ -139,20 +138,21 @@ public final class ImportBigFileMain {
         ImportValidation.RunReport report = as(tenant, () -> validation.validate(runId));
         Map<String, Integer> codes = new TreeMap<>();
         report.batches().forEach(b -> b.byCode().forEach((code, n) -> codes.merge(code, n, Integer::sum)));
-        System.out.println("BIGFILE step=validate ms=" + millis(started) + " codes=" + codes);
+        System.out.println("BIGFILE step=validate ms=" + millis(started) + " codes=" + codes + heap());
         if (report.count("blocking") + report.count("warning") > 0) {
             return false;
         }
         started = System.nanoTime();
         ImportPreview.Preview predicted = as(tenant, () -> preview.preview(runId));
-        System.out.println("BIGFILE step=preview ms=" + millis(started) + " records=" + predicted.recordsByType());
+        System.out.println(
+                "BIGFILE step=preview ms=" + millis(started) + " records=" + predicted.recordsByType() + heap());
         if (!commit) {
             return true;
         }
         started = System.nanoTime();
         ImportRuns.DryRun dry = as(tenant, () -> runs.dryRun(runId, operator));
         System.out.println("BIGFILE step=dry_run ms=" + millis(started) + " failure="
-                + dry.report().failure() + " previewMatches=" + dry.previewMatches());
+                + dry.report().failure() + " previewMatches=" + dry.previewMatches() + heap());
         if (dry.report().failure() != null || !dry.previewMatches()) {
             return false;
         }
@@ -181,7 +181,7 @@ public final class ImportBigFileMain {
         int written =
                 real.sources().stream().mapToInt(CommitReport.Source::written).sum();
         System.out.println("BIGFILE step=commit ms=" + commitMs + " outcome=" + outcome + " written=" + written
-                + " failure=" + real.failure());
+                + " failure=" + real.failure() + heap());
         return outcome == ImportRuns.CommitOutcome.COMMITTED && real.failure() == null;
     }
 
@@ -209,6 +209,32 @@ public final class ImportBigFileMain {
 
     private static long millis(long started) {
         return (System.nanoTime() - started) / 1_000_000;
+    }
+
+    // JUSTIFICATION-A3: issue #880 asks each step's peak and collector time, so 15.7 says which step fills the heap.
+    /** The old generation's highest peak of the steps so far, for the end line. */
+    private static long worst;
+
+    private static long gcBefore;
+
+    /**
+     * The old generation's peak and the collector's time since the previous step, printed on the step's line; the peak is
+     * then reset for the next step and kept for the end line.
+     */
+    private static String heap() {
+        long peak = oldPeak();
+        worst = Math.max(worst, peak);
+        ManagementFactory.getMemoryPoolMXBeans().forEach(MemoryPoolMXBean::resetPeakUsage);
+        long gc = gcMillis();
+        String out = " stepOldPeakMb=" + peak / 1024 / 1024 + " stepGcMs=" + (gc - gcBefore);
+        gcBefore = gc;
+        return out;
+    }
+
+    private static long gcMillis() {
+        return ManagementFactory.getGarbageCollectorMXBeans().stream()
+                .mapToLong(java.lang.management.GarbageCollectorMXBean::getCollectionTime)
+                .sum();
     }
 
     private static MemoryPoolMXBean old() {
