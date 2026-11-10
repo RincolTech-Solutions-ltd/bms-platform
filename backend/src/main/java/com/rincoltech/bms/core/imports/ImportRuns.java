@@ -1,6 +1,7 @@
 package com.rincoltech.bms.core.imports;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -28,6 +29,9 @@ public interface ImportRuns {
     Run open(UUID createdBy, boolean fabricated);
 
     Run get(UUID runId);
+
+    /** The business's runs of the import screens (origin {@code framework}), newest first, at most 50 (issue #141). */
+    List<Run> list();
 
     /**
      * Moves a run along the diagram of spec section 3.11, stamping the stage time: {@code draft} to {@code uploaded} to

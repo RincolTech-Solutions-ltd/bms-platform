@@ -255,6 +255,14 @@ class ImportRunService implements ImportRuns {
     }
 
     @Override
+    public List<Run> list() {
+        return tx.execute(s -> jdbc.sql("SELECT " + RUN_COLUMNS
+                        + " FROM import_runs WHERE origin = 'framework' ORDER BY created_at DESC, id LIMIT 50")
+                .query(ImportRunService::run)
+                .list());
+    }
+
+    @Override
     public Run transition(UUID runId, String status) {
         if (!RunStates.known(status) || RunStates.COMMIT_ONLY.contains(status)) {
             throw invalidTransition(
