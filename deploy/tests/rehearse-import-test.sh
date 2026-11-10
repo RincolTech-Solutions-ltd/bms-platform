@@ -96,6 +96,11 @@ check "the migrate container is capped the same way" \
     grep -Eq '^run --rm --name bms-rehearsal-migrate-[0-9]+ --cgroup-parent bms\.slice --memory 448m --memory-swap 448m --cpus 1\.0 ' "$FAKE/calls.log"
 check "the network is internal: no route out of it, and the live database is not on it" \
     grep -Eq '^network create --internal bms-rehearsal-net-[0-9]+$' "$FAKE/calls.log"
+# Review of #890, Lead on point 3: the provider hosts the startup guards pin are kept, so this network is what keeps the
+# API container from them. It joins that one network and no other, and nothing is connected to another network later.
+check "the API container joins the internal rehearsal network only (one --network, no network connect)" \
+    eval '[[ "$(grep -E "^run .*--name bms-rehearsal-api-" "$FAKE/calls.log" | grep -o -- "--network [^ ]*")" =~ ^--network\ bms-rehearsal-net-[0-9]+$ ]] \
+        && ! grep -q "^network connect" "$FAKE/calls.log"'
 check "the API runs the live API's image" grep -q 'ghcr.io/fake/bms-platform-api@sha256:fake rehearse-import --tenant' "$FAKE/calls.log"
 check "the API's only database is the throwaway one, its scheduler off, with the one-time token" \
     eval '[[ "$(grep -E "jdbc:|postgres(ql)?://" "$FAKE/api-env.seen")" =~ ^BMS_DB_URL=jdbc:postgresql://bms-rehearsal-db-[0-9]+:5432/bms$ ]] \
