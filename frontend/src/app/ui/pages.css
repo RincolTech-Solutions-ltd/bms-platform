@@ -524,6 +524,31 @@
   color: var(--color-text-muted);
 }
 
+/* The figures of an import (issue #141): each label above its value, so a long amount or file name never squeezes its label
+   on a phone. */
+.import-figures {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  margin: 0;
+}
+
+.import-figures dt {
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.import-figures dt:first-child {
+  margin-top: 0;
+}
+
+.import-figures dd {
+  margin: 0;
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+
 /* A searchable list of choices (the sheet layout of an upload): each choice a full 48px line (rule 12). */
 .import-choice {
   display: flex;

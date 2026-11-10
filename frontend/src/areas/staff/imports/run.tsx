@@ -420,9 +420,9 @@ function PreviewCard({ runId, currency }: { runId: string; currency: string }) {
       {shown && <Skeleton loading={preview.isPending} rows={3} />}
       {preview.data && (
         <>
-          <dl className="recon-figures">
+          <dl className="import-figures">
             {(preview.data.records ?? []).map((c) => (
-              <Figure key={c.type} label={(c.type ?? '').split('_').join(' ')} value={quantity(c.count)} />
+              <Figure key={c.type} label={(c.type ?? '').split('_').join(' ').replace(/^./, (l) => l.toUpperCase())} value={quantity(c.count)} />
             ))}
           </dl>
           <BalancesList balances={preview.data.balances} currency={currency} />
@@ -437,7 +437,7 @@ function DryRunCard({ dryRun, currency }: { dryRun: DryRun; currency: string }) 
     <section className="rt-card stack" aria-labelledby="import-dry-run-title" data-tour="import-run-dry-run">
       <h2 id="import-dry-run-title">Trial run</h2>
       <p>{dryRunLine(dryRun)}</p>
-      <dl className="recon-figures">
+      <dl className="import-figures">
         {(dryRun.sources ?? []).map((s) => (
           <Figure key={s.name} label={s.name ?? ''} value={`${quantity(s.written)} in, ${quantity(s.existing)} already there, ${quantity(s.skipped)} left out`} />
         ))}
@@ -472,7 +472,7 @@ export function dryRunLine(d: DryRun): string {
 function BalancesList({ balances, currency }: { balances: Balances | undefined; currency: string }) {
   if (!balances) return null;
   return (
-    <dl className="recon-figures">
+    <dl className="import-figures">
       {(balances.stock ?? []).map((s) => (
         <Figure key={`stock-${s.branch}`} label={`Stock at ${s.branch}`} value={`${quantity(s.qty)}, ${formatMinor(s.value_minor ?? 0, currency)}`} />
       ))}
@@ -514,7 +514,7 @@ function SignOffProgress({ run, metrics, canSign }: { run: ImportRun; metrics: R
   return (
     <section className="rt-card stack" aria-labelledby="import-sign-title" data-tour="import-run-sign">
       <h2 id="import-sign-title">Sign off</h2>
-      <dl className="recon-figures">
+      <dl className="import-figures">
         {signOffSteps(run, metrics).map((s) => (
           <Figure key={s.label} label={s.label} value={s.done ?? 'Not yet'} />
         ))}

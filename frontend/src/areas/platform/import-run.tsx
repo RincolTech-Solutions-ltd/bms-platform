@@ -110,7 +110,7 @@ export function OperatorImportRun({ slug, runId }: { slug: string; runId: string
           <StageProgress status={r.status} />
           <section className="card stack" aria-labelledby="run-facts" data-tour="import-run-facts">
             <h2 id="run-facts">Before it starts</h2>
-            <dl className="recon-figures">
+            <dl className="import-figures">
               {runFacts(s).map((f) => (
                 <Fact key={f.label} label={f.label} value={f.value} />
               ))}

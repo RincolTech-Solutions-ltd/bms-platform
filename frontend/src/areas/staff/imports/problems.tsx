@@ -177,7 +177,7 @@ function FixForm({ runId, issue, seesRaw, onDone }: { runId: string; issue: Impo
       {rawShown && raw.isPending && <Skeleton loading rows={2} />}
       {raw.isError && <p role="alert">{raw.error instanceof Error ? raw.error.message : 'Could not show the line.'}</p>}
       {raw.data && (
-        <dl className="recon-figures" data-testid="import-raw">
+        <dl className="import-figures" data-testid="import-raw">
           {(raw.data.cells ?? []).map((c) => (
             <Cell key={c.column} label={c.column ?? ''} value={c.value ?? ''} />
           ))}
