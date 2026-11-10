@@ -28,6 +28,8 @@ class ImportRunServiceTest {
 
     private static final String MESSAGE = "The plan allows at most 1 (max_branches); the limit has been reached.";
 
+    private static final String SENTENCE = "the plan's limit refused this batch; move the business to a plan with room";
+
     @Test
     void aFailingAuditIsAddedAsSuppressedAndTheBatchErrorIsTheOneThrown() {
         IllegalStateException batch = new IllegalStateException("fabricated row refused");
@@ -43,15 +45,16 @@ class ImportRunServiceTest {
 
     // JUSTIFICATION-A3: review of #902 asks for a test that a value-bearing refusal keeps no message.
     @Test
-    void aRefusalKeepsItsCodeAndOnlyAValueFreeMessage() {
+    void aRefusalKeepsItsCodeAndAFixedSentenceNeverItsMessage() {
         ApiException quoting = ApiException.rule("duplicate_sku", "SKU 'TST-0001' already exists for Test Sugar 1kg");
-        ApiException silent = new ApiException(HttpStatus.CONFLICT, "fabricated_refusal", "Refused", null);
+        ApiException silent = new ApiException(HttpStatus.CONFLICT, "no_message", "Refused", null);
         ApiException limit = ApiException.rule("plan_limit_reached", MESSAGE);
 
-        assertThat(ImportRunService.refused(2, quoting)).isEqualTo("batch 2 failed (duplicate_sku)");
-        assertThat(ImportRunService.refused(3, silent)).isEqualTo("batch 3 failed (fabricated_refusal)");
+        assertThat(ImportRunService.refused(2, quoting)).isEqualTo("batch 2 failed (refused with code duplicate_sku)");
+        assertThat(ImportRunService.refused(3, silent)).isEqualTo("batch 3 failed (refused with code no_message)");
         String kept = ImportRunService.refused(1, limit);
-        assertThat(kept).isEqualTo("batch 1 failed (plan_limit_reached: " + MESSAGE + ")");
+        assertThat(kept).isEqualTo("batch 1 failed (plan_limit_reached: " + SENTENCE + ")");
+        assertThat(kept).doesNotContain("max_branches");
     }
 
     @Test

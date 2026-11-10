@@ -122,7 +122,7 @@ public class FabricatedRunStager {
             files.forEach((set, bytes) -> upload(run, mapping, set, bytes));
             validation.validate(run);
             settle(run);
-            // A failed dry run is refused with its failure, which names a coded refusal's code and message (#885).
+            // A failed dry run is refused with its failure, which names a coded refusal's code and sentence (#885).
             String failure = runs.dryRun(run, OPERATOR).report().failure();
             if (failure != null) {
                 throw new IllegalStateException("dry_run_failed: " + failure);

@@ -43,6 +43,8 @@ class StageImportRunIT extends IntegrationTest {
 
     static final String BACKUP = "bms-staging-20261024T011500Z.dump.enc";
 
+    static final String PLAN_LIMIT = "the plan's limit refused this batch; move the business to a plan with room";
+
     @Autowired
     ImportRuns runs;
 
@@ -142,7 +144,8 @@ class StageImportRunIT extends IntegrationTest {
     // JUSTIFICATION-A3: issue #885 asks for this new test case of a plan limit refusing the dry run.
     /**
      * A business whose plan has no room for the sample's branches (issue #885): the plan limit refuses a batch, and
-     * both the stored dry run's failure and the stager's refusal name the refusal's code and the limit, not its class.
+     * both the stored dry run's failure and the stager's refusal name the refusal's code and its fixed sentence, never
+     * the exception's class or message (Lead on #902).
      */
     @Test
     void aPlanLimitRefusalInTheDryRunNamesItsCodeInTheReportAndTheRefusal() {
@@ -158,8 +161,7 @@ class StageImportRunIT extends IntegrationTest {
         assertThatThrownBy(() -> on("staging").stage(t.slug(), RetailImportIT.SAMPLE))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageStartingWith("dry_run_failed: batch ")
-                .hasMessageContaining("plan_limit_reached")
-                .hasMessageContaining("max_branches")
+                .hasMessageEndingWith(" failed (plan_limit_reached: " + PLAN_LIMIT + ")")
                 .hasMessageNotContaining("ApiException");
 
         UUID run = owner.sql("SELECT id FROM import_runs WHERE tenant_id = ?")
@@ -169,9 +171,8 @@ class StageImportRunIT extends IntegrationTest {
         String failure = as(() -> runs.dryRunReport(run)).orElseThrow().report().failure();
         assertThat(failure)
                 .startsWith("batch ")
-                .contains("(plan_limit_reached: ")
-                .contains("max_branches")
-                .doesNotContain("ApiException");
+                .endsWith(" failed (plan_limit_reached: " + PLAN_LIMIT + ")")
+                .doesNotContain("max_branches");
         assertThat(as(() -> runs.get(run)).status()).isNotEqualTo("ready");
 
         // With room for the branches, staging again works beside the refused run (review of #902).

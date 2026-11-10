@@ -17,8 +17,8 @@ import java.util.Objects;
  * <p>It holds codes, counts and amounts only, never a value of a personal field: the commit checks every text a writer gives
  * it against the personal values of the run's staged rows before it keeps it, and keeps one that holds such a value as
  * {@link #HIDDEN}. A failure names the batch and the kind of failure, never the message of an unexpected error, which
- * may quote a row; a coded refusal (an {@code ApiException}) adds its code, and its message only for a code whose
- * message holds no typed value, such as the plan limit (issue #885). Two reports
+ * may quote a row; a coded refusal (an {@code ApiException}) names its code and a fixed sentence for it, never its
+ * message (issue #885). Two reports
  * of the same input are equal apart from their {@link #mode} ({@link #sameAs}).
  */
 public record CommitReport(
@@ -276,7 +276,7 @@ public record CommitReport(
             this.checksum = line;
         }
 
-        /** Why the run stopped: the batch and the kind of failure, or a refusal's code and safe message (#885). */
+        /** Why the run stopped: the batch and the kind of failure, or a refusal's code and fixed sentence (#885). */
         public void fail(String failure) {
             this.failure = failure;
         }

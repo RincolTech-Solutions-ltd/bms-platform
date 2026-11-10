@@ -231,7 +231,8 @@ on live staging and ready. It needs a staging business with retail switched on t
 
 - **A plan with room for the sample's three branches**, for example `business`, not Starter (one shop). On a plan
   without room, the plan limit refuses the branches' batch and `stage-import-run` answers
-  `refused: dry_run_failed: batch N failed (plan_limit_reached: ... (max_branches) ...)`. Move the business with the
+  `refused: dry_run_failed: batch N failed (plan_limit_reached: the plan's limit refused this batch; move the business
+  to a plan with room)`. Move the business with the
   operator's `PUT .../plan` (`docs/runbooks/onboard-tenant.md`) and stage again: the refused run stays in review and
   blocks nothing; rehearse only the new run id the second staging prints, never the refused one.
 - **The business must be in last night's backup**: create it at least one nightly backup before the check. The

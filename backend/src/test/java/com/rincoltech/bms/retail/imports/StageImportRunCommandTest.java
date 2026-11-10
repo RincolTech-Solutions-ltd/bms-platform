@@ -17,8 +17,8 @@ class StageImportRunCommandTest {
     @Test
     void aFailedDryRunIsPrintedWithItsFailureAndExitsOne() {
         Path dir = Path.of("/tmp/test-import-sample");
-        String failure = "dry_run_failed: batch 1 failed (plan_limit_reached: The plan allows at most 1 (max_branches);"
-                + " the limit has been reached.)";
+        String failure = "dry_run_failed: batch 1 failed (plan_limit_reached: the plan's limit refused this batch;"
+                + " move the business to a plan with room)";
         FabricatedRunStager stager = mock(FabricatedRunStager.class);
         when(stager.stage("test-shop", dir)).thenThrow(new IllegalStateException(failure));
         ByteArrayOutputStream out = new ByteArrayOutputStream();

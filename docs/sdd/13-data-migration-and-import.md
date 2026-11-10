@@ -1183,10 +1183,10 @@ commit only through test-only templates (`FixtureShopTemplate`, `ScriptedTemplat
   the text in any case, and their digits, seven or more, found among the text's digits. One that holds one is kept as
   `CommitReport.HIDDEN`. A failure names the batch and the kind of failure (`batch 3 failed (IllegalStateException)`), never
   the message of an unexpected error, which may quote a row; a dry run stopped by a coded refusal (an `ApiException`)
-  names its code, and its message only for a code whose message holds no typed value
-  (`ImportRunService.VALUE_FREE_MESSAGES`, today `plan_limit_reached`, #885 and the review of #902):
-  `batch N failed (plan_limit_reached: The plan allows at most 1 (max_branches); the limit has been reached.)`, but
-  `batch N failed (duplicate_sku)`. Each batch's part is stored in `import_batches.report` in its commit transaction, so
+  names its code and a fixed sentence written in the code for it (`ImportRunService.REFUSAL_SENTENCES`), never the
+  exception's message (#885, the Lead on #902): `batch N failed (plan_limit_reached: the plan's limit refused this
+  batch; move the business to a plan with room)`, and for any other code `batch N failed (refused with code
+  duplicate_sku)`. Each batch's part is stored in `import_batches.report` in its commit transaction, so
   `ImportRuns.commitReport(run)` is the committed batches' parts in order, resumed or not.
 - **The dry run** (`ImportRuns.dryRun(run, by)`, a run `in_review`, or `committing` for a resume on a new build, else 409
   `run_not_open`; 409 `batch_not_parsed`

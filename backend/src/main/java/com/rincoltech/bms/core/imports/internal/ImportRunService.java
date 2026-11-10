@@ -1574,17 +1574,19 @@ class ImportRunService implements ImportRuns {
         return failure;
     }
 
-    // JUSTIFICATION-A3: review of #902 asks for an allowlist of value-free messages, proven by a unit test.
-    /** The codes whose message holds no typed value: the plan limit names the plan's number and the limit's key. */
-    static final Set<String> VALUE_FREE_MESSAGES = Set.of("plan_limit_reached");
+    // JUSTIFICATION-A3: the Lead on #902 asks for a fixed sentence per code, proven by a unit test.
+    /** A fixed plain sentence for a refusal's code, written here, never taken from the exception (Lead on #902). */
+    static final Map<String, String> REFUSAL_SENTENCES = Map.of(
+            "plan_limit_reached", "the plan's limit refused this batch; move the business to a plan with room");
 
     /**
-     * A dry run's failure for a batch a coded refusal stopped (issue #885): the batch and the refusal's code, and its
-     * message only for a code of {@link #VALUE_FREE_MESSAGES}, since another's may quote a row (review of #902).
+     * A dry run's failure for a batch a coded refusal stopped (issue #885): the batch, the refusal's code and the fixed
+     * sentence for it, or {@code refused with code <code>}. Never the exception's message, which may quote a row.
      */
     static String refused(int seq, ApiException e) {
-        String message = VALUE_FREE_MESSAGES.contains(e.code()) ? e.getMessage() : null;
-        return "batch " + seq + " failed (" + e.code() + (message == null ? "" : ": " + message.strip()) + ")";
+        String sentence = e.code() == null ? null : REFUSAL_SENTENCES.get(e.code());
+        return "batch " + seq + " failed ("
+                + (sentence == null ? "refused with code " + e.code() : e.code() + ": " + sentence) + ")";
     }
 
     /** Throws {@link Halted} when the kill switch is off or the run's halt is set, read with a fresh snapshot. */
