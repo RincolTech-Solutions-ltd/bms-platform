@@ -139,6 +139,44 @@ class StageImportRunIT extends IntegrationTest {
         assertThat(openRuns()).isZero();
     }
 
+    // JUSTIFICATION-A3: issue #885 asks for this new test case of a plan limit refusing the dry run.
+    /**
+     * A business whose plan has no room for the sample's branches (issue #885): the plan limit refuses a batch, and
+     * both the stored dry run's failure and the stager's refusal name the refusal's code and the limit, not its class.
+     */
+    @Test
+    void aPlanLimitRefusalInTheDryRunNamesItsCodeInTheReportAndTheRefusal() {
+        JdbcClient owner = TestDatabase.owner();
+        owner.sql("""
+                        INSERT INTO plans (id, code, name, max_branches, max_staff_users, max_active_members, allowed_modules)
+                        VALUES (?, ?, 'Test One Shop Plan', 1, 10, 0, '{retail}')
+                        """)
+                .params(UUID.randomUUID(), "one-shop-" + t.slug())
+                .update();
+        owner.sql("UPDATE tenants SET plan_id = (SELECT id FROM plans WHERE code = ?) WHERE id = ?")
+                .params("one-shop-" + t.slug(), t.tenantId())
+                .update();
+
+        assertThatThrownBy(() -> on("staging").stage(t.slug(), RetailImportIT.SAMPLE))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("dry_run_failed: batch ")
+                .hasMessageContaining("plan_limit_reached")
+                .hasMessageContaining("max_branches")
+                .hasMessageNotContaining("ApiException");
+
+        UUID run = owner.sql("SELECT id FROM import_runs WHERE tenant_id = ?")
+                .param(t.tenantId())
+                .query(UUID.class)
+                .single();
+        String failure = as(() -> runs.dryRunReport(run)).orElseThrow().report().failure();
+        assertThat(failure)
+                .startsWith("batch ")
+                .contains("(plan_limit_reached: ")
+                .contains("max_branches")
+                .doesNotContain("ApiException");
+        assertThat(as(() -> runs.get(run)).status()).isNotEqualTo("ready");
+    }
+
     /** The business's runs: none is opened by a refused staging. */
     long openRuns() {
         return TestDatabase.owner()

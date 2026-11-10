@@ -1042,8 +1042,11 @@ class ImportRunService implements ImportRuns {
                             // The business's import key is taken: answered at once, nothing stored (Lead ruling 5).
                             throw e;
                         }
-                        failure[0] = "batch " + batch.seq() + " failed ("
-                                + e.getClass().getSimpleName() + ")";
+                        // A coded refusal, such as a plan limit, names its code and its message (issue #885), the
+                        // message screened as every text a writer gives the report: a personal value hides it.
+                        String said = privacy.holds(e.getMessage()) ? CommitReport.HIDDEN : e.getMessage();
+                        failure[0] = "batch " + batch.seq() + " failed (" + e.code()
+                                + (said == null || said.isBlank() ? "" : ": " + said.strip()) + ")";
                         break;
                     } catch (RuntimeException e) {
                         // As a real run, the first batch that fails stops it; the report names the batch and the kind
