@@ -1576,8 +1576,8 @@ class ImportRunService implements ImportRuns {
 
     // JUSTIFICATION-A3: the Lead on #902 asks for a fixed sentence per code, proven by a unit test.
     /** A fixed plain sentence for a refusal's code, written here, never taken from the exception (Lead on #902). */
-    static final Map<String, String> REFUSAL_SENTENCES = Map.of(
-            "plan_limit_reached", "the plan's limit refused this batch; move the business to a plan with room");
+    static final Map<String, String> REFUSAL_SENTENCES =
+            Map.of("plan_limit_reached", "the plan's limit refused this batch; move the business to a plan with room");
 
     /**
      * A dry run's failure for a batch a coded refusal stopped (issue #885): the batch, the refusal's code and the fixed
