@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -238,13 +239,15 @@ class RehearsalSettingsIT {
         // The test JVM's logging is left as it is: the command's WARN level and the server profile's JSON lines would
         // otherwise stay for every later test in this JVM, and some of them read INFO lines. The start also writes the
         // logging system properties (the structured console format among them), so every system property is restored.
-        Properties before = new Properties();
-        before.putAll(System.getProperties());
+        // Restored key by key on the same Properties object, so nothing holding it sees a stale copy.
+        Map<Object, Object> before = new HashMap<>(System.getProperties());
         System.setProperty(LoggingSystem.SYSTEM_PROPERTY, LoggingSystem.NONE);
         try (ConfigurableApplicationContext context = app.run()) {
             check.accept(context);
         } finally {
-            System.setProperties(before);
+            Properties now = System.getProperties();
+            now.keySet().removeIf(key -> !before.containsKey(key));
+            now.putAll(before);
         }
     }
 
@@ -320,9 +323,44 @@ class RehearsalSettingsIT {
             env.put(entry.group(1), value);
         }
         assertThat(env).as("the api service's environment in %s", compose).containsKeys("BMS_DB_URL", "R2_ENDPOINT");
-        env.put("PATH", "/opt/java/openjdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
-        env.put("JAVA_HOME", "/opt/java/openjdk");
-        env.put("LANG", "en_US.UTF-8");
+        // docker inspect also lists the image's own ENV; a key compose sets wins, as Docker gives it.
+        imageEnvironment().forEach(env::putIfAbsent);
+        env.putIfAbsent("PATH", "/opt/java/openjdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+        env.putIfAbsent("JAVA_HOME", "/opt/java/openjdk");
+        env.putIfAbsent("LANG", "en_US.UTF-8");
+        return env;
+    }
+
+    private static final Pattern ENV_BLOCK = Pattern.compile("(?m)^ENV ((?:.*\\\\\\n)*.*)$");
+
+    private static final Pattern ENV_PAIR = Pattern.compile("([A-Z][A-Z0-9_]*)=(\"[^\"]*\"|\\S*)");
+
+    /**
+     * The ENV lines of the runtime stage of {@code backend/Dockerfile}, its build arguments fabricated (review of #890). A
+     * new ENV fails here until this test is taught it, so an image setting cannot change the start unseen.
+     * JUSTIFICATION-A3: the review asked for the image's own ENV in the live environment; this reads it from the Dockerfile.
+     */
+    static Map<String, String> imageEnvironment() throws IOException {
+        String dockerfile = Files.readString(Path.of("Dockerfile"), StandardCharsets.UTF_8);
+        String runtime = dockerfile.substring(dockerfile.lastIndexOf("\nFROM "));
+        Map<String, String> env = new LinkedHashMap<>();
+        Matcher block = ENV_BLOCK.matcher(runtime);
+        while (block.find()) {
+            Matcher pair = ENV_PAIR.matcher(block.group(1));
+            while (pair.find()) {
+                String value = pair.group(2);
+                if (value.startsWith("\"")) {
+                    value = value.substring(1, value.length() - 1);
+                }
+                env.put(
+                        pair.group(1),
+                        value.replace("${GIT_SHA}", "0".repeat(40)).replace("${GIT_TIME}", "20261109000000"));
+            }
+        }
+        assertThat(env.keySet())
+                .as("the ENV of backend/Dockerfile's runtime stage: give a new one its value here")
+                .containsExactly("BMS_GIT_SHA", "BMS_GIT_TIME", "SPRING_PROFILES_ACTIVE", "JAVA_TOOL_OPTIONS");
+        assertThat(env.values()).noneMatch(value -> value.contains("$"));
         return env;
     }
 

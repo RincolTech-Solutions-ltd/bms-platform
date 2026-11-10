@@ -97,10 +97,24 @@ check "the migrate container is capped the same way" \
 check "the network is internal: no route out of it, and the live database is not on it" \
     grep -Eq '^network create --internal bms-rehearsal-net-[0-9]+$' "$FAKE/calls.log"
 # Review of #890, Lead on point 3: the provider hosts the startup guards pin are kept, so this network is what keeps the
-# API container from them. It joins that one network and no other, and nothing is connected to another network later.
-check "the API container joins the internal rehearsal network only (one --network, no network connect)" \
-    eval '[[ "$(grep -E "^run .*--name bms-rehearsal-api-" "$FAKE/calls.log" | grep -o -- "--network [^ ]*")" =~ ^--network\ bms-rehearsal-net-[0-9]+$ ]] \
-        && ! grep -q "^network connect" "$FAKE/calls.log"'
+# API container from them. isolated <calls log>: the network is created --internal; the throwaway database, the migrate
+# and the API containers each run with exactly one --network, that one; nothing is connected to another network later.
+isolated() {
+    local net line
+    net="$(sed -nE 's/^network create --internal (bms-rehearsal-net-[0-9]+)$/\1/p' "$1")"
+    [[ -n "$net" ]] && grep -Eq '^run .*--name bms-rehearsal-api-[0-9]+ ' "$1" || return 1
+    while IFS= read -r line; do
+        [[ "$(grep -o -- '--network [^ ]*' <<< "$line")" == "--network $net" ]] || return 1
+    done < <(grep -E '^run .*--name bms-rehearsal-(db|migrate|api)-[0-9]+ ' "$1")
+    ! grep -q '^network connect' "$1"
+}
+check "the database, migrate and API containers join the internal rehearsal network only" isolated "$FAKE/calls.log"
+# The check fails the other way: each way of giving the API a route out is caught.
+sed 's/^network create --internal /network create /' "$FAKE/calls.log" > "$WORK/no-internal.log"
+sed -E 's/^(run .*--name bms-rehearsal-api-[0-9]+ .*--network [^ ]+)/\1 --network bridge/' "$FAKE/calls.log" > "$WORK/two-networks.log"
+{ cat "$FAKE/calls.log"; echo "network connect bridge bms-rehearsal-api-4242"; } > "$WORK/connected.log"
+check "... and it fails without --internal, with a second --network on the API, or with a network connect" \
+    eval '! isolated "$WORK/no-internal.log" && ! isolated "$WORK/two-networks.log" && ! isolated "$WORK/connected.log"'
 check "the API runs the live API's image" grep -q 'ghcr.io/fake/bms-platform-api@sha256:fake rehearse-import --tenant' "$FAKE/calls.log"
 check "the API's only database is the throwaway one, its scheduler off, with the one-time token" \
     eval '[[ "$(grep -E "jdbc:|postgres(ql)?://" "$FAKE/api-env.seen")" =~ ^BMS_DB_URL=jdbc:postgresql://bms-rehearsal-db-[0-9]+:5432/bms$ ]] \
