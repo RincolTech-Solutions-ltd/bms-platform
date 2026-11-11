@@ -25,6 +25,7 @@ import { sayDone } from '../retail/toast';
 // The Owner (ADR-062) carries a badge; only the Owner is offered the actions on another administrator and Transfer ownership, and the
 // Owner's own card offers no action to anyone else. The server refuses the same with 403 owner_only and owner_protected. Sign out
 // their devices (issue #647) ends every session of an active person at once, for a lost or stolen phone; they stay active.
+// Change email or phone (issue #883) stands beside Change roles and opens the form My details uses (contact-editor.tsx).
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong. Try again.');
 

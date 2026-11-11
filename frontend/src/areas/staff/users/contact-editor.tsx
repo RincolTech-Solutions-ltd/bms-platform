@@ -54,8 +54,10 @@ export function ContactEditor({ user, self, owner, mfaEnabled, withName, onDone,
     setBusy(true);
     setError(null);
     const proof = !withProof ? {} : proofKind === 'code' ? { totp_code: typed.trim() } : { password: typed };
-    // The proof is cleared as soon as it is sent: a retry needs the next code, and a password is never kept on the page.
+    // The proof is cleared as soon as it is sent: a retry needs the next code, and a password is never kept on the page. The
+    // emptied box says nothing of its own until the next press, so only the server's answer shows.
     setTyped('');
+    setTried(false);
     try {
       const saved = await users.update(user.id ?? '', user.version ?? 0, { ...change.body, ...proof });
       sayDone(self ? 'Your details are saved' : `New email or phone saved for ${who}`);
@@ -96,6 +98,7 @@ export function ContactEditor({ user, self, owner, mfaEnabled, withName, onDone,
   if (step === 'proof') {
     return (
       <form
+        key="proof"
         className="stack"
         aria-label="Show it is you"
         autoComplete="off"
@@ -156,6 +159,7 @@ export function ContactEditor({ user, self, owner, mfaEnabled, withName, onDone,
 
   return (
     <form
+      key="edit"
       className="stack"
       aria-label={self ? 'My details' : `Change the email or phone of ${who}`}
       autoComplete="off"
@@ -178,7 +182,7 @@ export function ContactEditor({ user, self, owner, mfaEnabled, withName, onDone,
         placeholder="0712 345 678"
         value={draft.phone}
         onChange={(e) => setDraft({ ...draft, phone: e.target.value })}
-        hint="A Uganda mobile number. You can sign in with it."
+        hint={self ? 'A Uganda mobile number. You can sign in with it.' : 'A Uganda mobile number. They can sign in with it.'}
         error={change.problems.phone}
         showError={tried}
       />
