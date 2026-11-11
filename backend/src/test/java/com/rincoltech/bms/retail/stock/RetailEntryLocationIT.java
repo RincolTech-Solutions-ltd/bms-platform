@@ -361,10 +361,16 @@ class RetailEntryLocationIT extends IntegrationTest {
         setShop();
         sell(sale(fix(NEAR_LAT, SHOP_LNG, 12)));
         use(fix(SHOP_LAT, FAR_LNG, 30));
+        // Only the payload (data), and the full fixture values: a created_at or an id can hold four of these digits.
         assertThat(TestDatabase.owner()
-                        .sql("SELECT count(*) FROM audit_log a WHERE a.tenant_id = ? AND (a::text LIKE '%32.58%'"
-                                + " OR a::text LIKE '%32.60%' OR a::text LIKE '%0.3139%')")
-                        .params(t.tenantId())
+                        .sql("SELECT count(*) FROM audit_log a WHERE a.tenant_id = ?"
+                                + " AND (a.data::text LIKE '%' || ? || '%' OR a.data::text LIKE '%' || ? || '%'"
+                                + " OR a.data::text LIKE '%' || ? || '%')")
+                        .params(
+                                t.tenantId(),
+                                String.valueOf(NEAR_LAT),
+                                String.valueOf(SHOP_LNG),
+                                String.valueOf(FAR_LNG))
                         .query(Long.class)
                         .single())
                 .isZero();
