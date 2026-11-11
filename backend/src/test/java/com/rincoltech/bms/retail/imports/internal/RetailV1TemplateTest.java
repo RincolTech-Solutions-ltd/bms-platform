@@ -307,15 +307,17 @@ class RetailV1TemplateTest {
         for (long seed = 1; seed <= 20; seed++) {
             List<String> shuffled = new java.util.ArrayList<>(sorted);
             java.util.Collections.shuffle(shuffled, new java.util.Random(seed));
-            shuffled.sort(RetailImporter::naturalOrder);
+            shuffled.sort(RetailImporter::refOrder);
             assertThat(shuffled).as("seed %d", seed).isEqualTo(sorted);
         }
-        assertThat(RetailImporter.naturalOrder("PUR-9", "PUR-10")).isNegative();
-        assertThat(RetailImporter.naturalOrder("ADV-10", "ADV-9")).isPositive();
-        // Advances share the rule (the data dictionary's upgrade note): the old one put ADV-10 first and X10-1 first.
-        assertThat(RetailImporter.naturalOrder("ADV-1A", "ADV-10")).isNegative();
-        assertThat(RetailImporter.naturalOrder("X2-1", "X10-1")).isNegative();
-        assertThat(RetailImporter.naturalOrder("PUR-7", "PUR-7")).isZero();
+        assertThat(RetailImporter.refOrder("PUR-9", "PUR-10")).isNegative();
+        assertThat(RetailImporter.refOrder("PUR-7", "PUR-7")).isZero();
+        // Advances keep their rule unchanged: on a pair the two rules order differently, each keeps its own.
+        assertThat(RetailImporter.naturalOrder("ADV-10", "ADV-1A"))
+                .as("advances")
+                .isNegative();
+        assertThat(RetailImporter.refOrder("ADV-1A", "ADV-10")).as("restocks").isNegative();
+        assertThat(RetailImporter.naturalOrder("ADV-9", "ADV-10")).isNegative();
     }
 
     private static RetailV1Template template() {

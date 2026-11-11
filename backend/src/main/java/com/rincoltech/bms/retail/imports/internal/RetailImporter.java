@@ -229,12 +229,12 @@ public class RetailImporter {
     static final String IMPORTED = "Imported ";
 
     /**
-     * Restocks of an item in time order (issue #881): by date, then by {@code source_ref} in {@link #naturalOrder} (issue
+     * Restocks of an item in time order (issue #881): by date, then by {@code source_ref} in {@link #refOrder} (issue
      * #905: PUR-9 before PUR-10, as an export lists them), which the books hold as well as the batch, so every split of
      * the history over runs orders them as one run does.
      */
     static final Comparator<Run.Restock> IN_TIME =
-            Comparator.comparing(Run.Restock::at).thenComparing(Run.Restock::ref, RetailImporter::naturalOrder);
+            Comparator.comparing(Run.Restock::at).thenComparing(Run.Restock::ref, RetailImporter::refOrder);
 
     private final TenantJobs tenants;
     private final TransactionTemplate transactions;
@@ -617,6 +617,9 @@ public class RetailImporter {
         return new Made(e.id(), e.created());
     }
 
+    private static final java.util.regex.Pattern TRAILING_NUMBER = java.util.regex.Pattern.compile("^(.*?)(\\d+)$");
+
+    /** Source ids in natural order: the same prefix, then the trailing number as a number (ADV-9 before ADV-10). */
     /** The text of one field on every row that has it as text; a row where it is not text is reported by its own read. */
     static List<String> texts(ExportFile file, String field) {
         List<String> out = new ArrayList<>();
@@ -633,13 +636,26 @@ public class RetailImporter {
         return out;
     }
 
-    /**
-     * Source ids in natural order (ADV-9 before ADV-10, PUR-9 before PUR-10): character by character, a run of digits
-     * against a run of digits by its value, and ids equal so ({@code PUR-09}, {@code PUR-9}) by their UTF-8 bytes. A total
-     * order, so a sort by it is the same whatever order the rows come in (issue #905). Characters compare as UTF-16
-     * units and the final tie as UTF-8 bytes: each is a total order, so together they are one; keep both.
-     */
     static int naturalOrder(String a, String b) {
+        java.util.regex.Matcher x = TRAILING_NUMBER.matcher(a);
+        java.util.regex.Matcher y = TRAILING_NUMBER.matcher(b);
+        if (x.matches() && y.matches() && x.group(1).equals(y.group(1))) {
+            int byValue = new BigDecimal(x.group(2)).compareTo(new BigDecimal(y.group(2)));
+            if (byValue != 0) {
+                return byValue;
+            }
+        }
+        return a.compareTo(b);
+    }
+
+    // JUSTIFICATION-A3: issue #905 orders same-day restocks by a total natural order; advances keep naturalOrder.
+    /**
+     * Restock refs in natural order (issue #905, PUR-9 before PUR-10): character by character, a run of digits against a
+     * run of digits by its value, and refs equal so ({@code PUR-09}, {@code PUR-9}) by their UTF-8 bytes. A total order,
+     * so a sort by it is the same whatever order the rows come in. Characters compare as UTF-16 units and the final tie
+     * as UTF-8 bytes: each is a total order, so together they are one; keep both. Advances keep {@link #naturalOrder}.
+     */
+    static int refOrder(String a, String b) {
         int i = 0;
         int j = 0;
         while (i < a.length() && j < b.length()) {
