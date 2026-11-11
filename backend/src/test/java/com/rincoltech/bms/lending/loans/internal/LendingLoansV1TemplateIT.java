@@ -601,8 +601,8 @@ class LendingLoansV1TemplateIT extends IntegrationTest {
         assertThat(linkedMemberOn(run, 3)).isEqualTo(linked.toString());
 
         // JUSTIFICATION-A3: must-fix 1 of the review of #911, the same issue resolved again on the same cells.
-        // The same issue cannot be resolved again on the same cells (409 issue_not_open), so no override can sit beside a
-        // link it does not clear: the link stands until the row's cells change.
+        // The same issue cannot be resolved again on the same cells (409 issue_not_open), so no override can sit
+        // beside a link it does not clear: the link stands until the row's cells change.
         Issue linkedIssue = as(t, () -> issueOn(run, 3, "MEMBER_PHONE_CONFLICT"));
         assertThat(linkedIssue.status()).isEqualTo("resolved");
         ApiException twice = null;
