@@ -229,7 +229,7 @@ class LendingLoansV1Template implements ImportTemplate {
                             + " dates are read."),
             warning(
                     "PAY_DATE_OUT_OF_RANGE",
-                    "{field} on {file} line {line} is before the loan's date or after the cutover day."),
+                    "{field} on {file} line {line} is before the loan's date."),
             info("DURATION_NORMALISED", "{field} on {file} line {line} was tidied into a count and a unit."),
             blocking(
                     "DURATION_UNPARSEABLE",
