@@ -541,11 +541,10 @@ class LendingLoansV1TemplateIT extends IntegrationTest {
         UUID run = uploaded(
                 t, officer, Map.of("register|fab-pay-dates.csv", csv(PAID_BEFORE_THE_LOAN, PAID_AFTER_THE_CUTOVER)));
         assertThat(as(t, () -> codesOn(run, 2))).contains("PAY_DATE_OUT_OF_RANGE");
-        assertThat(as(t, () -> codesOn(run, 3)))
-                .contains("DATE_AFTER_CUTOVER")
-                .doesNotContain("PAY_DATE_OUT_OF_RANGE");
+        assertThat(as(t, () -> codesOn(run, 3))).contains("DATE_AFTER_CUTOVER").doesNotContain("PAY_DATE_OUT_OF_RANGE");
         settle(t, run);
-        assertThat(as(t, () -> issueOn(run, 2, "PAY_DATE_OUT_OF_RANGE")).resolution()).isEqualTo("override");
+        assertThat(as(t, () -> issueOn(run, 2, "PAY_DATE_OUT_OF_RANGE")).resolution())
+                .isEqualTo("override");
         committed(t, run);
 
         // Interest first: 20,000 of interest and 30,000 of principal paid, 70,000 of principal owed at the cutover.
@@ -596,7 +595,8 @@ class LendingLoansV1TemplateIT extends IntegrationTest {
         assertThat(changed).isNotEqualTo(original);
         UUID first = as(t, () -> uploads.batches(run).getFirst().id());
         as(t, () -> uploads.cancelBatch(first));
-        UUID mapping = as(t, () -> mappings.latest("pilot-register").orElseThrow().id());
+        UUID mapping =
+                as(t, () -> mappings.latest("pilot-register").orElseThrow().id());
         byte[] sentAgain = changed.getBytes(StandardCharsets.UTF_8);
         as(t, () -> upload(run, mapping, "register|pilot_loan_register_sample.csv", sentAgain));
         as(t, () -> validation.validate(run));
@@ -870,9 +870,7 @@ class LendingLoansV1TemplateIT extends IntegrationTest {
         List<String> out = new ArrayList<>();
         for (ImportUploads.Batch b : uploads.batches(run)) {
             if (file.equals(b.fileName())) {
-                validation.issues(b.id()).stream()
-                        .filter(i -> i.line() == line)
-                        .forEach(i -> out.add(i.code()));
+                validation.issues(b.id()).stream().filter(i -> i.line() == line).forEach(i -> out.add(i.code()));
             }
         }
         return out;

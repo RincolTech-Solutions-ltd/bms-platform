@@ -493,7 +493,9 @@ class LendingLoansV1TemplateTest {
 
         List<String> hq = codesOf(r, "fab-hq.csv", 2);
         List<String> br2 = codesOf(r, "fab-br2.csv", 2);
-        assertThat(hq).as("the kin is the borrower of the later file").doesNotContain("KIN_IS_MEMBER", "KIN_PHONE_MATCH");
+        assertThat(hq)
+                .as("the kin is the borrower of the later file")
+                .doesNotContain("KIN_IS_MEMBER", "KIN_PHONE_MATCH");
         assertThat(br2).as("the kin is the borrower of the earlier file").contains("KIN_IS_MEMBER");
     }
 

@@ -1689,7 +1689,12 @@ class ImportRunService implements ImportRuns {
             }
             return preview.linkedEarlier(batchId, source.set()).stream()
                     .map(r -> new ImportRefs.StagedRow(
-                            r.line(), r.typed(), r.validationRef(), ImportRefs.Status.NEW, Map.of(), r.linkedMemberId()))
+                            r.line(),
+                            r.typed(),
+                            r.validationRef(),
+                            ImportRefs.Status.NEW,
+                            Map.of(),
+                            r.linkedMemberId()))
                     .toList();
         }
 
