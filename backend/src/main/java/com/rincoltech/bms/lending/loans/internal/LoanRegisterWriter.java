@@ -32,10 +32,11 @@ import org.springframework.stereotype.Component;
 /**
  * The loader of {@code lending_loans_v1} (issue #136, chapter 13 section 13.10 steps 1 to 7): one batch of register rows,
  * in the batch's transaction. First every borrower is matched or made, in line order, as the validation's rules
- * ({@link LoanRegisterRules}) assigned them: the member the review linked a row of the key to, in this file or by NIN in an
- * earlier one (every row of the key takes it; a key linked to two members is refused), the member an earlier row of the file with the same key made, a member
- * {@link LoanRegister#match} finds, or a new one with the details of the key's latest row by date. Then each row's next of kin (a duplicate collapses), collateral item, loan with its one bullet item, historic
- * disbursement and repayment with its allocations, and the remark as a collection note. Every record is registered in
+ * ({@link LoanRegisterRules}) assigned them: the member the review linked a row of the key to, in this file or by NIN in
+ * an earlier one (every row of the key takes it; a key linked to two members is refused), the member an earlier row of
+ * the file with the same key made, a member {@link LoanRegister#match} finds, or a new one with the details of the key's
+ * latest row by date. Then each row's next of kin (a duplicate collapses), collateral item, loan with its one bullet
+ * item, historic disbursement and repayment with its allocations, and the remark as a collection note. Every record is registered in
  * {@code import_refs}. Last, one opening journal per branch, ever: a branch with no import opening journal of loans yet takes
  * one for every imported loan of it still owing principal, one {@code loans_receivable} line per loan; a branch that has one
  * takes none and its new loans are listed for a correcting entry. Imported loans send no SMS, start no task and post no

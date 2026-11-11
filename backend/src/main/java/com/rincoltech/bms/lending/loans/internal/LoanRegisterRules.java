@@ -108,6 +108,7 @@ final class LoanRegisterRules implements SetRules {
     private final Map<String, UUID> branchFile = new HashMap<>();
 
     private Map<String, Assigned> assigned;
+    private Map<UUID, Integer> fileEnds;
 
     LoanRegisterRules(Directory directory) {
         this.directory = directory;
@@ -152,6 +153,7 @@ final class LoanRegisterRules implements SetRules {
                 r.paidOn(),
                 c != null && "vehicle".equals(c.type()) ? c.reference() : null));
         assigned = null;
+        fileEnds = null;
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -385,16 +387,18 @@ final class LoanRegisterRules implements SetRules {
     /**
      * The rows whose borrowers are members by the time the loader writes a next of kin of this file: every row of this file
      * (a batch makes its members before any next of kin) and of the files before it, in commit order. A borrower of a later
-     * file is not a member yet, so a next of kin naming them is neither linked nor shown as linked (issue #878).
+     * file is not a member yet, so a next of kin naming them is neither linked nor shown as linked (issue #878). Pass 1 sees
+     * the batches one after another in {@code seq} order, the commit's order, so {@code seen} holds each file's rows
+     * together; the end of each file in it is computed once.
      */
     private List<Seen> membersBy(UUID batch) {
-        int end = 0;
-        for (int i = 0; i < seen.size(); i++) {
-            if (seen.get(i).batch().equals(batch)) {
-                end = i + 1;
+        if (fileEnds == null) {
+            fileEnds = new HashMap<>();
+            for (int i = 0; i < seen.size(); i++) {
+                fileEnds.put(seen.get(i).batch(), i + 1);
             }
         }
-        return seen.subList(0, end);
+        return seen.subList(0, fileEnds.getOrDefault(batch, 0));
     }
 
     private void link(SetRow row, List<Note> notes, Nin kinNin, Phone kinPhone, Phone phone) {

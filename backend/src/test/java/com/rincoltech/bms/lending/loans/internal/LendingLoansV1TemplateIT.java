@@ -588,6 +588,27 @@ class LendingLoansV1TemplateIT extends IntegrationTest {
                         operator));
         assertThat(linkedMemberOn(run, 3)).isEqualTo(linked.toString());
 
+        // JUSTIFICATION-A3: must-fix 1 of the review of #911, the same issue resolved again on the same cells.
+        // The same issue cannot be resolved again on the same cells (409 issue_not_open), so no override can sit beside a
+        // link it does not clear: the link stands until the row's cells change.
+        Issue linkedIssue = as(t, () -> issueOn(run, 3, "MEMBER_PHONE_CONFLICT"));
+        assertThat(linkedIssue.status()).isEqualTo("resolved");
+        ApiException twice = null;
+        try {
+            as(
+                    t,
+                    () -> review.resolve(
+                            linkedIssue.id(),
+                            new ImportReview.Resolution(
+                                    "override", linkedIssue.version(), null, null, null, "Fabricated: changed mind"),
+                            operator));
+        } catch (ApiException e) {
+            twice = e;
+        }
+        assertThat(twice).isNotNull();
+        assertThat(twice.code()).isEqualTo("issue_not_open");
+        assertThat(linkedMemberOn(run, 3)).isEqualTo(linked.toString());
+
         // The customer sends the register again with line 3 changed: the link was made on other cells.
         String original = Files.readString(PILOT, StandardCharsets.UTF_8);
         String changed = original.replace(

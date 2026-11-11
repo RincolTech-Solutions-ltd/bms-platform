@@ -459,7 +459,7 @@ class PreviewService implements ImportPreview {
         return jdbc.sql("SELECT r.source_row_no, r.source_ref, r.normalised::text, r.linked_member_id"
                         + " FROM import_rows r JOIN import_batches b ON b.id = r.batch_id"
                         + " JOIN import_batches t ON t.id = ? AND t.run_id = b.run_id AND b.seq < t.seq"
-                        + " WHERE b.status IN ('uploaded', 'parsed', 'committed') AND r.linked_member_id IS NOT NULL"
+                        + " WHERE b.status NOT IN ('failed', 'cancelled') AND r.linked_member_id IS NOT NULL"
                         + " AND r.normalised IS NOT NULL AND " + WRITE
                         + " ORDER BY b.seq, r.source_row_no")
                 .param(batchId)
