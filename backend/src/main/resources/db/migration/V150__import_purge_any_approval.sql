@@ -1,20 +1,26 @@
 -- V150: customer data onboarding 13/16 follow-ups, the purge reaches every approval of the run (issue #887, review of #886,
 -- ADR-027 decision 8, SDD chapter 13 section 13.14). Directly after V149. Expand only, safe on a populated database: one
--- function replaced by its own body with one condition dropped. No table, column, index or grant changes.
+-- function replaced by its own body with its approval statement widened (below). No table, column, index or grant changes.
 --
 -- `import_purge_run(run)` (V147) hashed the checker's note and the failed execution's words of the run's `import_commit`
 -- request only. Any approval request whose subject is the run is the run's typed text whatever its action type (a trading
 -- override approved by a second operator, spec #127, or any later import action): the purge now hashes `decision_note` and
 -- `execution_error` of every request of the business with `subject_id = run`. A run's id is a fresh random uuid, so no
--- request of another subject shares it. The status, the people and the times of each request stay; `payload` stays as V147
--- says (the application's own notice and ids). Every other statement of the function is V147's, unchanged. Without the
+-- request of another subject shares it. The payload of every such request but `import_commit` is hashed too (review of
+-- #907, MF1): only `import_commit`'s payload is known to hold ids, a count and a fixed notice (ImportRunService), and an
+-- action added later may carry a typed reason for its checker. Today `import_commit` is the only approval action whose
+-- subject is an import run, and none has a batch as its subject (ImportPurgeIT asserts both). A request of the run still
+-- pending is cancelled first (review of #907, MF2): ApprovalService writes a note or an execution error only on a pending
+-- request, so none is typed on a purged run afterwards; the function returns how many it cancelled, and the purge's audit
+-- row says so. The status of a decided request, the people and the times stay. Every other statement of the function is
+-- V147's, unchanged. Without the
 -- action type no index has subject_id after tenant_id, so the update reads the business's requests through the tenant prefix
 -- of approval_requests_queue: once per purge, over one business's requests.
 --
 -- Personal data, the one rule restated for the reviewer (Lead on #886, review of #886 nice-to-haves); ImportPurgeIT reads
 -- this header and fails when a column it keeps readable is not named here with its reason.
 -- Hashed or cleared by the purge: every free-text column of the run's tables, as V147 lists them, and of every approval
---   request whose subject is the run (decision_note, execution_error).
+--   request whose subject is the run (decision_note, execution_error, and payload unless it is import_commit's).
 -- Kept readable, each for one reason:
 --   import_runs.pre_import_dump_file, import_batches.source_filename: the certificate names the files and the dump it deletes
 --     (spec section 6.4); their sizes and SHA-256 (import_batches.source_sha256, import_runs.pre_import_dump_sha256) are
@@ -26,7 +32,8 @@
 --     the application and the restore script, codes, counts and amounts only.
 --   import_deletion_certificates.body, import_deletion_certificates.document: the certificate itself, which names the
 --     platform operator, the witness and the files, never a customer's person.
---   approval_requests.payload: the run's id, its file count and the application's notice.
+--   approval_requests.payload: of the run's import_commit request only, the run's id, its file count and the
+--     application's fixed notice; every other request's payload whose subject is the run is hashed.
 -- The audit rows hold the length of a trading override's reason (reason_length) and of a policy's confirmation
 -- (confirmation_length), never the text: a length says nothing of a person (ADR-027 decision 8).
 --
@@ -44,6 +51,7 @@ DECLARE
     v_rows        integer;
     v_issues      integer;
     v_resolutions integer;
+    v_cancelled   integer;
 BEGIN
     IF v_tenant IS NULL THEN
         RAISE EXCEPTION 'an import run is purged inside its own business' USING ERRCODE = 'insufficient_privilege';
@@ -124,18 +132,30 @@ BEGIN
      WHERE x.tenant_id = v_tenant AND x.run_id = p_run;
     GET DIAGNOSTICS v_resolutions = ROW_COUNT;
 
+    -- A request of the run still pending is cancelled first (review of #907, MF2): a note or an execution error is
+    -- written only on a pending request (ApprovalService), so none can be typed on a purged run afterwards.
+    UPDATE approval_requests
+       SET status = 'cancelled', decided_at = now(), updated_at = now(), version = version + 1
+     WHERE tenant_id = v_tenant AND subject_id = p_run AND status = 'pending';
+    GET DIAGNOSTICS v_cancelled = ROW_COUNT;
+
     -- The checker's note and the words of a failed execution of every approval request whose subject is the run, whatever
-    -- its action type (review of #886, MF2; issue #887). approval_requests is not append-only, so no guard needs a way
-    -- through; its status, people and times stay.
+    -- its action type (review of #886, MF2; issue #887), and the payload of every one but import_commit, whose payload the
+    -- application writes from ids, a count and a fixed notice (review of #907, MF1). approval_requests is not append-only,
+    -- so no guard needs a way through; its status, people and times stay.
     UPDATE approval_requests
        SET decision_note = CASE WHEN decision_note IS NULL THEN NULL
                                 ELSE 'sha256:' || encode(sha256(v_salt || convert_to(decision_note, 'UTF8')), 'hex') END,
            execution_error = CASE WHEN execution_error IS NULL THEN NULL
                                   ELSE 'sha256:' || encode(sha256(v_salt || convert_to(execution_error, 'UTF8')), 'hex')
-                                  END
+                                  END,
+           payload = CASE WHEN action_type = 'import_commit' THEN payload
+                          ELSE jsonb_build_object('sha256', encode(sha256(v_salt || convert_to(payload::text, 'UTF8')),
+                                                                   'hex')) END
      WHERE tenant_id = v_tenant AND subject_id = p_run;
 
     PERFORM set_config('bms.purging_import_run', '', true);
-    RETURN jsonb_build_object('rows', v_rows, 'issues', v_issues, 'resolutions', v_resolutions);
+    RETURN jsonb_build_object('rows', v_rows, 'issues', v_issues, 'resolutions', v_resolutions,
+                              'approvals_cancelled', v_cancelled);
 END
 $$;

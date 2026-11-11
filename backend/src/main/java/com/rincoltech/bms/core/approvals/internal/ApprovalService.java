@@ -338,7 +338,9 @@ class ApprovalService implements Approvals {
             throw e;
         } catch (ExecutionFailed e) {
             transactions.executeWithoutResult(status -> {
-                jdbc.sql("UPDATE approval_requests SET execution_error = ?, updated_at = now() WHERE id = ?")
+                // Only while still pending: the purge of an import run cancels its requests meanwhile (#887).
+                jdbc.sql("UPDATE approval_requests SET execution_error = ?, updated_at = now()"
+                                + " WHERE id = ? AND status = 'pending'")
                         .params(e.getMessage(), approvalId)
                         .update();
                 audit.record(new AuditLog.Entry(

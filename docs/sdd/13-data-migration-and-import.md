@@ -1640,7 +1640,8 @@ section 4.1; coordinated with #110, which builds no second framework).**
   reason and each policy decision's confirmation reference (`import_runs.allow_trading_reason` and the `confirmation` of
   each entry of `import_runs.policy`), and the checker's note and any execution error on every approval request whose
   subject is the run, whatever its action type (`approval_requests.decision_note` and `execution_error`; `import_commit`
-  until V150 widened it, issue #887). Their audit rows, never purged, record only that
+  until V150 widened it, issue #887), with the payload of every such request but `import_commit`'s; a request of the run
+  still pending is cancelled by the purge, so no note is typed on it afterwards. Their audit rows, never purged, record only that
   the text was given and its length (`core.import_run.trading_override_set`, `core.import_run.policy_recorded`), never
   an unsalted hash a guess of every phone number would undo; an approval's decision is audited without its note. A run
   has no notes and no halt or cancel reason (V127). `ImportPurgeIT` names every text column of the run's tables and its

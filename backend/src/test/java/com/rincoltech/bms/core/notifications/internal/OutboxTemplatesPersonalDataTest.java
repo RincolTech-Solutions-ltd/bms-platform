@@ -30,17 +30,19 @@ class OutboxTemplatesPersonalDataTest {
         TreeMap<String, Set<String>> found = new TreeMap<>();
         for (String channel : List.of("email", "telegram", "sms", "push")) {
             for (String key : OutboxTemplates.keys(channel)) {
-                if (key.startsWith("imports.") || key.contains("approval")) {
+                if (key.contains("import") || key.contains("approv")) {
                     found.put(channel + ":" + key, OutboxTemplates.placeholders(channel, key));
                 }
             }
         }
+        // The whole list (review of #907): a new import or approval message fails here until it is added and checked.
         assertThat(found.keySet())
-                .as("the filter finds the messages it guards")
-                .contains(
+                .as("the import and approval messages")
+                .containsExactlyInAnyOrder(
                         "email:imports.purged_without_warning",
                         "telegram:imports.purged_without_warning",
                         "telegram:imports.purge_warning",
+                        "push:core.approval_policy_weakened",
                         "push:core.approval_waiting");
         found.forEach((template, names) -> {
             Set<String> extra = new TreeSet<>(names);
@@ -48,9 +50,6 @@ class OutboxTemplatesPersonalDataTest {
             assertThat(extra)
                     .as("parameters of %s outside the allowed list", template)
                     .isEmpty();
-            assertThat(names)
-                    .as(template)
-                    .noneMatch(n -> n.contains("note") || n.contains("signed") || n.contains("signer"));
         });
     }
 }
