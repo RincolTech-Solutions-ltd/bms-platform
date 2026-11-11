@@ -1,6 +1,7 @@
 package com.rincoltech.bms.retail.imports.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
 import com.rincoltech.bms.core.imports.ImportForecast;
@@ -217,26 +218,34 @@ class RetailV1TemplateTest {
     /** The stock a history row moves, read as the loader reads it; none for a row the loader refuses (issue #876). */
     @Test
     void aHistoryRowMovesTheStockTheLoaderWrites() {
-        assertThat(RetailV1Template.historyMoves("purchases", restock("adjustment", "HQ=-2; KLA=0; ENT=1.5")))
+        assertThat(RetailV1Template.historyMoves("purchases", restock("adjustment", "hq=-2; KLA=0; ENT=1.5")))
                 .containsExactly(
-                        new RetailV1Template.Move("HQ", "TS-001", new BigDecimal("-2.000")),
-                        new RetailV1Template.Move("ENT", "TS-001", new BigDecimal("1.500")));
-        assertThat(RetailV1Template.historyMoves("purchases", restock("return", "HQ=-2")))
-                .as("only an adjustment may be negative")
-                .isEmpty();
+                        new RetailV1Template.Move("HQ", "ts-001", new BigDecimal("-2.000")),
+                        new RetailV1Template.Move("ENT", "ts-001", new BigDecimal("1.500")));
+        assertThatThrownBy(() -> RetailV1Template.historyMoves("purchases", restock("return", "HQ=-2")))
+                .isInstanceOf(ExportFile.RowProblem.class)
+                .hasMessage("a return quantity must be positive, branch HQ");
+        assertThatThrownBy(() -> RetailV1Template.historyMoves("purchases", restock("purchase", "HQ=1; hq=2")))
+                .hasMessage("branch hq appears twice in qty_by_branch");
+        assertThatThrownBy(() -> RetailV1Template.historyMoves("purchases", restock("purchase", "HQ=0")))
+                .hasMessage("no quantity in qty_by_branch");
         assertThat(RetailV1Template.historyMoves(
-                        "usage",
-                        Map.of("source_ref", "U-1", "branch", "HQ", "product_code", "TS-001", "qty", BigDecimal.TEN)))
+                        "usage", row(Map.of("branch", "HQ", "product_code", "TS-001", "qty", BigDecimal.TEN))))
                 .containsExactly(new RetailV1Template.Move("HQ", "TS-001", new BigDecimal("-10.000")));
-        assertThat(RetailV1Template.historyMoves(
-                        "sales",
-                        Map.of("source_ref", "S-1", "branch", "HQ", "product_code", "TS-001", "qty", BigDecimal.ZERO)))
-                .isEmpty();
+        assertThatThrownBy(() -> RetailV1Template.historyMoves(
+                        "sales", row(Map.of("branch", "HQ", "product_code", "TS-001", "qty", BigDecimal.ZERO))))
+                .hasMessage("qty must be positive");
     }
 
-    /** A restock row of the fabricated item ts-001 as the validation types it. */
-    private static Map<String, Object> restock(String kind, String qtyByBranch) {
-        return Map.of("source_ref", "P-1", "product_code", "ts-001", "kind", kind, "qty_by_branch", qtyByBranch);
+    /** A restock row of the fabricated item ts-001 as the validation types it, read as the loader reads it. */
+    private static ExportFile.Row restock(String kind, String qtyByBranch) {
+        return row(Map.of("source_ref", "P-1", "product_code", "ts-001", "kind", kind, "qty_by_branch", qtyByBranch));
+    }
+
+    private static ExportFile.Row row(Map<String, Object> values) {
+        return ExportFile.staged("rows.jsonl", List.of(Map.entry(1, values)))
+                .rows
+                .getFirst();
     }
 
     @Test

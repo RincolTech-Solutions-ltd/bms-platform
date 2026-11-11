@@ -1446,11 +1446,13 @@ section 4.1 and Appendix A).**
   function (`RetailV1Template.BranchOpening.journal`, the opened branches read by `openedBranches`, leaving out the
   forecast run's own journal, `ImportTemplate.forecast(policy, runId)`), so the preview and the commit always agree.
   The forecast reads the books as they were before its run (`heldBefore`: each position less the run's own movements)
-  and moves stock for the run's own history rows as the loader writes them (`historyMoves`, the loader's readers), so an
-  item whose legacy balance an earlier import wrote is valued at the books' balance after this run's history, which is
-  when the loader reads it; a history row other imports hold moves nothing (`earlierHistory`). Its stock per item, the
-  reconciliation's quantity check, is what the run puts on hand: the quantity the opening values less what the books
-  held before, so an item the run leaves as the books hold it counts only its history (issue #876).
+  and moves stock for the run's own history rows by `historyMoves`, the one function the loader also writes a history
+  row's movements by, so an item whose legacy balance an earlier import wrote is valued at the books' balance after this
+  run's history, which is when the loader reads it; a history row other imports hold moves nothing (`earlierHistory`).
+  `openingQuantities` gives each balance row the quantity it stands at once the run is written (the books' balance for
+  an item the run leaves as the books hold it: legacy-held, or held at a branch already opened), and both the opening
+  and the forecast's stock per item, the reconciliation's quantity check, read it: the stock per item is that quantity
+  less what the books held before, so an item the run leaves as the books hold it counts only its history (issue #876).
   Every row the loader writes is registered, the records it matched included, so the reconciliation finds each one in
   the books.
 - **The wrapper.** `import-retail --tenant --dir [--dry-run] [--first-live-date]` keeps its interface, its tolerant reading

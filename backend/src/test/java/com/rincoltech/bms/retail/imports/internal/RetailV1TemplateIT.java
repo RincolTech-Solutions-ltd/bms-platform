@@ -30,6 +30,7 @@ import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.TenantContext;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -518,6 +519,20 @@ class RetailV1TemplateIT extends IntegrationTest {
                 .flatMap(s -> s.checks().stream())
                 .toList();
         assertThat(checks).as(r.render()).isNotEmpty().allMatch(ImportReconciliation.Check::ties);
+        // The stock value check (review of 43a5867): the rows at the quantities the opening values (TB-1 at the books'
+        // 0, TB-2 at the books' 2, TB-3 at 3, each at 100) against the run's opening journal, of which an opened branch
+        // takes none (one per branch, ever). The difference is the signer's to see, so the run is not signable until
+        // the stock-take the report lists is done.
+        assertThat(r.sections())
+                .filteredOn(s -> s.key().equals("stock_value"))
+                .singleElement()
+                .satisfies(s -> assertThat(s.checks()).singleElement().satisfies(c -> {
+                    assertThat(c.key()).isEqualTo("HQ");
+                    assertThat(new BigDecimal(c.source())).isEqualByComparingTo("500");
+                    assertThat(new BigDecimal(c.system())).isEqualByComparingTo("0");
+                    assertThat(c.ties()).isFalse();
+                }));
+        assertThat(r.signable()).isFalse();
     }
 
     /**
