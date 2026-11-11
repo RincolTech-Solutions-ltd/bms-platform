@@ -688,6 +688,15 @@ class ImportCommitIT extends IntegrationTest {
                                 Policy.RECEIVABLE,
                                 new PolicyDecision(Policy.TREAT_AS_SETTLED, DAY, "", operator, null, null))),
                 "policy_confirmation_required");
+        // No confirmation at all is the same refusal, never a NullPointerException (review of #886, issue #887).
+        assertCode(
+                () -> as(
+                        t,
+                        () -> runs.recordPolicy(
+                                run,
+                                Policy.RECEIVABLE,
+                                new PolicyDecision(Policy.TREAT_AS_SETTLED, DAY, null, operator, null, null))),
+                "policy_confirmation_required");
         // Defer without the exception, or with an id that is no platform operator's.
         assertCode(
                 () -> as(

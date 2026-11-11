@@ -149,23 +149,31 @@ tables and keeps in clear only codes, counts, hashes, statuses, ids and timestam
 | `import_batches` | `sheet_name`, `failure_reason` (hashed); the quarantined file and its `object_key` (deleted) |
 | `import_runs` | `allow_trading_reason` and each policy decision's confirmation (hashed), `data_key_wrapped` (cleared) |
 | `import_signoffs` | `signed_name` (hashed) |
-| `approval_requests` (the run's `import_commit`) | `decision_note`, `execution_error` (hashed) |
+| `approval_requests` (every request whose subject is the run, whatever its action type; V150, issue #887) | `decision_note`, `execution_error` (hashed) |
 
 The run has no notes and no halt or cancel reason (a boolean and a time, V127). The audit rows, never purged, hold no
 typed text and no unsalted hash of one, which a guess of every phone number would undo (review of #886, MF3): the
-override's reason and a policy's confirmation are audited only as given, with their length. Every other text column of
+override's reason and a policy's confirmation are audited only as given, with their length (`reason_length`,
+`confirmation_length`): a length is kept on purpose, since it says nothing of a person (issue #887). Every other text column of
 these tables holds codes only, and `ImportPurgeIT` names each column in one list, so a new column fails CI until it is
 classed. Kept readable, each for one reason:
 
 | Column | Why |
 |---|---|
-| `import_batches.source_filename`, `size_bytes`, `source_sha256`; `import_runs.pre_import_dump_file`, `pre_import_dump_sha256` | the certificate names the files and the dump it deletes |
+| `import_batches.source_filename`, `size_bytes`; `import_runs.pre_import_dump_file` (and the hashes `source_sha256`, `pre_import_dump_sha256`, which `ImportPurgeIT` lists as codes) | the certificate names the files and the dump it deletes |
 | `import_batches.source_headers` | the sheet's column names, which the business's mapping (not of the run) holds and a later run is mapped by |
 | `import_refs.source_key`, `source_ref` | the file, tab and reference code a later run matches its rows on; the mapping refuses a reference column that feeds a personal field (`SOURCE_REF_COLUMN_PERSONAL`) |
 | `import_reconciliations.report` | the signed document, codes, counts and amounts only, that the sign-off's SHA-256 names |
-| `import_rehearsals`, the dry run and batch reports | made by the application, codes, counts and amounts only |
-| `import_deletion_certificates.document` | the certificate itself, naming the platform operator, the witness and the files |
+| `import_rehearsals.report` and `reconciliation`, the dry run and batch reports | made by the application, codes, counts and amounts only |
+| `import_deletion_certificates.body` and `document` | the certificate itself, naming the platform operator, the witness and the files |
 | `approval_requests.payload` of the run's `import_commit` | the run's id, its file count and the application's notice |
+
+Issue #887 (follow-ups of the review of #886): the purge's migration header (V150) names every column kept readable with
+its reason, and `ImportPurgeIT` fails when one of its kept columns is missing there. An outbox row of an import or approval
+message is not purged (it lives 30 days after it is sent), so no such template takes a typed note or name:
+`OutboxTemplatesPersonalDataTest` holds every `imports.*` and approval template to ids, the business, the Owner's account
+name, a day, a fixed reason and an action's label. A customer's tab name stays on the batch (`sheet_name`, hashed by the
+purge) and reaches no audit row, proven on the real upload and parse.
 
 ## Note (8 November 2026, issue #138): decision 9 as built
 

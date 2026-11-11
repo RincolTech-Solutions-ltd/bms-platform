@@ -34,6 +34,7 @@ import com.rincoltech.bms.testsupport.Api;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -173,6 +174,19 @@ class ImportPurgeIT extends IntegrationTest {
                 .sql("UPDATE import_batches SET sheet_name = ?, failure_reason = ? WHERE run_id = ?")
                 .params(personal, personal, run)
                 .update();
+        // An approval of the run under another action type than import_commit, decided with a note and failed with
+        // words that are personal (issue #887): the purge hashes every request whose subject is the run.
+        UUID checker = UUID.randomUUID();
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO approval_requests (id, tenant_id, branch_id, action_type, subject_type, subject_id,
+                                                       payload, status, requested_by, requested_at, expires_at,
+                                                       decided_by, decided_at, decision_note, execution_error)
+                        VALUES (?, ?, ?, 'import_trading_override', 'core.import_run', ?, '{}', 'approved', ?, now(),
+                                now() + interval '1 day', ?, now(), ?, ?)
+                        """)
+                .params(UUID.randomUUID(), f.tenantId(), f.headOffice(), run, operator, checker, personal, personal)
+                .update();
         TestDatabase.owner()
                 .sql("UPDATE import_batches SET status = 'committed', committed_at = now() WHERE run_id = ?")
                 .param(run)
@@ -285,8 +299,9 @@ class ImportPurgeIT extends IntegrationTest {
                     .list());
             scan(table, scope, run, values, found);
         }
-        // The run's import_commit request, whose checker types a note (review of #886, MF2).
-        String approvals = "action_type = 'import_commit' AND subject_id = ?";
+        // Every approval request whose subject is the run, whatever its action type, whose checker types a note (review
+        // of #886, MF2; issue #887): the rows import_purge_run hashes (V150).
+        String approvals = "subject_id = ?";
         ids.addAll(TestDatabase.owner()
                 .sql("SELECT CAST(id AS text) FROM approval_requests WHERE " + approvals)
                 .param(run)
@@ -330,15 +345,21 @@ class ImportPurgeIT extends IntegrationTest {
         return "tenant_id = (SELECT tenant_id FROM import_runs WHERE id = ?)";
     }
 
-    /** Every text, character, JSON and text array column of a table, as the scan and the catalogue read them. */
+    /**
+     * Every text, character, JSON and user-defined column of a table, and every array whose element type is a string or
+     * a user-defined type (category S or U: text, varchar, bpchar, citext, json, jsonb and any later one), as the scan
+     * and the catalogue read them (issue #887: an array is classed by its element's category, not by a list of names).
+     */
     static List<String> textColumns(String table) {
         return TestDatabase.owner().sql("""
-                        SELECT column_name FROM information_schema.columns
-                         WHERE table_schema = 'public' AND table_name = ?
-                           AND (data_type IN ('text', 'character varying', 'character', 'jsonb', 'json',
-                                              'USER-DEFINED')
-                                OR (data_type = 'ARRAY' AND udt_name IN ('_text', '_varchar')))
-                         ORDER BY column_name
+                        SELECT c.column_name FROM information_schema.columns c
+                         WHERE c.table_schema = 'public' AND c.table_name = ?
+                           AND (c.data_type IN ('text', 'character varying', 'character', 'jsonb', 'json',
+                                                'USER-DEFINED')
+                                OR (c.data_type = 'ARRAY'
+                                    AND EXISTS (SELECT 1 FROM pg_type a JOIN pg_type e ON e.oid = a.typelem
+                                                 WHERE a.typname = c.udt_name AND e.typcategory IN ('S', 'U'))))
+                         ORDER BY c.column_name
                         """).param(table).query(String.class).list();
     }
 
@@ -388,7 +409,10 @@ class ImportPurgeIT extends IntegrationTest {
             "approval_requests.decision_note",
             "approval_requests.execution_error");
 
-    /** Kept readable, each for the one reason the V147 header and ADR-027 give. */
+    /**
+     * Kept readable, each for the one reason ADR-027 and the purge migration's header give; that header names every
+     * entry ({@link #everyColumnKeptReadableIsNamedWithItsReasonInThePurgeMigration}).
+     */
     static final Set<String> KEPT_READABLE = Set.of(
             "import_runs.pre_import_dump_file",
             // Its failure is a batch, a code or class name and a fixed sentence, never a message (#885, Lead on #902).
@@ -412,6 +436,7 @@ class ImportPurgeIT extends IntegrationTest {
      */
     static final Set<String> CODES = Set.of(
             "import_runs.status",
+            // A hash the certificate names; V150's header says so (V147's put it with the kept text).
             "import_runs.pre_import_dump_sha256",
             "import_runs.dry_run_stamp",
             "import_runs.dry_run_writer",
@@ -483,6 +508,69 @@ class ImportPurgeIT extends IntegrationTest {
         assertThat(gone).as("listed columns that do not exist").isEmpty();
     }
 
+    /** The migration that last replaced import_purge_run; its header names each kept column with its reason. */
+    static final String PURGE_MIGRATION = "/db/migration/V150__import_purge_any_approval.sql";
+
+    /**
+     * Review of #886 (nice-to-have): the list of columns kept readable and the migration's header cannot drift apart. A
+     * column added to {@link #KEPT_READABLE} fails here until the purge's migration names it with its reason.
+     */
+    @Test
+    void everyColumnKeptReadableIsNamedWithItsReasonInThePurgeMigration() throws IOException {
+        String text;
+        try (InputStream in = ImportPurgeIT.class.getResourceAsStream(PURGE_MIGRATION)) {
+            assertThat(in).as(PURGE_MIGRATION).isNotNull();
+            text = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        String header = text.substring(0, text.indexOf("SET LOCAL lock_timeout"));
+        assertThat(KEPT_READABLE).allSatisfy(c -> assertThat(header).as(c).contains(c));
+    }
+
+    // JUSTIFICATION-A3: issue #887 item 3 asks for this case on the real upload, parse and audit writes.
+    /**
+     * Issue #887: a customer's tab name reaches no audit row. A one-tab fabricated workbook whose tab names a person
+     * and a phone goes through the real upload and parse (the parser finds the tab), then is parsed again with the
+     * operator naming the tab: each step writes its own audit row through the service. The batch holds the name in
+     * {@code import_batches.sheet_name}, which the purge hashes (the purge test above), and no audit row of the
+     * business holds the name or the phone.
+     */
+    @Test
+    void aTabNameIsHeldOnTheBatchOnlyAndNeverReachesTheAuditLog() {
+        String tab = "Fabricated Gamma " + TYPED_PHONE;
+        byte[] book = TestFiles.xlsx(
+                tab, List.of("Code", "Customer"), List.of(List.of("FAB-887", "Fabricated Buyer Zeta")));
+        UUID run = as(t, () -> runs.open(operator).id());
+        Upload upload = new Upload(
+                "fabricated-book.xlsx",
+                new ByteArrayInputStream(book),
+                book.length,
+                operator,
+                new ImportUploads.ParseOptions(null, Set.of(), Set.of()));
+        Batch found = as(t, () -> uploads.upload(run, upload));
+        assertThat(found.status()).isEqualTo("parsed");
+        assertThat(found.sheetName()).isEqualTo(tab);
+        Batch named = as(t, () -> uploads.parse(found.id(), new ImportUploads.ParseOptions(tab, Set.of(), Set.of())));
+        assertThat(named.status()).isEqualTo("parsed");
+        assertThat(named.sheetName()).isEqualTo(tab);
+
+        String actions = "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND entity_id = ? AND action = ?";
+        assertThat(count(actions, t.tenantId(), found.id(), "core.import_batch.uploaded")).isEqualTo(1);
+        assertThat(count(actions, t.tenantId(), found.id(), "core.import_batch.parsed"))
+                .as("the parse on upload and the parse naming the tab, each audited")
+                .isEqualTo(2);
+        assertThat(personalValuesOf(run, List.of(tab, TYPED_PHONE)))
+                .as("the tab's name is on the batch, and in no audit row of the run")
+                .contains("import_batches.sheet_name")
+                .doesNotContain("audit_log.data");
+        String anyAudit = "SELECT count(*) FROM audit_log WHERE tenant_id = ?"
+                + " AND strpos(lower(CAST(data AS text)), lower(?)) > 0";
+        assertThat(count(anyAudit, t.tenantId(), tab)).as("audit rows naming the tab").isZero();
+        assertThat(count(anyAudit, t.tenantId(), TYPED_PHONE)).as("audit rows holding its phone").isZero();
+    }
+
+    // The outbox rows the scan reads are those whose params name the run. No other import or approval message can hold
+    // a typed note or name: OutboxTemplatesPersonalDataTest holds every imports.* and approval template to parameters
+    // that are ids, the business, the Owner's account name, a day, a fixed reason or an action's label (issue #887).
     static final String OUTBOX_OF_RUN =
             "SELECT count(*) FROM notification_outbox WHERE params ->> 'run' = CAST(? AS text)"
                     + " AND strpos(lower(CAST(params AS text)), lower(?)) > 0";
@@ -544,8 +632,10 @@ class ImportPurgeIT extends IntegrationTest {
                         "import_issues.suggested_value",
                         "import_batches.sheet_name",
                         "import_batches.failure_reason",
-                        "import_signoffs.signed_name")
-                .as("and never the audit rows, which keep only the typed text's hash")
+                        "import_signoffs.signed_name",
+                        "approval_requests.decision_note",
+                        "approval_requests.execution_error")
+                .as("and never the audit rows, which hold no typed text, only that it was given and its length")
                 .doesNotContain("audit_log.data");
         assertThat(objectsOf(t, run)).hasSize(GoldenRun.FILES.size());
         long rows = count("SELECT count(*)" + ROWS_OF_RUN, run);
@@ -581,6 +671,14 @@ class ImportPurgeIT extends IntegrationTest {
                                 + " AND policy -> 'receivable' ->> 'option' = 'defer'",
                         run))
                 .as("the run's own typed text hashed, its decisions kept")
+                .isEqualTo(1);
+        assertThat(count(
+                        "SELECT count(*) FROM approval_requests WHERE subject_id = ?"
+                                + " AND action_type = 'import_trading_override' AND status = 'approved'"
+                                + " AND decision_note ~ '^sha256:[0-9a-f]{64}$'"
+                                + " AND execution_error ~ '^sha256:[0-9a-f]{64}$'",
+                        run))
+                .as("an approval of the run under another action type: its note and its error hashed (issue #887)")
                 .isEqualTo(1);
         // The certificate: on the run, its hash its text's, the files with sizes and hashes, the counts, the dump as
         // confirmed, the operator and the witness, and what is kept.
@@ -892,7 +990,10 @@ class ImportPurgeIT extends IntegrationTest {
                                                       || coalesce(CAST(x.after_value AS text), ''), '|' ORDER BY x.id))
                                   FROM import_issue_resolutions x WHERE x.run_id = r.id) AS resolutions,
                                (SELECT string_agg(b.object_key, '|' ORDER BY b.seq) FROM import_batches b
-                                 WHERE b.run_id = r.id) AS files
+                                 WHERE b.run_id = r.id) AS files,
+                               (SELECT string_agg(coalesce(a.decision_note, '') || coalesce(a.execution_error, ''), '|'
+                                                  ORDER BY a.id)
+                                  FROM approval_requests a WHERE a.subject_id = r.id) AS approvals
                           FROM import_runs r WHERE r.id = ?
                         """).param(run).query().singleRow();
     }
