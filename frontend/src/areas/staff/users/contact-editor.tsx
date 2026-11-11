@@ -128,7 +128,7 @@ export function ContactEditor({ user, self, owner, mfaEnabled, withName, onDone,
             inputMode="numeric"
             autoComplete="one-time-code"
             spellCheck={false}
-            error={proofProblem}
+            error={tried || typed !== '' ? proofProblem : null}
             showError={tried}
           />
         ) : (
@@ -141,7 +141,7 @@ export function ContactEditor({ user, self, owner, mfaEnabled, withName, onDone,
             onChange={(e) => setTyped(e.target.value)}
             autoComplete="current-password"
             spellCheck={false}
-            error={proofProblem}
+            error={tried || typed !== '' ? proofProblem : null}
             showError={tried}
           />
         )}
