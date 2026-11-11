@@ -122,6 +122,9 @@ export async function importFiles(runId: string): Promise<ImportFile[]> {
   return data.items ?? [];
 }
 
+/** The most sheet layouts the server lists (MappingService.NEWEST_LIMIT); the upload sheet says so when it holds this many. */
+export const MAPPINGS_LISTED = 200;
+
 export async function mappingChoices(): Promise<MappingChoice[]> {
   const { data, error } = await api.GET('/api/v1/imports/mappings');
   if (error || !data) fail(error, 'Could not load the sheet layouts.');
