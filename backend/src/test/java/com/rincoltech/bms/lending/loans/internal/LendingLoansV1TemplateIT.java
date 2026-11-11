@@ -627,8 +627,9 @@ class LendingLoansV1TemplateIT extends IntegrationTest {
         assertThat(dry.previewMatches()).as(dry.report().render()).isTrue();
         as(t, () -> runs.transition(run, "ready"));
         ApiException refused = null;
+        byte[] late = csv(BORROWER_01_AT_BR2);
         try {
-            as(t, () -> upload(run, mapping, "register|fab-late.csv", csv(BORROWER_01_AT_BR2)));
+            as(t, () -> upload(run, mapping, "register|fab-late.csv", late));
         } catch (ApiException e) {
             refused = e;
         }
