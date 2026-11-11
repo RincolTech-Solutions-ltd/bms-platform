@@ -45,7 +45,9 @@ class OutboxTemplatesPersonalDataTest {
         found.forEach((template, names) -> {
             Set<String> extra = new TreeSet<>(names);
             extra.removeAll(ALLOWED);
-            assertThat(extra).as("parameters of %s outside the allowed list", template).isEmpty();
+            assertThat(extra)
+                    .as("parameters of %s outside the allowed list", template)
+                    .isEmpty();
             assertThat(names)
                     .as(template)
                     .noneMatch(n -> n.contains("note") || n.contains("signed") || n.contains("signer"));

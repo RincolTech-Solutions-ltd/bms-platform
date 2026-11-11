@@ -537,8 +537,8 @@ class ImportPurgeIT extends IntegrationTest {
     @Test
     void aTabNameIsHeldOnTheBatchOnlyAndNeverReachesTheAuditLog() {
         String tab = "Fabricated Gamma " + TYPED_PHONE;
-        byte[] book = TestFiles.xlsx(
-                tab, List.of("Code", "Customer"), List.of(List.of("FAB-887", "Fabricated Buyer Zeta")));
+        byte[] book =
+                TestFiles.xlsx(tab, List.of("Code", "Customer"), List.of(List.of("FAB-887", "Fabricated Buyer Zeta")));
         UUID run = as(t, () -> runs.open(operator).id());
         Upload upload = new Upload(
                 "fabricated-book.xlsx",
@@ -554,7 +554,8 @@ class ImportPurgeIT extends IntegrationTest {
         assertThat(named.sheetName()).isEqualTo(tab);
 
         String actions = "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND entity_id = ? AND action = ?";
-        assertThat(count(actions, t.tenantId(), found.id(), "core.import_batch.uploaded")).isEqualTo(1);
+        assertThat(count(actions, t.tenantId(), found.id(), "core.import_batch.uploaded"))
+                .isEqualTo(1);
         assertThat(count(actions, t.tenantId(), found.id(), "core.import_batch.parsed"))
                 .as("the parse on upload and the parse naming the tab, each audited")
                 .isEqualTo(2);
@@ -564,8 +565,12 @@ class ImportPurgeIT extends IntegrationTest {
                 .doesNotContain("audit_log.data");
         String anyAudit = "SELECT count(*) FROM audit_log WHERE tenant_id = ?"
                 + " AND strpos(lower(CAST(data AS text)), lower(?)) > 0";
-        assertThat(count(anyAudit, t.tenantId(), tab)).as("audit rows naming the tab").isZero();
-        assertThat(count(anyAudit, t.tenantId(), TYPED_PHONE)).as("audit rows holding its phone").isZero();
+        assertThat(count(anyAudit, t.tenantId(), tab))
+                .as("audit rows naming the tab")
+                .isZero();
+        assertThat(count(anyAudit, t.tenantId(), TYPED_PHONE))
+                .as("audit rows holding its phone")
+                .isZero();
     }
 
     // The outbox rows the scan reads are those whose params name the run. No other import or approval message can hold
