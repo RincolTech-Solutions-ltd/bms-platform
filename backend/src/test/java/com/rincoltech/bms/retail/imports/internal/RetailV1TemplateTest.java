@@ -312,6 +312,9 @@ class RetailV1TemplateTest {
         }
         assertThat(RetailImporter.naturalOrder("PUR-9", "PUR-10")).isNegative();
         assertThat(RetailImporter.naturalOrder("ADV-10", "ADV-9")).isPositive();
+        // Advances share the rule (the data dictionary's upgrade note): the old one put ADV-10 first and X10-1 first.
+        assertThat(RetailImporter.naturalOrder("ADV-1A", "ADV-10")).isNegative();
+        assertThat(RetailImporter.naturalOrder("X2-1", "X10-1")).isNegative();
         assertThat(RetailImporter.naturalOrder("PUR-7", "PUR-7")).isZero();
     }
 

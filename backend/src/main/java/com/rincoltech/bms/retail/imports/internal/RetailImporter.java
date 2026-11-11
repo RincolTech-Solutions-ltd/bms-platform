@@ -636,7 +636,8 @@ public class RetailImporter {
     /**
      * Source ids in natural order (ADV-9 before ADV-10, PUR-9 before PUR-10): character by character, a run of digits
      * against a run of digits by its value, and ids equal so ({@code PUR-09}, {@code PUR-9}) by their UTF-8 bytes. A total
-     * order, so a sort by it is the same whatever order the rows come in (issue #905).
+     * order, so a sort by it is the same whatever order the rows come in (issue #905). Characters compare as UTF-16
+     * units and the final tie as UTF-8 bytes: each is a total order, so together they are one; keep both.
      */
     static int naturalOrder(String a, String b) {
         int i = 0;
