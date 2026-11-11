@@ -1054,9 +1054,7 @@ public class RetailImporter {
 
         /** True when the reference was imported before (or earlier in this file): the row is skipped. */
         boolean seen(String file, Row row, String ref, Set<String> inFile) {
-            if (!inFile.add(ref)) {
-                throw row.problem("duplicate source_ref " + ref);
-            }
+            RetailV1Template.once(row, ref, inFile);
             return refs.seen(file, row, ref);
         }
 

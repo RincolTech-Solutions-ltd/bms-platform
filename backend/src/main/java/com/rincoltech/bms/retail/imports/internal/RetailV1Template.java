@@ -524,6 +524,17 @@ class RetailV1Template implements ImportTemplate {
         return row.requiredText("source_ref", 100);
     }
 
+    /**
+     * A history row's {@code source_ref} taken once among {@code refs}, the ones written before it: a second is refused
+     * (issue #876, the Lead's ruling on #908). The loader takes each file's refs, and the forecast each set's over its
+     * run, since the loader finds a row an earlier batch of the run wrote in the business's imports.
+     */
+    static void once(ExportFile.Row row, String ref, Set<String> refs) {
+        if (!refs.add(ref)) {
+            throw row.problem("duplicate source_ref " + ref);
+        }
+    }
+
     // JUSTIFICATION-A3: the review of 43a5867 on #908 asks one movements-for-row function for the loader and forecast.
     /**
      * The stock movements one history row makes (data dictionary section 4): the one rule the loader writes by
@@ -599,11 +610,14 @@ class RetailV1Template implements ImportTemplate {
 
         private final Map<String, Map<String, BigDecimal>> qty = new TreeMap<>();
 
+        /** The quantities {@link #opening} last valued each branch's balance rows at, by branch. */
+        private final Map<String, Map<String, BigDecimal>> valued = new HashMap<>();
+
         /** The stock this forecast's history rows move, by branch and item: what the loader writes before balances. */
         private final Map<String, Map<String, BigDecimal>> history = new TreeMap<>();
 
-        /** The history rows this forecast moved stock for, as {@code set|source_ref}: a second is not written. */
-        private Set<String> refs;
+        /** The {@code source_ref} of each history set this forecast was given, for {@link #once}. */
+        private final Map<String, Set<String>> refs = new HashMap<>(4);
 
         /** The balance rows ({@code branch|item}) whose branch was opened when their batch began. */
         private final Set<String> atOpened = new HashSet<>();
@@ -652,25 +666,22 @@ class RetailV1Template implements ImportTemplate {
             return openedBefore.contains(branch) || opened.contains(branch);
         }
 
-        /** The branch's opening, its rows at the quantities the loader values them at ({@link #quantities}). */
-        private BranchOpening opening(String branch, Map<String, BigDecimal> items) {
-            return branchOpening(quantities(branch, items), product -> cost(product));
-        }
-
         /**
-         * The branch's balance rows at the quantities they stand at once the run is written, by {@link #openingQuantities}:
-         * the one function the loader values the opening by, given what the loader gives it, the books' balance of each
-         * item it leaves as the books hold it, read once this run's history is written, which is when the loader reads it
-         * (issue #876). The opening and the stock per item both read these.
+         * The branch's opening: its balance rows at the quantities they stand at once the run is written, by
+         * {@link #openingQuantities}, the one function the loader values the opening by, given what the loader gives it
+         * (the books' balance of each item it leaves as the books hold it, read once this run's history is written, which
+         * is when the loader reads it). The quantities are recorded for {@link #productStock} (issue #876).
          */
-        private Map<String, BigDecimal> quantities(String branch, Map<String, BigDecimal> items) {
+        private BranchOpening opening(String branch, Map<String, BigDecimal> items) {
             Map<String, BigDecimal> kept = new HashMap<>();
             items.keySet().forEach(item -> {
                 if (kept(branch, item)) {
                     kept.put(item, atLoad(branch, item));
                 }
             });
-            return openingQuantities(items, kept);
+            Map<String, BigDecimal> quantities = openingQuantities(items, kept);
+            valued.put(branch, quantities);
+            return branchOpening(quantities, product -> cost(product));
         }
 
         /**
@@ -741,23 +752,20 @@ class RetailV1Template implements ImportTemplate {
             ExportFile.Row row = ExportFile.staged(entitySet + ".jsonl", List.of(Map.entry(0, values)))
                     .rows
                     .getFirst();
-            String key;
             List<Move> moves;
             try {
-                key = entitySet + "|" + historyRef(row);
+                String ref = historyRef(row);
+                if (earlier.contains(entitySet + "|" + ref)) {
+                    return;
+                }
+                once(row, ref, refs.computeIfAbsent(entitySet, k -> new HashSet<>()));
                 moves = historyMoves(entitySet, row);
             } catch (ExportFile.RowProblem e) {
                 // The loader refuses the row and writes nothing for it.
                 return;
             }
             // A row without its item or branch is refused by the loader's look-up of them (and by the validation).
-            if (earlier.contains(key) || moves.stream().anyMatch(m -> m.branch() == null || m.product() == null)) {
-                return;
-            }
-            if (refs == null) {
-                refs = new HashSet<>();
-            }
-            if (!refs.add(key)) {
+            if (moves.stream().anyMatch(m -> m.branch() == null || m.product() == null)) {
                 return;
             }
             moves.forEach(m -> history.computeIfAbsent(compare(m.branch()), k -> new TreeMap<>())
@@ -799,18 +807,19 @@ class RetailV1Template implements ImportTemplate {
         /**
          * The stock the run puts on hand, per branch and item, as the books will show it from the run's own records
          * ({@link #books()}): what the books hold once the run is written less what they held before it (issue #876,
-         * should-fix 2). An item with a balance row stands at the quantity the opening values it at ({@link #quantities}, as
-         * {@link #balances()} reads it), so an item the run leaves as the books hold it counts only this run's history; an
+         * should-fix 2). An item with a balance row stands at the quantity {@link #opening} recorded for it as
+         * {@link #balances()} valued it, so an item the run leaves as the books hold it counts only this run's history; an
          * item with history alone counts its history.
          */
         @Override
         public List<ProductStock> productStock() {
+            balances();
             Map<String, Map<String, BigDecimal>> onHand = new TreeMap<>();
             history.forEach((branch, items) -> items.keySet()
                     .forEach(item ->
                             onHand.computeIfAbsent(branch, k -> new TreeMap<>()).put(item, atLoad(branch, item))));
-            qty.forEach((branch, items) ->
-                    onHand.computeIfAbsent(branch, k -> new TreeMap<>()).putAll(quantities(branch, items)));
+            valued.forEach((branch, items) ->
+                    onHand.computeIfAbsent(branch, k -> new TreeMap<>()).putAll(items));
             List<ProductStock> out = new ArrayList<>();
             onHand.forEach((branch, items) -> items.forEach((product, q) -> {
                 BigDecimal share = q.subtract(before(branch, product));
