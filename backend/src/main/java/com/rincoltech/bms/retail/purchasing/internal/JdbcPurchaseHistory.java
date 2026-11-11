@@ -114,16 +114,15 @@ class JdbcPurchaseHistory implements PurchaseHistory {
         return id;
     }
 
-    // JUSTIFICATION-A3: issue #881 needs the restocks earlier runs imported, a page of items per query; no read holds them.
+    // JUSTIFICATION-A3: issue #881 needs the restocks earlier runs imported, a page of items per query.
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public List<ImportedRestock> importedRestocks(Collection<UUID> productIds) {
         if (productIds.isEmpty()) {
             return List.of();
         }
-        // Each product's lines through its own index lookup (V104), as sameName does for products (issue #880): OFFSET 0
-        // keeps the planner from a scan of every line, and never product_id = ANY(?), which row-level security keeps from
-        // its index.
+        // Each product's lines through its own index lookup (V104), as sameName does (issue #880): OFFSET 0 keeps the
+        // planner from a scan of every line; never product_id = ANY(?), which row-level security keeps from its index.
         return jdbc.sql("""
                         SELECT p.id, l.product_id, p.created_at, p.note, l.cost_minor, l.sell_minor
                           FROM unnest(CAST(? AS uuid[])) AS asked(id)

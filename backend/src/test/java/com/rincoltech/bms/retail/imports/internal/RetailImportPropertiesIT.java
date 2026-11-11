@@ -205,7 +205,8 @@ class RetailImportPropertiesIT extends IntegrationTest {
         TestDatabase.Fixture split = TestDatabase.tenant("prop-split", false, true);
         committed(whole, reviewed(whole, book.files(0)));
         committed(split, reviewed(split, book.part(0, 2).files(0, false)));
-        UUID second = committed(split, reviewed(split, book.part(2, Integer.MAX_VALUE).files(0)));
+        UUID second =
+                committed(split, reviewed(split, book.part(2, Integer.MAX_VALUE).files(0)));
 
         assertThat(importedChanges(whole)).containsExactly("Imported restock PUR-P03|100|200|600|700");
         assertThat(importedChanges(split)).isEqualTo(importedChanges(whole));
@@ -227,8 +228,8 @@ class RetailImportPropertiesIT extends IntegrationTest {
                 issue881(100, 200, 100),
                 List.of("Imported restock PUR-P02|100|200|600|700", "Imported restock PUR-P03|200|100|700|600"));
         assertThat(TestDatabase.owner()
-                        .sql("SELECT count(*) FROM import_refs WHERE run_id = ? AND target_type = 'retail.price_history'")
-                        .param(run)
+                        .sql("SELECT count(*) FROM import_refs WHERE run_id = ? AND target_type = ?")
+                        .params(run, "retail.price_history")
                         .query(Long.class)
                         .single())
                 .as("the change the second run adds at PUR-P03 is registered with PUR-P02")
@@ -244,10 +245,8 @@ class RetailImportPropertiesIT extends IntegrationTest {
     void aRestockThatMovesAChangeAnEarlierRunRecordedIsReportedAndTheRowKept() {
         Book book = issue881(100, 200, 200);
         TestDatabase.Fixture split = TestDatabase.tenant("prop-split", false, true);
-        committed(split, reviewed(split, book.withRestocks(List.of(book.restocks().get(0), book.restocks().get(2)))
-                .files(0, false)));
-        UUID second = committed(
-                split, reviewed(split, book.withRestocks(List.of(book.restocks().get(1))).files(0)));
+        committed(split, reviewed(split, only(book, 0, 2).files(0, false)));
+        UUID second = committed(split, reviewed(split, only(book, 1).files(0)));
 
         assertThat(importedChanges(split))
                 .containsExactly(
@@ -269,10 +268,8 @@ class RetailImportPropertiesIT extends IntegrationTest {
         TestDatabase.Fixture whole = TestDatabase.tenant("prop-whole", false, true);
         TestDatabase.Fixture split = TestDatabase.tenant("prop-split", false, true);
         committed(whole, reviewed(whole, book.files(0)));
-        committed(split, reviewed(split, book.withRestocks(List.of(book.restocks().get(0), book.restocks().get(2)))
-                .files(0, false)));
-        UUID second = committed(
-                split, reviewed(split, book.withRestocks(List.of(book.restocks().get(1))).files(0)));
+        committed(split, reviewed(split, only(book, 0, 2).files(0, false)));
+        UUID second = committed(split, reviewed(split, only(book, 1).files(0)));
 
         assertThat(importedChanges(whole)).containsExactlyElementsOf(expected);
         assertThat(importedChanges(split)).isEqualTo(importedChanges(whole));
@@ -290,6 +287,15 @@ class RetailImportPropertiesIT extends IntegrationTest {
                 List.of(new Restock(0, 1, 0, first), new Restock(0, 1, 0, second), new Restock(0, 1, 0, third));
         return new Book(
                 List.of(new Item(100, 100)), indexed(restocks), List.of(), List.of(), List.of(3, 0, 0, 0, 0, 0), true);
+    }
+
+    /** The book with only the restocks at these positions, each keeping its reference and date. */
+    static Book only(Book book, int... positions) {
+        List<Indexed<Restock>> kept = new ArrayList<>();
+        for (int at : positions) {
+            kept.add(book.restocks().get(at));
+        }
+        return book.withRestocks(kept);
     }
 
     /** Every {@code import} price change of the tenant: its reason, then the costs and sell prices from and to. */

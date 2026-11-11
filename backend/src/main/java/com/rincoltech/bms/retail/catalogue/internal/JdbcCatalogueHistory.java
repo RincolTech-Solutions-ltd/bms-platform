@@ -253,7 +253,7 @@ class JdbcCatalogueHistory implements CatalogueHistory {
         return id;
     }
 
-    // JUSTIFICATION-A3: issue #881 compares a later restock's recorded change, a page of items per query; no read has it.
+    // JUSTIFICATION-A3: issue #881 compares a later restock's recorded change, a page of items per query.
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public Map<UUID, ImportedChange> importedChanges(Collection<UUID> productIds) {

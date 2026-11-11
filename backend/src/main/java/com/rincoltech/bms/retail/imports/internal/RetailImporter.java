@@ -233,8 +233,10 @@ public class RetailImporter {
      * hold as well as the batch, so every split of the history over runs orders them as one run does.
      */
     static final Comparator<Run.Restock> IN_TIME = Comparator.comparing(Run.Restock::at)
-            .thenComparing(Run.Restock::ref, (a, b) -> Arrays.compareUnsigned(
-                    a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8)));
+            .thenComparing(
+                    Run.Restock::ref,
+                    (a, b) -> Arrays.compareUnsigned(
+                            a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8)));
 
     private final TenantJobs tenants;
     private final TransactionTemplate transactions;
@@ -1086,7 +1088,7 @@ public class RetailImporter {
             List<PurchaseRow> rows = new ArrayList<>();
             each(file, row -> rows.add(parsePurchase(row)));
             // Whether each row is held already, before anything is written (issue #881): a restock this batch writes is
-            // placed among the item's imported restocks as the books hold them before the batch. Told in row order below.
+            // placed among the item's imported restocks as the books hold them before the batch. Told in row order.
             Set<String> refs = new HashSet<>();
             Map<PurchaseRow, Object> held = new HashMap<>();
             for (PurchaseRow r : rows) {
@@ -1137,8 +1139,10 @@ public class RetailImporter {
                             IMPORTED + r.ref());
                     targetType = "retail.purchase";
                     Restock before = neighbours.before().get(r);
-                    PriceStep step =
-                            before == null ? null : PriceStep.between(before, Restock.of(r), r.product().sellMinor());
+                    PriceStep step = before == null
+                            ? null
+                            : PriceStep.between(
+                                    before, Restock.of(r), r.product().sellMinor());
                     if (step != null) {
                         catalogue.importPriceChange(
                                 r.product().id(),
@@ -1247,7 +1251,9 @@ public class RetailImporter {
          */
         Neighbours neighbours(List<PurchaseRow> fresh) {
             Map<UUID, List<PurchaseRow>> byItem = new LinkedHashMap<>();
-            fresh.forEach(r -> byItem.computeIfAbsent(r.product().id(), k -> new ArrayList<>()).add(r));
+            for (PurchaseRow r : fresh) {
+                byItem.computeIfAbsent(r.product().id(), k -> new ArrayList<>()).add(r);
+            }
             Map<PurchaseRow, Restock> before = new HashMap<>();
             Map<PurchaseRow, Restock> after = new HashMap<>();
             Map<UUID, CatalogueHistory.ImportedChange> recorded = new HashMap<>();
@@ -1320,8 +1326,8 @@ public class RetailImporter {
                     file,
                     r.row().line(),
                     "dated before restock " + next.ref() + ", which an earlier run imported; the price change recorded"
-                            + " at " + next.ref() + " is kept as it is, since price history is never rewritten, and differs"
-                            + " from what one run of the whole history records");
+                            + " at " + next.ref() + " is kept as it is, since price history is never rewritten,"
+                            + " and differs from what one run of the whole history records");
         }
 
         private PurchaseRow parsePurchase(Row row) {
