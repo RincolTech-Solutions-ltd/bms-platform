@@ -294,6 +294,27 @@ class RetailV1TemplateTest {
         assertThat(ExportFile.branchQuantities("not a list").isString()).isTrue();
     }
 
+    // JUSTIFICATION-A3: issue #905 item 4, the natural order of the restock tiebreak, needs its own test.
+    /**
+     * Issue #905: same-day restocks are tied by their {@code source_ref} in natural order, as an export lists them, and the
+     * order is total: the same sorted list from every starting order, so every split of the history sorts alike. The old
+     * rule was not (PUR-9 before PUR-10 before PUR-1A before PUR-9).
+     */
+    @Test
+    void sourceRefsSortInNaturalOrderWhateverTheirStartingOrder() {
+        List<String> sorted = List.of(
+                "PUR-1", "PUR-1A", "PUR-09", "PUR-9", "PUR-10", "PUR-100", "PUR-A", "PUR-A2", "PUR-A10", "PUR-B");
+        for (long seed = 1; seed <= 20; seed++) {
+            List<String> shuffled = new java.util.ArrayList<>(sorted);
+            java.util.Collections.shuffle(shuffled, new java.util.Random(seed));
+            shuffled.sort(RetailImporter::naturalOrder);
+            assertThat(shuffled).as("seed %d", seed).isEqualTo(sorted);
+        }
+        assertThat(RetailImporter.naturalOrder("PUR-9", "PUR-10")).isNegative();
+        assertThat(RetailImporter.naturalOrder("ADV-10", "ADV-9")).isPositive();
+        assertThat(RetailImporter.naturalOrder("PUR-7", "PUR-7")).isZero();
+    }
+
     private static RetailV1Template template() {
         return new RetailV1Template(null, null, null, null, null);
     }

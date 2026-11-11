@@ -229,14 +229,12 @@ public class RetailImporter {
     static final String IMPORTED = "Imported ";
 
     /**
-     * Restocks of an item in time order (issue #881): by date, then by {@code source_ref} as UTF-8 bytes, which the books
-     * hold as well as the batch, so every split of the history over runs orders them as one run does.
+     * Restocks of an item in time order (issue #881): by date, then by {@code source_ref} in {@link #naturalOrder} (issue
+     * #905: PUR-9 before PUR-10, as an export lists them), which the books hold as well as the batch, so every split of
+     * the history over runs orders them as one run does.
      */
-    static final Comparator<Run.Restock> IN_TIME = Comparator.comparing(Run.Restock::at)
-            .thenComparing(
-                    Run.Restock::ref,
-                    (a, b) -> Arrays.compareUnsigned(
-                            a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8)));
+    static final Comparator<Run.Restock> IN_TIME =
+            Comparator.comparing(Run.Restock::at).thenComparing(Run.Restock::ref, RetailImporter::naturalOrder);
 
     private final TenantJobs tenants;
     private final TransactionTemplate transactions;
@@ -619,9 +617,6 @@ public class RetailImporter {
         return new Made(e.id(), e.created());
     }
 
-    private static final java.util.regex.Pattern TRAILING_NUMBER = java.util.regex.Pattern.compile("^(.*?)(\\d+)$");
-
-    /** Source ids in natural order: the same prefix, then the trailing number as a number (ADV-9 before ADV-10). */
     /** The text of one field on every row that has it as text; a row where it is not text is reported by its own read. */
     static List<String> texts(ExportFile file, String field) {
         List<String> out = new ArrayList<>();
@@ -638,16 +633,46 @@ public class RetailImporter {
         return out;
     }
 
+    /**
+     * Source ids in natural order (ADV-9 before ADV-10, PUR-9 before PUR-10): character by character, a run of digits
+     * against a run of digits by its value, and ids equal so ({@code PUR-09}, {@code PUR-9}) by their UTF-8 bytes. A total
+     * order, so a sort by it is the same whatever order the rows come in (issue #905).
+     */
     static int naturalOrder(String a, String b) {
-        java.util.regex.Matcher x = TRAILING_NUMBER.matcher(a);
-        java.util.regex.Matcher y = TRAILING_NUMBER.matcher(b);
-        if (x.matches() && y.matches() && x.group(1).equals(y.group(1))) {
-            int byValue = new BigDecimal(x.group(2)).compareTo(new BigDecimal(y.group(2)));
-            if (byValue != 0) {
-                return byValue;
+        int i = 0;
+        int j = 0;
+        while (i < a.length() && j < b.length()) {
+            char x = a.charAt(i);
+            char y = b.charAt(j);
+            if (digit(x) && digit(y)) {
+                int from = i;
+                int to = j;
+                while (i < a.length() && digit(a.charAt(i))) {
+                    i++;
+                }
+                while (j < b.length() && digit(b.charAt(j))) {
+                    j++;
+                }
+                int byValue = new java.math.BigInteger(a.substring(from, i))
+                        .compareTo(new java.math.BigInteger(b.substring(to, j)));
+                if (byValue != 0) {
+                    return byValue;
+                }
+            } else if (x != y) {
+                return Character.compare(x, y);
+            } else {
+                i++;
+                j++;
             }
         }
-        return a.compareTo(b);
+        int byLength = Integer.compare(a.length() - i, b.length() - j);
+        return byLength != 0
+                ? byLength
+                : Arrays.compareUnsigned(a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static boolean digit(char c) {
+        return c >= '0' && c <= '9';
     }
 
     /** The state of one run: lookups refreshed at the start of each file's transaction. */
