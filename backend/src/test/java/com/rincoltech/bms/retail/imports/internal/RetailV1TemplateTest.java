@@ -8,6 +8,7 @@ import com.rincoltech.bms.core.imports.ImportTemplate.EntitySet;
 import com.rincoltech.bms.core.imports.ImportTemplate.Field;
 import com.rincoltech.bms.core.imports.ImportTemplate.IssueCode;
 import com.rincoltech.bms.core.imports.ImportTemplate.RowFinding;
+import com.rincoltech.bms.kernel.CompactKeys;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -155,6 +156,87 @@ class RetailV1TemplateTest {
         assertThat(RetailV1Template.openingQuantities(rows, Map.of("TS-001", BigDecimal.ZERO)))
                 .containsEntry("TS-001", BigDecimal.ZERO)
                 .containsEntry("TS-009", new BigDecimal("-3"));
+    }
+
+    // JUSTIFICATION-A3: issue #876 asks a test of should-fix 1 and 2; these are three tests of the forecast.
+    /**
+     * Issue #876, should-fix 1 and 2: TS-001's legacy balance an earlier import wrote at HQ, which is not opened, and the
+     * books hold 0. This run restocks 3, sells 1 (the same sale twice, written once) and sends a balance of 5. The loader
+     * reads the books after the history, 2, so the opening values 2 and the run puts 2 on hand.
+     */
+    @Test
+    void theForecastValuesALegacyHeldItemAfterThisRunsHistoryAsTheLoaderReadsIt() {
+        Map<String, Map<String, RetailV1Template.Held>> books =
+                Map.of("HQ", Map.of("TS-001", new RetailV1Template.Held(BigDecimal.ZERO, true)));
+        ImportForecast f = new RetailV1Template.StockForecast(Map.of("TS-001", 100L), Set.of(), Set.of(), books);
+        f.batch(1);
+        f.row(
+                "purchases",
+                Map.of("source_ref", "P-2", "product_code", "TS-001", "kind", "purchase", "qty_by_branch", "HQ=3"));
+        f.batch(2);
+        Map<String, Object> sale =
+                Map.of("source_ref", "S-1", "branch", "HQ", "product_code", "TS-001", "qty", BigDecimal.ONE);
+        f.row("sales", sale);
+        f.row("sales", sale);
+        f.batch(3);
+        f.row("balances", Map.of("branch", "HQ", "product_code", "TS-001", "qty", new BigDecimal("5")));
+
+        assertThat(f.balances().journals()).containsExactly(new ImportForecast.Journal("HQ", "inventory", 200, 200));
+        assertThat(f.productStock()).singleElement().satisfies(p -> {
+            assertThat(p.product()).isEqualTo("TS-001");
+            assertThat(p.qty()).as("this run's history, not the file's 5").isEqualByComparingTo("2");
+        });
+    }
+
+    /**
+     * Issue #876: at a branch already opened the loader leaves an item the books hold as they hold it, so the run puts
+     * nothing on hand for it; a new item there takes its legacy balance. A sale other imports hold moves nothing.
+     */
+    @Test
+    void theForecastsStockPerItemIsWhatTheRunPutsOnHand() {
+        CompactKeys earlier = new CompactKeys();
+        earlier.putIfAbsent("sales|S-OLD", 0L);
+        ImportForecast f = new RetailV1Template.StockForecast(
+                Map.of("TS-002", 200L, "TS-003", 300L),
+                Set.of("HQ"),
+                Set.of(),
+                Map.of("HQ", Map.of("TS-002", new RetailV1Template.Held(new BigDecimal("2"), false))),
+                earlier);
+        f.batch(1);
+        f.row("sales", Map.of("source_ref", "S-OLD", "branch", "HQ", "product_code", "TS-002", "qty", BigDecimal.ONE));
+        f.batch(2);
+        f.row("balances", Map.of("branch", "HQ", "product_code", "TS-002", "qty", BigDecimal.ONE));
+        f.row("balances", Map.of("branch", "HQ", "product_code", "TS-003", "qty", new BigDecimal("3")));
+
+        assertThat(f.balances().journals()).as("HQ is opened").isEmpty();
+        assertThat(f.productStock())
+                .extracting(ImportForecast.ProductStock::product, p -> p.qty().stripTrailingZeros())
+                .containsExactly(tuple("TS-002", BigDecimal.ZERO), tuple("TS-003", new BigDecimal("3")));
+    }
+
+    /** The stock a history row moves, read as the loader reads it; none for a row the loader refuses (issue #876). */
+    @Test
+    void aHistoryRowMovesTheStockTheLoaderWrites() {
+        assertThat(RetailV1Template.historyMoves("purchases", restock("adjustment", "HQ=-2; KLA=0; ENT=1.5")))
+                .containsExactly(
+                        new RetailV1Template.Move("HQ", "TS-001", new BigDecimal("-2.000")),
+                        new RetailV1Template.Move("ENT", "TS-001", new BigDecimal("1.500")));
+        assertThat(RetailV1Template.historyMoves("purchases", restock("return", "HQ=-2")))
+                .as("only an adjustment may be negative")
+                .isEmpty();
+        assertThat(RetailV1Template.historyMoves(
+                        "usage",
+                        Map.of("source_ref", "U-1", "branch", "HQ", "product_code", "TS-001", "qty", BigDecimal.TEN)))
+                .containsExactly(new RetailV1Template.Move("HQ", "TS-001", new BigDecimal("-10.000")));
+        assertThat(RetailV1Template.historyMoves(
+                        "sales",
+                        Map.of("source_ref", "S-1", "branch", "HQ", "product_code", "TS-001", "qty", BigDecimal.ZERO)))
+                .isEmpty();
+    }
+
+    /** A restock row of the fabricated item ts-001 as the validation types it. */
+    private static Map<String, Object> restock(String kind, String qtyByBranch) {
+        return Map.of("source_ref", "P-1", "product_code", "ts-001", "kind", kind, "qty_by_branch", qtyByBranch);
     }
 
     @Test
