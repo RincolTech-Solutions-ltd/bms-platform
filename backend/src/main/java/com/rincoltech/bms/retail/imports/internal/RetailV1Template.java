@@ -368,7 +368,8 @@ class RetailV1Template implements ImportTemplate {
      * cost: an item the business already holds keeps its own prices (issue #73), a new one takes its first products row's.
      * The opening inventory journal is one per branch, ever, for what the branch's rows above zero are worth,
      * so a negative balance is never in it (the negative-stock rule of #134). No receivable is opened under either option
-     * of the decision. History rows put nothing in the forecast: the legacy balance absorbs them.
+     * of the decision. A history row moves its item's stock as the loader writes it, so an item whose legacy balance an
+     * earlier import wrote is valued at the books' balance after this run's history, as the loader reads it (issue #876).
      */
     @Override
     public ImportForecast forecast(Map<String, String> policy) {
@@ -393,7 +394,8 @@ class RetailV1Template implements ImportTemplate {
             return costs;
         });
         Set<String> opened = readOnly.execute(s -> openedBranches(jdbc, runId));
-        Map<String, Map<String, BigDecimal>> legacy = readOnly.execute(s -> legacyHeld(jdbc, runId));
+        Map<String, Map<String, Held>> before = readOnly.execute(s -> heldBefore(jdbc, runId));
+        CompactKeys earlier = readOnly.execute(s -> earlierHistory(jdbc, runId));
         // The ledger takes no entry at a closed branch, so the loader journals none there and none is predicted.
         Set<String> inactive = readOnly.execute(s -> branches.all().stream()
                 .filter(b -> !b.active())
@@ -403,8 +405,11 @@ class RetailV1Template implements ImportTemplate {
         Set<String> openedBefore = opened == null ? Set.of() : opened;
         // Copied once here, so each forecast's own Set.copyOf and Map.copyOf return these (review of 12e9d33 on #898).
         Set<String> closed = inactive == null ? Set.of() : Set.copyOf(inactive);
-        Map<String, Map<String, BigDecimal>> legacyBefore = legacy == null ? Map.of() : Map.copyOf(legacy);
-        return () -> new StockForecast(costs, openedBefore, closed, legacyBefore);
+        Set<String> openedOnce = Set.copyOf(openedBefore);
+        Map<String, Map<String, Held>> books = before == null ? Map.of() : Map.copyOf(before);
+        CompactKeys earlierRefs = earlier == null ? new CompactKeys() : earlier;
+        // Each forecast shares what was read and copies none of it (issue #876, nice-to-have 4).
+        return () -> new StockForecast(costs, openedOnce, closed, books, earlierRefs);
     }
 
     // JUSTIFICATION-A3: the Lead's steer for round 4 asks one function shared by the forecast and the loader.
@@ -444,28 +449,121 @@ class RetailV1Template implements ImportTemplate {
     }
 
     /**
-     * The books' balance of each item at each branch that already has a legacy balance there, by branch and item code in
-     * compare form, as the loader reads its positions; a legacy balance {@code runId} itself wrote is left out (null for
-     * none), so the forecast of a committed run values that run's rows as it did.
+     * What the books hold of an item at a branch before a run (issue #876): its balance without the run's own movements,
+     * and whether an earlier import already wrote its legacy balance there.
      */
-    static Map<String, Map<String, BigDecimal>> legacyHeld(JdbcClient jdbc, UUID runId) {
-        Map<String, Map<String, BigDecimal>> out = new HashMap<>();
+    record Held(BigDecimal qty, boolean legacy) {}
+
+    // JUSTIFICATION-A3: issue #876 (should-fix 1 and 2) asks the forecast to read the books before its run.
+    /**
+     * The books before {@code runId} (null for none), as the loader reads its positions, by branch and item code in
+     * compare form: each position that holds a movement the run did not register, at its balance less the run's own
+     * movements (those it registered, and those of the documents it registered), and whether a legacy balance the run did
+     * not write is among them. So the forecast of a committed run reads the books as its preview did, and adds the run's
+     * own history from its rows, as before the commit.
+     */
+    static Map<String, Map<String, Held>> heldBefore(JdbcClient jdbc, UUID runId) {
+        Map<String, Map<String, Held>> out = new HashMap<>();
         jdbc.sql("""
-                        SELECT b.code, p.code, s.qty FROM retail_stock_balances s
-                          JOIN branches b ON b.id = s.branch_id JOIN retail_products p ON p.id = s.product_id
+                        WITH mine AS (
+                            SELECT m.id FROM import_refs r JOIN retail_stock_movements m ON m.id = r.target_id
+                             WHERE r.tenant_id = current_setting('app.tenant_id')::uuid AND r.run_id = CAST(? AS uuid)
+                            UNION
+                            SELECT m.id FROM import_refs r JOIN retail_stock_movements m ON m.source_id = r.target_id
+                             WHERE r.tenant_id = current_setting('app.tenant_id')::uuid AND r.run_id = CAST(? AS uuid))
+                        SELECT b.code, p.code, s.qty - coalesce(sum(m.qty) FILTER (WHERE x.id IS NOT NULL), 0),
+                               coalesce(bool_or(m.kind = 'legacy_balance' AND x.id IS NULL), false)
+                          FROM retail_stock_balances s
+                          JOIN branches b ON b.id = s.branch_id
+                          JOIN retail_products p ON p.id = s.product_id
+                          JOIN retail_stock_movements m
+                            ON m.tenant_id = s.tenant_id AND m.branch_id = s.branch_id AND m.product_id = s.product_id
+                          LEFT JOIN mine x ON x.id = m.id
                          WHERE s.tenant_id = current_setting('app.tenant_id')::uuid
-                           AND EXISTS (SELECT 1 FROM retail_stock_movements m
-                                        WHERE m.tenant_id = s.tenant_id AND m.branch_id = s.branch_id
-                                          AND m.product_id = s.product_id AND m.kind = 'legacy_balance'
-                                          AND NOT EXISTS (SELECT 1 FROM import_refs r
-                                                           WHERE r.tenant_id = m.tenant_id AND r.target_id = m.id
-                                                             AND r.run_id = CAST(? AS uuid)))
+                         GROUP BY b.code, p.code, s.qty
+                        HAVING bool_or(x.id IS NULL)
                         """)
-                .param(runId)
+                .params(runId, runId)
                 .query((rs, n) -> out.computeIfAbsent(compare(rs.getString(1)), k -> new HashMap<>())
-                        .put(compare(rs.getString(2)), rs.getBigDecimal(3)))
+                        .put(compare(rs.getString(2)), new Held(rs.getBigDecimal(3), rs.getBoolean(4))))
                 .list();
         return out;
+    }
+
+    /**
+     * The history rows the business's imports already hold and {@code runId} did not register, as {@code set|source_ref}:
+     * the loader counts such a row existing and writes nothing for it, whatever key an upload derives for it
+     * ({@code RetailImporter.StagedRefs#seen}), so the forecast moves no stock for it either (issue #876). Every history row
+     * an import wrote is in {@code retail_import_refs}, the command's and the screens' alike.
+     */
+    static CompactKeys earlierHistory(JdbcClient jdbc, UUID runId) {
+        CompactKeys out = new CompactKeys();
+        jdbc.sql("""
+                        SELECT o.source_file, o.source_ref FROM retail_import_refs o
+                         WHERE o.tenant_id = current_setting('app.tenant_id')::uuid
+                           AND o.source_file IN ('purchases', 'sales', 'usage')
+                           AND NOT EXISTS (SELECT 1 FROM import_refs r
+                                            WHERE r.tenant_id = o.tenant_id AND r.target_id = o.target_id
+                                              AND r.run_id = CAST(? AS uuid))
+                        """)
+                .param(runId)
+                .query((rs, n) -> out.putIfAbsent(rs.getString(1) + "|" + rs.getString(2), 0L))
+                .list();
+        return out;
+    }
+
+    /** One stock movement a history row makes: its branch and item in compare form, and the signed quantity. */
+    record Move(String branch, String product, BigDecimal qty) {}
+
+    // JUSTIFICATION-A3: issue #876 (should-fix 1): the forecast moves stock as the loader writes a history row.
+    /**
+     * The stock movements the loader writes for one history row (data dictionary section 4), read with the loader's own
+     * readers ({@link ExportFile#staged}): a purchase, adjustment or return adds its quantity at each branch, signed as
+     * given (only an adjustment may be negative, zero is left out); a sale or a usage report takes its quantity off its
+     * branch. None for a row the loader refuses.
+     */
+    static List<Move> historyMoves(String entitySet, Map<String, Object> values) {
+        ExportFile.Row row = ExportFile.staged(entitySet + ".jsonl", List.of(Map.entry(0, values)))
+                .rows
+                .getFirst();
+        try {
+            String product = compare(row.text("product_code"));
+            if (product == null) {
+                return List.of();
+            }
+            switch (entitySet) {
+                case "purchases" -> {
+                    String kind = row.oneOf("kind", List.of("purchase", "adjustment", "return"));
+                    Map<String, BigDecimal> out = new LinkedHashMap<>();
+                    for (Map.Entry<String, BigDecimal> e :
+                            row.qtyByBranch("qty_by_branch").entrySet()) {
+                        BigDecimal q = e.getValue();
+                        if (q.signum() == 0) {
+                            continue;
+                        }
+                        if ((q.signum() < 0 && !kind.equals("adjustment"))
+                                || out.putIfAbsent(compare(e.getKey()), q) != null) {
+                            return List.of();
+                        }
+                    }
+                    return out.entrySet().stream()
+                            .map(e -> new Move(e.getKey(), product, e.getValue()))
+                            .toList();
+                }
+                case "sales", "usage" -> {
+                    String branch = compare(row.text("branch"));
+                    BigDecimal q = row.qty("qty");
+                    return branch == null || q.signum() <= 0
+                            ? List.of()
+                            : List.of(new Move(branch, product, q.negate()));
+                }
+                default -> {
+                    return List.of();
+                }
+            }
+        } catch (ExportFile.RowProblem e) {
+            return List.of();
+        }
     }
 
     /** {@link BranchOpening} of a branch's balance rows, item to quantity, each item valued by {@code costMinor}. */
@@ -495,35 +593,102 @@ class RetailV1Template implements ImportTemplate {
         private final CompactKeys added = new CompactKeys();
 
         private final Map<String, Map<String, BigDecimal>> qty = new TreeMap<>();
+
+        /** The stock this forecast's history rows move, by branch and item: what the loader writes before balances. */
+        private final Map<String, Map<String, BigDecimal>> history = new TreeMap<>();
+
+        /** The history rows this forecast moved stock for, as {@code set|source_ref}: a second is not written. */
+        private Set<String> refs;
+
+        /** The balance rows ({@code branch|item}) whose branch was opened when their batch began. */
+        private final Set<String> atOpened = new HashSet<>();
+
+        /** The branches opened before the run, shared by every forecast of one read; and those this one opened. */
+        private final Set<String> openedBefore;
+
         private final Set<String> opened = new HashSet<>();
         private final List<Journal> journals = new ArrayList<>();
         private final Set<String> inactive;
-        private final Map<String, Map<String, BigDecimal>> legacy;
+        private final Map<String, Map<String, Held>> books;
+        private final CompactKeys earlier;
 
         StockForecast(Map<String, Long> held) {
             this(held, Set.of(), Set.of(), Map.of());
         }
 
+        StockForecast(
+                Map<String, Long> held,
+                Set<String> opened,
+                Set<String> inactive,
+                Map<String, Map<String, Held>> books) {
+            this(held, opened, inactive, books, new CompactKeys());
+        }
+
         /**
          * {@code opened}: the branches another run already gave an opening stock journal ({@link #openedBranches});
-         * {@code inactive}: the closed branches, where no journal is posted; {@code legacy}: the books' balance of the
-         * items an earlier import already wrote a legacy balance for ({@link #legacyHeld}); all in compare form.
+         * {@code inactive}: the closed branches, where no journal is posted; {@code books}: the books before the run
+         * ({@link #heldBefore}); {@code earlier}: the history rows other imports hold ({@link #earlierHistory}); all in
+         * compare form, never changed, so every forecast of one read shares them (issue #876).
          */
         StockForecast(
                 Map<String, Long> held,
                 Set<String> opened,
                 Set<String> inactive,
-                Map<String, Map<String, BigDecimal>> legacy) {
+                Map<String, Map<String, Held>> books,
+                CompactKeys earlier) {
             this.held = held;
-            this.opened.addAll(opened);
-            this.inactive = Set.copyOf(inactive);
-            this.legacy = Map.copyOf(legacy);
+            this.openedBefore = opened;
+            this.inactive = inactive;
+            this.books = books;
+            this.earlier = earlier;
         }
 
-        /** The branch's opening, its rows at the quantities the loader values them at ({@link #openingQuantities}). */
+        private boolean opened(String branch) {
+            return openedBefore.contains(branch) || opened.contains(branch);
+        }
+
+        /**
+         * The branch's opening, its rows at the quantities the loader values them at ({@link #openingQuantities}): an item
+         * whose legacy balance an earlier import wrote at the books' balance once this run's history is written, which is
+         * when the loader reads it (issue #876, should-fix 1).
+         */
         private BranchOpening opening(String branch, Map<String, BigDecimal> items) {
-            return branchOpening(
-                    openingQuantities(items, legacy.getOrDefault(branch, Map.of())), product -> cost(product));
+            Map<String, Held> before = books.getOrDefault(branch, Map.of());
+            Map<String, BigDecimal> legacyHeld = new HashMap<>();
+            items.keySet().forEach(item -> {
+                Held h = before.get(item);
+                if (h != null && h.legacy()) {
+                    legacyHeld.put(item, atLoad(branch, item));
+                }
+            });
+            return branchOpening(openingQuantities(items, legacyHeld), product -> cost(product));
+        }
+
+        /** What the books hold of the item at the branch when the loader reads them: before the run, plus its history. */
+        private BigDecimal atLoad(String branch, String item) {
+            return before(branch, item)
+                    .add(history.getOrDefault(branch, Map.of()).getOrDefault(item, BigDecimal.ZERO));
+        }
+
+        private BigDecimal before(String branch, String item) {
+            Held h = books.getOrDefault(branch, Map.of()).get(item);
+            return h == null ? BigDecimal.ZERO : h.qty();
+        }
+
+        /**
+         * What the books hold of an item with a balance row once the run is written, by the loader's rules: an item whose
+         * legacy balance an earlier import wrote, or one the books hold at a branch already opened, is left as the books
+         * hold it (its difference is listed for a stock-take); any other takes the legacy balance that makes it the
+         * source's quantity.
+         */
+        private BigDecimal after(String branch, String item, BigDecimal source) {
+            Held h = books.getOrDefault(branch, Map.of()).get(item);
+            boolean onBooks =
+                    h != null || history.getOrDefault(branch, Map.of()).containsKey(item);
+            if ((h != null && h.legacy()) || (onBooks && atOpened.contains(branch + "|" + item))) {
+                return atLoad(branch, item);
+            }
+            return source;
         }
 
         private long cost(String product) {
@@ -550,13 +715,41 @@ class RetailV1Template implements ImportTemplate {
                 case "balances" -> {
                     if (values.get("branch") instanceof String branch
                             && values.get("product_code") instanceof String product
-                            && values.get("qty") instanceof BigDecimal q) {
-                        qty.computeIfAbsent(compare(branch), k -> new TreeMap<>())
-                                .putIfAbsent(compare(product), q);
+                            && values.get("qty") instanceof BigDecimal q
+                            && qty.computeIfAbsent(compare(branch), k -> new TreeMap<>())
+                                            .putIfAbsent(compare(product), q)
+                                    == null
+                            && opened(compare(branch))) {
+                        atOpened.add(compare(branch) + "|" + compare(product));
                     }
                 }
+                case "purchases", "sales", "usage" -> history(entitySet, values);
                 default -> {}
             }
+        }
+
+        /**
+         * A history row, before the balances (the template's order): the stock it moves, as the loader writes it, unless
+         * the loader counts it existing: a row other imports hold ({@link #earlierHistory}), or a second of its
+         * {@code source_ref} in this run (issue #876, should-fix 1).
+         */
+        private void history(String entitySet, Map<String, Object> values) {
+            if (!(values.get("source_ref") instanceof String ref)) {
+                return;
+            }
+            List<Move> moves = historyMoves(entitySet, values);
+            String key = entitySet + "|" + ref.strip();
+            if (moves.isEmpty() || earlier.contains(key)) {
+                return;
+            }
+            if (refs == null) {
+                refs = new HashSet<>();
+            }
+            if (!refs.add(key)) {
+                return;
+            }
+            moves.forEach(m -> history.computeIfAbsent(m.branch(), k -> new TreeMap<>())
+                    .merge(m.product(), m.qty(), BigDecimal::add));
         }
 
         private long value(String product, BigDecimal q) {
@@ -572,7 +765,7 @@ class RetailV1Template implements ImportTemplate {
                 if (inactive.contains(branch)) {
                     return;
                 }
-                long amount = opening(branch, items).journal(opened.contains(branch));
+                long amount = opening(branch, items).journal(opened(branch));
                 if (amount != 0) {
                     journals.add(new Journal(branch, "inventory", amount, amount));
                     opened.add(branch);
@@ -591,11 +784,26 @@ class RetailV1Template implements ImportTemplate {
             return new Balances(stock, List.of(), List.of(), List.of(), List.copyOf(journals));
         }
 
+        /**
+         * The stock the run puts on hand, per branch and item, as the books will show it from the run's own records
+         * ({@link #books()}): what the books hold once the run is written less what they held before it (issue #876,
+         * should-fix 2). An item with a balance row stands at the quantity {@link #balances()} values it at, so an item
+         * whose legacy balance an earlier import wrote counts only this run's history; an item with history alone counts
+         * its history.
+         */
         @Override
         public List<ProductStock> productStock() {
+            Map<String, Map<String, BigDecimal>> onHand = new TreeMap<>();
+            history.forEach((branch, items) -> items.keySet()
+                    .forEach(item ->
+                            onHand.computeIfAbsent(branch, k -> new TreeMap<>()).put(item, atLoad(branch, item))));
+            qty.forEach((branch, items) -> items.forEach((item, q) ->
+                    onHand.computeIfAbsent(branch, k -> new TreeMap<>()).put(item, after(branch, item, q))));
             List<ProductStock> out = new ArrayList<>();
-            qty.forEach((branch, items) -> items.forEach((product, q) ->
-                    out.add(new ProductStock(branch, product, q, BigDecimal.valueOf(value(product, q))))));
+            onHand.forEach((branch, items) -> items.forEach((product, q) -> {
+                BigDecimal share = q.subtract(before(branch, product));
+                out.add(new ProductStock(branch, product, share, BigDecimal.valueOf(value(product, share))));
+            }));
             return out;
         }
     }
