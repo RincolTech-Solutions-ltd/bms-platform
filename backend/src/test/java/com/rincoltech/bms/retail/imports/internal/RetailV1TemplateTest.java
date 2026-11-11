@@ -215,6 +215,25 @@ class RetailV1TemplateTest {
                 .containsExactly(tuple("TS-002", BigDecimal.ZERO), tuple("TS-003", new BigDecimal("3")));
     }
 
+    /**
+     * Review of db86c31 on #908: at a closed branch the loader writes the legacy balance and posts no journal, so the
+     * forecast predicts no journal there and still counts the stock the run puts on hand, before and after balances().
+     */
+    @Test
+    void aClosedBranchTakesNoJournalButItsStockIsCounted() {
+        ImportForecast f =
+                new RetailV1Template.StockForecast(Map.of("TS-001", 100L), Set.of(), Set.of("KLA"), Map.of());
+        f.batch(1);
+        f.row("balances", Map.of("branch", "KLA", "product_code", "TS-001", "qty", new BigDecimal("4")));
+        f.batch(2);
+
+        assertThat(f.productStock())
+                .extracting(ImportForecast.ProductStock::branch, p -> p.qty().stripTrailingZeros())
+                .containsExactly(tuple("KLA", new BigDecimal("4")));
+        assertThat(f.balances().journals()).isEmpty();
+        assertThat(f.balances().stock()).containsExactly(new ImportForecast.Stock("KLA", new BigDecimal("4"), 400));
+    }
+
     /** The stock a history row moves, read as the loader reads it; none for a row the loader refuses (issue #876). */
     @Test
     void aHistoryRowMovesTheStockTheLoaderWrites() {

@@ -576,7 +576,8 @@ class RetailV1Template implements ImportTemplate {
                     throw row.problem("qty must be positive");
                 }
                 String branch = row.text("branch");
-                return List.of(new Move(branch == null ? null : branch.toUpperCase(Locale.ROOT), product, q.negate()));
+                return List.of(
+                        new Move(branch == null ? null : branch.strip().toUpperCase(Locale.ROOT), product, q.negate()));
             }
             default -> throw new IllegalArgumentException("not a history set: " + entitySet);
         }
@@ -782,10 +783,13 @@ class RetailV1Template implements ImportTemplate {
          */
         private void close() {
             qty.forEach((branch, items) -> {
+                // Every branch is valued and its quantities recorded; a closed one only takes no journal, as the loader
+                // still writes its legacy balances (review of db86c31 on #908).
+                BranchOpening opening = opening(branch, items);
                 if (inactive.contains(branch)) {
                     return;
                 }
-                long amount = opening(branch, items).journal(opened(branch));
+                long amount = opening.journal(opened(branch));
                 if (amount != 0) {
                     journals.add(new Journal(branch, "inventory", amount, amount));
                     opened.add(branch);
