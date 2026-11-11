@@ -182,9 +182,10 @@ class ImportPurgeIT extends IntegrationTest {
                 .params(personal, personal, run)
                 .update();
         // An approval request of the run under another action type than import_commit, as an action added later could
-        // make: none exists today (importCommitIsTheOnlyApprovalOfAnImport; the trading override is approved on the run,
-        // above), so it is written as the owner. Its payload carries a maker's reason, and it is decided with a note and
-        // failed with words, all personal (issue #887, review of #907 MF1): the purge hashes every request of the run.
+        // make: none exists today (importCommitIsTheOnlyApprovalOfAnImport; the trading override is approved on the
+        // run, above), so it is written as the owner. Its payload carries a maker's reason, and it is decided with a
+        // note and failed with words, all personal (issue #887, review of #907 MF1): the purge hashes every request of
+        // the run.
         approval(f, run, "approved", personal);
         TestDatabase.owner()
                 .sql("UPDATE import_batches SET status = 'committed', committed_at = now() WHERE run_id = ?")
@@ -901,7 +902,8 @@ class ImportPurgeIT extends IntegrationTest {
     @Test
     void importCommitIsTheOnlyApprovalOfAnImport() {
         assertThat(approvalActions)
-                .filteredOn(a -> a.subjectType().contains("import") || a.actionType().contains("import"))
+                .filteredOn(a ->
+                        a.subjectType().contains("import") || a.actionType().contains("import"))
                 .extracting(ApprovalAction::actionType)
                 .containsExactly(ImportCommitAction.TYPE);
     }
