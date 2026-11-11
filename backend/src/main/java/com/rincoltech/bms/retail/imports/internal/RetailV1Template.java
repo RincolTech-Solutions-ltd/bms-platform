@@ -402,14 +402,12 @@ class RetailV1Template implements ImportTemplate {
                 .map(b -> compare(b.code()))
                 .collect(Collectors.toSet()));
         Map<String, Long> costs = held == null ? Map.of() : Map.copyOf(held);
-        Set<String> openedBefore = opened == null ? Set.of() : opened;
-        // Copied once here, so each forecast's own Set.copyOf and Map.copyOf return these (review of 12e9d33 on #898).
+        // Copied once here; each forecast shares what was read and copies none of it (issue #876, nice-to-have 4).
+        Set<String> openedBefore = opened == null ? Set.of() : Set.copyOf(opened);
         Set<String> closed = inactive == null ? Set.of() : Set.copyOf(inactive);
-        Set<String> openedOnce = Set.copyOf(openedBefore);
         Map<String, Map<String, Held>> books = before == null ? Map.of() : Map.copyOf(before);
         CompactKeys earlierRefs = earlier == null ? new CompactKeys() : earlier;
-        // Each forecast shares what was read and copies none of it (issue #876, nice-to-have 4).
-        return () -> new StockForecast(costs, openedOnce, closed, books, earlierRefs);
+        return () -> new StockForecast(costs, openedBefore, closed, books, earlierRefs);
     }
 
     // JUSTIFICATION-A3: the Lead's steer for round 4 asks one function shared by the forecast and the loader.
