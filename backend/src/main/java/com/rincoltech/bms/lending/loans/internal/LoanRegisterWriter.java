@@ -160,7 +160,8 @@ class LoanRegisterWriter {
                 .param(runId)
                 .query(UUID.class)
                 .single();
-        // A collection note names a staff member of the business (its foreign key); the opener may be a platform operator.
+        // A collection note names a staff member of the business (its foreign key); the opener may be a platform
+        // operator.
         boolean officerIsStaff = jdbc.sql("SELECT EXISTS (SELECT 1 FROM users WHERE tenant_id ="
                         + " current_setting('app.tenant_id')::uuid AND id = ? AND kind = 'staff')")
                 .param(officer)
@@ -367,8 +368,9 @@ class LoanRegisterWriter {
             checkpoint.rowWritten();
         }
         if (remarksNotKept > 0) {
-            checkpoint.note(remarksNotKept + " remark(s) of this file are not kept as collection notes: a collection note"
-                    + " names a staff member of the business, and the run was opened by someone who is not one.");
+            checkpoint.note(
+                    remarksNotKept + " remark(s) of this file are not kept as collection notes: a collection note"
+                            + " names a staff member of the business, and the run was opened by someone who is not one.");
         }
         // Step 7: one opening journal per branch, ever.
         for (Branches.Branch b : touched.values()) {
