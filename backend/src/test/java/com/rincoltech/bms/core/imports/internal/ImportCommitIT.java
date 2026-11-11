@@ -1371,9 +1371,10 @@ class ImportCommitIT extends IntegrationTest {
         ResponseEntity<JsonNode> started = platform.post(base + "/start", null, token);
         assertThat(started.getStatusCode()).as("%s", started.getBody()).isEqualTo(HttpStatus.ACCEPTED);
         assertThat(started.getBody().get("run").get("status").asString()).isEqualTo("committing");
-        // A second start while it writes, or after it stopped, is refused; never a second writer. It is IMPORT_IN_PROGRESS
-        // either way, so it cannot race the killed loop: while the loop lives its claim refuses it, and once the loop is
-        // gone the run is still committing, which the start refuses with the same code (issue #897).
+        // A second start while it writes, or after it stopped, is refused; never a second writer. It is
+        // IMPORT_IN_PROGRESS either way, so it cannot race the killed loop: while the loop lives its claim refuses
+        // it, and once the loop is gone the run is still committing, which the start refuses with the same code
+        // (issue #897).
         ResponseEntity<JsonNode> second = platform.post(base + "/start", null, token);
         assertThat(second.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(second.getBody().get("code").asString()).isEqualTo("IMPORT_IN_PROGRESS");
