@@ -128,7 +128,9 @@ public interface ImportRuns {
      * them with the signed-in platform operator as actor ({@code platformUserId} must be an active one: 403
      * {@code operator_required}). Only then are the batches handed to {@code background}, which runs the work for the
      * business on its own thread; the work holds the loop claim until it ends, so a second start, or a resume while it
-     * writes, is refused at once with {@code IMPORT_IN_PROGRESS}.
+     * writes, is refused at once with {@code IMPORT_IN_PROGRESS}. The work binds the business itself, so it runs on a thread
+     * with none bound, and gives the claim back however it ends; a {@code background} that throws gives it back at once
+     * (issue #897).
      */
     void startCommit(UUID runId, UUID platformUserId, Consumer<Supplier<CommitOutcome>> background);
 

@@ -34,6 +34,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -781,17 +782,25 @@ class ImportRunService implements ImportRuns {
         handOff(runId, claim, background);
     }
 
-    /** Gives the batches and the loop claim to the caller's thread; the work gives the claim back when it ends. */
+    /**
+     * Gives the batches and the loop claim to the caller's thread; the work gives the claim back when it ends. The work binds
+     * the business itself, inside the claim's try, so nothing between the hand-off and the batches can keep the claim (issue
+     * #897): a background that throws or fails to start its thread (an Error too) gives it back here, in the finally.
+     */
     private void handOff(UUID runId, LoopClaim claim, Consumer<Supplier<CommitOutcome>> background) {
+        UUID tenant = TenantContext.require();
+        boolean handed = false;
         try {
             background.accept(() -> {
                 try (claim) {
-                    return writeBatches(runId, claim);
+                    return TenantContext.callAs(tenant, () -> writeBatches(runId, claim));
                 }
             });
-        } catch (RuntimeException e) {
-            claim.close();
-            throw e;
+            handed = true;
+        } finally {
+            if (!handed) {
+                claim.close();
+            }
         }
     }
 
@@ -1342,6 +1351,8 @@ class ImportRunService implements ImportRuns {
 
         private final Connection connection;
         private final String key;
+        /** Closed once only: a background that throws after its thread took the work must not give the connection twice. */
+        private final AtomicBoolean closed = new AtomicBoolean();
 
         LoopClaim(Connection connection, String key) {
             this.connection = connection;
@@ -1358,6 +1369,9 @@ class ImportRunService implements ImportRuns {
 
         @Override
         public void close() {
+            if (!closed.compareAndSet(false, true)) {
+                return;
+            }
             try (PreparedStatement unlock =
                     connection.prepareStatement("SELECT pg_advisory_unlock(hashtextextended(?, 0))")) {
                 unlock.setString(1, key);
