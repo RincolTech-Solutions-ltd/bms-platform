@@ -158,19 +158,22 @@ export async function runMetrics(runId: string): Promise<RunMetrics> {
   return data;
 }
 
-/** Every open issue of the run, read a page of 500 at a time, at most 2,000 for one screen. */
-export async function openIssues(runId: string): Promise<ImportIssue[]> {
-  const all: ImportIssue[] = [];
+/** The most open issues one screen lists; the counts of each kind come from the run's metrics, never from this list. */
+export const ISSUES_SHOWN = 2000;
+
+/** The open issues of the run, read a page of 500 at a time, at most ISSUES_SHOWN; `more` is true when some were not read. */
+export async function openIssues(runId: string): Promise<{ items: ImportIssue[]; more: boolean }> {
+  const items: ImportIssue[] = [];
   let cursor: string | undefined;
   do {
     const { data, error } = await api.GET('/api/v1/imports/runs/{run_id}/issues', {
       params: { path: { run_id: runId }, query: { status: 'open', limit: 500, cursor } },
     });
     if (error || !data) fail(error, 'Could not load the problems.');
-    all.push(...(data.items ?? []));
+    items.push(...(data.items ?? []));
     cursor = data.next_cursor ?? undefined;
-  } while (cursor && all.length < 2000);
-  return all;
+  } while (cursor && items.length < ISSUES_SHOWN);
+  return { items, more: cursor !== undefined };
 }
 
 export async function resolveIssue(issueId: string, body: ResolveRequest): Promise<void> {
