@@ -1775,8 +1775,9 @@ section 4.1; coordinated with #110, which builds no second framework).**
   (`ImportRuns.startCommit`, `startResume`): the business's commit loop is claimed and the guards, the move to
   `committing` (or the cleared halt) and its audit row, with the operator as actor, run in the request, whose answer is
   every refusal; only the batches go on on their own thread, which holds the loop until they end, so a second start or a
-  resume while a loop is alive is refused at once (review of 1c9568b on #895). The work binds its business inside the
-  claim's try, and a background that throws, or never starts its thread, gives the loop back at once (#897). The kill
+  resume while a loop is alive is refused at once (review of 1c9568b on #895). The work (`ImportRuns.Work`) is closeable:
+  the portal's thread closes it in a finally, so the loop is given back even if the work never runs, and a background that
+  throws, or never starts its thread, gives it back at once (#897). The kill
   switch refuses a resume in the service (`prepareResume`), for every caller, not only in the portal's controller. A run
   being brought in is offered Resume beside Stop only once it has been committing longer than one file's time limit (10
   minutes) or after the server refused an action on it (#897). The queue follows the run's state. The `import_commit` approval is still given in the

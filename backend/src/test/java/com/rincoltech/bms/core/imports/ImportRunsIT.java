@@ -419,8 +419,8 @@ class ImportRunsIT extends IntegrationTest {
     }
 
     /**
-     * A start or a resume whose background never runs the work (it throws, or its thread cannot start: an Error) gives the
-     * business's loop back at once (issue #897), so the next resume claims it.
+     * A start or a resume whose background never runs the work (it throws, its thread cannot start: an Error, or it closes
+     * the work unrun) gives the business's loop back at once (issue #897), so the next resume claims it.
      */
     @Test
     void aStartOrResumeWhoseWorkNeverRunsGivesTheLoopBack() {
@@ -435,6 +435,11 @@ class ImportRunsIT extends IntegrationTest {
                 }))
                 .isSameAs(noThread);
         assertThat(as(t, () -> runs.get(run.id())).status()).isEqualTo("committing");
+        // The portal's way when its thread fails before the work: the work is closed and never run.
+        as(t, () -> {
+            runs.startResume(run.id(), operatorId, ImportRuns.Work::close);
+            return null;
+        });
         OutOfMemoryError noMemory = new OutOfMemoryError("fabricated: no memory for a thread");
         assertThatThrownBy(() -> as(t, () -> {
                     runs.startResume(run.id(), operatorId, work -> {

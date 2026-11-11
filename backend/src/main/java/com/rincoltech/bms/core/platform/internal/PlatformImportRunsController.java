@@ -136,7 +136,7 @@ class PlatformImportRunsController {
         // The guards, the move to committing and its audit row (with this operator as actor) run here, so every refusal
         // is this request's answer; only the batches go on in the background (review of 1c9568b on #895).
         Run run = TenantContext.callAs(tenant, () -> {
-            runs.startCommit(runId, operator, work -> background(runId, "commit", work));
+            runs.startCommit(runId, operator, work -> background(tenant, runId, "commit", work));
             return runs.get(runId);
         });
         return state(slug, run);
@@ -155,7 +155,7 @@ class PlatformImportRunsController {
         // Refused here while any commit loop of the business is alive (IMPORT_IN_PROGRESS), so a stop is never undone
         // under a commit still finishing its batch, and a second resume never starts a second writer.
         Run run = TenantContext.callAs(tenant, () -> {
-            runs.startResume(runId, operator, work -> background(runId, "resume", work));
+            runs.startResume(runId, operator, work -> background(tenant, runId, "resume", work));
             return runs.get(runId);
         });
         return state(slug, run);
@@ -254,13 +254,14 @@ class PlatformImportRunsController {
     }
 
     /**
-     * Runs a commit or a resume on its own thread; a failure is logged by run id and kind only. The work binds its business
-     * itself and gives the loop claim back however it ends (issue #897), so nothing runs here before it.
+     * Runs a commit or a resume for one business on its own thread; a failure is logged by run id and kind only. The work is
+     * closed in the try-with-resources, so its loop claim is given back even if the tenant binding fails and the work never
+     * runs (issue #897).
      */
-    private static void background(UUID runId, String what, Supplier<ImportRuns.CommitOutcome> work) {
+    private static void background(UUID tenant, UUID runId, String what, ImportRuns.Work work) {
         Thread.ofVirtual().name("import-" + what + "-" + runId).start(() -> {
-            try {
-                ImportRuns.CommitOutcome outcome = work.get();
+            try (work) {
+                ImportRuns.CommitOutcome outcome = TenantContext.callAs(tenant, work);
                 log.info("import {} of run {} ended {}", what, runId, outcome);
             } catch (RuntimeException e) {
                 log.warn(

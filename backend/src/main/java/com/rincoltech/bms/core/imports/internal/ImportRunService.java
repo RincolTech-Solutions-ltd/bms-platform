@@ -36,7 +36,6 @@ import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import javax.sql.DataSource;
 import org.slf4j.Logger;
@@ -753,7 +752,7 @@ class ImportRunService implements ImportRuns {
 
     // JUSTIFICATION-A3: issue #141's portal start and resume: the guards in the request, the batches after.
     @Override
-    public void startCommit(UUID runId, UUID platformUserId, Consumer<Supplier<CommitOutcome>> background) {
+    public void startCommit(UUID runId, UUID platformUserId, Consumer<Work> background) {
         requireNoTransaction();
         requireKnownBuild();
         LoopClaim claim = claimLoop();
@@ -768,7 +767,7 @@ class ImportRunService implements ImportRuns {
     }
 
     @Override
-    public void startResume(UUID runId, UUID platformUserId, Consumer<Supplier<CommitOutcome>> background) {
+    public void startResume(UUID runId, UUID platformUserId, Consumer<Work> background) {
         requireNoTransaction();
         requireKnownBuild();
         LoopClaim claim = claimLoop();
@@ -783,17 +782,24 @@ class ImportRunService implements ImportRuns {
     }
 
     /**
-     * Gives the batches and the loop claim to the caller's thread; the work gives the claim back when it ends. The work binds
-     * the business itself, inside the claim's try, so nothing between the hand-off and the batches can keep the claim (issue
-     * #897): a background that throws or fails to start its thread (an Error too) gives it back here, in the finally.
+     * Gives the batches and the loop claim to the caller's thread; the work gives the claim back when it ends, and closing
+     * the work gives it back if it never ran (issue #897). A background that throws or fails to start its thread (an Error
+     * too) gives it back here, in the finally.
      */
-    private void handOff(UUID runId, LoopClaim claim, Consumer<Supplier<CommitOutcome>> background) {
-        UUID tenant = TenantContext.require();
+    private void handOff(UUID runId, LoopClaim claim, Consumer<Work> background) {
         boolean handed = false;
         try {
-            background.accept(() -> {
-                try (claim) {
-                    return TenantContext.callAs(tenant, () -> writeBatches(runId, claim));
+            background.accept(new Work() {
+                @Override
+                public CommitOutcome get() {
+                    try (claim) {
+                        return writeBatches(runId, claim);
+                    }
+                }
+
+                @Override
+                public void close() {
+                    claim.close();
                 }
             });
             handed = true;
