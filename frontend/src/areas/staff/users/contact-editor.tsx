@@ -44,7 +44,9 @@ export function ContactEditor({ user, self, owner, mfaEnabled, withName, onDone,
   const [error, setError] = useState<string | null>(null);
   const sending = useRef(false);
   const change = contactChange(user, draft, withName);
-  const needsProof = self && owner && change.contact;
+  // Once the server has asked for proof, Back keeps asking for it, even while /me still says this person is not the Owner.
+  const [serverAsked, setServerAsked] = useState(false);
+  const needsProof = change.contact && ((self && owner) || serverAsked);
   const proofProblem = resetProofProblem(proofKind === 'code', typed);
   const who = user.full_name ?? 'this person';
 
@@ -71,6 +73,7 @@ export function ContactEditor({ user, self, owner, mfaEnabled, withName, onDone,
         if (code === 'totp_required') setProofKind('code');
         if (code === 'password_required') setProofKind('password');
         if (code === 'totp_required' || code === 'password_required' || code === 'step_up_required') void queryClient.invalidateQueries({ queryKey: ['me'] });
+        setServerAsked(true);
         setStep('proof');
       }
       setError(code === 'network' ? NO_ANSWER : e instanceof Error ? e.message : 'Something went wrong. Try again.');
@@ -146,7 +149,7 @@ export function ContactEditor({ user, self, owner, mfaEnabled, withName, onDone,
           />
         )}
         {error && <p role="alert" className="alert alert-danger">{error}</p>}
-        <Hint full>After the change you can hand ownership to someone else only a day later. We tell your old email.</Hint>
+        <Hint full>{user.email ? 'After the change you can hand ownership to someone else only a day later. We tell your old email.' : 'After the change you can hand ownership to someone else only a day later.'}</Hint>
         <p className="cluster">
           <button type="button" /* busy-exempt: back waits for the request */ className="btn-ghost" disabled={busy} onClick={() => { setStep('edit'); setError(null); setTyped(''); setTried(false); }}>
             Back
@@ -194,7 +197,7 @@ export function ContactEditor({ user, self, owner, mfaEnabled, withName, onDone,
         autoComplete="off"
         value={draft.email}
         onChange={(e) => setDraft({ ...draft, email: e.target.value })}
-        hint={self ? 'You can sign in with it, and a new password link comes here.' : 'They can sign in with it. We send a short note to the old and the new email.'}
+        hint={self ? 'You can sign in with it, and a new password link comes here.' : user.status === 'active' ? 'They can sign in with it. We send a short note to the old and the new email.' : 'They can sign in with it.'}
         error={change.problems.email}
         showError={tried}
       />

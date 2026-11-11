@@ -143,6 +143,13 @@ describe('My details for the Owner (issue #883, ADR-062)', () => {
 
     expect(await screen.findByText('Enter your own password to confirm.')).toBeTruthy();
     expect(patches()[0]?.body).toEqual({ email: 'owner01.new@example.test' });
+    // Back and Save again asks for the password first, without a second request the server would refuse.
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    fireEvent.click(await screen.findByRole('button', { name: 'Next' }));
+    await screen.findByLabelText(/Your own password/);
+    expect(patches()).toHaveLength(1);
+    await new Promise((resolve) => setTimeout(resolve, 20));
     fireEvent.change(screen.getByLabelText(/Your own password/), { target: { value: 'Test-Password-1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save the change' }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());

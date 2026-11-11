@@ -479,7 +479,8 @@ class UserService implements TenantAdmins {
                 template,
                 Map.of("tenant_name", tenant.profile().name(), "when", when),
                 template + ":" + userId + ":" + before.version(),
-                "contact-changed:" + userId,
+                // One volume key per note, apart from the SMS above: no note can count against another.
+                "contact-changed:" + userId + ":" + template,
                 now.plus(Duration.ofDays(1)))));
         audit.record(new AuditLog.Entry(
                 "core.user.updated",

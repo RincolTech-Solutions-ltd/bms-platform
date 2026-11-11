@@ -636,6 +636,20 @@ class TenantOwnerIT extends IntegrationTest {
                 .param(cashier)
                 .query(String.class)
                 .single();
+        // A change of the phone alone keeps the email, so no email note is written (review of #906).
+        String phoneTag = api.get("/api/v1/users/" + cashier, adminSession.accessToken())
+                .getHeaders()
+                .getETag();
+        assertThat(api.call(
+                                HttpMethod.PATCH,
+                                "/api/v1/users/" + cashier,
+                                Map.of("phone", String.format("070%07d", new java.util.Random().nextInt(10_000_000))),
+                                adminSession.accessToken(),
+                                Map.of("If-Match", phoneTag))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(notes(cashier)).as("a phone-only change").isEmpty();
+
         String newEmail = Api.email("cashier-new");
         String etag = api.get("/api/v1/users/" + cashier, adminSession.accessToken())
                 .getHeaders()
@@ -650,12 +664,19 @@ class TenantOwnerIT extends IntegrationTest {
         assertThat(notes(cashier))
                 .containsExactly("identity.email_changed_new " + newEmail, "identity.email_changed_old " + oldEmail);
         assertThat(TestDatabase.owner()
-                        .sql("SELECT params::text FROM notification_outbox WHERE throttle_key = ?")
-                        .param("contact-changed:" + cashier)
+                        .sql("SELECT params::text FROM notification_outbox WHERE throttle_key LIKE ?")
+                        .param("contact-changed:" + cashier + ":%")
                         .query(String.class)
                         .list())
                 .as("neither note names an address")
                 .allSatisfy(p -> assertThat(p).doesNotContain(newEmail).doesNotContain(oldEmail));
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(DISTINCT throttle_key) FROM notification_outbox WHERE throttle_key LIKE ?")
+                        .param("contact-changed:" + cashier + ":%")
+                        .query(Long.class)
+                        .single())
+                .as("each note has its own volume key")
+                .isEqualTo(2);
 
         String ownerOld = TestDatabase.owner()
                 .sql("SELECT email FROM users WHERE id = ?")
@@ -673,11 +694,13 @@ class TenantOwnerIT extends IntegrationTest {
                 .doesNotEndWith(ownerOld);
     }
 
+    /** The email notes of a contact change that the sender will pick up: pending and due now. */
     List<String> notes(UUID userId) {
         return TestDatabase.owner()
-                .sql("SELECT template_key || ' ' || recipient FROM notification_outbox WHERE throttle_key = ?"
-                        + " AND channel = 'email' ORDER BY template_key")
-                .param("contact-changed:" + userId)
+                .sql("SELECT template_key || ' ' || recipient FROM notification_outbox WHERE throttle_key LIKE ?"
+                        + " AND channel = 'email' AND status = 'pending' AND next_attempt_at <= now()"
+                        + " ORDER BY template_key")
+                .param("contact-changed:" + userId + ":%")
                 .query(String.class)
                 .list();
     }
