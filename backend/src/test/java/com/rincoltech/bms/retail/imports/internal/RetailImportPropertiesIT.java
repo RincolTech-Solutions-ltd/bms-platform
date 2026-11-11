@@ -227,13 +227,27 @@ class RetailImportPropertiesIT extends IntegrationTest {
         UUID run = reversed(
                 issue881(100, 200, 100),
                 List.of("Imported restock PUR-P02|100|200|600|700", "Imported restock PUR-P03|200|100|700|600"));
+        // Issue #905, item 6: PUR-P02's one key holds its purchase and the change at PUR-P03 (readers take a key's
+        // records as a set); the legacy table, keyed by the ref, keeps the purchase alone.
         assertThat(TestDatabase.owner()
-                        .sql("SELECT count(*) FROM import_refs WHERE run_id = ? AND target_type = ?")
-                        .params(run, "retail.price_history")
-                        .query(Long.class)
+                        .sql("""
+                                SELECT count(DISTINCT source_key) || '|'
+                                       || string_agg(target_type, ',' ORDER BY target_type)
+                                  FROM import_refs WHERE run_id = ?
+                                   AND target_type IN ('retail.purchase', 'retail.price_history')
+                                """)
+                        .param(run)
+                        .query(String.class)
                         .single())
-                .as("the change the second run adds at PUR-P03 is registered with PUR-P02")
-                .isEqualTo(1L);
+                .as("the change the second run adds at PUR-P03 is registered with PUR-P02, beside its purchase")
+                .isEqualTo("1|retail.price_history,retail.purchase");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT target_type FROM retail_import_refs WHERE source_ref = 'PUR-P02' AND tenant_id ="
+                                + " (SELECT tenant_id FROM import_runs WHERE id = ?)")
+                        .param(run)
+                        .query(String.class)
+                        .list())
+                .containsExactly("retail.purchase");
     }
 
     /**

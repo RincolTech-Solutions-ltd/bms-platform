@@ -1121,8 +1121,8 @@ public class RetailImporter {
                     held.put(r, p);
                 }
             }
-            // Only rows that will be written enter the chain (issue #905): a row refused as read (parsePurchase, through
-            // each) or by seen is never a predecessor. Nothing below refuses a single row: a failure while writing
+            // Only rows that will be written enter the chain (issue #905): a row refused as read (parsePurchase, in each)
+            // or by seen is never a predecessor. Nothing below refuses a single row: a failure while writing
             // rolls the whole batch back, so no restock of the batch stays in the books, phantom predecessor or not.
             Neighbours neighbours = neighbours(rows.stream()
                     .filter(r -> r.kind().equals("purchase") && Boolean.FALSE.equals(held.get(r)))
@@ -1168,7 +1168,9 @@ public class RetailImporter {
                     PriceStep step = before == null
                             ? null
                             : PriceStep.between(
-                                    before, neighbours.known().get(r), r.product().sellMinor());
+                                    before,
+                                    neighbours.known().get(r),
+                                    r.product().sellMinor());
                     if (step != null) {
                         catalogue.importPriceChange(
                                 r.product().id(),
@@ -1210,7 +1212,11 @@ public class RetailImporter {
                 Restock next = neighbours.after().get(r);
                 if (next != null) {
                     laterRestock(
-                            file.name, r, neighbours.known().get(r), next, neighbours.recorded().get(next.purchase()));
+                            file.name,
+                            r,
+                            neighbours.known().get(r),
+                            next,
+                            neighbours.recorded().get(next.purchase()));
                 }
                 c.written++;
             }
