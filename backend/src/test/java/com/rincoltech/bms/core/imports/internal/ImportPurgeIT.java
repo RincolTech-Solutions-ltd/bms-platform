@@ -155,6 +155,12 @@ class ImportPurgeIT extends IntegrationTest {
         // The run's own typed text carries personal values on purpose (review of #886, round 3): the trading override's
         // reason, set through the service so its audit row is written too, and a policy decision's confirmation.
         as(f, () -> runs.allowTradingTenant(run, operatorId, "Fabricated Buyer Gamma " + TYPED_PHONE + " still buys"));
+        // Approved by a second operator through the real service (Lead on the review of #907): on the run itself, with
+        // no approval request, so no payload carries the reason.
+        as(f, () -> runs.approveTradingTenant(run, witnessId));
+        assertThat(count("SELECT count(*) FROM approval_requests WHERE subject_id = ?", run))
+                .as("the trading override's approval makes no approval request")
+                .isZero();
         String policy =
                 "{\"receivable\": {\"option\": \"defer\", \"confirmation\": \"Confirmed by " + TYPED_PHONE + "\"}}";
         TestDatabase.owner()
@@ -175,9 +181,10 @@ class ImportPurgeIT extends IntegrationTest {
                 .sql("UPDATE import_batches SET sheet_name = ?, failure_reason = ? WHERE run_id = ?")
                 .params(personal, personal, run)
                 .update();
-        // An approval of the run under another action type than import_commit (none exists today; the action-type guard
-        // below says so), its payload carrying the maker's reason for the checker, decided with a note and failed with
-        // words, all personal (issue #887, review of #907 MF1): the purge hashes every request whose subject is the run.
+        // An approval request of the run under another action type than import_commit, as an action added later could
+        // make: none exists today (importCommitIsTheOnlyApprovalOfAnImport; the trading override is approved on the run,
+        // above), so it is written as the owner. Its payload carries a maker's reason, and it is decided with a note and
+        // failed with words, all personal (issue #887, review of #907 MF1): the purge hashes every request of the run.
         approval(f, run, "approved", personal);
         TestDatabase.owner()
                 .sql("UPDATE import_batches SET status = 'committed', committed_at = now() WHERE run_id = ?")
