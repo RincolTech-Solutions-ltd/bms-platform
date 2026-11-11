@@ -236,8 +236,8 @@ class RetailV1TemplateTest {
                         "sales", row(Map.of("branch", "HQ", "product_code", "TS-001", "qty", BigDecimal.ZERO))))
                 .hasMessage("qty must be positive");
         Set<String> refs = new java.util.HashSet<>();
-        RetailV1Template.once(restock("purchase", "HQ=1"), "P-1", refs);
-        assertThatThrownBy(() -> RetailV1Template.once(restock("purchase", "HQ=1"), "P-1", refs))
+        RetailV1Template.refOnce(restock("purchase", "HQ=1"), "P-1", refs);
+        assertThatThrownBy(() -> RetailV1Template.refOnce(restock("purchase", "HQ=1"), "P-1", refs))
                 .hasMessage("duplicate source_ref P-1");
     }
 

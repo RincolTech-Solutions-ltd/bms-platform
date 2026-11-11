@@ -529,7 +529,7 @@ class RetailV1Template implements ImportTemplate {
      * (issue #876, the Lead's ruling on #908). The loader takes each file's refs, and the forecast each set's over its
      * run, since the loader finds a row an earlier batch of the run wrote in the business's imports.
      */
-    static void once(ExportFile.Row row, String ref, Set<String> refs) {
+    static void refOnce(ExportFile.Row row, String ref, Set<String> refs) {
         if (!refs.add(ref)) {
             throw row.problem("duplicate source_ref " + ref);
         }
@@ -616,7 +616,7 @@ class RetailV1Template implements ImportTemplate {
         /** The stock this forecast's history rows move, by branch and item: what the loader writes before balances. */
         private final Map<String, Map<String, BigDecimal>> history = new TreeMap<>();
 
-        /** The {@code source_ref} of each history set this forecast was given, for {@link #once}. */
+        /** The {@code source_ref} of each history set this forecast was given, for {@link #refOnce}. */
         private final Map<String, Set<String>> refs = new HashMap<>(4);
 
         /** The balance rows ({@code branch|item}) whose branch was opened when their batch began. */
@@ -758,7 +758,7 @@ class RetailV1Template implements ImportTemplate {
                 if (earlier.contains(entitySet + "|" + ref)) {
                     return;
                 }
-                once(row, ref, refs.computeIfAbsent(entitySet, k -> new HashSet<>()));
+                refOnce(row, ref, refs.computeIfAbsent(entitySet, k -> new HashSet<>()));
                 moves = historyMoves(entitySet, row);
             } catch (ExportFile.RowProblem e) {
                 // The loader refuses the row and writes nothing for it.
