@@ -222,8 +222,9 @@ class ImportPurgeIT extends IntegrationTest {
 
     // JUSTIFICATION-A3: review of #907 (MF1, MF2) needs one request fixture shared by the decided and the pending case.
     /**
-     * An {@code import_trading_override} request of the run, written as the owner: its payload holds {@code text} as a
-     * maker's reason, and one not pending holds it as its note and its execution error too. Returns its id.
+     * A {@code fabricated_import_action} request of the run (a type no action has), written as the owner: its payload
+     * holds {@code text} as a maker's reason, and one not pending holds it as its note and its execution error too.
+     * Returns its id.
      */
     UUID approval(TestDatabase.Fixture f, UUID run, String status, String text) {
         UUID id = UUID.randomUUID();
@@ -231,7 +232,7 @@ class ImportPurgeIT extends IntegrationTest {
                 .sql("""
                         INSERT INTO approval_requests (id, tenant_id, branch_id, action_type, subject_type, subject_id,
                                                        payload, status, requested_by, requested_at, expires_at)
-                        VALUES (?, ?, ?, 'import_trading_override', 'core.import_run', ?,
+                        VALUES (?, ?, ?, 'fabricated_import_action', 'core.import_run', ?,
                                 jsonb_build_object('reason', CAST(? AS text)), ?, ?, now(), now() + interval '1 day')
                         """)
                 .params(id, f.tenantId(), f.headOffice(), run, text, status, operator)
@@ -725,7 +726,7 @@ class ImportPurgeIT extends IntegrationTest {
                 .isEqualTo(1);
         assertThat(count(
                         "SELECT count(*) FROM approval_requests WHERE subject_id = ?"
-                                + " AND action_type = 'import_trading_override' AND status = 'approved'"
+                                + " AND action_type = 'fabricated_import_action' AND status = 'approved'"
                                 + " AND decision_note ~ '^sha256:[0-9a-f]{64}$'"
                                 + " AND execution_error ~ '^sha256:[0-9a-f]{64}$'"
                                 + " AND payload ->> 'sha256' ~ '^[0-9a-f]{64}$' AND payload - 'sha256' = '{}'::jsonb",

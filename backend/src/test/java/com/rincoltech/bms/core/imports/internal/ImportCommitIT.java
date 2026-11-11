@@ -738,6 +738,10 @@ class ImportCommitIT extends IntegrationTest {
     @Autowired
     ImportPurges purges;
 
+    /** The application's notice to the checker after the file count (ImportRunService.requestCommit), word for word. */
+    static final String NOTICE_TAIL = " checked files of customer data into the business's records and opening"
+            + " balances. It cannot be undone except by restoring the dump taken before it.";
+
     // JUSTIFICATION-A3: the Lead's ruling on the review of #907 asks for this case through the real services.
     /**
      * Lead on the review of #907: an import_commit request made by the real maker's request and still pending when its
@@ -768,14 +772,19 @@ class ImportCommitIT extends IntegrationTest {
         Purge purge = new Purge(operatorAt, witnessAt, "pre-import-fabricated.dump", SHA);
         as(t, () -> purges.purge(run, purge));
 
+        // The payload the purge keeps readable is proven value-free (review of #907, round 2): exactly the run's id,
+        // the file count as a number and the application's fixed notice, nothing else.
         String cancelled = "SELECT count(*) FROM approval_requests WHERE id = ? AND status = 'cancelled'"
                 + " AND decision_note IS NULL AND execution_error IS NULL"
-                + " AND payload ->> 'run_id' = ? AND payload -> 'batches' IS NOT NULL";
-        assertThat(count(cancelled, request, run.toString())).isEqualTo(1);
+                + " AND (SELECT array_agg(k ORDER BY k) FROM jsonb_object_keys(payload) k)"
+                + " = ARRAY['batches', 'checker_notice', 'run_id']"
+                + " AND jsonb_typeof(payload -> 'batches') = 'number' AND payload ->> 'run_id' = ?"
+                + " AND payload ->> 'checker_notice' = 'This writes ' || (payload ->> 'batches') || ?";
+        assertThat(count(cancelled, request, run.toString(), NOTICE_TAIL)).isEqualTo(1);
         ResponseEntity<JsonNode> late = CommitApproval.approve(http, t, request, UUID.randomUUID());
         assertThat(late.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(late.getBody().get("code").asString()).isEqualTo("invalid_status_transition");
-        assertThat(count(cancelled, request, run.toString()))
+        assertThat(count(cancelled, request, run.toString(), NOTICE_TAIL))
                 .as("still cancelled, with no note")
                 .isEqualTo(1);
     }
