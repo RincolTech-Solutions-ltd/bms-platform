@@ -51,6 +51,8 @@ export function ImportProblems({ runId }: { runId: string }) {
     );
   }
   const groups = groupByCode(issues.data?.items ?? []);
+  // Fix all never sends without the server's count of the kind (a refetch into an error leaves none).
+  const bulkCount = bulk ? openOfKind(metrics.data, bulk.code) : null;
   const asked = metrics.data?.questions?.open ?? (issues.data?.items ?? []).filter((i) => i.ask_customer).length;
   return (
     <main className="stack">
@@ -89,7 +91,11 @@ export function ImportProblems({ runId }: { runId: string }) {
         {fixing && <FixForm runId={runId} issue={fixing} seesRaw={seesRaw} onDone={() => setFixing(null)} />}
       </Sheet>
       <Sheet open={bulk !== null} onClose={() => setBulk(null)} title="Fix them all the same way">
-        {bulk && <BulkForm runId={runId} group={bulk} count={openOfKind(metrics.data, bulk.code) ?? 0} onDone={() => setBulk(null)} />}
+        {bulk && (bulkCount === null ? (
+          <p role="alert" className="alert alert-danger">Could not count these problems. Close this and try again.</p>
+        ) : (
+          <BulkForm runId={runId} group={bulk} count={bulkCount} onDone={() => setBulk(null)} />
+        ))}
       </Sheet>
     </main>
   );

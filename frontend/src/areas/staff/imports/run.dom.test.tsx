@@ -116,6 +116,16 @@ describe('the sheet layout of an upload', () => {
     expect(uploads).toEqual([]);
   });
 
+  it('tells apart two tabs of one file, and sends the one picked (review of a5168f7)', async () => {
+    layouts = [{ id: 'm-9', name: 'test-shop-9', version: 1, sources: [{ key: 'items', file: 'book.xlsx' }, { key: 'buyers', file: 'book.xlsx' }] }];
+    const box = await openSheet();
+    await waitFor(() => expect(document.querySelectorAll('#import-layouts option')).toHaveLength(2));
+    fireEvent.change(box, { target: { value: 'test-shop-9: book.xlsx, buyers' } });
+    pickFile();
+    fireEvent.click(screen.getByRole('button', { name: 'Upload the file' }));
+    await waitFor(() => expect(uploads).toEqual(['test-items.csv|m-9|buyers']));
+  });
+
   it('says so when the list holds as many layouts as the server sends (issue #897)', async () => {
     layouts = Array.from({ length: 200 }, (_, i) => layout(i));
     await openSheet();

@@ -24,6 +24,13 @@ vi.mock('../../../api/imports', async (original) => {
     ...real,
     openIssues: () => Promise.resolve({ items: listed, more }),
     runMetrics: () => Promise.resolve(metrics),
+    // A single fix: the server then counts one fewer open line of the kind.
+    resolveIssue: (issueId: string) => {
+      listed = listed.filter((i) => i.id !== issueId);
+      const m = metrics as RunMetrics;
+      metrics = { ...m, issues: (m.issues ?? []).map((c) => ({ ...c, open: (c.open ?? 0) - 1 })) };
+      return Promise.resolve();
+    },
     resolveAll: (_run: string, body: BulkResolveRequest) => {
       bulk.push(body);
       return Promise.resolve(2500);
@@ -81,6 +88,17 @@ describe('a kind with more open problems than the screen lists', () => {
     fireEvent.change(screen.getByLabelText(/^Why/), { target: { value: 'Test lines from an old sheet' } });
     fireEvent.click(screen.getByRole('button', { name: 'Fix all 2500' }));
     await waitFor(() => expect(bulk).toEqual([{ code: 'TYPE_INVALID', resolution: 'exclude_row', note: 'Test lines from an old sheet' }]));
+  });
+
+  it('counts again after a single fix, so Fix all says what is left (review of a5168f7)', async () => {
+    show();
+    expect(await screen.findByRole('button', { name: 'Fix all 2500 the same way' })).toBeTruthy();
+    fireEvent.click(screen.getByText('See each line'));
+    fireEvent.click(screen.getByRole('button', { name: 'Fix line 2' }));
+    fireEvent.change(await screen.findByLabelText(/^New value/), { target: { value: '+256700000001' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save the fix' }));
+    expect(await screen.findByRole('button', { name: 'Fix all 2499 the same way' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Not the right kind of value (2499)' })).toBeTruthy();
   });
 
   it('says "or more" and offers no Fix all until the server count is in', async () => {

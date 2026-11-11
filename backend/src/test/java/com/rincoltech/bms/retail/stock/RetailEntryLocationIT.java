@@ -361,16 +361,14 @@ class RetailEntryLocationIT extends IntegrationTest {
         setShop();
         sell(sale(fix(NEAR_LAT, SHOP_LNG, 12)));
         use(fix(SHOP_LAT, FAR_LNG, 30));
-        // Only the payload (data), and the full fixture values: a created_at or an id can hold four of these digits.
+        // Every column of the row but id, created_at and tenant_id, which can hold these digits by chance (a time
+        // such as 10:32.58 failed it); every coordinate of the fixture, both latitudes too, as a short fragment, so a
+        // rounded or truncated value is caught as well. Shop locations are audited without coordinates.
         assertThat(TestDatabase.owner()
-                        .sql("SELECT count(*) FROM audit_log a WHERE a.tenant_id = ?"
-                                + " AND (a.data::text LIKE '%' || ? || '%' OR a.data::text LIKE '%' || ? || '%'"
-                                + " OR a.data::text LIKE '%' || ? || '%')")
-                        .params(
-                                t.tenantId(),
-                                String.valueOf(NEAR_LAT),
-                                String.valueOf(SHOP_LNG),
-                                String.valueOf(FAR_LNG))
+                        .sql("SELECT count(*) FROM audit_log a WHERE a.tenant_id = ? AND EXISTS (SELECT 1 FROM"
+                                + " unnest(CAST(? AS text[])) f WHERE"
+                                + " (to_jsonb(a) - 'id' - 'created_at' - 'tenant_id')::text LIKE '%' || f || '%')")
+                        .params(t.tenantId(), new String[] {"0.3136", "0.3139", "32.58", "32.60"})
                         .query(Long.class)
                         .single())
                 .isZero();

@@ -307,13 +307,16 @@ export interface LayoutChoice {
   hint: string;
 }
 
-/** Every file or tab of every sheet layout, each a choice; the browser narrows them by the words typed. */
+/**
+ * Every file or tab of every sheet layout, each a choice; the browser narrows them by the words typed. A choice is found by
+ * its words, so two sources of one layout that name the same file (two tabs) carry their key as well and never share them.
+ */
 export function layoutChoices(mappings: MappingChoice[]): LayoutChoice[] {
   return mappings.flatMap((m) =>
-    (m.sources ?? []).map((s) => ({
+    (m.sources ?? []).map((s, _, all) => ({
       mappingId: m.id ?? '',
       source: s.key ?? '',
-      label: `${m.name ?? ''}: ${s.file ?? s.key ?? ''}`,
+      label: `${m.name ?? ''}: ${s.file ?? s.key ?? ''}${all.filter((o) => (o.file ?? o.key) === (s.file ?? s.key)).length > 1 ? `, ${s.key ?? ''}` : ''}`,
       hint: `Version ${m.version ?? 1}, ${(s.entity_set ?? '').split('_').join(' ')}`,
     })),
   );
