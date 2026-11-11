@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.rincoltech.bms.core.imports.ImportForecast;
 import com.rincoltech.bms.core.imports.ImportTemplate.IssueCode;
 import com.rincoltech.bms.core.imports.ImportTemplate.SetRules;
+import com.rincoltech.bms.core.imports.ImportTemplates;
 import com.rincoltech.bms.core.imports.internal.EngineRun;
 import com.rincoltech.bms.lending.members.MemberImports;
 import java.io.IOException;
@@ -529,7 +530,8 @@ class LendingLoansV1TemplateTest {
         assertThat(after.note().field()).isEqualTo(LoanRegister.PAID_ON);
         assertThat(before.note().code()).isEqualTo("PAY_DATE_OUT_OF_RANGE");
         assertThat(inside.note()).isNull();
-        assertThat(LendingLoansV1Template.CODES.stream()
+        // DATE_AFTER_CUTOVER is a code of the framework's shared catalogue, not of the template's own.
+        assertThat(ImportTemplates.SHARED_CODES.stream()
                         .filter(c -> c.code().equals("DATE_AFTER_CUTOVER"))
                         .map(c -> c.severity().key()))
                 .containsExactly("blocking");
