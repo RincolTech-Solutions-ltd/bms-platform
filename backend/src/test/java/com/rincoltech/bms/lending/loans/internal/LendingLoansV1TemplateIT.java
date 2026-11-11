@@ -497,7 +497,11 @@ class LendingLoansV1TemplateIT extends IntegrationTest {
                                 "link_member", conflict.version(), null, null, linked, "Fabricated: confirmed"),
                         operator));
         settle(t, run);
+        // The dry run carries the link as the commit does (Lead on #911): it predicts the preview and reports alike.
+        DryRun dry = as(t, () -> runs.dryRun(run, operator));
+        assertThat(dry.previewMatches()).as(dry.report().render()).isTrue();
         committed(t, run);
+        assertThat(as(t, () -> runs.commitReport(run)).sameAs(dry.report())).isTrue();
 
         assertThat(count(t, "SELECT count(*) FROM lending_loans WHERE tenant_id = ? AND member_id = '" + linked + "'"))
                 .as("rows 3 and 12 of the head office, row 2 of the second branch")
@@ -529,6 +533,14 @@ class LendingLoansV1TemplateIT extends IntegrationTest {
                 .anySatisfy(n -> assertThat(n).startsWith("1 remark(s) of this file are not kept as collection notes"));
         assertThat(count(other, "SELECT count(*) FROM lending_collection_actions WHERE tenant_id = ?"))
                 .isZero();
+
+        // The positive control (Lead on #911): a staff user of the run's own business keeps the remark.
+        UUID own = reviewed(other, otherOfficer, files);
+        committed(other, own);
+        assertThat(count(other, "SELECT count(*) FROM lending_collection_actions WHERE tenant_id = ?"))
+                .isEqualTo(1);
+        assertThat(as(other, () -> runs.commitReport(own)).notes())
+                .noneSatisfy(n -> assertThat(n).contains("are not kept as collection notes"));
     }
 
     /**
