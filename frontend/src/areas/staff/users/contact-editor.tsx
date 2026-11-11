@@ -197,7 +197,7 @@ export function ContactEditor({ user, self, owner, mfaEnabled, withName, onDone,
         autoComplete="off"
         value={draft.email}
         onChange={(e) => setDraft({ ...draft, email: e.target.value })}
-        hint={self ? 'You can sign in with it, and a new password link comes here.' : user.status === 'active' ? 'They can sign in with it. We send a short note to the old and the new email.' : 'They can sign in with it.'}
+        hint={self ? 'You can sign in with it, and a new password link comes here.' : user.status !== 'active' ? 'They can sign in with it.' : user.email ? 'They can sign in with it. We send a short note to the old and the new email.' : 'They can sign in with it. We send a short note to the new email.'}
         error={change.problems.email}
         showError={tried}
       />

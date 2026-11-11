@@ -643,12 +643,21 @@ class TenantOwnerIT extends IntegrationTest {
         assertThat(api.call(
                                 HttpMethod.PATCH,
                                 "/api/v1/users/" + cashier,
-                                Map.of("phone", String.format("070%07d", new java.util.Random().nextInt(10_000_000))),
+                                // Staff phones are unique per business (V98) and this test's business is new,
+                                // with no other staff phone, so a fixed number cannot collide.
+                                Map.of("phone", "0700000183"),
                                 adminSession.accessToken(),
                                 Map.of("If-Match", phoneTag))
                         .getStatusCode())
                 .isEqualTo(HttpStatus.OK);
-        assertThat(notes(cashier)).as("a phone-only change").isEmpty();
+        // Every row of any status or due time: a note claimed, sent or delayed must not hide here.
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM notification_outbox WHERE throttle_key LIKE ?")
+                        .param("contact-changed:" + cashier + ":%")
+                        .query(Long.class)
+                        .single())
+                .as("a phone-only change writes no note")
+                .isZero();
 
         String newEmail = Api.email("cashier-new");
         String etag = api.get("/api/v1/users/" + cashier, adminSession.accessToken())
