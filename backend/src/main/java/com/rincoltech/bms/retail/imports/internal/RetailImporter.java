@@ -1121,8 +1121,8 @@ public class RetailImporter {
                     held.put(r, p);
                 }
             }
-            // Only rows that will be written enter the chain (issue #905): a row refused as read (parsePurchase, in each)
-            // or by seen is never a predecessor. Nothing below refuses a single row: a failure while writing
+            // Only rows that will be written enter the chain (issue #905): a row refused as read (parsePurchase) or
+            // by seen is never a predecessor. Nothing below refuses a single row: a failure while writing
             // rolls the whole batch back, so no restock of the batch stays in the books, phantom predecessor or not.
             Neighbours neighbours = neighbours(rows.stream()
                     .filter(r -> r.kind().equals("purchase") && Boolean.FALSE.equals(held.get(r)))

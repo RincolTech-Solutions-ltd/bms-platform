@@ -698,9 +698,6 @@ class RetailImportIT extends IntegrationTest {
                         SELECT reason || '|' || old_cost_minor || '|' || new_cost_minor || '|' || old_sell_minor || '|'
                                || new_sell_minor
                           FROM retail_price_history WHERE tenant_id = ? AND source = 'import' ORDER BY 1
-                        """)
-                .param(f.tenantId())
-                .query(String.class)
-                .list();
+                        """).param(f.tenantId()).query(String.class).list();
     }
 }
