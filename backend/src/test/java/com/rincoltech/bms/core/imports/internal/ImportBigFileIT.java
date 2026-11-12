@@ -16,8 +16,6 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -45,12 +43,14 @@ import tools.jackson.databind.json.JsonMapper;
  *   <li>a product master at the column limit (200 columns, 193 of them ignored with a reason), committed.
  * </ul>
  *
- * <p>They found #880. Its fix (the streamed loader, the batched writes, the lookups by index, the validation's compact
- * indexes) brought the validation and preview at 100,000 rows inside the staging heap and the dry run and commit
- * at that size inside their time limits, but the commit there still fills the old generation, and in a database other
- * businesses' imports already fill the dry run still stops at its limit: those two cases are disabled with #900. The
- * configured row limit, {@link UploadSettings#DEFAULT_MAX_ROWS}, is the largest of the measured sizes that commits with a
- * tenth of the old generation to spare (the Lead's fallback on #880); a case over it runs the child at its own size.
+ * <p>They found #880 and #900. #880 streamed the loader and batched its writes. #900 found that the planner, whose
+ * statistics cannot see the rows a batch writes in its own transaction, looked a key up through an index on
+ * {@code tenant_id} alone and filtered every row the batch had written, so a dry run in a database other businesses' imports
+ * already fill stopped at its limit whatever the heap; the batch now refreshes those statistics as it grows (V153). It also
+ * found the reconciliation after the commit reading every item the batch wrote as objects; it now reads their costs
+ * compactly. The configured row limit, {@link UploadSettings#DEFAULT_MAX_ROWS}, is the 100,000 of section 3.1, and every
+ * case runs at it. The commits at the row limit run last, after the other cases have committed theirs, so their lookups
+ * run among other businesses' rows, as on staging.
  *
  * <p><b>Not part of {@code mvn verify}.</b> The commits and their dry runs take longer than
  * the backend job can spare, and on the shared runner a stalled machine would fail the job for a reason that is not a
@@ -66,152 +66,6 @@ import tools.jackson.databind.json.JsonMapper;
 @Timeout(value = 100, unit = TimeUnit.MINUTES)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class ImportBigFileIT extends IntegrationTest {
-
-    // JUSTIFICATION-A3: issue #900 asks why the twice-heap dry run slows before any change: one diagnostic CI run.
-    /** #900 diagnosis (temporary): the plans of slow statements, summarised after each child. */
-    @BeforeAll
-    static void explain() {
-        TestDatabase.explainSlowStatements("250ms");
-    }
-
-    // JUSTIFICATION-A3: issue #900 asks why before any change: one probe of the planner's index choice, then removed.
-    /** #900 diagnosis (temporary): which index the planner can use for a key lookup, under row-level security and not. */
-    @Test
-    @Order(0)
-    @Disabled("#900 probe done (temporary)")
-    void probe() throws Exception {
-        TestDatabase.Fixture t = TestDatabase.tenant("import-probe", false, true);
-        StringBuilder out = new StringBuilder("IMPORT BIG FILE PROBE\n");
-        StringBuilder keys = new StringBuilder();
-        for (int n = 30_001; n <= 30_250; n++) {
-            keys.append(keys.isEmpty() ? "" : ",")
-                    .append("\"upload:abc|-|line:")
-                    .append(n)
-                    .append('"');
-        }
-        String lookup = "SELECT r.source_key, r.source_ref FROM unnest(CAST('{" + keys + "}' AS text[])) AS k(key)"
-                + " CROSS JOIN LATERAL (SELECT * FROM %s i WHERE i.source_key = k.key OFFSET 0) r";
-        for (String table : List.of("probe_refs", "probe_refs_plain")) {
-            String opclass = table.equals("probe_refs") ? " text_pattern_ops" : "";
-            try (java.sql.Connection o = java.sql.DriverManager.getConnection(
-                            TestDatabase.url(), "bms_owner", TestDatabase.OWNER_PASSWORD);
-                    java.sql.Statement s = o.createStatement()) {
-                s.execute("DROP TABLE IF EXISTS " + table);
-                s.execute("CREATE TABLE " + table + " (id uuid PRIMARY KEY, tenant_id uuid NOT NULL, run_id uuid NOT"
-                        + " NULL, source_key varchar(330) NOT NULL, source_ref varchar(400) NOT NULL, target_type"
-                        + " varchar(60) NOT NULL, target_id uuid NOT NULL, UNIQUE (tenant_id, source_ref, target_type,"
-                        + " target_id))");
-                s.execute("CREATE INDEX " + table + "_by_key ON " + table + " (tenant_id, source_key" + opclass + ")");
-                s.execute("CREATE INDEX " + table + "_by_target ON " + table + " (tenant_id, target_id)");
-                s.execute("CREATE INDEX " + table + "_by_run ON " + table + " (tenant_id, run_id, target_type)");
-                s.execute("ALTER TABLE " + table + " ENABLE ROW LEVEL SECURITY");
-                s.execute("ALTER TABLE " + table + " FORCE ROW LEVEL SECURITY");
-                s.execute("CREATE POLICY p ON " + table + " USING (tenant_id = current_setting('app.tenant_id')::uuid)"
-                        + " WITH CHECK (tenant_id = current_setting('app.tenant_id')::uuid)");
-                s.execute("GRANT SELECT, INSERT ON " + table + " TO bms_app");
-                s.execute("INSERT INTO " + table + " SELECT gen_random_uuid(), '" + java.util.UUID.randomUUID()
-                        + "', gen_random_uuid(), 'upload:abc|-|line:' || g, 'upload:abc|-|line:' || g || '#h',"
-                        + " 'retail.product', gen_random_uuid() FROM generate_series(1, 100000) g");
-                s.execute("ANALYZE " + table);
-                s.execute("CREATE OR REPLACE FUNCTION " + table + "_analyze() RETURNS void LANGUAGE plpgsql SECURITY"
-                        + " DEFINER SET search_path = public, pg_temp AS $$ BEGIN ANALYZE " + table + "; END $$");
-                s.execute("GRANT EXECUTE ON FUNCTION " + table + "_analyze() TO bms_app");
-            }
-            try (java.sql.Connection c =
-                    java.sql.DriverManager.getConnection(TestDatabase.url(), "bms_app", TestDatabase.APP_PASSWORD)) {
-                c.setAutoCommit(false);
-                try (java.sql.Statement s = c.createStatement()) {
-                    s.execute("SET LOCAL app.tenant_id = '" + t.tenantId() + "'");
-                    s.execute("SET LOCAL plan_cache_mode = force_custom_plan");
-                    s.execute("INSERT INTO " + table + " SELECT gen_random_uuid(),"
-                            + " current_setting('app.tenant_id')::uuid, gen_random_uuid(), 'upload:abc|-|line:' || g,"
-                            + " 'upload:abc|-|line:' || g || '#h', 'retail.product', gen_random_uuid()"
-                            + " FROM generate_series(1, 30000) g");
-                    for (String step : List.of("before ANALYZE", "after ANALYZE")) {
-                        if (step.startsWith("after")) {
-                            s.execute("SELECT " + table + "_analyze()");
-                        }
-                        out.append("P ").append(table).append(' ').append(step).append('\n');
-                        try (java.sql.ResultSet rs =
-                                s.executeQuery("EXPLAIN (ANALYZE, BUFFERS, TIMING OFF) " + lookup.formatted(table))) {
-                            while (rs.next()) {
-                                out.append("  ").append(rs.getString(1)).append('\n');
-                            }
-                        }
-                    }
-                }
-                c.rollback();
-            }
-            try (java.sql.Connection o = java.sql.DriverManager.getConnection(
-                            TestDatabase.url(), "bms_owner", TestDatabase.OWNER_PASSWORD);
-                    java.sql.Statement s = o.createStatement()) {
-                s.execute("DROP FUNCTION " + table + "_analyze()");
-                s.execute("DROP TABLE " + table);
-            }
-        }
-        System.out.println(out);
-    }
-
-    private static int logSeen;
-
-    /** Groups the slow statements logged since the last call by query, and prints the slowest plan of the worst eight. */
-    static void plans(String label) {
-        String log = TestDatabase.serverLog();
-        String fresh = log.substring(Math.min(logSeen, log.length()));
-        logSeen = log.length();
-        record Entry(double ms, String query, String plan) {}
-        List<Entry> entries = new ArrayList<>();
-        Pattern head = Pattern.compile("duration: ([0-9.]+) ms\\s+plan:");
-        String[] lines = fresh.split("\n");
-        for (int i = 0; i < lines.length; i++) {
-            Matcher m = head.matcher(lines[i]);
-            if (!m.find()) {
-                continue;
-            }
-            StringBuilder plan = new StringBuilder();
-            String query = "?";
-            int j = i + 1;
-            for (; j < lines.length && (lines[j].startsWith("\t") || lines[j].startsWith(" ")); j++) {
-                String l = lines[j].strip();
-                if (l.startsWith("Query Text:")) {
-                    query = l.substring(0, Math.min(l.length(), 160));
-                }
-                plan.append("  ").append(lines[j]).append('\n');
-            }
-            entries.add(new Entry(Double.parseDouble(m.group(1)), query, plan.toString()));
-            i = j - 1;
-        }
-        Map<String, List<Entry>> byQuery = new LinkedHashMap<>();
-        entries.forEach(
-                e -> byQuery.computeIfAbsent(e.query(), k -> new ArrayList<>()).add(e));
-        StringBuilder out = new StringBuilder(
-                "IMPORT BIG FILE EXPLAIN " + label + ": " + entries.size() + " statements over 250 ms\n");
-        byQuery.entrySet().stream()
-                .sorted((a, b) -> Double.compare(
-                        b.getValue().stream().mapToDouble(Entry::ms).sum(),
-                        a.getValue().stream().mapToDouble(Entry::ms).sum()))
-                .limit(8)
-                .forEach(g -> {
-                    List<Entry> es = g.getValue();
-                    out.append("EXPLAIN-GROUP n=")
-                            .append(es.size())
-                            .append(" totalMs=")
-                            .append(Math.round(
-                                    es.stream().mapToDouble(Entry::ms).sum()))
-                            .append(" firstMs=")
-                            .append(Math.round(es.getFirst().ms()))
-                            .append(" lastMs=")
-                            .append(Math.round(es.getLast().ms()))
-                            .append(" ")
-                            .append(g.getKey())
-                            .append('\n');
-                    Entry worst = es.stream()
-                            .max((a, b) -> Double.compare(a.ms(), b.ms()))
-                            .orElseThrow();
-                    worst.plan().lines().limit(45).forEach(l -> out.append(l).append('\n'));
-                });
-        System.out.println(out);
-    }
 
     static final int ROW_LIMIT = 100_000;
 
@@ -238,10 +92,11 @@ class ImportBigFileIT extends IntegrationTest {
     @TempDir
     Path dir;
 
+    /** Last of all, among every other case's committed rows (#900): judged on the staging heap. */
     @Test
-    @Order(2)
+    @Order(Integer.MAX_VALUE)
     void aCsvAtTheRowAndSizeLimitsIsCommittedOnTheStagingHeapInsideTheBatchTimeout() throws Exception {
-        String output = child("commit", "items=" + limitsCsv(), STAGING_HEAP_MB, ROW_LIMIT);
+        String output = child("commit", "items=" + limitsCsv(), STAGING_HEAP_MB);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "outcome=COMMITTED");
         assertThat(written(output)).as("every item written").isGreaterThanOrEqualTo(ROW_LIMIT);
         assertThat(stepMillis(output, "commit"))
@@ -251,12 +106,13 @@ class ImportBigFileIT extends IntegrationTest {
 
     /**
      * The same file on twice the staging heap, a measurement: the commit of the batch at the row limit must still finish
-     * inside the batch timeout, and the times of every step are printed for chapter 15. The heap is not judged here.
+     * inside the batch timeout, and the times of every step are printed for chapter 15. The heap is not judged here. Before
+     * the last case, among the other cases' rows (#900: a larger heap never was the cause).
      */
     @Test
-    @Order(1)
+    @Order(Integer.MAX_VALUE - 1)
     void aCsvAtTheRowAndSizeLimitsIsCommittedInsideTheBatchTimeoutOnTwiceTheStagingHeap() throws Exception {
-        String output = child("commit", "items=" + limitsCsv(), 2 * STAGING_HEAP_MB, ROW_LIMIT);
+        String output = child("commit", "items=" + limitsCsv(), 2 * STAGING_HEAP_MB);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "outcome=COMMITTED");
         assertThat(written(output)).as("every item written").isGreaterThanOrEqualTo(ROW_LIMIT);
         assertThat(stepMillis(output, "commit"))
@@ -268,37 +124,29 @@ class ImportBigFileIT extends IntegrationTest {
     void aWorkbookAtTheRowLimitIsValidatedAndPreviewedOnTheStagingHeap() throws Exception {
         Path xlsx = dir.resolve("fab-items-at-the-row-limit.xlsx");
         TestFiles.writeXlsx(xlsx, ITEM_HEADER, items(ROW_LIMIT, 0));
-        String output = child("preview", "items=" + xlsx, STAGING_HEAP_MB, ROW_LIMIT);
+        String output = child("preview", "items=" + xlsx, STAGING_HEAP_MB);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "step=preview");
     }
 
     @Test
     void aCsvAtTheColumnLimitIsCommittedOnTheStagingHeap() throws Exception {
-        String output = child(
-                "commit",
-                "wide_items=" + columnLimitCsv(),
-                STAGING_HEAP_MB,
-                Math.max(COLUMN_LIMIT_ROWS, UploadSettings.DEFAULT_MAX_ROWS));
+        String output = child("commit", "wide_items=" + columnLimitCsv(), STAGING_HEAP_MB);
         assertThat(output).contains("columns=" + COLUMN_LIMIT, "outcome=COMMITTED");
         assertThat(written(output)).isGreaterThanOrEqualTo(COLUMN_LIMIT_ROWS);
         assertThat(stepMillis(output, "commit")).isLessThan(BATCH_TIMEOUT_MS);
     }
 
-    /**
-     * The upload, validation and preview at the row and size limits of spec section 3.1, on the staging heap, judged and
-     * timed (#880: these fit; the commit at that size does not yet, #900, so the configured limit is lower).
-     */
+    /** The upload, validation and preview at the row and size limits of spec section 3.1, on the staging heap, judged. */
     @Test
     void aCsvAtTheRowAndSizeLimitsIsUploadedValidatedAndPreviewedOnTheStagingHeap() throws Exception {
-        String output = child("preview", "items=" + limitsCsv(), STAGING_HEAP_MB, ROW_LIMIT);
+        String output = child("preview", "items=" + limitsCsv(), STAGING_HEAP_MB);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "step=preview");
     }
 
     // JUSTIFICATION-A3: the Lead's fallback on #880 asks the sizes measured and the largest that passes configured.
     /**
-     * The whole path, commit included, for a product master of seven columns at each measured size up to the configured
-     * row limit, on the staging heap and judged there (the Lead's fallback on #880, recorded in SDD chapter 15 section
-     * 15.7): the configured limit is the largest of these sizes that passes with a tenth of the old generation to spare.
+     * The whole path, commit included, for a product master of seven columns at each measured size below the row limit, on
+     * the staging heap and judged there (SDD chapter 15 section 15.7): how the times grow with the rows.
      */
     @ParameterizedTest(name = "{0} rows")
     @MethodSource("sizesUpToTheConfiguredLimit")
@@ -311,7 +159,7 @@ class ImportBigFileIT extends IntegrationTest {
         assertThat(stepMillis(output, "commit")).isLessThan(BATCH_TIMEOUT_MS);
     }
 
-    /** The sizes measured for #880, those up to the configured limit. */
+    /** The sizes measured for #880 and #900, those up to the configured limit. */
     static java.util.stream.Stream<Integer> sizesUpToTheConfiguredLimit() {
         return java.util.stream.Stream.of(10_000, 25_000, 50_000, 75_000)
                 .filter(rows -> rows <= UploadSettings.DEFAULT_MAX_ROWS);
@@ -440,11 +288,6 @@ class ImportBigFileIT extends IntegrationTest {
      * configured one.
      */
     private String child(String mode, String bigFile, int heapMb) throws Exception {
-        return child(mode, bigFile, heapMb, UploadSettings.DEFAULT_MAX_ROWS);
-    }
-
-    /** As {@link #child(String, String, int)}, with the child's row limit at {@code maxRows} (#880: sizes over it). */
-    private String child(String mode, String bigFile, int heapMb, int maxRows) throws Exception {
         TestDatabase.Fixture t = TestDatabase.tenant("import-big", false, true);
         Path mappingFile = dir.resolve("mapping.json");
         Files.writeString(mappingFile, JsonMapper.builder().build().writeValueAsString(mapping()));
@@ -460,7 +303,6 @@ class ImportBigFileIT extends IntegrationTest {
                 "-XX:MaxMetaspaceSize=128m",
                 "-XX:+ExitOnOutOfMemoryError",
                 "-Djava.awt.headless=true",
-                "-Dbigfile.maxRows=" + maxRows,
                 "-cp",
                 System.getProperty("java.class.path"),
                 ImportBigFileMain.class.getName(),
@@ -488,7 +330,6 @@ class ImportBigFileIT extends IntegrationTest {
         String lines = output.lines().filter(l -> l.startsWith("BIGFILE ")).reduce("", (a, b) -> a + b + "\n");
         System.out.println("IMPORT BIG FILE " + bigFile.substring(bigFile.lastIndexOf('/') + 1) + " heap " + heapMb
                 + " MB\n" + lines);
-        plans(bigFile.substring(bigFile.lastIndexOf('/') + 1) + " heap " + heapMb + " MB");
         assertThat(finished)
                 .as("the child finished within %s minutes: %s", CHILD_LIMIT_MINUTES, lines)
                 .isTrue();

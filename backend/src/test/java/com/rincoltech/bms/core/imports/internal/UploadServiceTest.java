@@ -21,11 +21,11 @@ class UploadServiceTest {
 
     /** Issues #137, #880 and #900: production holds the row limit the big file test measured safe on the staging heap. */
     @Test
-    void theRowLimitIsTheMeasuredTwentyFiveThousandUntil900() throws java.io.IOException {
+    void theRowLimitIsTheMeasuredHundredThousand() throws java.io.IOException {
         assertThat(new UploadSettings.Properties(null, null, null, null, null, null).maxRows())
-                .isEqualTo(25_000);
+                .isEqualTo(100_000);
         assertThat(java.nio.file.Files.readString(java.nio.file.Path.of("src/main/resources/application.yml")))
-                .contains("max-rows: ${BMS_IMPORTS_MAX_ROWS:25000}");
+                .contains("max-rows: ${BMS_IMPORTS_MAX_ROWS:100000}");
     }
 
     @Test
