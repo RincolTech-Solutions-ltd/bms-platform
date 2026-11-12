@@ -449,7 +449,7 @@ call whose key has a row in the last 15 minutes writes none (`PlatformAuditLog.r
 queue writes at most 4 rows an hour; another `since` or limit is another read and is recorded at once. The CSV export is
 recorded every time. Test: `ImportMetricsIT.thePlatformReportIsReadOnlyByAPlatformOperatorAndNamesBusinessesBySlug` (one
 `report_read` row with the limit, the count and `since`, and no slug or name; the same read again writes none; a read with
-another limit writes its own).
+another limit writes its own; the same read after the 15 minutes writes a second).
 
 **Cost of the report (issue #894, N3).** One call runs `import_run_metrics` once per run, up to 500 runs, inside the
 connection's 60 second `statement_timeout`. Postgres was not run for this decision: the figures below are counted from the

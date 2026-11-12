@@ -281,7 +281,7 @@ class ImportMetricsIT extends IntegrationTest {
     }
 
     @Test
-    void theReportsGrowingReadsUseTheirPartialIndexes() {
+    void theReportsGrowingReadsUseTheirPartialIndexes() throws java.sql.SQLException {
         // JUSTIFICATION-A3: issue #894 N3 (review of #917, must-fix 1): the planner must use the two V151 indexes for
         // the two reads chapter 14 section 14.6 bounds on them, so their plans are read with EXPLAIN.
         JdbcClient owner = TestDatabase.owner();
@@ -307,12 +307,21 @@ class ImportMetricsIT extends IntegrationTest {
         owner.sql("ANALYZE import_rows").update();
         owner.sql("ANALYZE import_issue_resolutions").update();
 
-        // The two statements of import_run_metrics (V148) with the run's values in place of its variables. The ids are
-        // generated uuids, so writing them into the text is safe.
+        // The two statements of import_run_metrics (V148:301-302 and V148:356-361) with the run's values in place of
+        // its
+        // variables. The ids are generated uuids, so writing them into the text is safe. One connection, with
+        // sequential
+        // scans off (Lead on #917), so a fixture too small for the planner to bother with an index still shows which
+        // one
+        // it would take.
+        java.sql.Connection connection = TestDatabase.ownerDataSource().getConnection();
+        JdbcClient plans =
+                JdbcClient.create(new org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true));
+        plans.sql("SET enable_seqscan = off").update();
         String excluded = "EXPLAIN SELECT count(*) FROM import_rows w JOIN import_batches b ON b.id = w.batch_id"
                 + " WHERE b.id = '" + batch + "' AND w.tenant_id = b.tenant_id AND w.batch_id = b.id"
                 + " AND w.excluded_by IS NOT NULL";
-        assertThat(String.join("\n", owner.sql(excluded).query(String.class).list()))
+        assertThat(String.join("\n", plans.sql(excluded).query(String.class).list()))
                 .contains("import_rows_excluded");
         String asked = "EXPLAIN SELECT min(a.created_at) FROM import_issue_resolutions a"
                 + " JOIN import_batches ab ON ab.tenant_id = a.tenant_id AND ab.id = a.batch_id"
@@ -320,8 +329,9 @@ class ImportMetricsIT extends IntegrationTest {
                 + " AND a.resolution = 'ask_customer' AND a.code = 'TYPE_INVALID'"
                 + " AND a.field IS NOT DISTINCT FROM 'name' AND a.source_row_no = 5"
                 + " AND ab.mapping_source IS NOT DISTINCT FROM 'item_list'";
-        assertThat(String.join("\n", owner.sql(asked).query(String.class).list()))
+        assertThat(String.join("\n", plans.sql(asked).query(String.class).list()))
                 .contains("import_issue_resolutions_asked");
+        connection.close();
     }
 
     @Test
@@ -522,6 +532,24 @@ class ImportMetricsIT extends IntegrationTest {
                         .query(String.class)
                         .list())
                 .containsExactly("500", "200");
+        // After the window the same read is a new read (Lead on #917): the owner moves this operator's rows 16 minutes
+        // back with bms.allow_mutation on, the append-only guard's one way round.
+        TestDatabase.owner()
+                .sql("DO $$ BEGIN PERFORM set_config('bms.allow_mutation', 'on', true);"
+                        + " UPDATE platform_audit_log SET occurred_at = occurred_at - interval '16 minutes'"
+                        + " WHERE action = 'platform.imports.report_read' AND platform_user_id = '" + operatorId
+                        + "'; END $$")
+                .update();
+        assertThat(platform.get("/api/v1/platform/imports/report?limit=500", operator.accessToken())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT data ->> 'limit' FROM platform_audit_log WHERE platform_user_id = ?"
+                                + " AND action = 'platform.imports.report_read' ORDER BY occurred_at")
+                        .param(operatorId)
+                        .query(String.class)
+                        .list())
+                .containsExactly("500", "200", "500");
 
         HttpHeaders h = new HttpHeaders();
         h.setBearerAuth(operator.accessToken());
