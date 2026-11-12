@@ -10920,7 +10920,17 @@ export interface components {
             taken_on?: string;
         };
         HeldRenewalFees: {
+            /**
+             * Format: int64
+             * @description The ledger less what the loans hold by their fee transactions; not 0 means the books and the loans disagree (FR-GL-10)
+             */
+            difference_minor?: number;
             items?: components["schemas"]["HeldRenewalFee"][];
+            /**
+             * Format: int64
+             * @description 2050 Renewal fees held in the ledger, in the caller's branches
+             */
+            ledger_minor?: number;
             /** @description More loans hold a fee than the list shows (it shows the oldest 200) */
             more?: boolean;
         };

@@ -3454,11 +3454,21 @@
       },
       "HeldRenewalFees" : {
         "properties" : {
+          "difference_minor" : {
+            "description" : "The ledger less what the loans hold by their fee transactions; not 0 means the books and the loans disagree (FR-GL-10)",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "items" : {
             "items" : {
               "$ref" : "#/components/schemas/HeldRenewalFee"
             },
             "type" : "array"
+          },
+          "ledger_minor" : {
+            "description" : "2050 Renewal fees held in the ledger, in the caller's branches",
+            "format" : "int64",
+            "type" : "integer"
           },
           "more" : {
             "description" : "More loans hold a fee than the list shows (it shows the oldest 200)",

@@ -54,7 +54,9 @@ a new loan and carries the unpaid amounts as a memorandum, and V8 and V29 alread
    stranded; no renewal waiting; never dated before the fee was taken) pays it out of the till with its own receipt
    (`renewal_fee_refund`: debit `renewal_fees_held`, credit the payment method's account). A request whose expiry passed
    is ended as `expired` by the next request or hand-back on the loan, before the nightly run, so it neither blocks a new
-   request nor can be approved (review of #919). Until it is handed back, a new
+   request nor can be approved (review of #919). The move to income is booked on the approval's business date, in the
+   period open then. A nightly control check (`lending.renewal-fees-control`) compares 2050 per branch with what the loans
+   hold, and Home's list of held fees shows any difference (FR-GL-10 for this account). Until it is handed back, a new
    renewal request on the loan uses it instead of taking it again. What a loan holds is worked out from its own fee
    transactions, never from its credit balance. The schedule runs from the renewal date. Pledges and guarantors move to the new loan;
    the old loan's are released (the new loan is a draft while it takes them, the one state the V8 guards allow).

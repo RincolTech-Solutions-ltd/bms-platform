@@ -14,7 +14,8 @@ export const heldFeesKey = (branchIds: string[] | undefined) => ['lending', 'ren
 export function HeldFeesCard({ branchIds }: { branchIds?: string[] }) {
   const held = useQuery({ queryKey: heldFeesKey(branchIds), queryFn: () => lending.heldRenewalFees(branchIds) });
   const items = held.data?.items ?? [];
-  if (items.length === 0) return null;
+  const difference = held.data?.difference_minor ?? 0;
+  if (items.length === 0 && difference === 0) return null;
   return (
     <article className="card home-card" aria-labelledby="home-fees-back">
       <h2 id="home-fees-back" className="card-title">
@@ -37,6 +38,12 @@ export function HeldFeesCard({ branchIds }: { branchIds?: string[] }) {
         ))}
       </ol>
       {held.data?.more && <p className="hint">More loans hold a fee; the oldest are shown.</p>}
+      {difference !== 0 && (
+        <p role="alert">
+          Renewal fees held in the books differ from what the loans hold by {money(Math.abs(difference), items[0]?.currency)}. Tell the
+          accountant before handing anything back.
+        </p>
+      )}
     </article>
   );
 }

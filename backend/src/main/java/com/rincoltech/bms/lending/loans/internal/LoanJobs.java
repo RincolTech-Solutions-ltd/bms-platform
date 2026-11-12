@@ -56,6 +56,20 @@ class LoanJobs {
                 });
     }
 
+    static final String RENEWAL_FEES_CONTROL = "lending.renewal-fees-control";
+
+    /**
+     * FR-GL-10 for 2050 Renewal fees held (issue #918, the Lead on the review of #919): every night, per lending tenant, the
+     * account per branch against the loans' held fees ({@link RenewalFeesControl}). A difference fails the run for that
+     * tenant with every branch named, logged as an error, and Home shows it to the cashier on the list of held fees.
+     */
+    @Bean
+    RecurringTask<Void> renewalFeesControl(TenantJobs tenantJobs, RenewalFeesControl control) {
+        return Tasks.recurring(RENEWAL_FEES_CONTROL, Schedules.daily(BusinessClock.DEFAULT_ZONE, LocalTime.of(1, 15)))
+                .execute((instance, context) -> tenantJobs.forEachActiveTenantWithModule(
+                        RENEWAL_FEES_CONTROL, "lending", tenantId -> control.check()));
+    }
+
     /** An approved loan not disbursed within the tenant's approval_validity_days is cancelled (FR-ORG-08). */
     @Bean
     RecurringTask<Void> loanApprovalExpiry(TenantJobs tenantJobs, DecisionService decisions) {

@@ -101,7 +101,7 @@ Parameter: `as_at`. Per branch and control account (`loans_receivable`,
 | `investments_payable` | Sum of `principal_minor` over investments `active` or `matured` |
 | `investment_returns_payable` | Sum of `return_due_minor - return_paid_minor` over investments |
 | `member_overpayments` | Sum of `credit_balance_minor` over loans |
-| `renewal_fees_held` (V152, issue #918) | Sum over loans of `renewal_fee_held` less `renewal_fee` and `renewal_fee_refund` transactions; a renewal fee never touches `credit_balance_minor`, so `member_overpayments` keeps its own check. Until this report and FR-GL-10 are built (neither is yet, for any account), `LoanRenewalIT` checks this rule per loan on every fee path |
+| `renewal_fees_held` (V152, issue #918) | Sum over loans of `renewal_fee_held` less `renewal_fee` and `renewal_fee_refund` transactions; a renewal fee never touches `credit_balance_minor`, so `member_overpayments` keeps its own check. This account's check is built (issue #918): the nightly job `lending.renewal-fees-control` compares it per branch and fails with every branch named, and `GET /lending/renewal-fees/held` returns the difference, which Home shows the cashier; `LoanRenewalIT` checks the rule per loan on every fee path. The report and the alert for the other accounts are not built yet |
 
 Any non-zero difference raises the FR-GL-10 alert.
 

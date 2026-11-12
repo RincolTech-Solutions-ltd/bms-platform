@@ -49,6 +49,12 @@ describe('Renewal fees to hand back', () => {
     expect(screen.getByRole('link', { name: 'LN000041' }).getAttribute('href')).toBe('/staff/lending/loans/55555555-5555-4555-8555-555555555555');
   });
 
+  it('warns when the books and the loans disagree, even with nothing to hand back', async () => {
+    heldRenewalFees.mockResolvedValue({ items: [], more: false, ledger_minor: 5_000, difference_minor: 5_000 });
+    shell();
+    expect((await screen.findByRole('alert')).textContent).toContain('differ from what the loans hold by UGX 5,000');
+  });
+
   it('shows nothing when no loan holds a fee', async () => {
     heldRenewalFees.mockResolvedValue({ items: [], more: false });
     shell();

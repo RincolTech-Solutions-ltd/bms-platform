@@ -445,6 +445,9 @@ class LoanRenewalIT extends LoanFixtures {
                 .isTrue();
         assertThat(lines(income.get("journal_entry_id").asString()))
                 .containsExactly("renewal_fees_held:20000:0", "loan_fee_income:0:20000");
+        assertThat(entryDate(income))
+                .as("income on the approval's business date")
+                .isEqualTo(today.toString());
         assertThat(heldOn(old))
                 .as("nothing is left held once the renewal used the fee")
                 .isZero();
@@ -685,6 +688,25 @@ class LoanRenewalIT extends LoanFixtures {
         assertThat(again.getStatusCode()).as("%s", again.getBody()).isEqualTo(HttpStatus.ACCEPTED);
         assertThat(heldOn(old)).isEqualTo(20_000);
         booksAgree();
+
+        // The control check (FR-GL-10 for 2050): the books and the loans agree; a fee recorded without its posting
+        // shows.
+        assertThat(heldControl().get("difference_minor").asLong()).isZero();
+        assertThat(heldControl().get("ledger_minor").asLong()).isEqualTo(20_000);
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO lending_loan_transactions (id, tenant_id, branch_id, loan_id, txn_type, amount_minor,
+                            currency, value_date, reason, source, is_historic)
+                        VALUES (?, ?, ?, ?::uuid, 'renewal_fee_held', 5000, 'UGX', ?, 'Fabricated, no posting', 'staff', true)
+                        """)
+                .params(UUID.randomUUID(), t.tenantId(), t.headOffice(), old, today)
+                .update();
+        assertThat(heldControl().get("difference_minor").asLong()).isEqualTo(-5_000);
+    }
+
+    JsonNode heldControl() {
+        return send(HttpMethod.GET, "/api/v1/lending/renewal-fees/held", as(cashier, cashierPerms, "*", null), null)
+                .getBody();
     }
 
     /** The renewal fee a loan holds: taken, less made income, less handed back. */

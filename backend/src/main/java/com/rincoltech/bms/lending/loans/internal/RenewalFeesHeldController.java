@@ -32,9 +32,11 @@ class RenewalFeesHeldController {
     static final int LIMIT = 200;
 
     private final JdbcClient jdbc;
+    private final RenewalFeesControl control;
 
-    RenewalFeesHeldController(JdbcClient jdbc) {
+    RenewalFeesHeldController(JdbcClient jdbc, RenewalFeesControl control) {
         this.jdbc = jdbc;
+        this.control = control;
     }
 
     @Schema(name = "HeldRenewalFee")
@@ -57,7 +59,15 @@ class RenewalFeesHeldController {
             List<Held> items,
 
             @Schema(description = "More loans hold a fee than the list shows (it shows the oldest " + LIMIT + ")")
-            boolean more) {}
+            boolean more,
+
+            @Schema(description = "2050 Renewal fees held in the ledger, in the caller's branches")
+            long ledgerMinor,
+
+            @Schema(
+                    description = "The ledger less what the loans hold by their fee transactions; not 0 means the books"
+                            + " and the loans disagree (FR-GL-10)")
+            long differenceMinor) {}
 
     @GetMapping("/held")
     @RequiresPermission("lending.repayments.create")
@@ -68,8 +78,9 @@ class RenewalFeesHeldController {
     HeldList held(@RequestParam(name = "branch_id", required = false) List<UUID> branchIds) {
         List<UUID> branches = CurrentPrincipal.require().branchFilter("lending.repayments.create", branchIds);
         if (branches != null && branches.isEmpty()) {
-            return new HeldList(List.of(), false);
+            return new HeldList(List.of(), false, 0, 0);
         }
+        List<RenewalFeesControl.Line> control = this.control.lines(branches);
         Map<String, Object> p = new LinkedHashMap<>();
         p.put("limit", LIMIT + 1);
         String branchFilter = "";
@@ -107,6 +118,12 @@ class RenewalFeesHeldController {
                         rs.getObject("taken_on", LocalDate.class)))
                 .list();
         boolean more = rows.size() > LIMIT;
-        return new HeldList(more ? rows.subList(0, LIMIT) : rows, more);
+        return new HeldList(
+                more ? rows.subList(0, LIMIT) : rows,
+                more,
+                control.stream().mapToLong(RenewalFeesControl.Line::ledgerMinor).sum(),
+                control.stream()
+                        .mapToLong(RenewalFeesControl.Line::differenceMinor)
+                        .sum());
     }
 }

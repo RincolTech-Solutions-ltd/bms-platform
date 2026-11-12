@@ -561,9 +561,11 @@ class RenewalService {
         servicer.refreshPosition(fresh.id(), repo.items(fresh.id()), today);
 
         // The fee the counter took and held for the member is income now (RenewalFees); never part of what a loan owes.
+        // It is booked on the approval's business date, the day it was earned, in the period open then (the Lead on the
+        // review of #919); the renewal itself keeps its own date.
         long fee = ((Number) payload.getOrDefault(RenewalAction.FEE, 0)).longValue();
         if (fee > 0) {
-            fees.release(old, fee, date, approvalId, makerId);
+            fees.release(old, fee, today, approvalId, makerId);
         }
 
         Map<String, Object> after = new LinkedHashMap<>();
