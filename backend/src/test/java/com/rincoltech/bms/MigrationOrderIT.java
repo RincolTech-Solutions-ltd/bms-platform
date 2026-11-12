@@ -1894,7 +1894,9 @@ class MigrationOrderIT {
                                         // V144 (the sign-off of an import's reconciliation, #134).
                                         + " 'core.imports.sign_off',"
                                         // V149 (the raw row of the import screens, #141).
-                                        + " 'core.imports.view_raw')")
+                                        + " 'core.imports.view_raw',"
+                                        // V152 (loan renewal, #918).
+                                        + " 'lending.loans.renew_request', 'lending.loans.renew_approve')")
                         .query(Long.class)
                         .single())
                 .as("no permission is added")
@@ -4265,11 +4267,13 @@ class MigrationOrderIT {
                             .success)
                     .isTrue();
 
-            assertThat(owner.sql("SELECT count(*) FROM permissions")
+            // V152 (loan renewal, #918) adds its own two, which are not V149's to answer for.
+            assertThat(owner.sql("SELECT count(*) FROM permissions WHERE key NOT LIKE 'lending.loans.renew\\_%'")
                             .query(Long.class)
                             .single())
                     .isEqualTo(permissions + 1);
-            assertThat(owner.sql("SELECT count(*) FROM role_permissions")
+            assertThat(owner.sql(
+                                    "SELECT count(*) FROM role_permissions WHERE permission_key NOT LIKE 'lending.loans.renew\\_%'")
                             .query(Long.class)
                             .single())
                     .isEqualTo(grants + 1);

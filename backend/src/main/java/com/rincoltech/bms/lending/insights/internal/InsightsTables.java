@@ -178,6 +178,7 @@ class InsightsTables {
                      WHERE si.due_date BETWEEN :from AND :to
                        AND l.disbursed_on IS NOT NULL
                        AND (l.written_off_on IS NULL OR l.written_off_on >= :from)
+                       AND (l.restructured_on IS NULL OR si.due_date <= l.restructured_on)
                        AND (l.closed_on IS NULL OR l.closed_on >= :from)""",
                         "ORDER BY si.due_date, l.loan_no, si.item_no",
                         Map.of());

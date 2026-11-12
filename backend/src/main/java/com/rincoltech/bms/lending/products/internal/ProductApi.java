@@ -95,7 +95,34 @@ final class ProductApi {
             Integer minCollateralCoverBp,
 
             Boolean requiresGuarantor,
-            @Valid @Size(max = MAX_FEES) List<Fee> fees) {}
+            @Valid @Size(max = MAX_FEES) List<Fee> fees,
+
+            @Valid
+            @Schema(description = "Loan renewal (issue #918); left out: allowed, no limit, interest first, no fee")
+            Renewal renewal) {}
+
+    /** How a loan of the version may be renewed (issue #918, ADR-128); every field left out takes its default. */
+    @Schema(name = "LoanProductRenewal")
+    record Renewal(
+            @Schema(description = "True by default") Boolean allowed,
+
+            @Positive
+            @Max(1000)
+            @Schema(description = "How many renewals one chain of loans may have; null for no limit")
+            Integer maxCount,
+
+            @Schema(description = "True by default: the interest due is collected before the principal moves")
+            Boolean interestFirst,
+
+            @Positive
+            @Max(MAX_MONEY_MINOR)
+            @Schema(
+                    description =
+                            "The fixed fee of one renewal, collected with the interest; null (the default) for none")
+            Long feeMinor) {
+
+        static final Renewal DEFAULTS = new Renewal(true, null, true, null);
+    }
 
     @Schema(name = "CreateLoanProductRequest")
     record CreateProductRequest(
@@ -148,6 +175,7 @@ final class ProductApi {
             Integer minCollateralCoverBp,
             boolean requiresGuarantor,
             List<Fee> fees,
+            Renewal renewal,
             Instant createdAt) {}
 
     @Schema(name = "LoanProduct")

@@ -70,6 +70,7 @@ class LoanService {
     private final AuditLog audit;
     private final BusinessClock clock;
     private final ServicingRepository servicing;
+    private final RenewalRepository renewals;
 
     LoanService(
             LoanRepository repo,
@@ -81,8 +82,10 @@ class LoanService {
             CurrentTenant currentTenant,
             AuditLog audit,
             BusinessClock clock,
-            ServicingRepository servicing) {
+            ServicingRepository servicing,
+            RenewalRepository renewals) {
         this.repo = repo;
+        this.renewals = renewals;
         this.members = members;
         this.products = products;
         this.collateral = collateral;
@@ -617,6 +620,7 @@ class LoanService {
                 pledges,
                 schedule,
                 servicing.balances(l.id()).orElseThrow(),
+                RenewalApi.Links.of(renewals.links(l.id())),
                 l.createdBy(),
                 l.createdAt(),
                 l.updatedAt(),

@@ -30,6 +30,7 @@ export const ACTION_WORDS: Record<string, string> = {
   loan_write_off: 'Write off a loan',
   loan_bring_in: 'Bring in a loan from the paper register',
   loan_bring_in_reversal: 'Undo a loan brought in',
+  loan_renewal: 'Renew a loan',
   repayment_reversal: 'Reverse a repayment',
   charge_waiver: 'Waive a penalty, fee or interest',
   savings_withdrawal: 'Pay out savings',
@@ -107,7 +108,7 @@ function Row({ item, id }: { item: Approval; id: string }) {
       <td data-label="Action">
         <What item={item} />
         {item.checker_notice && <p className="hint" role="note"><strong>{item.checker_notice}</strong></p>}
-        {['loan_bring_in', 'loan_bring_in_reversal', 'charge_waiver'].includes(item.action_type ?? '') && item.subject_id && (
+        {['loan_bring_in', 'loan_bring_in_reversal', 'charge_waiver', 'loan_renewal'].includes(item.action_type ?? '') && item.subject_id && (
           <>
             {' '}
             <Link to="/staff/lending/loans/$loanId" params={{ loanId: item.subject_id }}>Open the loan</Link>
@@ -116,6 +117,11 @@ function Row({ item, id }: { item: Approval; id: string }) {
         {item.action_type === 'loan_bring_in' && (
           <Hint full>
             Approving puts this loan from the paper register in the books. No arrears SMS goes to the borrower in the 7 days after it comes in, so the business can speak to them first.
+          </Hint>
+        )}
+        {item.action_type === 'loan_renewal' && (
+          <Hint full>
+            Approving moves the amount shown, what the borrower still owes on the loan, to a new loan for a new period. No money is paid out.
           </Hint>
         )}
         {item.action_type === 'collateral_release' && item.subject_id && (

@@ -7,6 +7,7 @@ import com.rincoltech.bms.lending.insights.InsightsFigures;
 import com.rincoltech.bms.lending.insights.InsightsFigures.ParGroupBy;
 import com.rincoltech.bms.lending.insights.InsightsFigures.PortfolioFigures;
 import com.rincoltech.bms.lending.insights.InsightsFigures.PortfolioGroup;
+import com.rincoltech.bms.lending.insights.RenewalFigures;
 import java.util.List;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
@@ -26,8 +27,12 @@ class PortfolioOutstandingReport extends PortfolioReport {
 
     static final String KEY = "lending.portfolio_outstanding";
 
-    PortfolioOutstandingReport(InsightsFigures figures, ObjectMapper mapper) {
+    /** Issue #918: the renewals table after the portfolio, as on the PAR report. */
+    private final RenewalFigures renewals;
+
+    PortfolioOutstandingReport(InsightsFigures figures, RenewalFigures renewals, ObjectMapper mapper) {
         super(figures, mapper);
+        this.renewals = renewals;
     }
 
     @Override
@@ -86,5 +91,6 @@ class PortfolioOutstandingReport extends PortfolioReport {
                 t.interestOutstandingMinor(),
                 t.arrearsMinor(),
                 t.averagePrincipalMinor());
+        RenewalsTable.write(out, renewals, scope(prepared), f.source().equals("live"));
     }
 }

@@ -255,6 +255,7 @@ class ProductService {
                     "min_collateral_cover_bp", "required", "Required when the product requires collateral."));
         }
         List<Fee> fees = t.fees() == null ? List.of() : t.fees();
+        ProductApi.Renewal renewal = renewal(t.renewal());
         if (!problems.isEmpty()) {
             throw ApiException.validation(problems);
         }
@@ -287,7 +288,20 @@ class ProductService {
                 collateral ? t.minCollateralCoverBp() : null,
                 Boolean.TRUE.equals(t.requiresGuarantor()),
                 List.copyOf(fees),
+                renewal,
                 null);
+    }
+
+    /** Issue #918: the renewal settings with their defaults (allowed, no limit, interest first, no fee). */
+    private static ProductApi.Renewal renewal(ProductApi.Renewal r) {
+        if (r == null) {
+            return ProductApi.Renewal.DEFAULTS;
+        }
+        return new ProductApi.Renewal(
+                r.allowed() == null || r.allowed(),
+                r.maxCount(),
+                r.interestFirst() == null || r.interestFirst(),
+                r.feeMinor());
     }
 
     /** R-TERM: instalments need a frequency that fits the term unit; a bullet has none. */

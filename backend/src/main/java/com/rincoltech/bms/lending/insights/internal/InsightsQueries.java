@@ -204,7 +204,8 @@ class InsightsQueries {
     static final String ACTIVE_IN_RANGE = " " + """
              AND l.disbursed_on IS NOT NULL
              AND (l.written_off_on IS NULL OR l.written_off_on >= :from)
-             AND (l.closed_on IS NULL OR l.closed_on >= :from)""";
+             AND (l.closed_on IS NULL OR l.closed_on >= :from)
+             AND (l.restructured_on IS NULL OR si.due_date <= l.restructured_on)""";
 
     /** Principal, interest and fees due by due date in the range. */
     List<DayTotal> expectedByDay(Scope s) {
@@ -320,7 +321,8 @@ class InsightsQueries {
         String sql = """
                 SELECT coalesce(sum(l.maturity_date - l.disbursed_on), 0) AS days, count(*) AS n
                   FROM lending_loans l
-                 WHERE l.disbursed_on BETWEEN :from AND :to AND l.maturity_date IS NOT NULL""" + s.loanFilter("l", p);
+                 WHERE l.disbursed_on BETWEEN :from AND :to AND l.maturity_date IS NOT NULL
+                   AND l.renewal_no = 0""" + s.loanFilter("l", p);
         return jdbc.sql(sql)
                 .params(p)
                 .query((rs, n) -> new long[] {rs.getLong("days"), rs.getLong("n")})

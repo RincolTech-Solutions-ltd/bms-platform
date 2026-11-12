@@ -92,7 +92,7 @@ daily cash count by the cashier and branch manager.
 
 Parameter: `as_at`. Per branch and control account (`loans_receivable`,
 `member_savings`, `investments_payable`, `investment_returns_payable`,
-`member_overpayments`): ledger balance, subledger total, difference.
+`member_overpayments`, `renewal_fees_held`): ledger balance, subledger total, difference.
 
 | Control account | Subledger total |
 |---|---|
@@ -101,6 +101,7 @@ Parameter: `as_at`. Per branch and control account (`loans_receivable`,
 | `investments_payable` | Sum of `principal_minor` over investments `active` or `matured` |
 | `investment_returns_payable` | Sum of `return_due_minor - return_paid_minor` over investments |
 | `member_overpayments` | Sum of `credit_balance_minor` over loans |
+| `renewal_fees_held` (V152, issue #918) | Sum over loans of `renewal_fee_held` less `renewal_fee` and `renewal_fee_refund` transactions; a renewal fee never touches `credit_balance_minor`, so `member_overpayments` keeps its own check. This account's check is built (issue #918): the nightly job `lending.renewal-fees-control` compares it per branch and fails with every branch named, and `GET /lending/renewal-fees/held` returns the difference, which Home shows the cashier; `LoanRenewalIT` checks the rule per loan on every fee path. The report and the alert for the other accounts are not built yet |
 
 Any non-zero difference raises the FR-GL-10 alert.
 
@@ -141,6 +142,12 @@ Parameters: `as_at`, branches, group by.
 - Written-off loans are excluded from both numerator and denominator.
 - Restructured loans (the new loan) are flagged and also shown as a separate line for 12
   months after restructure (FR-LCL-04).
+- Renewals (issue #918, FR-LCL-04a, ADR-128): a renewed loan is no longer active and the loan that replaces it starts on time,
+  so the report ends with a `renewals` table whenever there is a renewal to show: loans renewed from the first of the report
+  date's month to the report date with the principal they moved and the unpaid amounts carried as a memorandum, and, on
+  the report date (today's book, or that date's nightly snapshot for a past date), the active renewal loans with their principal outstanding, those in arrears with the arrears, and those
+  more than 30 days late with their principal outstanding. With
+  none, a note says no loan was renewed. `lending.portfolio_outstanding` ends with the same table.
 
 Worked example (fabricated): active `PO` totals 10,000,000; loans with DPD 1 to 30 hold
 1,000,000, DPD 31 to 60 hold 500,000, over 90 hold 300,000. PAR1 = 18.0 percent,
@@ -596,7 +603,8 @@ of the group's principal) and `ageing` (per group and bucket: loans, principal o
 arrears). The figures come from the public `InsightsFigures` port (`lending.insights`); slice D2 (issue #217) added the portfolio
 figures to it and the remaining reports add theirs. A test asserts the report's principal outstanding, arrears, active loans and PAR 1,
 30, 60 and 90 equal the insights portfolio metrics for the same date. The restructured loan's separate line (FR-LCL-04) is not
-printed, because loans cannot be restructured yet. The business date is the one of the request, and the figures are the book of that date: a run asked for at 23:59 and executed
+printed, because loans cannot be restructured yet; renewals (issue #918) have their own `renewals` table, read through the
+public `RenewalFigures` port (`LendingRenewalsReportIT`). The business date is the one of the request, and the figures are the book of that date: a run asked for at 23:59 and executed
 after midnight no longer finds that book in the loan tables (they hold the new day's disbursements and repayments), so it reads the
 date's nightly snapshot when the job has written it and is refused with `report_stale_as_of` when it has not (the user asks again
 once the snapshot exists, or for today). The figures are totalled as the loans are read, in

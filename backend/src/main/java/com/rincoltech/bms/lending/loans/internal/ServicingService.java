@@ -264,7 +264,7 @@ class ServicingService {
     }
 
     private static ScheduleRow totals(List<ScheduleRow> rows) {
-        long[] t = new long[15];
+        long[] t = new long[17];
         for (ScheduleRow r : rows) {
             long[] v = {
                 r.principalDueMinor(),
@@ -281,7 +281,9 @@ class ServicingService {
                 r.writtenOffMinor(),
                 r.outstandingMinor(),
                 r.interestOutstandingMinor(),
-                r.feesOutstandingMinor()
+                r.feesOutstandingMinor(),
+                r.restructuredMinor(),
+                r.carriedArrearsMinor()
             };
             for (int i = 0; i < v.length; i++) {
                 t[i] = Math.addExact(t[i], v[i]);
@@ -289,7 +291,7 @@ class ServicingService {
         }
         return new ScheduleRow(
                 null, null, t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9], t[10], t[11], t[12], null, null,
-                t[13], t[14]);
+                t[13], t[14], t[15], t[16]);
     }
 
     private static String blankToNull(String s) {

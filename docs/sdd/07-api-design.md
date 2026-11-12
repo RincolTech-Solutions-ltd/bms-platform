@@ -1039,6 +1039,53 @@ unless stated): `value_date_in_future`, `before_disbursement`, `before_last_repa
 disbursement, FR-DIS-03; a repayment on a closed loan; a quote on a loan that is not active), 409
 `approval_already_pending`, and the idempotency codes of section 7.8.
 
+Built (issue #918, ADR-128, FR-LCL-04a, migration `V152`): loan renewal. `GET .../renewal-quote?value_date=&collect_minor=&term_count=&interest_rate_bp=`
+(`lending.loans.renew_request`; every parameter optional: today, nothing collected, the old loan's term and rate) answers
+`LoanRenewalQuote` `{loan_id, loan_no, currency, value_date, principal_outstanding_minor, interest_due_minor, fees_due_minor,
+penalties_due_minor, interest_first, minimum_collect_minor, suggested_collect_minor, collect_minor, principal_moved_minor,
+carried_minor, rebated_minor, term_count, min_term_count, max_term_count, term_unit, interest_rate_bp, rate_unit,
+interest_method, repayment_pattern, instalment_frequency, renewal_fee_minor, first_due_date, new_due_date,
+first_instalment_minor, new_total_interest_minor, new_total_due_minor, renewal_no, max_renewals}`: the review step's
+figures. `minimum_collect_minor` is the least repayment after which no interest is due (0 when `interest_first` is false),
+`suggested_collect_minor` the least that also clears fees and penalties, so nothing is carried. `POST .../renewals`
+(**M A**, `Idempotency-Key`) takes `{value_date, collect_minor?, payment_method_key?, external_reference?, term_count?,
+interest_rate_bp?, reason?, notify_member?}`: `collect_minor` above 0 is recorded at once as a repayment (it needs
+`lending.repayments.create` too, 403 otherwise, and `payment_method_key`), then the `loan_renewal` request waits for a
+checker with `lending.loans.renew_approve`; 202 `LoanActionOutcome`. On approval the old loan is `restructured`, the new
+loan `active`. `GET` of a loan carries `renewal` `{renewal_no, renewed_from_loan_id, renewed_from_loan_no,
+renewed_to_loan_id, renewed_to_loan_no, renewed_on, pending_approval_id, fee_held_minor}` (null when the loan neither is
+nor was renewed, has no renewal waiting and holds no renewal fee; `pending_approval_id` is the renewal request waiting for a
+checker, `fee_held_minor` the renewal fee the loan holds, both added on the review of #919). Schedule rows carry
+`restructured_minor` (what was unpaid on an item of a renewed loan, not outstanding) and `carried_arrears_minor` (the memo on
+a renewal loan's first item). A loan product's `terms` and version take `renewal` `{allowed, max_count, interest_first,
+fee_minor}` (defaults true, null, true, null). `renewal_fee_minor` of the quote is that fixed fee: the request needs
+`payment_method_key` (and `lending.repayments.create`) when the loan does not already hold it. The counter takes it with the
+interest and it is recorded at once as `renewal_fee_held` (its own receipt; the payment method's account debited, 2050
+Renewal fees held credited with the loan as subledger); the approval moves it to `loan_fee_income` (`renewal_fee`, no cash).
+The fee taken alone (nothing else collected) is checked as a repayment is (`value_date_in_future`, `before_disbursement`,
+`before_last_repayment`, the payment method; a closed period is `period_closed`). A fee no renewal used (rejected,
+cancelled or lapsed) stays held, worked out from the loan's own fee transactions: the next request uses it, and when no
+renewal waits the loan page shows the cashier "Hand back (amount) to the member", which calls `POST .../renewal-fee/refund`
+(`lending.repayments.create`, **M**, `Idempotency-Key`; `{value_date, payment_method_key, external_reference?}`; an
+active, closed or written-off loan; 409 `renewal_pending` while a renewal waits, 422 `nothing_held`, `value_date_in_future`,
+`before_latest_transaction` for a date before the loan's latest transaction of any kind, so before the fee was taken or a
+later repayment, as a repayment's backdate rule, `period_closed`) to pay it out of the till as a
+`renewal_fee_refund` with its own receipt; it answers 201 `RepaymentResult`. A request or hand-back first ends as `expired`
+a renewal request of the loan whose expiry passed before the nightly run, so it neither blocks a new request nor can be
+approved. `GET /lending/renewal-fees/held?branch_id=` (`lending.repayments.create`, in the caller's branches) lists the
+loans holding a fee with no renewal waiting, oldest first (`{items: [{loan_id, loan_no, member_no, branch_id, loan_status,
+currency, held_minor, taken_on}], more, ledger_minor, difference_minor, balanced}`, at most 200 items): Home shows it to the
+cashier as "Renewal fees to hand back". `ledger_minor` is 2050 Renewal fees held in the caller's branches, `difference_minor`
+the ledger less what the loans hold by their fee transactions, and `balanced` false when any one branch differs (two
+branches can cancel out in the sum); Home warns when either says so (the FR-GL-10 check of this account,
+which the nightly job `lending.renewal-fees-control` also runs). The approval books the fee as income on the approval's
+business date. The quote checks
+`collect_minor` (0 to 10^15), `term_count` (1 to 3660) and `interest_rate_bp` (0 to 100000) like the request, 422
+`validation_failed` with each field, and a rate below 0 is refused. Codes (422 unless stated): `renewal_not_allowed`, `renewal_fee_not_held`,
+`renewal_limit_reached`, `renewal_interest_unpaid`, `renewal_settles_loan`, `renewal_term_out_of_range`,
+`renewal_rate_above_loan`, `value_date_in_future`, `before_last_repayment`, 409 `renewal_pending`, 409
+`invalid_status_transition` (not active; a repayment on a renewed loan).
+
 | Method | Path | Permission | Notes |
 |---|---|---|---|
 | GET | `/lending/loans` | `lending.loans.read` | Filters: `status`, `member_id`, `officer_user_id`, `product_id`, `q` (built); `dpd_from`, `dpd_to`, `disbursed_on_from/_to` (increment 8) |
@@ -1065,6 +1112,10 @@ disbursement, FR-DIS-03; a repayment on a closed loan; a quote on a loan that is
 | POST | `/lending/loans/{loan_id}/schedule/{item_no}/waive` | `lending.charges.waive_request` | **M A**. FR-ARR-04 (#265). `{component: fee\|interest, amount_minor, reason}`: at most what is still due on that component of the item (422 `waiver_exceeds_due`, `nothing_to_waive`); `principal` is 422 `principal_not_waivable`. The `charge_waiver` approval, its checker also holding `lending.charges.waive_fee_interest`; 201 at once below the threshold (weighed against everything waived on the loan) for a maker who holds that permission, else 202 |
 | POST | `/lending/loans/{loan_id}/write-off` | `lending.loans.write_off_request` | **M A**. FR-LCL-02 |
 | POST | `/lending/loans/{loan_id}/restructure` | `lending.loans.restructure_request` | **M A**. FR-LCL-04 (P2) |
+| GET | `/lending/loans/{loan_id}/renewal-quote` | `lending.loans.renew_request` | Issue #918, FR-LCL-04a: the renewal's review figures |
+| POST | `/lending/loans/{loan_id}/renewals` | `lending.loans.renew_request` | **M A**. Issue #918, FR-LCL-04a, ADR-128: collect, then `loan_renewal` |
+| POST | `/lending/loans/{loan_id}/renewal-fee/refund` | `lending.repayments.create` | **M**. Issue #918, ADR-128: give back a held renewal fee no renewal used |
+| GET | `/lending/renewal-fees/held` | `lending.repayments.create` | Issue #918, review of #919: loans holding a renewal fee to hand back, oldest first |
 | PUT | `/lending/loans/{loan_id}/officer` | `lending.collections.assign` | FR-CLN-01. `{officer_user_id}`; `{officer_user_id, reassigned}`; 422 `officer_not_eligible` |
 | GET, POST | `/lending/loans/{loan_id}/collection-actions` | `lending.collections.read` / `lending.collections.log_action` | FR-CLN-04. Newest first. POST `{action_type, note?, promised_date?, promised_amount_minor?}`, 201; 422 `invalid_action_type`, `note_required`, `promise_incomplete`, `promised_date_in_past`, `promise_fields_not_allowed` |
 | POST | `/lending/loans/{loan_id}/documents/{doc_type}` | `lending.loans.read` | Generates statement, schedule, or agreement PDF. Built (#120, ADR-034): `schedule` and `loan_statement` return the PDF itself as at the business date, numbered `SCH-<branch>-<loan no>` and `ST-<branch>-<loan no>`, never stored, numbered with the statement date; 409 `invalid_status_transition` before disbursement; 503 `documents_busy` with `Retry-After` when too many are being produced. Every document response is `Cache-Control: no-store`. The statement is the loan account with a running balance whose closing balance is the loan's outstanding (ADR-034). |

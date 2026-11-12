@@ -3418,6 +3418,68 @@
         },
         "required" : [ "code", "name" ]
       },
+      "HeldRenewalFee" : {
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "held_minor" : {
+            "description" : "What the loan holds: taken and neither made income nor handed back",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "loan_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "loan_no" : {
+            "type" : "string"
+          },
+          "loan_status" : {
+            "type" : "string"
+          },
+          "member_no" : {
+            "type" : "string"
+          },
+          "taken_on" : {
+            "description" : "When the fee was last taken",
+            "format" : "date",
+            "type" : "string"
+          }
+        }
+      },
+      "HeldRenewalFees" : {
+        "properties" : {
+          "balanced" : {
+            "description" : "Every branch's ledger equals what its loans hold; false even when differences in two branches cancel out in difference_minor",
+            "type" : "boolean"
+          },
+          "difference_minor" : {
+            "description" : "The ledger less what the loans hold by their fee transactions; not 0 means the books and the loans disagree (FR-GL-10)",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/HeldRenewalFee"
+            },
+            "type" : "array"
+          },
+          "ledger_minor" : {
+            "description" : "2050 Renewal fees held in the ledger, in the caller's branches",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "more" : {
+            "description" : "More loans hold a fee than the list shows (it shows the oldest 200)",
+            "type" : "boolean"
+          }
+        }
+      },
       "HostnameCheck" : {
         "properties" : {
           "host" : {
@@ -6995,6 +7057,9 @@
           "rejected_reason" : {
             "type" : "string"
           },
+          "renewal" : {
+            "$ref" : "#/components/schemas/LoanRenewalLinks"
+          },
           "repayment_pattern" : {
             "type" : "string"
           },
@@ -7666,6 +7731,33 @@
           }
         }
       },
+      "LoanProductRenewal" : {
+        "description" : "Loan renewal (issue #918); left out: allowed, no limit, interest first, no fee",
+        "properties" : {
+          "allowed" : {
+            "description" : "True by default",
+            "type" : "boolean"
+          },
+          "fee_minor" : {
+            "description" : "The fixed fee of one renewal, collected with the interest; null (the default) for none",
+            "format" : "int64",
+            "maximum" : 1000000000000000,
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "interest_first" : {
+            "description" : "True by default: the interest due is collected before the principal moves",
+            "type" : "boolean"
+          },
+          "max_count" : {
+            "description" : "How many renewals one chain of loans may have; null for no limit",
+            "format" : "int32",
+            "maximum" : 1000,
+            "minimum" : 0,
+            "type" : "integer"
+          }
+        }
+      },
       "LoanProductTerms" : {
         "properties" : {
           "allocation_order" : {
@@ -7772,6 +7864,9 @@
             "pattern" : "per_term|per_day|per_week|per_month|per_year",
             "type" : "string"
           },
+          "renewal" : {
+            "$ref" : "#/components/schemas/LoanProductRenewal"
+          },
           "repayment_pattern" : {
             "pattern" : "bullet|instalments",
             "type" : "string"
@@ -7876,6 +7971,9 @@
           },
           "rate_unit" : {
             "type" : "string"
+          },
+          "renewal" : {
+            "$ref" : "#/components/schemas/LoanProductRenewal"
           },
           "repayment_pattern" : {
             "type" : "string"
@@ -8030,6 +8128,232 @@
           }
         }
       },
+      "LoanRenewalLinks" : {
+        "description" : "Issue #918: the loans before and after this one in its renewals",
+        "properties" : {
+          "fee_held_minor" : {
+            "description" : "The renewal fee the loan holds, taken and neither made income nor handed back; 0 when none",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "pending_approval_id" : {
+            "description" : "The renewal request of this loan waiting for a checker, null when none (review of #919)",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "renewal_no" : {
+            "description" : "0 for a loan that is no renewal",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "renewed_from_loan_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "renewed_from_loan_no" : {
+            "type" : "string"
+          },
+          "renewed_on" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "renewed_to_loan_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "renewed_to_loan_no" : {
+            "type" : "string"
+          }
+        }
+      },
+      "LoanRenewalQuote" : {
+        "description" : "What a renewal would do, worked out on the value date",
+        "properties" : {
+          "carried_minor" : {
+            "description" : "Interest, fees and penalties left unpaid, carried to the new loan as a memorandum",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "collect_minor" : {
+            "description" : "The amount this quote collects",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "fees_due_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "first_due_date" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "first_instalment_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "instalment_frequency" : {
+            "type" : "string"
+          },
+          "interest_due_minor" : {
+            "description" : "Interest due on the value date (R-PAYOFF)",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "interest_first" : {
+            "description" : "True: the product needs the interest due collected before the principal moves",
+            "type" : "boolean"
+          },
+          "interest_method" : {
+            "type" : "string"
+          },
+          "interest_rate_bp" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "loan_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "loan_no" : {
+            "type" : "string"
+          },
+          "max_renewals" : {
+            "description" : "Renewals the product allows in a chain; null for no limit",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "max_term_count" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "min_term_count" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "minimum_collect_minor" : {
+            "description" : "The least to collect so that no interest is left due (0 when interest_first is false)",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "new_due_date" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "new_total_due_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "new_total_interest_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "penalties_due_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "principal_moved_minor" : {
+            "description" : "Principal that moves to the new loan, no cash",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "principal_outstanding_minor" : {
+            "description" : "Principal still owed before anything is collected",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "rate_unit" : {
+            "type" : "string"
+          },
+          "rebated_minor" : {
+            "description" : "Interest of later periods that is no longer charged (R-PAYOFF rebate)",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "renewal_fee_minor" : {
+            "description" : "The product's fixed renewal fee, collected with the interest (the request's payment method) and income once the renewal is approved; never added to the new loan",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "renewal_no" : {
+            "description" : "Which renewal the new loan is: 1 for the first",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "repayment_pattern" : {
+            "type" : "string"
+          },
+          "suggested_collect_minor" : {
+            "description" : "What clears the interest, fees and penalties due, so nothing is carried",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "term_count" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "term_unit" : {
+            "type" : "string"
+          },
+          "value_date" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }
+      },
+      "LoanRenewalRequest" : {
+        "description" : "Renew an active loan: what is collected now is recorded at once as a normal repayment; the principal still owed then moves to a new loan once a second person approves",
+        "properties" : {
+          "collect_minor" : {
+            "description" : "Collected now as a repayment (receipt, journal, allocation as any repayment); 0 or left out when the interest is already paid",
+            "format" : "int64",
+            "maximum" : 1000000000000000,
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "external_reference" : {
+            "maxLength" : 100,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "interest_rate_bp" : {
+            "description" : "The new loan's rate; the old loan's when left out, never above it",
+            "format" : "int32",
+            "maximum" : 100000,
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "notify_member" : {
+            "description" : "As on a repayment: false sends no receipt text message (an administrator only)",
+            "type" : "boolean"
+          },
+          "payment_method_key" : {
+            "description" : "Required when collect_minor or the renewal fee is above 0",
+            "pattern" : "cash|bank|mtn_momo|airtel_money",
+            "type" : "string"
+          },
+          "reason" : {
+            "maxLength" : 500,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "term_count" : {
+            "description" : "The new loan's term; the old loan's when left out",
+            "format" : "int32",
+            "maximum" : 3660,
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "value_date" : {
+            "description" : "Today or earlier, not before the loan's latest repayment",
+            "format" : "date",
+            "type" : "string"
+          }
+        },
+        "required" : [ "value_date" ]
+      },
       "LoanSchedule" : {
         "description" : "FR-DIS-04: the items and a totals row that equals the loan totals",
         "properties" : {
@@ -8082,6 +8406,11 @@
       },
       "LoanScheduleRow" : {
         "properties" : {
+          "carried_arrears_minor" : {
+            "description" : "FR-LCL-04: on the first item of a renewal loan, what the old loan left unpaid and was not collected; a memorandum, never part of what is due",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "due_date" : {
             "format" : "date",
             "type" : "string"
@@ -8137,6 +8466,11 @@
             "type" : "integer"
           },
           "principal_paid_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "restructured_minor" : {
+            "description" : "Issue #918: what was unpaid on the item when the loan was renewed (its principal moved to the new loan, the rest carried or rebated); not outstanding",
             "format" : "int64",
             "type" : "integer"
           },
@@ -11184,6 +11518,26 @@
             "type" : "string"
           }
         }
+      },
+      "RenewalFeeRefundRequest" : {
+        "description" : "Give back the renewal fee a loan holds because no renewal used it (review of #919)",
+        "properties" : {
+          "external_reference" : {
+            "maxLength" : 100,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "payment_method_key" : {
+            "pattern" : "cash|bank|mtn_momo|airtel_money",
+            "type" : "string"
+          },
+          "value_date" : {
+            "description" : "Today or earlier",
+            "format" : "date",
+            "type" : "string"
+          }
+        },
+        "required" : [ "payment_method_key", "value_date" ]
       },
       "RepaymentRequest" : {
         "properties" : {
@@ -34893,6 +35247,156 @@
         "tags" : [ "lending-loans" ]
       }
     },
+    "/api/v1/lending/loans/{loan_id}/renewal-fee/refund" : {
+      "post" : {
+        "operationId" : "refundLoanRenewalFee",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "loan_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RenewalFeeRefundRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RepaymentResult"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Give back the renewal fee the loan holds because no renewal used it, with a receipt (issue #918)",
+        "tags" : [ "lending-loans" ]
+      }
+    },
+    "/api/v1/lending/loans/{loan_id}/renewal-quote" : {
+      "get" : {
+        "operationId" : "getLoanRenewalQuote",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "loan_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "value_date",
+          "required" : false,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "collect_minor",
+          "required" : false,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "term_count",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "interest_rate_bp",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LoanRenewalQuote"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "What renewing the loan would do on a date: interest due, what to collect, principal moved, the new term, fee and due date (issue #918)",
+        "tags" : [ "lending-loans" ]
+      }
+    },
+    "/api/v1/lending/loans/{loan_id}/renewals" : {
+      "post" : {
+        "operationId" : "requestLoanRenewal",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "loan_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/LoanRenewalRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LoanActionOutcome"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Renew an active loan: collect what is due as a repayment now, and ask a second person to move the principal to a new loan (issue #918); 202 while it waits",
+        "tags" : [ "lending-loans" ]
+      }
+    },
     "/api/v1/lending/loans/{loan_id}/repayments" : {
       "post" : {
         "operationId" : "recordLoanRepayment",
@@ -35952,6 +36456,37 @@
         },
         "summary" : "Confirm or reject a suggested link (FR-MEM-07)",
         "tags" : [ "lending-members" ]
+      }
+    },
+    "/api/v1/lending/renewal-fees/held" : {
+      "get" : {
+        "operationId" : "listHeldRenewalFees",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "branch_id",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/HeldRenewalFees"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Loans holding a renewal fee to hand back to the member, oldest first (issue #918)",
+        "tags" : [ "lending-loans" ]
       }
     },
     "/api/v1/lending/savings-accounts" : {

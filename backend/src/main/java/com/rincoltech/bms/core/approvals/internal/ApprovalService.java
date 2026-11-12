@@ -467,6 +467,23 @@ class ApprovalService implements Approvals {
         return get(approvalId);
     }
 
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean expireOverdue(String actionType, UUID subjectId) {
+        List<Row> overdue = jdbc.sql("SELECT " + COLUMNS
+                        + " FROM approval_requests r LEFT JOIN users u ON u.id = r.requested_by"
+                        + " WHERE r.action_type = ? AND r.subject_id = ? AND r.status = 'pending' AND r.expires_at <= ?"
+                        + " FOR UPDATE OF r")
+                .params(actionType, subjectId, Timestamp.from(clock.now()))
+                .query(this::map)
+                .list();
+        for (Row row : overdue) {
+            setStatus(row, "expired", null, null, clock.now());
+            audit.record(transition(row, "core.approval.expired", "expired"));
+        }
+        return !overdue.isEmpty();
+    }
+
     /** Marks every pending request past its expiry as expired (nightly, FR-APR-07). */
     @Transactional(propagation = Propagation.MANDATORY)
     int expireOverdue() {

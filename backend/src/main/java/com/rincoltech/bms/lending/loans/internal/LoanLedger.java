@@ -198,6 +198,52 @@ final class LoanLedger {
                         }
                     }
                 }
+                case "restructure_in" -> {
+                    // Issue #918: a renewal loan starts with the principal the old loan moved to it; no cash was paid.
+                    String of = t.reason() == null ? "Renewal" : t.reason();
+                    charge(entries, balance, t.valueDate(), "", of + ": principal brought in", t.amountMinor());
+                    charge(entries, balance, t.valueDate(), "", "Interest charged (schedule)", interest);
+                    charge(entries, balance, t.valueDate(), "", "Fees added (schedule)", fees);
+                }
+                case "restructure_out" -> {
+                    String to = t.reason() == null ? "Renewed" : t.reason();
+                    credit(entries, balance, t.valueDate(), "", to + ": principal moved", t.amountMinor());
+                    if (balance[0] > 0) {
+                        credit(
+                                entries,
+                                balance,
+                                t.valueDate(),
+                                "",
+                                "Not collected: carried or no longer charged",
+                                balance[0]);
+                    }
+                }
+                // Issue #918: the renewal fee is never part of what the loan owes (ADR-128), so its three lines are
+                // notes
+                // and the closing balance stays the loan's outstanding (ADR-034).
+                case "renewal_fee_held" ->
+                    note(
+                            entries,
+                            balance,
+                            t.valueDate(),
+                            number,
+                            "Renewal fee taken: " + money.apply(t.amountMinor())
+                                    + ", held until the renewal is decided, not part of the balance");
+                case "renewal_fee" ->
+                    note(
+                            entries,
+                            balance,
+                            t.valueDate(),
+                            "",
+                            "Renewal fee kept for the renewal: " + money.apply(t.amountMinor())
+                                    + ", not part of the balance");
+                case "renewal_fee_refund" ->
+                    note(
+                            entries,
+                            balance,
+                            t.valueDate(),
+                            number,
+                            "Renewal fee handed back: " + money.apply(t.amountMinor()) + ", not part of the balance");
                 case "write_off" -> {
                     long amount = writtenOff > 0 ? writtenOff : t.amountMinor();
                     credit(entries, balance, t.valueDate(), "", "Written off", amount);
@@ -339,7 +385,7 @@ final class LoanLedger {
     /** A disbursement before its fee payment, and either before the repayments of the same instant. */
     private static int rank(LoanTransaction t) {
         return switch (t.txnType()) {
-            case "disbursement" -> 0;
+            case "disbursement", "restructure_in" -> 0;
             case "fee_upfront" -> 1;
             default -> 2;
         };

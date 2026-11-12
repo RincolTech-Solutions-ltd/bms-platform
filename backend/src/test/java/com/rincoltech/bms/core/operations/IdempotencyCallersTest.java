@@ -38,6 +38,8 @@ class IdempotencyCallersTest {
             caller("lending/loans/internal/ServicingService", 5, "lending/loans/LoanServicingIT"),
             caller("lending/loans/internal/ExistingLoanService", 1, "lending/loans/LoanServicingIT"),
             caller("lending/loans/internal/ItemWaiverService", 1, "lending/loans/LoanServicingIT"),
+            caller("lending/loans/internal/RenewalService", 1, "lending/loans/LoanRenewalIT"),
+            caller("lending/loans/internal/RenewalFeeRefunds", 1, "lending/loans/LoanRenewalIT"),
             caller("lending/savings/internal/SavingsService", 4, "lending/savings/SavingsIT"),
             caller("retail/cashbook/internal/AdvanceService", 4, "retail/cashbook/RetailCashbookKeyPerPersonIT"),
             caller("retail/cashbook/internal/BankingService", 4, "retail/cashbook/RetailCashbookKeyPerPersonIT"),

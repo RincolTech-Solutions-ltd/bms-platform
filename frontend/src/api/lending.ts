@@ -24,6 +24,9 @@ export type DisbursementRequest = S['DisbursementRequest'];
 export type LoanActionOutcome = S['LoanActionOutcome'];
 export type ScheduleItemWaiverRequest = S['ScheduleItemWaiverRequest'];
 export type PayoffQuote = S['PayoffQuote'];
+export type LoanRenewalQuote = S['LoanRenewalQuote'];
+export type LoanRenewalRequest = S['LoanRenewalRequest'];
+export type LoanRenewalLinks = S['LoanRenewalLinks'];
 export type LoanHomeSummary = S['LoanHomeSummary'];
 
 /** The payment methods the server maps to an account (payment_method_key). */
@@ -56,6 +59,16 @@ const BY_CODE: Record<string, string> = {
   lending_chart_missing: 'The lending accounts are not set up in the ledger yet. Ask an admin.',
   idempotency_in_progress: 'This is still being saved. Wait a moment and reload the loan before trying again.',
   module_not_enabled: 'Lending is not switched on for this business.',
+  renewal_not_allowed: 'This loan product does not allow renewals.',
+  renewal_limit_reached: 'This loan has been renewed as many times as its product allows.',
+  renewal_interest_unpaid: 'The interest due must be paid before the loan is renewed. Collect at least the amount shown.',
+  renewal_settles_loan: 'That amount pays the whole loan off, so there is nothing to renew. Record it as a repayment instead.',
+  renewal_term_out_of_range: 'That term is outside what the loan product allows.',
+  renewal_rate_above_loan: 'The new rate can be the same or lower, never higher than the loan has now.',
+  renewal_pending: 'A renewal of this loan is already waiting for approval.',
+  renewal_changed: 'The loan changed while the renewal waited. Ask for it again.',
+  renewal_fee_not_held: 'The renewal fee is no longer held on the loan. Ask for the renewal again.',
+  nothing_held: 'The loan holds no renewal fee to give back.',
 };
 
 /** The message to show a person for a failed lending call. */
@@ -163,6 +176,36 @@ export const lending = {
     });
     const outcome = unwrap(result);
     return { executed: executed(outcome, result.response.status), outcome };
+  },
+
+  /** Issue #918: what renewing would do on a date, with an amount collected first and a new term and rate. */
+  async renewalQuote(id: string, query: { value_date?: string; collect_minor?: number; term_count?: number; interest_rate_bp?: number }): Promise<LoanRenewalQuote> {
+    return unwrap(await api.GET('/api/v1/lending/loans/{loan_id}/renewal-quote', { params: { path: { loan_id: id }, query } }));
+  },
+
+  /** Issue #918: collect now as a repayment, then ask a second person to move the principal; 202 while it waits. */
+  async renew(id: string, body: LoanRenewalRequest, idempotencyKey: string): Promise<{ executed: boolean; outcome: LoanActionOutcome }> {
+    const result = await api.POST('/api/v1/lending/loans/{loan_id}/renewals', {
+      params: { path: { loan_id: id }, header: key(idempotencyKey) },
+      body,
+    });
+    const outcome = unwrap(result);
+    return { executed: executed(outcome, result.response.status), outcome };
+  },
+
+  /** Review of #919: the cashier's list of loans holding a renewal fee to hand back, oldest first. */
+  async heldRenewalFees(branchIds?: string[]): Promise<S['HeldRenewalFees']> {
+    return unwrap(await api.GET('/api/v1/lending/renewal-fees/held', { params: { query: { branch_id: branchIds } } }));
+  },
+
+  /** Review of #919: give back a renewal fee the loan holds because no renewal used it; a receipt like a repayment's. */
+  async refundRenewalFee(id: string, body: S['RenewalFeeRefundRequest'], idempotencyKey: string): Promise<RepaymentResult> {
+    return unwrap(
+      await api.POST('/api/v1/lending/loans/{loan_id}/renewal-fee/refund', {
+        params: { path: { loan_id: id }, header: key(idempotencyKey) },
+        body,
+      }),
+    );
   },
 
   async writeOff(id: string, reason: string, idempotencyKey: string): Promise<{ executed: boolean; outcome: LoanActionOutcome }> {

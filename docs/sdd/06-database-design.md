@@ -1628,6 +1628,7 @@ Codes are defaults; the tenant may renumber non-system accounts. `S` marks
 | 2021 | Investment returns payable | liability | `investment_returns_payable` | S |
 | 2030 | Member overpayments | liability | `member_overpayments` | S |
 | 2040 | Unallocated receipts | liability | `unallocated_receipts` | S |
+| 2050 | Renewal fees held (V152, issue #918: a renewal fee taken and not yet used or handed back) | liability | `renewal_fees_held` | S |
 | 3000 | Equity | equity (header) | | |
 | 3010 | Capital | equity | `capital` | |
 | 3020 | Retained earnings | equity | `retained_earnings` | |
@@ -1663,7 +1664,10 @@ on lines touching `S` accounts carry the loan, savings account or investment id.
 | Repayment reversal | Mirror of the original entry (a reversing entry) | | FR-REP-05 |
 | Recovery on written-off loan | PM amount | `bad_debt_recovered` | FR-LCL-03 |
 | Write-off | `loan_write_off_expense` outstanding principal | `loans_receivable` outstanding principal | FR-LCL-02 |
-| Restructure | `loans_receivable` (new loan subledger) | `loans_receivable` (old loan subledger) | FR-LCL-04 |
+| Renewal fee taken (`renewal_fee_held`, issue #918; its own receipt, same till day as the interest) | PM fee | `renewal_fees_held` (old loan subledger) | FR-LCL-04a |
+| Renewal fee on approval (`renewal_fee`; no cash) | `renewal_fees_held` (old loan subledger) | `loan_fee_income` | FR-LCL-04a |
+| Renewal fee handed back after a rejected, cancelled or lapsed renewal (`renewal_fee_refund`; its own receipt) | `renewal_fees_held` (loan subledger) | PM fee | FR-LCL-04a |
+| Restructure, and a renewal (issue #918; one entry, the old loan's `restructure_out` and the new loan's `restructure_in` share it) | `loans_receivable` (new loan subledger) | `loans_receivable` (old loan subledger) | FR-LCL-04, FR-LCL-04a |
 | Cross-branch repayment | At receiving branch: PM amount / `interbranch_clearing` amount. At loan branch: `interbranch_clearing` amount / the repayment credits above | | FR-REP-07 |
 | Member credit refund | `member_overpayments` | PM | FR-REP-04a |
 | Member credit to savings | `member_overpayments` | `member_savings` | FR-REP-04a |
@@ -1802,6 +1806,10 @@ increment 4.
 | `requires_collateral` | `boolean NOT NULL DEFAULT false` | |
 | `min_collateral_cover_bp` | `integer` | For example 15000 = 1.5 times principal. `CHECK`: NOT NULL when `requires_collateral`. |
 | `requires_guarantor` | `boolean NOT NULL DEFAULT false` | |
+| `renewal_allowed` | `boolean NOT NULL DEFAULT true` | V152, ADR-128: loans of the product may be renewed (issue #918). Read from the loan's own product version at each renewal |
+| `renewal_max_count` | `integer` | V152: renewals one chain of loans may have; null for no limit. `CHECK (>= 1)` |
+| `renewal_interest_first` | `boolean NOT NULL DEFAULT true` | V152: a renewal is refused while interest is due on the old loan |
+| `renewal_fee_minor` | `bigint` | V152: the fixed fee of one renewal (1 to 10^15), null for none; taken with the interest and held (`renewal_fee_held`, account 2050 Renewal fees held) until the approval makes it income (`renewal_fee`) or the cashier hands it back (`renewal_fee_refund`); never added to the schedule |
 | `created_by` | `uuid NOT NULL` | |
 
 ### `lending_loan_product_fees`
@@ -1850,8 +1858,11 @@ creation and replaced by the approved terms at approval.
 | `disbursed_on` | `date` | |
 | `maturity_date` | `date` | Last schedule item's due date. |
 | `closed_on`, `written_off_on` | `date` | |
-| `restructured_from_loan_id`, `restructured_to_loan_id` | `uuid` | |
-| `principal_disbursed_minor` | `bigint NOT NULL DEFAULT 0` | |
+| `restructured_from_loan_id`, `restructured_to_loan_id` | `uuid` | The loan this one renewed and the loan that renewed it (issue #918). `lending_loans_restructured_from`: one successor per loan |
+| `renewal_no` | `integer NOT NULL DEFAULT 0` | V152, ADR-128: which renewal of its chain the loan is, 0 for none; `CHECK (renewal_no = 0 OR restructured_from_loan_id IS NOT NULL)` |
+| `restructured_on` | `date` | V152: the date the loan was renewed (restructured); index `(tenant_id, restructured_on)` for the reports |
+| `restructure_kind` | `text` | V152: [`renewal`, `restructure`]; only `renewal` is written. `lending_loans_restructured_shape`: a `restructured` loan has its successor, date and kind |
+| `principal_disbursed_minor` | `bigint NOT NULL DEFAULT 0` | On a renewal loan, the principal moved to it (no cash) |
 | `principal_outstanding_minor` | `bigint NOT NULL DEFAULT 0` | Denormalised; equals the schedule sum; reconciled nightly. |
 | `interest_outstanding_minor` | `bigint NOT NULL DEFAULT 0` | Scheduled interest unpaid and unwaived. |
 | `fees_outstanding_minor` | `bigint NOT NULL DEFAULT 0` | |
@@ -1980,8 +1991,9 @@ item's value (`pledge_exceeds_value`).
 | `principal_paid_minor`, `interest_paid_minor`, `fees_paid_minor`, `penalties_paid_minor` | `bigint NOT NULL DEFAULT 0` | |
 | `interest_waived_minor`, `fees_waived_minor`, `penalties_waived_minor` | `bigint NOT NULL DEFAULT 0` | Principal is never waived. |
 | `written_off_minor` | `bigint NOT NULL DEFAULT 0` | Set at write-off. |
-| `carried_arrears_minor` | `bigint NOT NULL DEFAULT 0` | Memorandum amounts carried from a restructured loan. |
-| `status` | `text NOT NULL` | [`pending`, `due`, `overdue`, `partially_paid`, `paid`, `waived`, `written_off`] |
+| `carried_arrears_minor` | `bigint NOT NULL DEFAULT 0` | Memorandum amounts carried from a restructured loan: on a renewal loan's first item, the interest, fees and penalties the old loan left unpaid and were not collected (issue #918). Never due, never principal. |
+| `restructured_minor` | `bigint NOT NULL DEFAULT 0` | V152: on a renewed loan's unsettled item, what was unpaid when the loan was renewed (principal moved, the rest carried or rebated); not outstanding. |
+| `status` | `text NOT NULL` | [`pending`, `due`, `overdue`, `partially_paid`, `paid`, `waived`, `written_off`, `restructured`]; `restructured` since V152 |
 | `paid_on` | `date` | Date the item became fully settled. |
 
 `CHECK` for each component: `paid + waived <= due`. Index `(tenant_id, due_date, status)`,
@@ -1989,6 +2001,20 @@ item's value (`pledge_exceeds_value`).
 Built in `V29` (#108). The trigger `lending_schedule_items_guard` refuses any change of `loan_id`,
 `item_no`, `due_date` or the principal, interest and fee due once written; only the paid, waived,
 written-off, penalty and status columns move.
+
+Changed by `V152__lending_loan_renewal.sql` (issue #918, ADR-128), expand only, after `V151` of pull request #917: the
+permissions `lending.loans.renew_request` and `lending.loans.renew_approve`; the renewal columns of
+`lending_loan_product_versions`; `renewal_no`, `restructured_on` and `restructure_kind` on `lending_loans` with the
+indexes `lending_loans_restructured_from` (unique) and `lending_loans_restructured_on`; `restructured_minor` and the
+`restructured` status on `lending_schedule_items`; the transaction types `renewal_fee_held`, `renewal_fee` and
+`renewal_fee_refund` on `lending_loan_transactions` (both checks widened `NOT VALID` with no `VALIDATE`, so no table is
+scanned under the lock of the `DROP`; the old sets of V29 are subsets of the new ones, and every new check on `lending_loans`
+is `NOT VALID` too; the header gives the sizes, staging's 299 loans and 833 schedule items, and the lock times); and the
+account 2050 Renewal fees held, added to `bms_seed_lending_chart` and seeded for every business with the lending chart
+(with `FORCE ROW LEVEL SECURITY` dropped on `tenants` and `gl_accounts` for that statement only when the owner cannot bypass
+row security, as V123 does). A renewal writes the new loan
+as a `draft`, gives it the old loan's pledges and guarantors (the V8 guards allow that only on a draft) after releasing them
+from the old loan, and moves it to `active`.
 
 ### `lending_loan_charges`
 
@@ -2044,7 +2070,7 @@ the item keyed by `(tenant_id, loan_id, schedule_item_id)` so it is always the l
 | `id`, `tenant_id`, `created_at` | | |
 | `branch_id` | `uuid NOT NULL` | Branch where the money moved. |
 | `loan_id` | `uuid NOT NULL` | |
-| `txn_type` | `text NOT NULL` | [`disbursement`, `fee_upfront`, `repayment`, `recovery`, `reversal`, `waiver`, `write_off`, `restructure_out`, `restructure_in`, `credit_refund`, `credit_to_savings`] |
+| `txn_type` | `text NOT NULL` | [`disbursement`, `fee_upfront`, `repayment`, `recovery`, `reversal`, `waiver`, `write_off`, `restructure_out`, `restructure_in`, `credit_refund`, `credit_to_savings`, `renewal_fee_held`, `renewal_fee`, `renewal_fee_refund`]; the last three since V152 |
 | `amount_minor` | `bigint NOT NULL` | `CHECK (amount_minor > 0)` |
 | `currency` | `char(3) NOT NULL` | |
 | `value_date` | `date NOT NULL` | |

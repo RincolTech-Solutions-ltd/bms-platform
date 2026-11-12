@@ -37,6 +37,21 @@ public interface ProductCatalog {
      */
     List<FeeCharge> fees(UUID productVersionId, long principalMinor);
 
+    /**
+     * Issue #918, ADR-128: how a loan of this product version may be renewed. A loan keeps the version it was made under
+     * (FR-PRD-04), so its renewal rule and its term limits come from the same version (the Lead on #919).
+     */
+    Optional<RenewalRule> renewal(UUID productVersionId);
+
+    /** {@code maxCount} null is no limit; {@code feeMinor} null is no fee (the fixed fee of one renewal). */
+    record RenewalRule(boolean allowed, Integer maxCount, boolean interestFirst, Long feeMinor) {
+
+        /** The renewal fee, 0 when the product charges none. */
+        public long fee() {
+            return feeMinor == null ? 0 : feeMinor;
+        }
+    }
+
     /** One fee for one principal; {@code timing} is {@code deducted_at_disbursement}, {@code added_to_loan} or {@code paid_upfront}. */
     record FeeCharge(String name, String timing, long amountMinor) {}
 
