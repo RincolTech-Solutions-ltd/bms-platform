@@ -1484,7 +1484,9 @@ class RetailDocumentsIT extends IntegrationTest {
         assertThat(Math.abs(baseline(description) - baseline(ref)))
                 .as("Description on the reference's row")
                 .isLessThan(20f);
-        assertThat(left(description)).as("Description starts after the reference ends").isGreaterThan(right(ref));
+        assertThat(left(description))
+                .as("Description starts after the reference ends")
+                .isGreaterThan(right(ref));
 
         // The figures are right-aligned, so a column's place is where its figures end.
         List<Float> before = amountEdges(baseline, find(baseline, w -> w.text().startsWith("RS"), "the sale"));
