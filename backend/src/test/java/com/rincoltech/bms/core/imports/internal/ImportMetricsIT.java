@@ -227,6 +227,62 @@ class ImportMetricsIT extends IntegrationTest {
     }
 
     @Test
+    void aFixRefLinksOnlyIntoThisRepository() {
+        // JUSTIFICATION-A3: issue #894 N1 asks to prove the link is pinned to this repository, on the route and in
+        // V151.
+        UUID run = run(t, "committed");
+        catalogued(t, run, "fab-shop-links", "item_list");
+        UUID first = UUID.fromString(log(t, run, "Line 5 of the item list lost its pack size", "TYPE_INVALID")
+                .getBody()
+                .get("id")
+                .asString());
+        for (String foreign : List.of(
+                "https://github.com/someone-else/bms-platform/pull/12",
+                "https://github.com/RincolTech-Solutions-ltd/other-repo/issues/12",
+                "https://github.com/RincolTech-Solutions-ltd/bms-platform.evil/commit/0123abcd")) {
+            ResponseEntity<JsonNode> refused = close(t, first, 0, foreign);
+            assertThat(refused.getStatusCode()).as(foreign).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+            assertThat(refused.getBody().get("code").asString()).isEqualTo("validation_failed");
+        }
+        String ours = "https://github.com/RincolTech-Solutions-ltd/bms-platform/pull/894";
+        ResponseEntity<JsonNode> closed = close(t, first, 0, ours);
+        assertThat(closed.getStatusCode()).as("%s", closed.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(closed.getBody().get("fix_ref").asString()).isEqualTo(ours);
+
+        // The database holds the same rule for every role: the owner cannot close one with another repository's link.
+        UUID second = UUID.fromString(log(t, run, "Line 6 of the item list lost its pack size", "TYPE_INVALID")
+                .getBody()
+                .get("id")
+                .asString());
+        assertThatThrownBy(() -> TestDatabase.owner()
+                        .sql(
+                                "UPDATE import_defects SET status = 'closed', fix_ref = ?, closed_by = ?, closed_at = now()"
+                                        + " WHERE id = ?")
+                        .params("https://github.com/someone-else/bms-platform/pull/12", staff, second)
+                        .update())
+                .hasStackTraceContaining("import_defects_fix_ref_this_repo");
+        // V151 replaced the V148 CHECK, so exactly one CHECK reads fix_ref's form.
+        assertThat(count("SELECT count(*) FROM pg_constraint WHERE conrelid = CAST('import_defects' AS regclass)"
+                        + " AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%fix_ref ~%'"))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void theReportsGrowingReadsHaveTheirPartialIndexes() {
+        // JUSTIFICATION-A3: issue #894 N3; chapter 14 section 14.6 bounds the report on these two V151 indexes.
+        List<String> defs = TestDatabase.owner()
+                .sql(
+                        "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public'"
+                                + " AND indexname IN ('import_rows_excluded', 'import_issue_resolutions_asked') ORDER BY indexname")
+                .query(String.class)
+                .list();
+        assertThat(defs).hasSize(2);
+        assertThat(defs.get(0))
+                .contains("import_issue_resolutions", "(tenant_id, run_id, code, source_row_no)", "ask_customer");
+        assertThat(defs.get(1)).contains("import_rows", "(tenant_id, batch_id)", "excluded_by IS NOT NULL");
+    }
+
+    @Test
     void aDescriptionNamingAPersonAndARunNotImportedAreRefused() {
         UUID run = run(t, "committed");
         for (String description : List.of(
@@ -395,6 +451,19 @@ class ImportMetricsIT extends IntegrationTest {
         assertThat(ourRow).isNotNull();
         assertThat(ourRow.get("tenant_slug").asString()).isEqualTo(t.slug());
         assertThat(ourRow.get("metrics").get("status").asString()).isEqualTo("committed");
+        // The JSON read is audited like the CSV (issue #894, N4): one row per read, with the count, never a slug or
+        // name.
+        List<String> reads = TestDatabase.owner()
+                .sql("SELECT (data ->> 'limit') || '|' || (data ->> 'runs') || '|' || (data ->> 'since') || '|'"
+                        + " || CAST(data AS text) FROM platform_audit_log WHERE platform_user_id = ?"
+                        + " AND action = 'platform.imports.report_read'")
+                .param(operatorId)
+                .query(String.class)
+                .list();
+        assertThat(reads).hasSize(1);
+        assertThat(reads.get(0))
+                .startsWith("500|" + report.getBody().get("items").size() + "|all|")
+                .doesNotContain(t.slug(), ourName);
 
         HttpHeaders h = new HttpHeaders();
         h.setBearerAuth(operator.accessToken());

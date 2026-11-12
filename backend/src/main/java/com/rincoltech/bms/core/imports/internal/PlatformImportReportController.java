@@ -21,7 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
  * {@code /api/v1/platform/imports/report} (chapter 7 section 7.11.3, chapter 14 section 14.6, issue #140): the runs of every
  * business with their metrics, for platform operators only, on the platform host. It reads across businesses through the
  * definer function {@code platform_import_runs_report}, which refuses a call bound to a business and names each business by
- * its slug, never its name. The CSV is recorded in the platform audit log.
+ * its slug, never its name. Both the JSON and the CSV are recorded in the platform audit log (issue #894, N4).
  */
 @RestController
 @RequestMapping(path = "/api/v1/platform/imports", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -41,12 +41,13 @@ class PlatformImportReportController {
     @RequiresPermission("platform.tenants.read")
     @Operation(
             summary = "The import runs of every business with their metrics, newest first; since (a moment) and limit"
-                    + " (1 to 500, default 100)",
+                    + " (1 to 500, default 100); audited",
             operationId = "platformImportRunsReport")
     RunList report(
             @RequestParam(name = "since", required = false) Instant since,
             @RequestParam(name = "limit", required = false) Integer limit) {
-        return new RunList(metrics.platformReport(since, limit == null ? 100 : limit));
+        return new RunList(metrics.platformReport(
+                since, limit == null ? 100 : limit, CurrentPrincipal.require().userId()));
     }
 
     @GetMapping(path = "/report.csv", produces = "text/csv")

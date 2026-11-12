@@ -46,8 +46,11 @@ public interface ImportMetrics {
      */
     Defect closeDefect(UUID defectId, int version, String fixRef, UUID by);
 
-    /** The platform report: every business's runs created since the moment (all when null), newest first, at most limit. */
-    List<PlatformRun> platformReport(Instant since, int limit);
+    /**
+     * The platform report: every business's runs created since the moment (all when null), newest first, at most limit;
+     * each read recorded in the platform audit log as {@code platform.imports.report_read} (issue #894, N4).
+     */
+    List<PlatformRun> platformReport(Instant since, int limit, UUID operatorId);
 
     /** The same as CSV, at most 500 runs, each business by its slug only; recorded in the platform audit log. */
     String platformReportCsv(Instant since, UUID operatorId);

@@ -37,9 +37,12 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(name = "imports")
 class MetricsController {
 
-    /** The forms of a fix's reference, as the CHECK of import_defects.fix_ref holds them (V148). */
+    /**
+     * The forms of a fix's reference, as the CHECK import_defects_fix_ref_this_repo holds them (V151, issue #894): a link
+     * only into this project's own repository, so no other owner's name reaches the column or its audit row.
+     */
     static final String FIX_REF = "#[0-9]{1,7}|[0-9a-f]{7,40}"
-            + "|https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/(pull|issues|commit)/[0-9a-f]{1,40}";
+            + "|https://github\\.com/RincolTech-Solutions-ltd/bms-platform/(pull|issues|commit)/[0-9a-f]{1,40}";
 
     private final ImportMetrics metrics;
 
@@ -74,7 +77,9 @@ class MetricsController {
             @NotBlank
             @Size(max = 200)
             @Pattern(regexp = FIX_REF)
-            @Schema(description = "The fix: an issue or pull request number (#123), a commit hash or a GitHub link")
+            @Schema(
+                    description = "The fix: an issue or pull request number (#123), a commit hash or a link to a pull"
+                            + " request, issue or commit of RincolTech-Solutions-ltd/bms-platform")
             String fixRef) {}
 
     @GetMapping("/runs/{run_id}/metrics")

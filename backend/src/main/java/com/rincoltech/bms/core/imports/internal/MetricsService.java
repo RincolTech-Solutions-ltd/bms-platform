@@ -96,9 +96,17 @@ class MetricsService implements ImportMetrics {
     }
 
     @Override
-    public List<PlatformRun> platformReport(Instant since, int limit) {
+    public List<PlatformRun> platformReport(Instant since, int limit, UUID operatorId) {
         requireUnbound();
-        return tx.execute(s -> platformRuns(since, limit));
+        return tx.execute(s -> {
+            List<PlatformRun> runs = platformRuns(since, limit);
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("runs", runs.size());
+            data.put("since", since == null ? "all" : since.toString());
+            data.put("limit", Math.clamp(limit, 1, PLATFORM_LIMIT));
+            platformAudit.record("platform.imports.report_read", operatorId, null, data);
+            return runs;
+        });
     }
 
     @Override
