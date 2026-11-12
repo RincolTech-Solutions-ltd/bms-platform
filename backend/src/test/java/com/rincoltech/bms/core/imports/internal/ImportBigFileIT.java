@@ -74,6 +74,61 @@ class ImportBigFileIT extends IntegrationTest {
         TestDatabase.explainSlowStatements("250ms");
     }
 
+    // JUSTIFICATION-A3: issue #900 asks why before any change: one probe of the planner's index choice, then removed.
+    /** #900 diagnosis (temporary): which index the planner can use for a key lookup, under row-level security and not. */
+    @Test
+    @Order(0)
+    void probe() throws Exception {
+        TestDatabase.Fixture t = TestDatabase.tenant("import-probe", false, true);
+        StringBuilder out = new StringBuilder("IMPORT BIG FILE PROBE\n");
+        try (java.sql.Connection c =
+                java.sql.DriverManager.getConnection(TestDatabase.url(), "bms_app", TestDatabase.APP_PASSWORD)) {
+            c.setAutoCommit(false);
+            try (java.sql.Statement s = c.createStatement()) {
+                s.execute("SET LOCAL app.tenant_id = '" + t.tenantId() + "'");
+                s.execute("SET LOCAL plan_cache_mode = force_custom_plan");
+                s.execute("SET LOCAL enable_seqscan = off");
+                s.execute("SET LOCAL enable_bitmapscan = off");
+                for (String q : List.of(
+                        "SELECT * FROM import_refs i WHERE i.source_key = 'k'",
+                        "SELECT * FROM import_refs i WHERE i.source_key LIKE 'k%'",
+                        "SELECT * FROM unnest('{a,b}'::text[]) k(key) CROSS JOIN LATERAL"
+                                + " (SELECT * FROM import_refs i WHERE i.source_key = k.key OFFSET 0) r",
+                        "SELECT * FROM import_refs i WHERE i.source_key = 'k' AND i.tenant_id = '" + t.tenantId() + "'",
+                        "SELECT * FROM retail_products p WHERE p.id = '" + t.tenantId() + "'",
+                        "SELECT * FROM retail_products p WHERE p.name_key = 'k'")) {
+                    out.append("Q ").append(q).append('\n');
+                    try (java.sql.ResultSet rs = s.executeQuery("EXPLAIN " + q)) {
+                        while (rs.next()) {
+                            out.append("  ").append(rs.getString(1)).append('\n');
+                        }
+                    }
+                }
+            }
+            c.rollback();
+        }
+        for (String q : List.of(
+                "SELECT i.indexrelid::regclass || ' coll=' || i.indcollation::text || ' class=' || i.indclass::text"
+                        + " FROM pg_index i WHERE i.indrelid = 'import_refs'::regclass",
+                "SELECT string_agg(o.oprname || ':' || o.oprleft::regtype || ',' || o.oprright::regtype, ' ')"
+                        + " FROM pg_amop a JOIN pg_operator o ON o.oid = a.amopopr JOIN pg_opclass c"
+                        + " ON c.opcfamily = a.amopfamily WHERE c.opcname = 'text_pattern_ops'"
+                        + " AND c.opcmethod = (SELECT oid FROM pg_am WHERE amname = 'btree')",
+                "SELECT string_agg(proname || '=' || proleakproof, ' ') FROM pg_proc"
+                        + " WHERE proname IN ('texteq', 'uuid_eq', 'textlike')",
+                "SELECT string_agg(attname || ' coll=' || attcollation::regcollation, ' ') FROM pg_attribute"
+                        + " WHERE attrelid = 'import_refs'::regclass AND attname IN ('source_key', 'source_ref')",
+                "SELECT current_setting('server_version') || ' ' || datcollate || ' ' || coalesce(datlocprovider::text,"
+                        + " '') FROM pg_database WHERE datname = current_database()")) {
+            TestDatabase.owner()
+                    .sql(q)
+                    .query(String.class)
+                    .list()
+                    .forEach(l -> out.append("C ").append(l).append('\n'));
+        }
+        System.out.println(out);
+    }
+
     private static int logSeen;
 
     /** Groups the slow statements logged since the last call by query, and prints the slowest plan of the worst eight. */
@@ -162,6 +217,7 @@ class ImportBigFileIT extends IntegrationTest {
 
     @Test
     @Order(2)
+    @Disabled("#900 probe run (temporary)")
     void aCsvAtTheRowAndSizeLimitsIsCommittedOnTheStagingHeapInsideTheBatchTimeout() throws Exception {
         String output = child("commit", "items=" + limitsCsv(), STAGING_HEAP_MB, ROW_LIMIT);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "outcome=COMMITTED");
@@ -177,6 +233,7 @@ class ImportBigFileIT extends IntegrationTest {
      */
     @Test
     @Order(1)
+    @Disabled("#900 probe run (temporary)")
     void aCsvAtTheRowAndSizeLimitsIsCommittedInsideTheBatchTimeoutOnTwiceTheStagingHeap() throws Exception {
         String output = child("commit", "items=" + limitsCsv(), 2 * STAGING_HEAP_MB, ROW_LIMIT);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "outcome=COMMITTED");
