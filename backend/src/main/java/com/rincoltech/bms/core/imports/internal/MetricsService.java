@@ -41,6 +41,12 @@ class MetricsService implements ImportMetrics {
     /** At most this many runs on the platform report and in its CSV. */
     static final int PLATFORM_LIMIT = 500;
 
+    /** The audit action of a read of the platform report's JSON (issue #894, N4). */
+    static final String REPORT_READ = "platform.imports.report_read";
+
+    /** Reads of the JSON by one operator with the same parameters inside this window are one audited read. */
+    static final java.time.Duration READ_WINDOW = java.time.Duration.ofMinutes(15);
+
     /** Seven digits or more in a row: an account, ID or phone number (a line number or a date never has so many). */
     private static final Pattern DIGITS = Pattern.compile("(?<!\\d)\\d{7,}(?!\\d)");
 
@@ -56,6 +62,7 @@ class MetricsService implements ImportMetrics {
     private final PlatformAuditLog platformAudit;
     private final ImportTemplates templates;
     private final PreviewService preview;
+    private final com.rincoltech.bms.kernel.BusinessClock clock;
 
     MetricsService(
             JdbcClient jdbc,
@@ -64,7 +71,8 @@ class MetricsService implements ImportMetrics {
             AuditLog audit,
             PlatformAuditLog platformAudit,
             ImportTemplates templates,
-            PreviewService preview) {
+            PreviewService preview,
+            com.rincoltech.bms.kernel.BusinessClock clock) {
         this.jdbc = jdbc;
         this.tx = new TransactionTemplate(transactions);
         this.mapper = mapper;
@@ -72,6 +80,7 @@ class MetricsService implements ImportMetrics {
         this.platformAudit = platformAudit;
         this.templates = templates;
         this.preview = preview;
+        this.clock = clock;
     }
 
     /** Milliseconds since a {@link System#nanoTime()} reading, for a step's time stored on its run or batch. */
@@ -96,9 +105,30 @@ class MetricsService implements ImportMetrics {
     }
 
     @Override
-    public List<PlatformRun> platformReport(Instant since, int limit) {
+    public List<PlatformRun> platformReport(Instant since, int limit, UUID operatorId) {
         requireUnbound();
-        return tx.execute(s -> platformRuns(since, limit));
+        int applied = Math.clamp(limit, 1, PLATFORM_LIMIT);
+        String sinceText = since == null ? "all" : since.toString();
+        // The operator's queue polls every 15 seconds: a poll inside the window is the same read, so one row per
+        // operator
+        // and parameters per window (issue #894, review of #917).
+        String readKey = operatorId + "|" + sinceText + "|" + applied;
+        return tx.execute(s -> {
+            List<PlatformRun> runs = platformRuns(since, applied);
+            if (!platformAudit.recorded(
+                    java.util.Set.of(REPORT_READ),
+                    "read_key",
+                    readKey,
+                    clock.now().minus(READ_WINDOW))) {
+                Map<String, Object> data = new LinkedHashMap<>();
+                data.put("runs", runs.size());
+                data.put("since", sinceText);
+                data.put("limit", applied);
+                data.put("read_key", readKey);
+                platformAudit.record(REPORT_READ, operatorId, null, data);
+            }
+            return runs;
+        });
     }
 
     @Override
@@ -114,10 +144,11 @@ class MetricsService implements ImportMetrics {
         });
     }
 
+    /** The report's runs; {@code limit} is already clamped to 1 to {@link #PLATFORM_LIMIT} by the caller. */
     private List<PlatformRun> platformRuns(Instant since, int limit) {
         return jdbc.sql("SELECT tenant_slug, CAST(metrics AS text) AS metrics"
                         + " FROM platform_import_runs_report(CAST(? AS timestamptz), ?)")
-                .params(since == null ? null : Timestamp.from(since), Math.clamp(limit, 1, PLATFORM_LIMIT))
+                .params(since == null ? null : Timestamp.from(since), limit)
                 .query((rs, n) -> new PlatformRun(
                         rs.getString("tenant_slug"), metricsOf(mapper.readTree(rs.getString("metrics")), true)))
                 .list();

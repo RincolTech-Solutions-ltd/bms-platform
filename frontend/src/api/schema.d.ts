@@ -4171,7 +4171,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The import runs of every business with their metrics, newest first; since (a moment) and limit (1 to 500, default 100) */
+        /** The import runs of every business with their metrics, newest first; since (a moment) and limit (1 to 500, default 100); audited once per operator and parameters in 15 minutes */
         get: operations["platformImportRunsReport"];
         put?: never;
         post?: never;
@@ -10999,7 +10999,7 @@ export interface components {
             version?: number;
         };
         ImportDefectCloseRequest: {
-            /** @description The fix: an issue or pull request number (#123), a commit hash or a GitHub link */
+            /** @description The fix: an issue or pull request number (#123), a commit hash or a link to a pull request, issue or commit of RincolTech-Solutions-ltd/bms-platform */
             fix_ref: string;
             /**
              * Format: int32

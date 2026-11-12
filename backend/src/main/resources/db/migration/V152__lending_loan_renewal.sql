@@ -1,5 +1,5 @@
--- V152: loan renewal (issue #918, ADR-128; FR-LCL-04a). Directly after V151 (#917, the onboarding metrics follow-ups), an
--- ordered claim while #917 is open. Expand only, safe on a populated database: two permissions, nullable or defaulted
+-- V152: loan renewal (issue #918, ADR-128; FR-LCL-04a). Directly after V151 (#917, the onboarding metrics follow-ups,
+-- merged). Expand only, safe on a populated database: two permissions, nullable or defaulted
 -- columns, two partial indexes, and one status check widened. No row changes, nothing is dropped that a running release
 -- reads.
 --
