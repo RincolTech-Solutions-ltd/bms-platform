@@ -337,8 +337,11 @@ class RetailV1Template implements ImportTemplate {
 
     /** The compare form of a key: upper case with every space removed (ImportTemplate#existingKeys). */
     static String compare(String key) {
-        return key == null ? null : key.toUpperCase(Locale.ROOT).replaceAll("\\s+", "");
+        return key == null ? null : SPACES.matcher(key.toUpperCase(Locale.ROOT)).replaceAll("");
     }
+
+    /** Compiled once: {@link #compare} runs for every key of every row of a forecast (issue #900). */
+    private static final java.util.regex.Pattern SPACES = java.util.regex.Pattern.compile("\\s+");
 
     @Override
     public Set<String> existingKeys(String entitySet, Set<String> keys) {
@@ -506,7 +509,10 @@ class RetailV1Template implements ImportTemplate {
      * read through {@code CatalogueHistory#productsByCode}.
      */
     static CompactKeys heldCosts(JdbcClient jdbc) {
-        CompactKeys out = new CompactKeys();
+        // Sized at once, so 100,000 items are never copied as the tables grow (issue #900).
+        CompactKeys out = new CompactKeys(jdbc.sql("SELECT count(*) FROM retail_products")
+                .query(Integer.class)
+                .single());
         jdbc.sql("SELECT code, cost_minor FROM retail_products ORDER BY lower(code) DESC")
                 .query(rs -> {
                     out.putIfAbsent(compare(rs.getString(1)), rs.getLong(2));

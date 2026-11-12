@@ -27,6 +27,22 @@ class CompactKeysTest {
         assertThat(keys.get("", -1)).isEqualTo(7);
     }
 
+    /** Sized for a few keys, for none, or for fewer than it is given: each answers as the default does (issue #900). */
+    @Test
+    void aSizedOneAnswersAsTheDefaultHowEverManyKeysItTakes() {
+        for (int expected : new int[] {0, 1, 100, 5_000}) {
+            CompactKeys sized = new CompactKeys(expected);
+            CompactKeys grown = new CompactKeys();
+            for (int i = 0; i < 2_000; i++) {
+                String key = "fab-" + (i % 1_500) + "-" + "x".repeat(i % 40);
+                assertThat(sized.putIfAbsent(key, i)).isEqualTo(grown.putIfAbsent(key, i));
+            }
+            assertThat(sized.size()).isEqualTo(grown.size());
+            assertThat(sized.get("fab-7-xxxxxxx", -1)).isEqualTo(grown.get("fab-7-xxxxxxx", -1));
+            assertThat(sized.contains("fab-1500-")).isFalse();
+        }
+    }
+
     // JUSTIFICATION-A3: the review of 12e9d33 on #898 asks a key over 64 KiB proven.
     /** A key as long as a cell may be (32,767 characters, three bytes each in UTF-8), beside short ones. */
     @Test

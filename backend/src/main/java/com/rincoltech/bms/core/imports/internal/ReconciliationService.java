@@ -838,9 +838,12 @@ class ReconciliationService implements ImportReconciliation {
                 // they need is missing) is counted and named, never dropped without a trace (review of #873).
                 Map<CheckId, BigDecimal> part = null;
                 String unmeasurable = null;
+                // Typed once for every forecast the row is given (issue #900).
+                Map<String, Object> typed = null;
                 if (template != null && stored.containsKey(s.line())) {
                     try {
-                        part = part(openParts, b, stored.get(s.line()));
+                        typed = PreviewService.typed(b.set(), stored.get(s.line()));
+                        part = part(openParts, b, typed);
                     } catch (RuntimeException e) {
                         unmeasured++;
                         unmeasurable = e.getClass().getSimpleName();
@@ -887,7 +890,7 @@ class ReconciliationService implements ImportReconciliation {
                     unmeasuredKinds.add(unmeasurable);
                 }
                 if (part != null && whole != null) {
-                    whole.row(b.set().key(), PreviewService.typed(b.set(), stored.get(s.line())));
+                    whole.row(b.set().key(), typed);
                     part.forEach((id, v) -> writtenParts.merge(id, v, BigDecimal::add));
                 }
                 if (s.overridden() != null) {
@@ -906,7 +909,7 @@ class ReconciliationService implements ImportReconciliation {
                     // itemised, so its difference stays unexplained and holds the sign-off.
                     Map<CheckId, BigDecimal> asDecided = null;
                     try {
-                        asDecided = part(decidedParts, b, stored.get(s.line()));
+                        asDecided = part(decidedParts, b, typed);
                     } catch (RuntimeException e) {
                         // Named like any other row the rules cannot measure (review of 391e1dc, point 3).
                         unmeasured++;
@@ -1040,13 +1043,14 @@ class ReconciliationService implements ImportReconciliation {
 
     /**
      * One row's part in every check, by the template's own rules: a fresh forecast given only that row. Throws when the
-     * rules cannot measure it (a row left out for a value they need); the caller counts and names that row.
+     * rules cannot measure it (a row left out for a value they need); the caller counts and names that row. The row's
+     * values are typed ({@link PreviewService#typed}) and only read.
      */
     private static Map<CheckId, BigDecimal> part(
-            Supplier<ImportForecast> forecasts, BatchInfo b, Map<String, Object> stored) {
+            Supplier<ImportForecast> forecasts, BatchInfo b, Map<String, Object> typed) {
         ImportForecast f = forecasts.get();
         f.batch(b.seq());
-        f.row(b.set().key(), PreviewService.typed(b.set(), stored));
+        f.row(b.set().key(), typed);
         return parts(f);
     }
 
