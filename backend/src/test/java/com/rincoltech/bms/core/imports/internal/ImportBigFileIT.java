@@ -78,6 +78,7 @@ class ImportBigFileIT extends IntegrationTest {
     /** #900 diagnosis (temporary): which index the planner can use for a key lookup, under row-level security and not. */
     @Test
     @Order(0)
+    @Disabled("#900 probe done (temporary)")
     void probe() throws Exception {
         TestDatabase.Fixture t = TestDatabase.tenant("import-probe", false, true);
         StringBuilder out = new StringBuilder("IMPORT BIG FILE PROBE\n");
@@ -239,7 +240,6 @@ class ImportBigFileIT extends IntegrationTest {
 
     @Test
     @Order(2)
-    @Disabled("#900 probe run (temporary)")
     void aCsvAtTheRowAndSizeLimitsIsCommittedOnTheStagingHeapInsideTheBatchTimeout() throws Exception {
         String output = child("commit", "items=" + limitsCsv(), STAGING_HEAP_MB, ROW_LIMIT);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "outcome=COMMITTED");
@@ -255,7 +255,6 @@ class ImportBigFileIT extends IntegrationTest {
      */
     @Test
     @Order(1)
-    @Disabled("#900 probe run (temporary)")
     void aCsvAtTheRowAndSizeLimitsIsCommittedInsideTheBatchTimeoutOnTwiceTheStagingHeap() throws Exception {
         String output = child("commit", "items=" + limitsCsv(), 2 * STAGING_HEAP_MB, ROW_LIMIT);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "outcome=COMMITTED");
@@ -266,7 +265,6 @@ class ImportBigFileIT extends IntegrationTest {
     }
 
     @Test
-    @Disabled("#900 diagnostic run (temporary)")
     void aWorkbookAtTheRowLimitIsValidatedAndPreviewedOnTheStagingHeap() throws Exception {
         Path xlsx = dir.resolve("fab-items-at-the-row-limit.xlsx");
         TestFiles.writeXlsx(xlsx, ITEM_HEADER, items(ROW_LIMIT, 0));
@@ -275,7 +273,6 @@ class ImportBigFileIT extends IntegrationTest {
     }
 
     @Test
-    @Disabled("#900 diagnostic run (temporary)")
     void aCsvAtTheColumnLimitIsCommittedOnTheStagingHeap() throws Exception {
         String output = child(
                 "commit",
@@ -292,7 +289,6 @@ class ImportBigFileIT extends IntegrationTest {
      * timed (#880: these fit; the commit at that size does not yet, #900, so the configured limit is lower).
      */
     @Test
-    @Disabled("#900 diagnostic run (temporary)")
     void aCsvAtTheRowAndSizeLimitsIsUploadedValidatedAndPreviewedOnTheStagingHeap() throws Exception {
         String output = child("preview", "items=" + limitsCsv(), STAGING_HEAP_MB, ROW_LIMIT);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "step=preview");
@@ -305,7 +301,6 @@ class ImportBigFileIT extends IntegrationTest {
      * 15.7): the configured limit is the largest of these sizes that passes with a tenth of the old generation to spare.
      */
     @ParameterizedTest(name = "{0} rows")
-    @Disabled("#900 diagnostic run (temporary)")
     @MethodSource("sizesUpToTheConfiguredLimit")
     void aProductMasterIsCommittedOnTheStagingHeapInsideTheTimeLimits(int rows) throws Exception {
         Path csv = dir.resolve("fab-items-" + rows + ".csv");
@@ -324,7 +319,6 @@ class ImportBigFileIT extends IntegrationTest {
 
     /** One row over the configured limit is refused at the upload with TOO_MANY_ROWS, in the child at that limit. */
     @Test
-    @Disabled("#900 diagnostic run (temporary)")
     void oneRowOverTheConfiguredLimitIsRefused() throws Exception {
         Path csv = dir.resolve("fab-items-over-the-limit.csv");
         TestFiles.writeCsv(csv, ITEM_HEADER, items(UploadSettings.DEFAULT_MAX_ROWS + 1, 0));
