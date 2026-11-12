@@ -148,6 +148,12 @@ class ProductRepository {
         p.put("requiresCollateral", v.requiresCollateral());
         p.put("minCollateralCoverBp", v.minCollateralCoverBp());
         p.put("requiresGuarantor", v.requiresGuarantor());
+        p.put("renewalAllowed", v.renewal().allowed());
+        p.put("renewalMaxCount", v.renewal().maxCount());
+        p.put("renewalInterestFirst", v.renewal().interestFirst());
+        p.put("renewalFeeMethod", v.renewal().feeMethod());
+        p.put("renewalFeeMinor", v.renewal().feeMinor());
+        p.put("renewalFeeBp", v.renewal().feeBp());
         p.put("createdBy", createdBy);
         jdbc.sql("""
                         INSERT INTO lending_loan_product_versions (id, tenant_id, product_id, version_no, currency,
@@ -156,14 +162,16 @@ class ProductRepository {
                             max_principal_minor, allocation_order, penalty_method, penalty_grace_days,
                             penalty_period_unit, penalty_flat_minor, penalty_rate_bp, penalty_cap_bp,
                             flat_early_settlement_rebate, requires_collateral, min_collateral_cover_bp,
-                            requires_guarantor, created_by)
+                            requires_guarantor, renewal_allowed, renewal_max_count, renewal_interest_first,
+                            renewal_fee_method, renewal_fee_minor, renewal_fee_bp, created_by)
                         VALUES (:id, current_setting('app.tenant_id')::uuid, :productId, :versionNo, :currency,
                             :interestMethod, :interestRateBp, :rateUnit, :termUnit, :minTermCount, :maxTermCount,
                             :defaultTermCount, :repaymentPattern, :instalmentFrequency, :minPrincipalMinor,
                             :maxPrincipalMinor, CAST(:allocationOrder AS text[]), :penaltyMethod, :penaltyGraceDays,
                             :penaltyPeriodUnit, :penaltyFlatMinor, :penaltyRateBp, :penaltyCapBp,
                             :flatEarlySettlementRebate, :requiresCollateral, :minCollateralCoverBp,
-                            :requiresGuarantor, :createdBy)
+                            :requiresGuarantor, :renewalAllowed, :renewalMaxCount, :renewalInterestFirst,
+                            :renewalFeeMethod, :renewalFeeMinor, :renewalFeeBp, :createdBy)
                         """).params(p).update();
         for (Fee f : v.fees()) {
             jdbc.sql("""
@@ -257,6 +265,13 @@ class ProductRepository {
                 rs.getObject("min_collateral_cover_bp", Integer.class),
                 rs.getBoolean("requires_guarantor"),
                 List.copyOf(fees),
+                new ProductApi.Renewal(
+                        rs.getBoolean("renewal_allowed"),
+                        rs.getObject("renewal_max_count", Integer.class),
+                        rs.getBoolean("renewal_interest_first"),
+                        rs.getString("renewal_fee_method"),
+                        rs.getObject("renewal_fee_minor", Long.class),
+                        rs.getObject("renewal_fee_bp", Integer.class)),
                 instant(rs.getTimestamp("created_at")));
     }
 

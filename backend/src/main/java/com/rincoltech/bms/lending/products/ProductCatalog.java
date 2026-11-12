@@ -37,6 +37,26 @@ public interface ProductCatalog {
      */
     List<FeeCharge> fees(UUID productVersionId, long principalMinor);
 
+    /**
+     * Issue #918, ADR-128: how loans of the product may be renewed, by its current version, so a change of the settings
+     * applies to the next renewal of every loan.
+     */
+    Optional<RenewalRule> renewal(UUID productId);
+
+    /** {@code maxCount} null is no limit; {@code feeMethod} is {@code none}, {@code flat} or {@code percent_of_principal}. */
+    record RenewalRule(
+            boolean allowed, Integer maxCount, boolean interestFirst, String feeMethod, Long feeMinor, Integer feeBp) {
+
+        /** The renewal fee on the principal moved. */
+        public long feeFor(long principalMinor) {
+            return switch (feeMethod) {
+                case "flat" -> feeMinor;
+                case "percent_of_principal" -> ScheduleCalculator.percentOf(principalMinor, feeBp);
+                default -> 0;
+            };
+        }
+    }
+
     /** One fee for one principal; {@code timing} is {@code deducted_at_disbursement}, {@code added_to_loan} or {@code paid_upfront}. */
     record FeeCharge(String name, String timing, long amountMinor) {}
 

@@ -89,6 +89,22 @@ class ProductCatalogService implements ProductCatalog {
                 .toList();
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<RenewalRule> renewal(UUID productId) {
+        return repo.find(productId)
+                .flatMap(row -> repo.versions(row.id()).stream()
+                        .filter(v -> v.id().equals(row.currentVersionId()))
+                        .findFirst()
+                        .map(v -> new RenewalRule(
+                                v.renewal().allowed(),
+                                v.renewal().maxCount(),
+                                v.renewal().interestFirst(),
+                                v.renewal().feeMethod(),
+                                v.renewal().feeMinor(),
+                                v.renewal().feeBp())));
+    }
+
     private Optional<ProductTerms> terms(Row row, UUID versionId) {
         return repo.versions(row.id()).stream()
                 .filter(v -> v.id().equals(versionId))
