@@ -1535,10 +1535,16 @@ source_row_no) WHERE resolution = 'ask_customer'`. No column, function or grant 
 
 Added by `V153__import_batch_statistics.sql` (issue #900, chapter 13 section 13.14.1 11/16), expand only: the definer
 function **`bms_import_refresh_statistics()`** (owned by `bms_owner`; `bms_app` alone may execute). It raises
-`insufficient_privilege` unless `app.import_commit` is `on`, which only an import batch's transaction sets (V143). It then
-runs ANALYZE on `import_refs` and `retail_products` (the columns a batch looks rows up by) inside the caller's transaction,
-so the batch's own uncommitted rows count. It waits at most 2 s for the lock (`lock_timeout`) and returns false when
-another batch holds it. No table, column, index or row changes.
+`insufficient_privilege` unless `app.import_commit` is `on`, which an import batch's transaction sets (V143): a guard
+against misuse, not a privilege check, since any `bms_app` session may set that setting. It then runs ANALYZE on
+`import_refs` and `retail_products` (the columns a batch looks rows up by) inside the caller's transaction, so the batch's
+own uncommitted rows count. It waits at most 2 s for the lock (`lock_timeout`) and returns false when another batch holds
+it. A rollback undoes the new `pg_statistic` rows but not what ANALYZE writes in place: `pg_class.relpages` and
+`reltuples` (after a dry run they count its rolled-back rows until the next analyze) and the reset of the table's count
+of rows changed since its last analyze (autovacuum analyzes it later). `pg_class` is readable by every role, so the sum
+of every business's rows in each table is seen earlier than autovacuum would show it; no row or value is, `pg_stats`
+shows `bms_app` nothing of a table under row-level security, and `bms_app` is NOBYPASSRLS and owns no table. No table,
+column, index or row changes.
 
 ## 6.6 General ledger (RLS)
 

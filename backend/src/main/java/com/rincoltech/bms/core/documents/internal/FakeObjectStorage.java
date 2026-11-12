@@ -72,31 +72,24 @@ class FakeObjectStorage implements ObjectStorage {
 
     private void keep(String key, byte[] bytes, String contentType, java.time.Instant at) {
         if (dir == null) {
-            drop(objects.put(key, new StoredObject(bytes.clone(), contentType, at)));
+            objects.put(key, new StoredObject(bytes.clone(), contentType, at));
             return;
         }
         try {
             java.nio.file.Path file = java.nio.file.Files.write(fileFor(), bytes);
-            drop(objects.put(key, new StoredObject(null, contentType, at, file)));
+            objects.put(key, new StoredObject(null, contentType, at, file));
         } catch (java.io.IOException e) {
             throw new java.io.UncheckedIOException(e);
         }
     }
 
+    /**
+     * A new file of the directory for each write, never one deleted while the fake runs, so a read of an object replaced
+     * or removed meanwhile still reads what it found (the review of 887dc57). The directory's owner deletes it.
+     */
     private java.nio.file.Path fileFor() throws java.io.IOException {
         java.nio.file.Files.createDirectories(dir);
         return dir.resolve(java.util.UUID.randomUUID().toString());
-    }
-
-    /** Deletes the file of an object the fake no longer holds. */
-    private static void drop(StoredObject gone) {
-        if (gone != null && gone.file() != null) {
-            try {
-                java.nio.file.Files.deleteIfExists(gone.file());
-            } catch (java.io.IOException e) {
-                throw new java.io.UncheckedIOException(e);
-            }
-        }
     }
 
     /** For tests: keys that {@link #deleteAll} reports as failed and keeps, like an object store that refuses some. */
@@ -109,7 +102,7 @@ class FakeObjectStorage implements ObjectStorage {
             if (failDeletes.contains(key)) {
                 failed.add(key);
             } else {
-                drop(objects.remove(key));
+                objects.remove(key);
             }
         }
         return failed;
@@ -133,12 +126,11 @@ class FakeObjectStorage implements ObjectStorage {
     public void putFile(String key, java.nio.file.Path file, String contentType) {
         try {
             if (dir == null) {
-                drop(objects.put(
-                        key, new StoredObject(java.nio.file.Files.readAllBytes(file), contentType, clock.now())));
+                objects.put(key, new StoredObject(java.nio.file.Files.readAllBytes(file), contentType, clock.now()));
                 return;
             }
             java.nio.file.Path copy = java.nio.file.Files.copy(file, fileFor());
-            drop(objects.put(key, new StoredObject(null, contentType, clock.now(), copy)));
+            objects.put(key, new StoredObject(null, contentType, clock.now(), copy));
         } catch (java.io.IOException e) {
             throw new java.io.UncheckedIOException(e);
         }
@@ -160,7 +152,7 @@ class FakeObjectStorage implements ObjectStorage {
 
     @Override
     public void delete(String key) {
-        drop(objects.remove(key));
+        objects.remove(key);
     }
 
     /** For tests: how many objects the fake holds. */

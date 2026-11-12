@@ -4309,11 +4309,40 @@ class MigrationOrderIT {
                         .hasMessageContaining("runs only inside an import batch");
             }
             c.rollback();
+            // Inside a batch's transaction: true (no other batch runs here), and the statistics count the rows the same
+            // transaction wrote (the review of 887dc57). pg_stats hides a table under row security from bms_app, so the
+            // count is read where everyone may, pg_class, against the committed rows the owner counts.
+            TestDatabase.Fixture f = TestDatabase.tenant("v153-stats", false);
+            long committed = TestDatabase.owner()
+                    .sql("SELECT count(*) FROM import_refs")
+                    .query(Long.class)
+                    .single();
             try (Statement s = c.createStatement()) {
+                s.execute("SET LOCAL app.tenant_id = '" + f.tenantId() + "'");
+                UUID run = UUID.randomUUID();
+                UUID batch = UUID.randomUUID();
+                s.execute("INSERT INTO import_runs (id, tenant_id, created_by) VALUES ('" + run
+                        + "', current_setting('app.tenant_id')::uuid, '" + UUID.randomUUID() + "')");
+                s.execute("INSERT INTO import_batches (id, tenant_id, run_id, seq, status, row_count) VALUES ('" + batch
+                        + "', current_setting('app.tenant_id')::uuid, '" + run + "', 1, 'parsed', 2000)");
+                s.execute(
+                        "INSERT INTO import_refs (id, tenant_id, run_id, batch_id, source_key, source_ref, target_type,"
+                                + " target_id) SELECT gen_random_uuid(), current_setting('app.tenant_id')::uuid, '"
+                                + run + "', '"
+                                + batch
+                                + "', 'fab-v153.csv|-|line:' || g, 'fab-v153.csv|-|line:' || g || '#h', 'retail.product',"
+                                + " gen_random_uuid() FROM generate_series(1, 2000) g");
                 s.execute("SET LOCAL app.import_commit = 'on'");
-                // True, or false when another batch holds the tables' statistics lock: never an error.
                 try (java.sql.ResultSet rs = s.executeQuery("SELECT bms_import_refresh_statistics()")) {
                     assertThat(rs.next()).isTrue();
+                    assertThat(rs.getBoolean(1)).as("refreshed").isTrue();
+                }
+                try (java.sql.ResultSet rs =
+                        s.executeQuery("SELECT reltuples FROM pg_class WHERE oid = 'import_refs'::regclass")) {
+                    assertThat(rs.next()).isTrue();
+                    assertThat(rs.getDouble(1) - committed)
+                            .as("the 2,000 rows written in the same transaction are counted")
+                            .isGreaterThan(1_000);
                 }
             }
             c.rollback();

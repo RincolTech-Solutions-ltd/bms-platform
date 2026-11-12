@@ -98,7 +98,12 @@ class RetailV1Template implements ImportTemplate {
     private final CatalogueHistory catalogue;
     private final Branches branches;
     private final JdbcClient jdbc;
-    private final JdbcClient streaming;
+    /**
+     * The application's own {@code JdbcTemplate}, on the data source the tenant-binding transaction manager binds, for a
+     * read streamed a page at a time inside the caller's transaction (issue #900, the review of 887dc57).
+     */
+    private final org.springframework.jdbc.core.JdbcTemplate reads;
+
     private final TransactionTemplate readOnly;
 
     RetailV1Template(
@@ -106,22 +111,13 @@ class RetailV1Template implements ImportTemplate {
             CatalogueHistory catalogue,
             Branches branches,
             JdbcClient jdbc,
-            javax.sql.DataSource dataSource,
+            org.springframework.jdbc.core.JdbcTemplate reads,
             PlatformTransactionManager transactions) {
         this.importer = importer;
         this.catalogue = catalogue;
         this.branches = branches;
         this.jdbc = jdbc;
-        if (dataSource == null) {
-            this.streaming = jdbc;
-        } else {
-            // The same connection and transaction, read 1,000 rows at a time (issue #900): pgjdbc otherwise holds a
-            // whole result, and every item's cost after a commit of 100,000 filled the staging heap's old generation.
-            org.springframework.jdbc.core.JdbcTemplate template =
-                    new org.springframework.jdbc.core.JdbcTemplate(dataSource);
-            template.setFetchSize(1_000);
-            this.streaming = JdbcClient.create(template);
-        }
+        this.reads = reads;
         this.readOnly = new TransactionTemplate(transactions);
         this.readOnly.setReadOnly(true);
     }
@@ -403,7 +399,7 @@ class RetailV1Template implements ImportTemplate {
     /** What {@link #forecast(Map, UUID)} reads, read once for every forecast the supplier makes (issue #880). */
     @Override
     public java.util.function.Supplier<ImportForecast> forecasts(Map<String, String> policy, UUID runId) {
-        CompactKeys held = readOnly.execute(s -> heldCosts(streaming));
+        CompactKeys held = readOnly.execute(s -> heldCosts(reads));
         Set<String> opened = readOnly.execute(s -> openedBranches(jdbc, runId));
         Map<String, Map<String, Held>> before = readOnly.execute(s -> heldBefore(jdbc, runId));
         CompactKeys earlier = readOnly.execute(s -> earlierHistory(jdbc, runId));
@@ -503,20 +499,26 @@ class RetailV1Template implements ImportTemplate {
     }
 
     /**
-     * The business's cost of each item, by its code in compare form, read a row at a time into compact keys (issue #900):
-     * the reconciliation after a commit reads every item the batch just wrote, which as product objects and a copied map
-     * filled the staging heap at 100,000 items. The last code in {@code lower(code)} order wins, as it did when this was
-     * read through {@code CatalogueHistory#productsByCode}.
+     * The business's cost of each item, by its code in compare form, read 1,000 rows at a time into compact keys (issue
+     * #900): the reconciliation after a commit reads every item the batch just wrote, which as product objects and a
+     * copied map filled the staging heap at 100,000 items. The same rows as {@code CatalogueHistory#productsByCode}, every
+     * product of the business whatever its state, and the same winner among codes alike in compare form: that read went
+     * in {@code lower(code)} order and the last one won; this one goes in the opposite order, with {@code code} and
+     * {@code id} breaking any tie, and the first one wins ({@code RetailV1TemplateIT}).
      */
-    static CompactKeys heldCosts(JdbcClient jdbc) {
+    static CompactKeys heldCosts(org.springframework.jdbc.core.JdbcTemplate reads) {
         // Sized at once, so 100,000 items are never copied as the tables grow (issue #900).
-        CompactKeys out = new CompactKeys(jdbc.sql("SELECT count(*) FROM retail_products")
-                .query(Integer.class)
-                .single());
-        jdbc.sql("SELECT code, cost_minor FROM retail_products ORDER BY lower(code) DESC")
-                .query(rs -> {
-                    out.putIfAbsent(compare(rs.getString(1)), rs.getLong(2));
-                });
+        Integer count = reads.queryForObject("SELECT count(*) FROM retail_products", Integer.class);
+        CompactKeys out = new CompactKeys(count == null ? 0 : count);
+        reads.query(
+                connection -> {
+                    java.sql.PreparedStatement read = connection.prepareStatement(
+                            "SELECT code, cost_minor FROM retail_products ORDER BY lower(code) DESC, code DESC, id DESC");
+                    read.setFetchSize(1_000);
+                    return read;
+                },
+                (org.springframework.jdbc.core.RowCallbackHandler)
+                        rs -> out.putIfAbsent(compare(rs.getString(1)), rs.getLong(2)));
         return out;
     }
 

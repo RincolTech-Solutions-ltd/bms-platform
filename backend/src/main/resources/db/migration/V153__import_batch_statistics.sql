@@ -15,14 +15,25 @@
 -- Locks: ANALYZE takes SHARE UPDATE EXCLUSIVE on each table, held to the end of the batch's transaction (10 minutes at
 -- most). That lock does not conflict with reads or writes, only with VACUUM, ANALYZE, CREATE INDEX CONCURRENTLY and some
 -- forms of ALTER TABLE. The function waits for it at most 2 s (lock_timeout, longer than the 1 s deadlock_timeout after
--- which an autovacuum in the way is cancelled). A batch of a second business that finds the lock held gets false back and
--- keeps the statistics it has: it is never stopped and never waits behind the first. Autovacuum skips the table meanwhile.
--- In a dry run the new statistics are rolled back with everything else.
+-- which an autovacuum in the way is cancelled). A batch of a second business that finds the lock held gets false back,
+-- keeps the statistics it has and asks again at its next registration: it is never stopped and never waits behind the
+-- first for more than those 2 s a time. Autovacuum skips the table meanwhile.
+-- Large batches (over 20,000 rows) take a platform-wide advisory key first, so two never need this lock together
+-- (ImportRunService.LARGE_BATCH_ROWS, the review of 887dc57).
+--
+-- What a rollback keeps (the review of 887dc57). The new pg_statistic rows are rolled back with a dry run. ANALYZE also
+-- writes pg_class.relpages and reltuples in place, which no rollback undoes, and resets the table's count of rows changed
+-- since its last analyze: after a dry run reltuples counts the rolled-back rows until the next analyze, and autovacuum
+-- analyzes the table later than it would have. pg_class is readable by every role, so the sum of the rows of every
+-- business in each table is seen a little earlier than autovacuum would show it; no row and no value is. pg_stats shows
+-- bms_app nothing of a table under row-level security, and bms_app is NOBYPASSRLS and owns no table
+-- (deploy/postgres/initdb/01-roles.sh).
 
 CREATE FUNCTION bms_import_refresh_statistics() RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp SET lock_timeout = '2s' AS $$
 BEGIN
-    -- Only from inside an import batch, which sets app.import_commit for its transaction (V143).
+    -- A guard against misuse, not a privilege check: an import batch sets app.import_commit for its transaction (V143),
+    -- but any bms_app session may set it too. At worst such a call holds the lock above to the end of its transaction.
     IF coalesce(current_setting('app.import_commit', true), '') <> 'on' THEN
         RAISE EXCEPTION 'bms_import_refresh_statistics runs only inside an import batch'
             USING ERRCODE = 'insufficient_privilege';

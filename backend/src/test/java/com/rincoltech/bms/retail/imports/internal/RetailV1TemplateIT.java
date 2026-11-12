@@ -161,6 +161,66 @@ class RetailV1TemplateIT extends IntegrationTest {
         return TenantContext.callAs(f.tenantId(), work);
     }
 
+    @Autowired
+    com.rincoltech.bms.retail.catalogue.CatalogueHistory catalogue;
+
+    @Autowired
+    org.springframework.jdbc.core.JdbcTemplate reads;
+
+    @Autowired
+    org.springframework.transaction.PlatformTransactionManager transactionManager;
+
+    // JUSTIFICATION-A3: the review of 887dc57 (#900, must-fix 1) asks heldCosts proven equal to the read it replaced.
+    /**
+     * The forecast's costs read compactly (#900) are the ones the catalogue's map gave: every product of the business, an
+     * inactive one too, and among codes alike in compare form the one that read's order put last. Written through the
+     * application's {@code JdbcTemplate}, which joins the tenant-bound transaction (its insert names the bound tenant).
+     */
+    @Test
+    void theHeldCostsAreTheCostsTheCatalogueMapGave() {
+        as(
+                t,
+                () -> new org.springframework.transaction.support.TransactionTemplate(transactionManager).execute(s -> {
+                    UUID category = catalogue.ensureCategory("Test Category").id();
+                    UUID unit = catalogue.ensureUnit("piece").id();
+                    Object[][] items = {
+                        {"TS-001", 100L, true},
+                        {"ts-002", 200L, true},
+                        {"TS 003", 300L, true},
+                        {"TS003", 310L, true},
+                        {"Ts-004", 400L, false},
+                        {"TS-0 05", 500L, true},
+                        {"ts-005", 510L, true}
+                    };
+                    for (Object[] item : items) {
+                        reads.update(
+                                "INSERT INTO retail_products (id, tenant_id, code, description, category_id, unit_id,"
+                                        + " cost_minor, sell_minor, currency, active)"
+                                        + " VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, 0, 'UGX', ?)",
+                                UUID.randomUUID(),
+                                item[0],
+                                "Fabricated item " + item[0],
+                                category,
+                                unit,
+                                item[1],
+                                item[2]);
+                    }
+                    Map<String, Long> before = new java.util.HashMap<>();
+                    catalogue
+                            .productsByCode()
+                            .values()
+                            .forEach(p -> before.put(RetailV1Template.compare(p.code()), p.costMinor()));
+                    com.rincoltech.bms.kernel.CompactKeys held = RetailV1Template.heldCosts(reads);
+                    assertThat(held.size()).isEqualTo(before.size());
+                    before.forEach((code, cost) ->
+                            assertThat(held.get(code, -1)).as(code).isEqualTo(cost));
+                    assertThat(before).as("an inactive product").containsEntry("TS-004", 400L);
+                    assertThat(before).as("codes alike in compare form are one").containsKeys("TS003", "TS-005");
+                    s.setRollbackOnly();
+                    return null;
+                }));
+    }
+
     @Test
     void theSampleCommitsThroughTheFrameworkAsTheCommandWritesItReconcilesAndIsSignedOff() throws IOException {
         UUID run = reviewed(t, "import-retail-export", exportMapping(), RetailImportIT.SAMPLE, exportFiles());

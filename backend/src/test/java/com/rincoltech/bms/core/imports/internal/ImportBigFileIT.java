@@ -349,9 +349,11 @@ class ImportBigFileIT extends IntegrationTest {
         return output;
     }
 
+    /** The rows the commit wrote; and its reconciliation is stored (the review of 887dc57, #900). */
     static long written(String output) {
         Matcher m = Pattern.compile("step=commit .*?written=(\\d+)").matcher(output);
         assertThat(m.find()).as(output).isTrue();
+        assertThat(output).as("the reconciliation after the commit").contains("reconciled=1");
         return Long.parseLong(m.group(1));
     }
 

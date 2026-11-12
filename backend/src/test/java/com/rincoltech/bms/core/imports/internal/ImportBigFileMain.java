@@ -57,6 +57,10 @@ public final class ImportBigFileMain {
                 JsonMapper.builder().build().readValue(Path.of(args[4]).toFile(), new TypeReference<>() {});
         boolean commit = "commit".equals(args[5]);
         SpringApplication app = new SpringApplication(BmsApplication.class);
+        // The quarantined file kept on disk, not in the heap judged: staging streams it to R2 (issue #900). Deleted
+        // with
+        // everything in it when the child ends.
+        Path storage = Files.createTempDirectory("import-big-file-storage-");
         // Command line arguments win over application.yml; the switches are those of IntegrationTest.
         String[] settings = {
             "--spring.profiles.active=test",
@@ -67,9 +71,7 @@ public final class ImportBigFileMain {
             "--management.server.port=0",
             // Production's row limit, whatever the test profile holds.
             "--bms.imports.max-rows=" + UploadSettings.DEFAULT_MAX_ROWS,
-            // The quarantined file kept on disk, not in the heap judged: staging streams it to R2 (issue #900).
-            "--bms.storage.fake-dir="
-                    + Files.createTempDirectory("import-big-file-storage-").toString(),
+            "--bms.storage.fake-dir=" + storage,
             "--bms.reports.runner-enabled=false",
             "--bms.lending.arrears-job-enabled=false",
             "--bms.platform.billing-job-enabled=false",
@@ -90,6 +92,12 @@ public final class ImportBigFileMain {
             System.out.println("BIGFILE maxHeapMb=" + Runtime.getRuntime().maxMemory() / 1024 / 1024 + " oldPeakMb="
                     + Math.max(worst, oldPeak()) / 1024 / 1024 + " oldMaxMb=" + oldMax() / 1024 / 1024 + " gcMs="
                     + gcMillis());
+        } finally {
+            try (java.util.stream.Stream<Path> files = Files.walk(storage)) {
+                for (Path p : files.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                    Files.deleteIfExists(p);
+                }
+            }
         }
         System.exit(ok ? 0 : 1);
     }
@@ -191,9 +199,12 @@ public final class ImportBigFileMain {
                 tenant,
                 () -> new TransactionTemplate(ctx.getBean(PlatformTransactionManager.class))
                         .execute(s -> ctx.getBean(JdbcClient.class)
-                                .sql("SELECT string_agg(seq || ':' || commit_ms, ',' ORDER BY seq) FROM import_batches"
-                                        + " WHERE run_id = ?")
-                                .param(runId)
+                                // And the reconciliation after the commit, which logs a failure and stores nothing:
+                                // its streamed reads join the tenant's transaction (the review of 887dc57, #900).
+                                .sql("SELECT string_agg(seq || ':' || commit_ms, ',' ORDER BY seq) || ' reconciled='"
+                                        + " || (SELECT count(*) FROM import_reconciliations WHERE run_id = ?)"
+                                        + " FROM import_batches WHERE run_id = ?")
+                                .params(runId, runId)
                                 .query(String.class)
                                 .single()));
         System.out.println("BIGFILE step=commit ms=" + commitMs + " outcome=" + outcome + " written=" + written

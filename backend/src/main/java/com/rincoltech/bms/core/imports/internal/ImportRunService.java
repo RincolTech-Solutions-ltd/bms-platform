@@ -86,6 +86,19 @@ class ImportRunService implements ImportRuns {
     /** The rows a batch registers before the statistics of the tables it fills are first refreshed (V153, #900). */
     static final int STATISTICS_FIRST = 1_000;
 
+    /**
+     * A batch over this many rows is large: it takes {@link #LARGE_KEY} first (the Lead on the review of 887dc57, #900).
+     * Two large batches of different businesses would each need the statistics the other's ANALYZE holds (V153), and
+     * the one left without them falls back to the lookups whose time grows with the square of its rows.
+     */
+    static final int LARGE_BATCH_ROWS = 20_000;
+
+    /** The platform's large-batch key: one large batch is written at a time, of any business. */
+    static final String LARGE_KEY = "hashtextextended('core.imports.large', 0)";
+
+    /** The refusal of a large batch while another business's large batch is being written. */
+    static final String IMPORT_BUSY = "import_busy";
+
     /** The business's import key: the advisory lock every batch takes, the import-retail command's too (#135). */
     static final String LOCK_KEY = "hashtextextended('core.imports:' || current_setting('app.tenant_id'), 0)";
 
@@ -1064,8 +1077,9 @@ class ImportRunService implements ImportRuns {
                             parts.add(part);
                         }
                     } catch (ApiException e) {
-                        if ("IMPORT_IN_PROGRESS".equals(e.code())) {
-                            // The business's import key is taken: answered at once, nothing stored (Lead ruling 5).
+                        if ("IMPORT_IN_PROGRESS".equals(e.code()) || IMPORT_BUSY.equals(e.code())) {
+                            // The business's import key is taken, or the platform's large-batch key (#900): answered
+                            // at once, nothing stored (Lead ruling 5).
                             throw e;
                         }
                         failure[0] = refused(batch.seq(), e);
@@ -1548,6 +1562,19 @@ class ImportRunService implements ImportRuns {
         if ("committed".equals(row.get("status"))) {
             return null;
         }
+        // One large batch at a time on the platform, never a wait: held to the end of the batch's transaction (a dry
+        // run's outer one), and the batch is refused at once when another business's holds it (#900).
+        if (row.get("row_count") instanceof Integer rows
+                && rows > LARGE_BATCH_ROWS
+                && !jdbc.sql("SELECT pg_try_advisory_xact_lock(" + LARGE_KEY + ")")
+                        .query(Boolean.class)
+                        .single()) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    IMPORT_BUSY,
+                    "Import busy",
+                    "Another business's large import is being written; try again in a few minutes.");
+        }
         if (!dryRun) {
             stopIfRequested(runId);
         }
@@ -1721,8 +1748,10 @@ class ImportRunService implements ImportRuns {
          */
         private void registered(int n) {
             registered += n;
-            if (registered >= refreshAt) {
-                refs.refreshStatistics();
+            // Refused while another batch holds the tables' statistics lock: tried again at the next registration
+            // (the review of 887dc57). A large batch holds the platform's large-batch key, so that other batch is
+            // small.
+            if (registered >= refreshAt && refs.refreshStatistics()) {
                 refreshAt = registered * 2;
             }
         }

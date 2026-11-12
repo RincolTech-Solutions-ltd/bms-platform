@@ -110,18 +110,12 @@ class ReconciliationService implements ImportReconciliation {
     private final JdbcClient jdbc;
 
     /**
-     * The same connection and transaction, read 1,000 rows at a time (issue #900): pgjdbc otherwise holds a whole result,
-     * and the run's {@code import_refs} at 100,000 rows filled the staging heap's old generation after the commit.
+     * The application's own {@code JdbcTemplate}, on the data source the tenant-binding transaction manager binds, so a
+     * read joins the transaction and its {@code app.tenant_id} (the review of 887dc57, #900). Used for a read streamed
+     * {@link #FETCH} rows at a time: pgjdbc otherwise holds a whole result, and the run's {@code import_refs} at 100,000
+     * rows filled the staging heap's old generation after the commit.
      */
-    private final JdbcClient streaming;
-
-    /** A client on the data source that reads its results {@link #FETCH} rows at a time inside a transaction. */
-    static JdbcClient streaming(javax.sql.DataSource dataSource) {
-        org.springframework.jdbc.core.JdbcTemplate template =
-                new org.springframework.jdbc.core.JdbcTemplate(dataSource);
-        template.setFetchSize(FETCH);
-        return JdbcClient.create(template);
-    }
+    private final org.springframework.jdbc.core.JdbcTemplate reads;
 
     static final int FETCH = 1_000;
     private final TransactionTemplate tx;
@@ -137,7 +131,7 @@ class ReconciliationService implements ImportReconciliation {
 
     ReconciliationService(
             JdbcClient jdbc,
-            javax.sql.DataSource dataSource,
+            org.springframework.jdbc.core.JdbcTemplate reads,
             PlatformTransactionManager transactions,
             PreviewService preview,
             ImportTemplates templates,
@@ -149,7 +143,7 @@ class ReconciliationService implements ImportReconciliation {
             AuditLog audit,
             ObjectMapper mapper) {
         this.jdbc = jdbc;
-        this.streaming = streaming(dataSource);
+        this.reads = reads;
         this.tx = new TransactionTemplate(transactions);
         this.preview = preview;
         this.templates = templates;
@@ -567,17 +561,25 @@ class ReconciliationService implements ImportReconciliation {
         Map<String, List<UUID>> targets = new TreeMap<>();
         Map<UUID, String> journalKinds = new LinkedHashMap<>();
         // Streamed, and the key read only for a journal, which needs its kind (issue #900).
-        streaming.sql("""
-                        SELECT target_type, target_id, CASE WHEN target_type = ? THEN source_key END
-                          FROM import_refs WHERE run_id = ? ORDER BY created_at, id
-                        """).params(JOURNAL, runId).query(rs -> {
-            String type = rs.getString(1);
-            UUID id = rs.getObject(2, UUID.class);
-            targets.computeIfAbsent(type, k -> new ArrayList<>()).add(id);
-            if (JOURNAL.equals(type)) {
-                journalKinds.put(id, kindOf(rs.getString(3)));
-            }
-        });
+        reads.query(
+                connection -> {
+                    java.sql.PreparedStatement read = connection.prepareStatement("""
+                            SELECT target_type, target_id, CASE WHEN target_type = ? THEN source_key END
+                              FROM import_refs WHERE run_id = ? ORDER BY created_at, id
+                            """);
+                    read.setFetchSize(FETCH);
+                    read.setString(1, JOURNAL);
+                    read.setObject(2, runId);
+                    return read;
+                },
+                (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+                    String type = rs.getString(1);
+                    UUID id = rs.getObject(2, UUID.class);
+                    targets.computeIfAbsent(type, k -> new ArrayList<>()).add(id);
+                    if (JOURNAL.equals(type)) {
+                        journalKinds.put(id, kindOf(rs.getString(3)));
+                    }
+                });
         ImportBooks.Scope scope = new ImportBooks.Scope(runId, targets);
 
         // The source: each row left out alone, with its own part, and the rows written netted together over the whole
@@ -838,11 +840,13 @@ class ReconciliationService implements ImportReconciliation {
                 // they need is missing) is counted and named, never dropped without a trace (review of #873).
                 Map<CheckId, BigDecimal> part = null;
                 String unmeasurable = null;
-                // Typed once for every forecast the row is given (issue #900).
+                // Typed once for every forecast the row is given (issue #900), and unmodifiable, so no forecast can
+                // change what the next one is given (the review of 887dc57).
                 Map<String, Object> typed = null;
                 if (template != null && stored.containsKey(s.line())) {
                     try {
-                        typed = PreviewService.typed(b.set(), stored.get(s.line()));
+                        typed = java.util.Collections.unmodifiableMap(
+                                PreviewService.typed(b.set(), stored.get(s.line())));
                         part = part(openParts, b, typed);
                     } catch (RuntimeException e) {
                         unmeasured++;

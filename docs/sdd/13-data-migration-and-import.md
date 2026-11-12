@@ -1603,8 +1603,14 @@ section 4.1; coordinated with #110, which builds no second framework).**
     registered rows double from 1,000 (`ImportRunService.RowCheckpoint`): ANALYZE of those two tables in the batch's own
     transaction counts its own rows, and the key is then found through `import_refs_by_key` (a page of 250 lookups in
     0.4 ms instead of 1,449 ms, measured on a copy of the table with 30,000 rows of the batch). ANALYZE holds SHARE UPDATE
-    EXCLUSIVE on the two tables to the end of the batch, which blocks no read or write; a second business's batch that
-    finds it held waits at most 2 s, keeps the statistics it has and goes on. A dry run rolls the statistics back.
+    EXCLUSIVE on the two tables to the end of the batch, which blocks no read or write; a batch that finds it held waits
+    at most 2 s, keeps the statistics it has and asks again at its next registration. A dry run rolls the new statistics
+    back, but not `pg_class.relpages` and `reltuples` nor the reset of the count of changed rows, which ANALYZE writes in
+    place (chapter 6, V153). Without the statistics a large batch is back on the slow path, so a batch over 20,000 rows
+    (`ImportRunService.LARGE_BATCH_ROWS`) first takes a platform-wide advisory key, held to the end of its transaction (a
+    dry run's whole one), and is refused at once with `import_busy` ("try again in a few minutes") while another
+    business's large batch holds it; a dry run refused so stores nothing, and a commit refused so stays committing for a
+    resume (`ImportPreviewIT.aLargeBatchIsRefusedAtOnceWhileAnotherLargeBatchIsWritten`).
   - *The reconciliation after the commit* read every item the batch had just written as product objects and a copied
     map of costs (the dry run reads the catalogue before the batch, so it never did), and filled the staging heap's old
     generation at 100,000 items. The forecast now reads the costs into compact keys sized at once

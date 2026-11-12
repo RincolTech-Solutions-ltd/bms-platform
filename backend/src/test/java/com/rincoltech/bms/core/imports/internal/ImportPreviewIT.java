@@ -1017,6 +1017,71 @@ class ImportPreviewIT extends IntegrationTest {
         assertThat(as(t, () -> runs.commit(ready))).isEqualTo(CommitOutcome.COMMITTED);
     }
 
+    // JUSTIFICATION-A3: the Lead on the review of 887dc57 (#900) asks large batches never written together, with a
+    // test.
+    /**
+     * A batch over {@link ImportRunService#LARGE_BATCH_ROWS} rows takes the platform's large-batch key: while another
+     * business's large batch holds it, a dry run is refused at once with {@code import_busy} and stores nothing, and a
+     * batch at the threshold takes no key; once the key is free the large batch's dry run runs.
+     */
+    @Test
+    void aLargeBatchIsRefusedAtOnceWhileAnotherLargeBatchIsWritten() throws Exception {
+        UUID large = emptyRun(t);
+        UUID atThreshold = emptyRun(t);
+        String rows = "UPDATE import_batches SET row_count = ? WHERE run_id = ?";
+        TestDatabase.owner()
+                .sql(rows)
+                .params(ImportRunService.LARGE_BATCH_ROWS + 1, large)
+                .update();
+        TestDatabase.owner()
+                .sql(rows)
+                .params(ImportRunService.LARGE_BATCH_ROWS, atThreshold)
+                .update();
+        scripted(large, NOTHING);
+        TestDatabase.Fixture other = TestDatabase.tenant("import-busy", false);
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            // Another business's large batch is being written: it holds the platform's key in its transaction.
+            CountDownLatch holding = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            Future<?> holder = pool.submit(() -> as(
+                    other,
+                    () -> new TransactionTemplate(transactionManager).execute(s -> {
+                        jdbc.sql("SELECT pg_advisory_xact_lock(" + ImportRunService.LARGE_KEY + ")")
+                                .query()
+                                .singleRow();
+                        holding.countDown();
+                        try {
+                            release.await(20, TimeUnit.SECONDS);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                        return null;
+                    })));
+            assertThat(holding.await(20, TimeUnit.SECONDS)).isTrue();
+            long started = System.nanoTime();
+            try {
+                assertCode(() -> as(t, () -> runs.dryRun(large, operator)), ImportRunService.IMPORT_BUSY);
+                assertThat(as(t, () -> runs.dryRun(atThreshold, operator))
+                                .report()
+                                .failure())
+                        .as("a batch at the threshold takes no key")
+                        .isNull();
+            } finally {
+                release.countDown();
+            }
+            assertThat(TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - started))
+                    .isLessThan(10);
+            holder.get(60, TimeUnit.SECONDS);
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(as(t, () -> runs.dryRunReport(large))).as("nothing stored").isEmpty();
+        assertThat(as(t, () -> runs.dryRun(large, operator)).report().failure())
+                .as("once the key is free")
+                .isNull();
+    }
+
     @Test
     void aFailedDryRunIsStoredLeavesNoTraceAndTheRunIsNotReady() throws IOException {
         Run run = validated(t);
