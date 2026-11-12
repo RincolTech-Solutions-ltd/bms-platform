@@ -251,7 +251,9 @@ class RetailDocumentsIT extends IntegrationTest {
 
     /**
      * Dates a void at noon in Kampala on {@code day}; the API dates it by the database clock, which moves with the calendar.
-     * Only {@code voided_at} moves: the statement's void line reads that column and no ledger table (issue #893).
+     * Only {@code voided_at} moves: the statement's void line reads that column and no ledger table (issue #893). The
+     * ledger's reversal stays on the real business day, so a test that pins a void must not compare the journal's dates
+     * with the statement's.
      */
     static void pinVoid(UUID sale, String day) {
         TestDatabase.owner()
@@ -1407,10 +1409,53 @@ class RetailDocumentsIT extends IntegrationTest {
         return new Word(text.toString(), List.copyOf(glyphs));
     }
 
+    static float left(Word w) {
+        return w.glyphs().getFirst().getXDirAdj();
+    }
+
+    static float right(Word w) {
+        org.apache.pdfbox.text.TextPosition g = w.glyphs().getLast();
+        return g.getXDirAdj() + g.getWidthDirAdj();
+    }
+
+    static float baseline(Word w) {
+        return w.glyphs().getFirst().getYDirAdj();
+    }
+
+    /** The first word that {@code which} matches, failing with every printed word when none does. */
+    static Word find(List<Word> words, java.util.function.Predicate<Word> which, String what) {
+        return words.stream()
+                .filter(which)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(
+                        what + " not printed: " + words.stream().map(Word::text).toList()));
+    }
+
+    /** The words on the same baseline as {@code anchor}, left to right: the single-line cells of its table row. */
+    static List<Word> row(List<Word> words, Word anchor) {
+        return words.stream()
+                .filter(w -> Math.abs(baseline(w) - baseline(anchor)) < 1)
+                .sorted(java.util.Comparator.comparingDouble(RetailDocumentsIT::left))
+                .toList();
+    }
+
+    /**
+     * Where the Charged, Paid and Balance figures of a statement row end, in points from the left edge to a tenth of a
+     * point, so two right-aligned figures of different text in one column compare equal.
+     */
+    static List<Float> amountEdges(List<Word> words, Word anchor) {
+        List<Word> cells = row(words, anchor);
+        return cells.subList(cells.size() - 3, cells.size()).stream()
+                .map(w -> Math.round(right(w) * 10) / 10f)
+                .toList();
+    }
+
     /**
      * Issue #893: the widest reference a statement line can carry, a credit note of a branch with a 10-character code of the
      * widest letter (CN + code + '-' + 6 digits, about 48 mm at 9.5pt against 23 mm in the Reference column's 15%), prints
-     * whole on one line and ends before its Description starts.
+     * whole on one line and ends before its Description starts; the Charged, Paid and Balance columns stay exactly where a
+     * statement of short references prints them, inside the right margin. The renamed branch is this test's own: setUp
+     * makes a new tenant with new branches for every test (TestDatabase.tenant).
      */
     @Test
     void theWidestCreditNoteReferencePrintsOnOneLineOfTheStatement() throws Exception {
@@ -1422,24 +1467,29 @@ class RetailDocumentsIT extends IntegrationTest {
                 .update();
         UUID customer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Buyer 05"), DOCS));
         UUID s = creditSale(customer, hq, "2026-10-02", "3");
+        // Before the return (dated the business day, 8 Oct): the sale alone, whose reference fits the 15%.
+        List<Word> baseline = words(statementPdf(customer, "?from=2026-10-01&to=2026-10-07", DOCS));
         String no = takeBack(s, 0, "2", null, "account").get("credit_note_no").asString();
         assertThat(no).isEqualTo("CNWWWWWWWWWW-000001");
         List<Word> printed = words(statementPdf(customer, "?from=2026-10-01&to=2026-10-31", DOCS));
-        Word ref = printed.stream()
-                .filter(w -> w.text().equals(no))
-                .findFirst()
-                .orElseThrow(() -> new AssertionError("not whole on one line: "
-                        + printed.stream().map(Word::text).toList()));
-        org.apache.pdfbox.text.TextPosition end = ref.glyphs().getLast();
-        // The return's line is the only one with "Goods returned (credit note)"; a cell is centred, so a wrapped
-        // Description may sit a little above the reference, never to its left.
-        Word description = printed.stream()
-                .filter(w -> w.text().equals("Goods"))
-                .findFirst()
-                .orElseThrow(() -> new AssertionError("no Description for the return"));
-        assertThat(description.glyphs().getFirst().getXDirAdj())
-                .as("Description starts after the reference ends")
-                .isGreaterThan(end.getXDirAdj() + end.getWidthDirAdj());
+
+        Word ref = find(printed, w -> w.text().equals(no), "the reference whole on one line");
+        // A cell is centred in its row, so a Description wrapped onto two lines starts half a line above the reference.
+        Word description = find(
+                printed,
+                w -> w.text().equals("Goods") && Math.abs(baseline(w) - baseline(ref)) < 10,
+                "the return's Description on the reference's row");
+        assertThat(left(description)).as("Description starts after the reference ends").isGreaterThan(right(ref));
+
+        List<Float> before = amountEdges(baseline, find(baseline, w -> w.text().startsWith("RS"), "the sale"));
+        assertThat(amountEdges(printed, find(printed, w -> w.text().startsWith("RS"), "the sale")))
+                .as("the amount columns do not move")
+                .containsExactlyElementsOf(before);
+        float margin = ref.glyphs().getFirst().getPageWidth() - 15 * 72 / 25.4f;
+        assertThat(amountEdges(printed, ref))
+                .as("the return's amounts end inside the right margin")
+                .allSatisfy(edge -> assertThat(edge).isLessThanOrEqualTo(margin))
+                .containsExactlyElementsOf(before);
     }
 
     // ---- escaping and other scripts --------------------------------------------------------------
