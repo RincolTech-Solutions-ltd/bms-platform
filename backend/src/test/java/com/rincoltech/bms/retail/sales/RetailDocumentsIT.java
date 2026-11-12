@@ -1461,6 +1461,7 @@ class RetailDocumentsIT extends IntegrationTest {
     void theWidestCreditNoteReferencePrintsOnOneLineOfTheStatement() throws Exception {
         capability("customer_accounts", true);
         capability("returns", true);
+        // No restore needed: setUp gives every test a new tenant and new branch ids (TestDatabase.tenant).
         TestDatabase.owner()
                 .sql("UPDATE branches SET code = 'WWWWWWWWWW' WHERE id = ?")
                 .param(hq)
@@ -1481,15 +1482,15 @@ class RetailDocumentsIT extends IntegrationTest {
                 "the return's Description on the reference's row");
         assertThat(left(description)).as("Description starts after the reference ends").isGreaterThan(right(ref));
 
+        // The figures are right-aligned, so a column's place is where its figures end.
         List<Float> before = amountEdges(baseline, find(baseline, w -> w.text().startsWith("RS"), "the sale"));
-        assertThat(amountEdges(printed, find(printed, w -> w.text().startsWith("RS"), "the sale")))
-                .as("the amount columns do not move")
-                .containsExactlyElementsOf(before);
+        List<Float> sale = amountEdges(printed, find(printed, w -> w.text().startsWith("RS"), "the sale"));
+        assertThat(sale).as("the amount columns do not move").containsExactlyElementsOf(before);
         float margin = ref.glyphs().getFirst().getPageWidth() - 15 * 72 / 25.4f;
         assertThat(amountEdges(printed, ref))
-                .as("the return's amounts end inside the right margin")
-                .allSatisfy(edge -> assertThat(edge).isLessThanOrEqualTo(margin))
-                .containsExactlyElementsOf(before);
+                .as("the return's amounts sit in the sale's columns, inside the right margin")
+                .containsExactlyElementsOf(sale)
+                .allSatisfy(edge -> assertThat(edge).isLessThanOrEqualTo(margin));
     }
 
     // ---- escaping and other scripts --------------------------------------------------------------
