@@ -864,7 +864,7 @@ never by a tenant role:
 |---|---|
 | `platform.tenants.read` | List plans and tenants, read one tenant |
 | `platform.tenants.read` (also) | The applications queue and one application with its possible repeats; the outbox counts and failed rows (ADR-024) |
-| `platform.tenants.read` (also) | The platform report of every business's import runs and its CSV (`/platform/imports/report`, issue #140): each business by its slug, never its name; the CSV recorded in the platform audit log |
+| `platform.tenants.read` (also) | The platform report of every business's import runs and its CSV (`/platform/imports/report`, issue #140): each business by its slug, never its name; the JSON (`platform.imports.report_read`, issue #894) and the CSV (`platform.imports.report_exported`) each recorded in the platform audit log |
 | `platform.tenants.manage` | Create tenants, switch modules, move subscriptions, suspend and resume, reset a tenant admin's second factor |
 | `platform.tenants.manage` (also) | Verify, Needs info, Reject and Activate an application; send a failed outbox row again (ADR-024); clear the suppression of an email address after a bounce or complaint (`POST /platform/outbox/unsuppress`, ADR-117 decision 9) |
 

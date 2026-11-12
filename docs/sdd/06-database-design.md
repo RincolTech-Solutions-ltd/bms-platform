@@ -1525,6 +1525,14 @@ approval requests, and hashes `decision_note` and `execution_error` of every app
 whatever its action type, and the `payload` of each but `import_commit`'s; it returns `approvals_cancelled` with its
 counts. No table, column, index or grant changes. Its header names every column the purge keeps readable, with its reason.
 
+Changed by `V151__import_metrics_follow_ups.sql` (issue #894, follow-ups of the review of #888), expand only:
+`import_defects.fix_ref` is held by the CHECK `import_defects_fix_ref_this_repo` (`#123`, a commit hash, or
+`https://github.com/RincolTech-Solutions-ltd/bms-platform/(pull|issues|commit)/<id>`), added NOT VALID, validated, and the
+V148 CHECK `import_defects_fix_ref_check` (any owner and repository) then dropped. Two partial plain indexes for
+`import_run_metrics` and the platform report (chapter 14 section 14.6 gives the cost): `import_rows_excluded
+(tenant_id, batch_id) WHERE excluded_by IS NOT NULL` and `import_issue_resolutions_asked (tenant_id, run_id, code,
+source_row_no) WHERE resolution = 'ask_customer'`. No column, function or grant changes.
+
 ## 6.6 General ledger (RLS)
 
 ### 6.6.1 Tables
