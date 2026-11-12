@@ -64,7 +64,7 @@ class LoanJobs {
      * tenant with every branch named, logged as an error, and Home shows it to the cashier on the list of held fees.
      */
     @Bean
-    RecurringTask<Void> renewalFeesControl(TenantJobs tenantJobs, RenewalFeesControl control) {
+    RecurringTask<Void> renewalFeesControlJob(TenantJobs tenantJobs, RenewalFeesControl control) {
         return Tasks.recurring(RENEWAL_FEES_CONTROL, Schedules.daily(BusinessClock.DEFAULT_ZONE, LocalTime.of(1, 15)))
                 .execute((instance, context) -> tenantJobs.forEachActiveTenantWithModule(
                         RENEWAL_FEES_CONTROL, "lending", tenantId -> control.check()));
