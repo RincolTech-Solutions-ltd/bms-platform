@@ -1751,7 +1751,11 @@ section 4.1; coordinated with #110, which builds no second framework).**
   writes "Removed" (`imports_erase_personal_data`).
 - **The platform report** (`GET /platform/imports/report` and `.../report.csv`, `platform.tenants.read`, on the platform
   host only) reads every business's runs through the definer function `platform_import_runs_report`, which refuses a call
-  bound to a business and names each business by its slug, never its name; the CSV is recorded in the platform audit log.
+  bound to a business and names each business by its slug, never its name; the JSON and the CSV are each recorded in the
+  platform audit log (issue #894, chapter 14 section 14.6, which also gives the report's cost and the V151 indexes).
+- **The fix's reference** (`fix_ref`) is `#123`, a commit hash, or a link to a pull request, issue or commit of
+  `RincolTech-Solutions-ltd/bms-platform` only, so no other owner's name reaches the column or the close's audit row
+  (issue #894; the request pattern `MetricsController.FIX_REF` and the CHECK `import_defects_fix_ref_this_repo` of V151).
 - **Tests.** The golden runs of `retail_v1` (`RetailV1TemplateIT`) and `lending_loans_v1` (`LendingLoansV1TemplateIT`)
   check every figure against the run's tables queried on their own and against the commit's report (`MetricsCheck`);
   `ImportPurgeIT` proves the metrics are the same after the purge and the descriptions hashed; `ImportMetricsIT` logs and

@@ -637,7 +637,8 @@ the code proposed goes in the description (Lead on #888). It is closed once with
 description is hashed with the run's other free text when the run is purged, and a defect logged against a run already
 purged is stored with its description hashed at once. The platform report (`GET /platform/imports/report` and its CSV)
 lists every business's runs with their metrics, for platform operators only, each business by its slug and without its
-own labels (mapping names, mapping sources and source file names left out).
+own labels (mapping names, mapping sources and source file names left out); each read of it, JSON or CSV, is recorded in
+the platform audit log (issue #894). A fix's reference links only into this project's own repository (issue #894).
 
 ## 9. Build plan
 
