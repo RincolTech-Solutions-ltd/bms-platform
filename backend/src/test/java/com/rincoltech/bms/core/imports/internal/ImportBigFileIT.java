@@ -16,8 +16,12 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.io.TempDir;
@@ -60,7 +64,76 @@ import tools.jackson.databind.json.JsonMapper;
         matches = "true",
         disabledReason = "the big file test is run on request: -Dimports.bigfile.run=true")
 @Timeout(value = 100, unit = TimeUnit.MINUTES)
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class ImportBigFileIT extends IntegrationTest {
+
+    // JUSTIFICATION-A3: issue #900 asks why the twice-heap dry run slows before any change: one diagnostic CI run.
+    /** #900 diagnosis (temporary): the plans of slow statements, summarised after each child. */
+    @BeforeAll
+    static void explain() {
+        TestDatabase.explainSlowStatements("250ms");
+    }
+
+    private static int logSeen;
+
+    /** Groups the slow statements logged since the last call by query, and prints the slowest plan of the worst eight. */
+    static void plans(String label) {
+        String log = TestDatabase.serverLog();
+        String fresh = log.substring(Math.min(logSeen, log.length()));
+        logSeen = log.length();
+        record Entry(double ms, String query, String plan) {}
+        List<Entry> entries = new ArrayList<>();
+        Pattern head = Pattern.compile("duration: ([0-9.]+) ms\\s+plan:");
+        String[] lines = fresh.split("\n");
+        for (int i = 0; i < lines.length; i++) {
+            Matcher m = head.matcher(lines[i]);
+            if (!m.find()) {
+                continue;
+            }
+            StringBuilder plan = new StringBuilder();
+            String query = "?";
+            int j = i + 1;
+            for (; j < lines.length && (lines[j].startsWith("\t") || lines[j].startsWith(" ")); j++) {
+                String l = lines[j].strip();
+                if (l.startsWith("Query Text:")) {
+                    query = l.substring(0, Math.min(l.length(), 160));
+                }
+                plan.append("  ").append(lines[j]).append('\n');
+            }
+            entries.add(new Entry(Double.parseDouble(m.group(1)), query, plan.toString()));
+            i = j - 1;
+        }
+        Map<String, List<Entry>> byQuery = new LinkedHashMap<>();
+        entries.forEach(
+                e -> byQuery.computeIfAbsent(e.query(), k -> new ArrayList<>()).add(e));
+        StringBuilder out = new StringBuilder(
+                "IMPORT BIG FILE EXPLAIN " + label + ": " + entries.size() + " statements over 250 ms\n");
+        byQuery.entrySet().stream()
+                .sorted((a, b) -> Double.compare(
+                        b.getValue().stream().mapToDouble(Entry::ms).sum(),
+                        a.getValue().stream().mapToDouble(Entry::ms).sum()))
+                .limit(8)
+                .forEach(g -> {
+                    List<Entry> es = g.getValue();
+                    out.append("EXPLAIN-GROUP n=")
+                            .append(es.size())
+                            .append(" totalMs=")
+                            .append(Math.round(
+                                    es.stream().mapToDouble(Entry::ms).sum()))
+                            .append(" firstMs=")
+                            .append(Math.round(es.getFirst().ms()))
+                            .append(" lastMs=")
+                            .append(Math.round(es.getLast().ms()))
+                            .append(" ")
+                            .append(g.getKey())
+                            .append('\n');
+                    Entry worst = es.stream()
+                            .max((a, b) -> Double.compare(a.ms(), b.ms()))
+                            .orElseThrow();
+                    worst.plan().lines().limit(45).forEach(l -> out.append(l).append('\n'));
+                });
+        System.out.println(out);
+    }
 
     static final int ROW_LIMIT = 100_000;
 
@@ -88,8 +161,7 @@ class ImportBigFileIT extends IntegrationTest {
     Path dir;
 
     @Test
-    @Disabled("#900: at 100,000 rows the dry run (77 s) and the commit (64 s) fit their limits, but the commit fills"
-            + " the old generation of the staging heap (149 of 149 MB)")
+    @Order(2)
     void aCsvAtTheRowAndSizeLimitsIsCommittedOnTheStagingHeapInsideTheBatchTimeout() throws Exception {
         String output = child("commit", "items=" + limitsCsv(), STAGING_HEAP_MB, ROW_LIMIT);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "outcome=COMMITTED");
@@ -104,8 +176,7 @@ class ImportBigFileIT extends IntegrationTest {
      * inside the batch timeout, and the times of every step are printed for chapter 15. The heap is not judged here.
      */
     @Test
-    @Disabled("#900: in a database other businesses' imports already fill, the key lookups of a batch at 100,000 rows"
-            + " still grow with its rows, and the dry run stops at its 900 s limit")
+    @Order(1)
     void aCsvAtTheRowAndSizeLimitsIsCommittedInsideTheBatchTimeoutOnTwiceTheStagingHeap() throws Exception {
         String output = child("commit", "items=" + limitsCsv(), 2 * STAGING_HEAP_MB, ROW_LIMIT);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "outcome=COMMITTED");
@@ -116,6 +187,7 @@ class ImportBigFileIT extends IntegrationTest {
     }
 
     @Test
+    @Disabled("#900 diagnostic run (temporary)")
     void aWorkbookAtTheRowLimitIsValidatedAndPreviewedOnTheStagingHeap() throws Exception {
         Path xlsx = dir.resolve("fab-items-at-the-row-limit.xlsx");
         TestFiles.writeXlsx(xlsx, ITEM_HEADER, items(ROW_LIMIT, 0));
@@ -124,6 +196,7 @@ class ImportBigFileIT extends IntegrationTest {
     }
 
     @Test
+    @Disabled("#900 diagnostic run (temporary)")
     void aCsvAtTheColumnLimitIsCommittedOnTheStagingHeap() throws Exception {
         String output = child(
                 "commit",
@@ -140,6 +213,7 @@ class ImportBigFileIT extends IntegrationTest {
      * timed (#880: these fit; the commit at that size does not yet, #900, so the configured limit is lower).
      */
     @Test
+    @Disabled("#900 diagnostic run (temporary)")
     void aCsvAtTheRowAndSizeLimitsIsUploadedValidatedAndPreviewedOnTheStagingHeap() throws Exception {
         String output = child("preview", "items=" + limitsCsv(), STAGING_HEAP_MB, ROW_LIMIT);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "step=preview");
@@ -152,6 +226,7 @@ class ImportBigFileIT extends IntegrationTest {
      * 15.7): the configured limit is the largest of these sizes that passes with a tenth of the old generation to spare.
      */
     @ParameterizedTest(name = "{0} rows")
+    @Disabled("#900 diagnostic run (temporary)")
     @MethodSource("sizesUpToTheConfiguredLimit")
     void aProductMasterIsCommittedOnTheStagingHeapInsideTheTimeLimits(int rows) throws Exception {
         Path csv = dir.resolve("fab-items-" + rows + ".csv");
@@ -170,6 +245,7 @@ class ImportBigFileIT extends IntegrationTest {
 
     /** One row over the configured limit is refused at the upload with TOO_MANY_ROWS, in the child at that limit. */
     @Test
+    @Disabled("#900 diagnostic run (temporary)")
     void oneRowOverTheConfiguredLimitIsRefused() throws Exception {
         Path csv = dir.resolve("fab-items-over-the-limit.csv");
         TestFiles.writeCsv(csv, ITEM_HEADER, items(UploadSettings.DEFAULT_MAX_ROWS + 1, 0));
@@ -339,6 +415,7 @@ class ImportBigFileIT extends IntegrationTest {
         String lines = output.lines().filter(l -> l.startsWith("BIGFILE ")).reduce("", (a, b) -> a + b + "\n");
         System.out.println("IMPORT BIG FILE " + bigFile.substring(bigFile.lastIndexOf('/') + 1) + " heap " + heapMb
                 + " MB\n" + lines);
+        plans(bigFile.substring(bigFile.lastIndexOf('/') + 1) + " heap " + heapMb + " MB");
         assertThat(finished)
                 .as("the child finished within %s minutes: %s", CHILD_LIMIT_MINUTES, lines)
                 .isTrue();

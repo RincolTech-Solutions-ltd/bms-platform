@@ -95,6 +95,29 @@ public final class TestDatabase {
         return "jdbc:postgresql://" + POSTGRES.getHost() + ":" + POSTGRES.getMappedPort(5432) + "/" + database;
     }
 
+    // JUSTIFICATION-A3: issue #900 asks why the dry run slows before any change: the plans of one CI run, then removed.
+    /**
+     * #900 diagnosis (temporary): every new {@code bms_app} session logs the plan, with its row counts, of each statement
+     * slower than {@code minDuration}, to the server's log ({@link #serverLog()}).
+     */
+    public static void explainSlowStatements(String minDuration) {
+        JdbcClient su = superuser(POSTGRES.getDatabaseName());
+        su.sql("LOAD 'auto_explain'").update();
+        su.sql("ALTER ROLE bms_app SET session_preload_libraries = 'auto_explain'")
+                .update();
+        su.sql("ALTER ROLE bms_app SET auto_explain.log_min_duration = '" + minDuration + "'")
+                .update();
+        su.sql("ALTER ROLE bms_app SET auto_explain.log_nested_statements = on").update();
+        su.sql("ALTER ROLE bms_app SET auto_explain.log_analyze = on").update();
+        su.sql("ALTER ROLE bms_app SET auto_explain.log_timing = off").update();
+        su.sql("ALTER ROLE bms_app SET auto_explain.log_buffers = on").update();
+    }
+
+    /** #900 diagnosis (temporary): the database server's log so far. */
+    public static String serverLog() {
+        return POSTGRES.getLogs();
+    }
+
     private static JdbcClient superuser(String database) {
         return JdbcClient.create(
                 new DriverManagerDataSource(urlOf(database), POSTGRES.getUsername(), POSTGRES.getPassword()));

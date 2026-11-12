@@ -84,6 +84,7 @@ public final class ImportBigFileMain {
             System.out.println("BIGFILE oldBaselineMb=" + oldUsed() / 1024 / 1024);
             ManagementFactory.getMemoryPoolMXBeans().forEach(MemoryPoolMXBean::resetPeakUsage);
             gcBefore = gcMillis();
+            diagnose(Thread.currentThread());
             ok = run(ctx, tenant, slug, document, commit, args);
             System.out.println("BIGFILE maxHeapMb=" + Runtime.getRuntime().maxMemory() / 1024 / 1024 + " oldPeakMb="
                     + Math.max(worst, oldPeak()) / 1024 / 1024 + " oldMaxMb=" + oldMax() / 1024 / 1024 + " gcMs="
@@ -157,6 +158,7 @@ public final class ImportBigFileMain {
         ImportRuns.DryRun dry = as(tenant, () -> runs.dryRun(runId, operator));
         System.out.println("BIGFILE step=dry_run ms=" + millis(started) + " failure="
                 + dry.report().failure() + " previewMatches=" + dry.previewMatches() + heap());
+        histogram(12);
         if (dry.report().failure() != null || !dry.previewMatches()) {
             return false;
         }
@@ -196,6 +198,7 @@ public final class ImportBigFileMain {
                                 .single()));
         System.out.println("BIGFILE step=commit ms=" + commitMs + " outcome=" + outcome + " written=" + written
                 + " failure=" + real.failure() + " batchCommitMs=" + batchMs + heap());
+        histogram(12);
         return outcome == ImportRuns.CommitOutcome.COMMITTED && real.failure() == null;
     }
 
@@ -243,6 +246,89 @@ public final class ImportBigFileMain {
         String out = " stepOldPeakMb=" + peak / 1024 / 1024 + " stepGcMs=" + (gc - gcBefore);
         gcBefore = gc;
         return out;
+    }
+
+    // JUSTIFICATION-A3: issue #900 asks why before any change: a diagnostic of one CI run, removed before review.
+    /**
+     * #900 diagnosis (temporary): when the old generation after a collection passes 80, 90 and 97 percent of its limit,
+     * prints the live class histogram's top and where the importing thread is; and once a minute where it is.
+     */
+    private static void diagnose(Thread main) {
+        MemoryPoolMXBean old = old();
+        long max = old.getUsage().getMax();
+        long[] levels = {max * 80 / 100, max * 90 / 100, max * 97 / 100};
+        int[] next = {0};
+        old.setCollectionUsageThreshold(levels[0]);
+        javax.management.NotificationEmitter emitter =
+                (javax.management.NotificationEmitter) ManagementFactory.getMemoryMXBean();
+        emitter.addNotificationListener(
+                (n, h) -> {
+                    if (!java.lang.management.MemoryNotificationInfo.MEMORY_COLLECTION_THRESHOLD_EXCEEDED.equals(
+                            n.getType())) {
+                        return;
+                    }
+                    synchronized (levels) {
+                        if (next[0] >= levels.length) {
+                            return;
+                        }
+                        System.out.println("BIGFILE diag threshold oldUsedMb=" + oldUsed() / 1024 / 1024 + " at "
+                                + where(main, 14));
+                        histogram(30);
+                        next[0]++;
+                        if (next[0] < levels.length) {
+                            old.setCollectionUsageThreshold(levels[next[0]]);
+                        }
+                    }
+                },
+                null,
+                null);
+        long start = System.nanoTime();
+        Thread ticker = new Thread(() -> {
+            while (true) {
+                try {
+                    Thread.sleep(60_000);
+                } catch (InterruptedException e) {
+                    return;
+                }
+                System.out.println("BIGFILE diag tick s=" + millis(start) / 1000 + " oldUsedMb="
+                        + oldUsed() / 1024 / 1024 + " gcMs=" + gcMillis() + " at " + where(main, 5));
+            }
+        });
+        ticker.setDaemon(true);
+        ticker.start();
+    }
+
+    private static String where(Thread main, int frames) {
+        StringBuilder out = new StringBuilder();
+        int n = 0;
+        StackTraceElement[] stack = main.getStackTrace();
+        for (int i = 0; i < stack.length && n < frames; i++) {
+            StackTraceElement f = stack[i];
+            if (i < 3 || f.getClassName().startsWith("com.rincoltech")) {
+                out.append(f.getClassName().substring(f.getClassName().lastIndexOf('.') + 1))
+                        .append('.')
+                        .append(f.getMethodName())
+                        .append(':')
+                        .append(f.getLineNumber())
+                        .append(" < ");
+                n++;
+            }
+        }
+        return out.toString();
+    }
+
+    private static void histogram(int lines) {
+        try {
+            String h = (String) ManagementFactory.getPlatformMBeanServer()
+                    .invoke(
+                            new javax.management.ObjectName("com.sun.management:type=DiagnosticCommand"),
+                            "gcClassHistogram",
+                            new Object[] {new String[0]},
+                            new String[] {String[].class.getName()});
+            h.lines().limit(lines + 3).forEach(l -> System.out.println("BIGFILE diag hist " + l));
+        } catch (Exception e) {
+            System.out.println("BIGFILE diag hist failed " + e);
+        }
     }
 
     private static long gcMillis() {
