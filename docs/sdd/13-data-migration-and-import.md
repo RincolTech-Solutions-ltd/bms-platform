@@ -1607,8 +1607,11 @@ section 4.1; coordinated with #110, which builds no second framework).**
     finds it held waits at most 2 s, keeps the statistics it has and goes on. A dry run rolls the statistics back.
   - *The reconciliation after the commit* read every item the batch had just written as product objects and a copied
     map of costs (the dry run reads the catalogue before the batch, so it never did), and filled the staging heap's old
-    generation at 100,000 items. The forecast now reads the costs a row at a time into compact keys
-    (`RetailV1Template.heldCosts`).
+    generation at 100,000 items. The forecast now reads the costs into compact keys sized at once
+    (`RetailV1Template.heldCosts`), the run's `import_refs` and the costs are read 1,000 rows at a time (a fetch size,
+    so pgjdbc never holds the whole result), each row is typed once for every forecast it is given, and `CompactKeys`
+    starts small, since the reconciliation makes a forecast for each row. The big file test's storage double keeps the
+    quarantined file on disk, as staging keeps it in R2, so the heap it judges is the API's (chapter 12 section 12.7).
 
   #881 (a restock's price change looked for within its batch only, so splitting the restocks over two runs lost it) is
   fixed: see the restock price changes in section 13.13's table.
