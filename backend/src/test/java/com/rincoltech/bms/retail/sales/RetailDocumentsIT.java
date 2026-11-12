@@ -1881,6 +1881,72 @@ class RetailDocumentsIT extends IntegrationTest {
         assertThat(screen.get("closing_minor").asLong()).isEqualTo(500);
     }
 
+    // JUSTIFICATION-A3: issue #915 needs a statement with all three delivery fee lines; this class has no order helper.
+    /** A customer order of the buyer delivered today on credit with its delivery fee left on the account. */
+    JsonNode deliveredWithFeeOnAccount(UUID customer, long fee) {
+        String orders = DOCS + ",retail.order.manage";
+        Map<String, Object> b = new LinkedHashMap<>();
+        b.put("branch_id", hq);
+        b.put("source", "phone");
+        b.put("customer_id", customer);
+        b.put("customer_name", "Test Buyer 05");
+        b.put("customer_phone", "+256700000005");
+        b.put("delivery_place", "Test Place, Plot 5");
+        b.put("delivery_date", TODAY);
+        b.put("delivery_fee_minor", fee);
+        b.put("lines", List.of(Map.of("product_id", product, "qty", "1")));
+        ResponseEntity<JsonNode> placed = api.postKeyed("/orders", b, orders, "*", UUID.randomUUID().toString());
+        assertThat(placed.getStatusCode()).as("%s", placed.getBody()).isEqualTo(HttpStatus.CREATED);
+        Map<String, Object> pay = new LinkedHashMap<>();
+        pay.put("payment_method", "credit");
+        pay.put("fee_on_account", true);
+        UUID order = RetailTestSupport.id(placed);
+        ResponseEntity<JsonNode> done =
+                api.postKeyed("/orders/" + order + "/deliver", pay, orders, "*", UUID.randomUUID().toString());
+        assertThat(done.getStatusCode()).as("%s", done.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(done.getBody().get("order").get("fee_method").asString()).isEqualTo("account");
+        return done.getBody();
+    }
+
+    /**
+     * Issue #915: the three delivery fee lines of a statement print in words (the fee on the account, its payment with
+     * the method, its reversal with a voided sale), never as the kind code or the neutral fallback.
+     */
+    @Test
+    void theStatementPrintsDeliveryFeeLinesInWords() throws Exception {
+        capability("customer_accounts", true);
+        UUID customer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Buyer 05"), DOCS));
+        String paidLater = deliveredWithFeeOnAccount(customer, 700).get("order").get("id").asString();
+        assertThat(api.postKeyed(
+                                "/orders/" + paidLater + "/fee-payment",
+                                Map.of("method", "mobile_money"),
+                                DOCS,
+                                "*",
+                                UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        String sale = deliveredWithFeeOnAccount(customer, 900).get("sale_id").asString();
+        assertThat(api.post("/sales/" + sale + "/void", Map.of("reason", "Wrong buyer"), DOCS)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+        String range = "?from=2026-10-01&to=2028-06-30";
+        JsonNode screen = api.get("/customers/" + customer + "/statement" + range, DOCS).getBody();
+        List<String> kinds = new ArrayList<>();
+        for (JsonNode l : screen.get("lines")) {
+            kinds.add(l.get("kind").asString());
+        }
+        assertThat(kinds).contains("delivery_fee", "delivery_fee_paid", "delivery_fee_void");
+        // A description may wrap inside its column, so the words are matched with the line breaks made spaces.
+        String printed = text(statementPdf(customer, range, DOCS)).replaceAll("\\s+", " ");
+        assertThat(printed)
+                .contains(
+                        "Delivery fee on the account",
+                        "Delivery fee paid (Mobile money)",
+                        "Delivery fee voided with the sale");
+        assertThat(printed).doesNotContain("delivery_fee", "mobile_money", "Account entry");
+    }
+
     // JUSTIFICATION-A3: the second review follow-up cases of the same new test class (inert markup on all five PDFs,
     // other tenant,
     // the facts of a credit note after a void, a void that lands while a PDF is being recorded).

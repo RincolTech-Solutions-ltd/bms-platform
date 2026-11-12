@@ -15,6 +15,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
@@ -26,6 +28,7 @@ import org.springframework.stereotype.Component;
 @Component
 class DocumentModels {
 
+    private static final Logger log = LoggerFactory.getLogger(DocumentModels.class);
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.ENGLISH);
     private static final Map<String, String> METHODS = Map.of(
             "cash", "Cash",
@@ -420,7 +423,16 @@ class DocumentModels {
             case "return" -> "Goods returned (credit note)";
             case "return_void" -> "Credit note voided";
             case "write_off" -> "Written off as a loss";
-            default -> l.kind();
+            // A customer order's delivery fee left on the account (issue #385): charged on delivery, paid later, or
+            // reversed when its sale is voided while it is unpaid (AccountsRepository.movements).
+            case "delivery_fee" -> "Delivery fee on the account";
+            case "delivery_fee_paid" -> "Delivery fee paid" + method;
+            case "delivery_fee_void" -> "Delivery fee voided with the sale";
+            default -> {
+                // A kind the statement query gained without words here: never print the code to a customer (#915).
+                log.warn("Statement line kind {} has no words on the PDF", l.kind());
+                yield "Account entry";
+            }
         };
     }
 
