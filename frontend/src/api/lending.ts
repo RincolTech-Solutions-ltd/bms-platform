@@ -193,6 +193,11 @@ export const lending = {
     return { executed: executed(outcome, result.response.status), outcome };
   },
 
+  /** Review of #919: the cashier's list of loans holding a renewal fee to hand back, oldest first. */
+  async heldRenewalFees(branchIds?: string[]): Promise<S['HeldRenewalFees']> {
+    return unwrap(await api.GET('/api/v1/lending/renewal-fees/held', { params: { query: { branch_id: branchIds } } }));
+  },
+
   /** Review of #919: give back a renewal fee the loan holds because no renewal used it; a receipt like a repayment's. */
   async refundRenewalFee(id: string, body: S['RenewalFeeRefundRequest'], idempotencyKey: string): Promise<RepaymentResult> {
     return unwrap(

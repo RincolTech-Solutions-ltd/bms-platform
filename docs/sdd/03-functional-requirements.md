@@ -396,7 +396,7 @@ retail.
 | FR-GL-07 | The system shall produce a trial balance for any date range and branch selection, per chapter 14. | Total debits equal total credits for every branch and for the consolidated view. | MVP |
 | FR-GL-08 | A tenant admin shall map each payment method (cash, bank, MTN mobile money, Airtel mobile money, payment gateway) to a GL asset account, per branch where needed. | A repayment by a method with no mapping is refused (`payment_method_unmapped`). | MVP |
 | FR-GL-09 | The system shall post opening balances for an imported book against the opening balance equity account (chapter 13). | The import commit posts one opening entry per branch. | MVP |
-| FR-GL-10 | A nightly job shall reconcile each subledger to its control account per branch (loans receivable, member savings, investments payable, member overpayments) and raise an alert to tenant admins and accountants on any difference. | A seeded mismatch produces an alert naming the account, branch and difference. | MVP |
+| FR-GL-10 | A nightly job shall reconcile each subledger to its control account per branch (loans receivable, member savings, investments payable, member overpayments, renewal fees held since issue #918) and raise an alert to tenant admins and accountants on any difference. | A seeded mismatch produces an alert naming the account, branch and difference. | MVP |
 
 ## 3.11 Notifications (NTF)
 

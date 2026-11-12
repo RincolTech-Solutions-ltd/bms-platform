@@ -1,5 +1,6 @@
 package com.rincoltech.bms.lending.loans.internal;
 
+import com.rincoltech.bms.core.approvals.Approvals;
 import com.rincoltech.bms.core.operations.Idempotency;
 import com.rincoltech.bms.core.operations.Idempotency.Outcome;
 import com.rincoltech.bms.kernel.ApiException;
@@ -8,6 +9,7 @@ import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.lending.loans.internal.LoanRepository.Loan;
 import com.rincoltech.bms.lending.loans.internal.RenewalApi.FeeRefundRequest;
 import com.rincoltech.bms.lending.loans.internal.ServicingApi.RepaymentResult;
+import java.time.LocalDate;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -29,6 +31,7 @@ class RenewalFeeRefunds {
     private final RenewalFees fees;
     private final LoanServicer servicer;
     private final Idempotency idempotency;
+    private final Approvals approvals;
 
     RenewalFeeRefunds(
             LoanRepository loans,
@@ -36,7 +39,9 @@ class RenewalFeeRefunds {
             RenewalRepository renewals,
             RenewalFees fees,
             LoanServicer servicer,
-            Idempotency idempotency) {
+            Idempotency idempotency,
+            Approvals approvals) {
+        this.approvals = approvals;
         this.loans = loans;
         this.repo = repo;
         this.renewals = renewals;
@@ -55,7 +60,9 @@ class RenewalFeeRefunds {
                             .orElseThrow(ApiException::notFound);
                     // What is held is the loan's renewal fee transactions only (RenewalFees.held), never its credit
                     // balance; a loan paid off after a rejected renewal still holds the fee until it is handed back.
-                    LoanServicer.requireStatus(loan, Set.of("active", "closed"));
+                    // A written-off loan can hold one too: it is handed back all the same, so 2050 is never stranded.
+                    LoanServicer.requireStatus(loan, Set.of("active", "closed", "written_off"));
+                    approvals.expireOverdue(RenewalAction.TYPE, id);
                     if (renewals.pending(id).isPresent()) {
                         throw new ApiException(
                                 HttpStatus.CONFLICT,
@@ -65,6 +72,14 @@ class RenewalFeeRefunds {
                     }
                     if (r.valueDate().isAfter(servicer.today())) {
                         throw ApiException.rule("value_date_in_future", "The date is today or earlier.");
+                    }
+                    // Never before the fee was taken, so renewal fees held is never negative on any date (review of
+                    // #919);
+                    // a closed period is refused by the ledger (period_closed) as for a repayment.
+                    LocalDate taken = fees.lastHeldOn(id);
+                    if (taken != null && r.valueDate().isBefore(taken)) {
+                        throw ApiException.rule(
+                                "before_fee_taken", "The date is before the renewal fee was taken (" + taken + ").");
                     }
                     UUID txn = fees.refund(
                             loan,

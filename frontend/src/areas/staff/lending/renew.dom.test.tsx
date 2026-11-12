@@ -143,10 +143,11 @@ describe('Renew', () => {
     expect(screen.queryByRole('button', { name: 'Renew' })).toBeNull();
   });
 
+  const holding = (pending: string | null): Loan => ({ ...loan, renewal: { renewal_no: 0, fee_held_minor: 20_000, pending_approval_id: pending ?? undefined } });
+
   it('asks the cashier to hand back a fee no renewal used, once', async () => {
-    lend.listTransactions.mockResolvedValue([{ id: 't1', txn_type: 'renewal_fee_held', amount_minor: 20_000, currency: 'UGX', value_date: '2026-11-12' }]);
     lend.refundRenewalFee.mockResolvedValue({ transaction_id: 't2' });
-    shell(CASHIER);
+    shell(CASHIER, holding(null));
     const task = await screen.findByRole('region', { name: 'Hand back the renewal fee' });
     expect(task.textContent).toContain('Hand back UGX 20,000 to the member');
     fireEvent.click(screen.getByRole('button', { name: 'Hand back UGX 20,000' }));
@@ -154,13 +155,15 @@ describe('Renew', () => {
     expect(lend.refundRenewalFee.mock.calls[0]?.[1]).toMatchObject({ payment_method_key: 'cash' });
   });
 
-  it('shows no hand-back task once the fee was handed back', async () => {
-    lend.listTransactions.mockResolvedValue([
-      { id: 't1', txn_type: 'renewal_fee_held', amount_minor: 20_000, currency: 'UGX', value_date: '2026-11-12' },
-      { id: 't2', txn_type: 'renewal_fee_refund', amount_minor: 20_000, currency: 'UGX', value_date: '2026-11-12' },
-    ]);
-    shell(CASHIER);
-    expect(await screen.findByText('Renewal fee handed back')).toBeTruthy();
+  it('shows no hand-back task while a renewal waits, since that renewal uses the fee', async () => {
+    shell(CASHIER, holding('44444444-4444-4444-8444-444444444444'));
+    expect(await screen.findByRole('button', { name: 'Renew' })).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Hand back the renewal fee' })).toBeNull();
+  });
+
+  it('shows no hand-back task to someone who may not take money', async () => {
+    shell(['lending.loans.read', 'lending.loans.renew_request'], holding(null));
+    expect(await screen.findByRole('button', { name: 'Renew' })).toBeTruthy();
     expect(screen.queryByRole('region', { name: 'Hand back the renewal fee' })).toBeNull();
   });
 });

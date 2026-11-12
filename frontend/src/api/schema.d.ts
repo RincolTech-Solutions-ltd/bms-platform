@@ -2793,6 +2793,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/lending/renewal-fees/held": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Loans holding a renewal fee to hand back to the member, oldest first (issue #918) */
+        get: operations["listHeldRenewalFees"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/lending/savings-accounts": {
         parameters: {
             query?: never;
@@ -10882,6 +10899,31 @@ export interface components {
             code: string;
             name: string;
         };
+        HeldRenewalFee: {
+            /** Format: uuid */
+            branch_id?: string;
+            currency?: string;
+            /**
+             * Format: int64
+             * @description What the loan holds: taken and neither made income nor handed back
+             */
+            held_minor?: number;
+            /** Format: uuid */
+            loan_id?: string;
+            loan_no?: string;
+            loan_status?: string;
+            member_no?: string;
+            /**
+             * Format: date
+             * @description When the fee was last taken
+             */
+            taken_on?: string;
+        };
+        HeldRenewalFees: {
+            items?: components["schemas"]["HeldRenewalFee"][];
+            /** @description More loans hold a fee than the list shows (it shows the oldest 200) */
+            more?: boolean;
+        };
         HostnameCheck: {
             /** @description The business's own host, from the slug and the tenant host pattern */
             host?: string;
@@ -12933,6 +12975,16 @@ export interface components {
         };
         /** @description Issue #918: the loans before and after this one in its renewals */
         LoanRenewalLinks: {
+            /**
+             * Format: int64
+             * @description The renewal fee the loan holds, taken and neither made income nor handed back; 0 when none
+             */
+            fee_held_minor?: number;
+            /**
+             * Format: uuid
+             * @description The renewal request of this loan waiting for a checker, null when none (review of #919)
+             */
+            pending_approval_id?: string;
             /**
              * Format: int32
              * @description 0 for a loan that is no renewal
@@ -28560,6 +28612,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NextOfKin"];
+                };
+            };
+        };
+    };
+    listHeldRenewalFees: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HeldRenewalFees"];
                 };
             };
         };

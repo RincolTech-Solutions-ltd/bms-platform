@@ -134,11 +134,27 @@ final class RenewalApi {
             String renewedFromLoanNo,
             UUID renewedToLoanId,
             String renewedToLoanNo,
-            LocalDate renewedOn) {
+            LocalDate renewedOn,
 
-        /** The links of a loan for its page; null for a loan that is no renewal and was never renewed. */
+            @Schema(
+                    description =
+                            "The renewal request of this loan waiting for a checker, null when none (review of #919)")
+            UUID pendingApprovalId,
+
+            @Schema(
+                    description =
+                            "The renewal fee the loan holds, taken and neither made income nor handed back; 0 when none")
+            long feeHeldMinor) {
+
+        /**
+         * The links of a loan for its page; null for a loan that is no renewal, was never renewed, has no renewal waiting
+         * and holds no renewal fee.
+         */
         static Links of(RenewalRepository.Links l) {
-            if (l.renewedFromLoanId() == null && l.renewedToLoanId() == null) {
+            if (l.renewedFromLoanId() == null
+                    && l.renewedToLoanId() == null
+                    && l.pendingApprovalId() == null
+                    && l.feeHeldMinor() == 0) {
                 return null;
             }
             return new Links(
@@ -147,7 +163,9 @@ final class RenewalApi {
                     l.renewedFromLoanNo(),
                     l.renewedToLoanId(),
                     l.renewedToLoanNo(),
-                    l.renewedOn());
+                    l.renewedOn(),
+                    l.pendingApprovalId(),
+                    l.feeHeldMinor());
         }
     }
 }

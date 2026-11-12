@@ -201,6 +201,23 @@ SELECT bms_seed_lending_chart(t.id)
   FROM tenants t
  WHERE EXISTS (SELECT 1 FROM gl_accounts a WHERE a.tenant_id = t.id AND a.system_key = 'loans_receivable');
 
+-- The seed skips a code a business already uses (ON CONFLICT DO NOTHING). A business that made its own account 2050 would be
+-- left without renewal_fees_held and its first renewal fee would fail, so the migration stops here instead and names it
+-- (review of #919). No chart seed before this one has a 2050, and a business's own accounts are under its own codes.
+DO $$
+DECLARE
+    v_missing text;
+BEGIN
+    SELECT string_agg(t.slug, ', ' ORDER BY t.slug) INTO v_missing
+      FROM tenants t
+     WHERE EXISTS (SELECT 1 FROM gl_accounts a WHERE a.tenant_id = t.id AND a.system_key = 'loans_receivable')
+       AND NOT EXISTS (SELECT 1 FROM gl_accounts a WHERE a.tenant_id = t.id AND a.system_key = 'renewal_fees_held');
+    IF v_missing IS NOT NULL THEN
+        RAISE EXCEPTION 'V152: no renewal_fees_held account for %; code 2050 is taken, free it and migrate again', v_missing;
+    END IF;
+END
+$$;
+
 DO $$
 BEGIN
     IF NOT (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user) THEN

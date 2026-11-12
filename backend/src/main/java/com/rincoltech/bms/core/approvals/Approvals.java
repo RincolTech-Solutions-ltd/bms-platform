@@ -30,6 +30,13 @@ public interface Approvals {
     boolean markStale(String actionType, java.util.UUID subjectId, String note);
 
     /**
+     * Issue #918: ends the request of this action still pending on this subject whose expiry has passed as {@code expired}
+     * now, as the nightly run would (FR-APR-07), so a module that allows one request per subject can take a new one before
+     * that run. Returns whether one was ended.
+     */
+    boolean expireOverdue(String actionType, java.util.UUID subjectId);
+
+    /**
      * Issue #819 (ADR-124): the branch of a request of this action still pending whose payload's top-level {@code field} is
      * {@code value}, in the caller's transaction; empty when there is none. A module asks it only of its own action type
      * (an expense waiting for an administrator names its receipt photo in its payload).

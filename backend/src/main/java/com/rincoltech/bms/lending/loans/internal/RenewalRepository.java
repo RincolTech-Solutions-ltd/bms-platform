@@ -40,12 +40,23 @@ class RenewalRepository {
             UUID renewedToLoanId,
             String renewedToLoanNo,
             LocalDate renewedOn,
-            String restructureKind) {}
+            String restructureKind,
+            UUID pendingApprovalId,
+            long feeHeldMinor) {}
 
+    /** The loan's links, with the renewal request waiting on it and the renewal fee it holds (review of #919). */
     Links links(UUID loanId) {
         return jdbc.sql("""
                         SELECT l.renewal_no, l.restructured_from_loan_id, f.loan_no AS from_no,
-                               l.restructured_to_loan_id, t.loan_no AS to_no, l.restructured_on, l.restructure_kind
+                               l.restructured_to_loan_id, t.loan_no AS to_no, l.restructured_on, l.restructure_kind,
+                               (SELECT a.id FROM approval_requests a
+                                 WHERE a.subject_id = l.id AND a.action_type = 'loan_renewal' AND a.status = 'pending'
+                                   AND a.expires_at > now() LIMIT 1) AS pending_id,
+                               (SELECT coalesce(sum(CASE WHEN x.txn_type = 'renewal_fee_held' THEN x.amount_minor
+                                                         ELSE -x.amount_minor END), 0)
+                                  FROM lending_loan_transactions x
+                                 WHERE x.loan_id = l.id
+                                   AND x.txn_type IN ('renewal_fee_held', 'renewal_fee', 'renewal_fee_refund')) AS held
                           FROM lending_loans l
                           LEFT JOIN lending_loans f ON f.id = l.restructured_from_loan_id
                           LEFT JOIN lending_loans t ON t.id = l.restructured_to_loan_id
@@ -59,7 +70,9 @@ class RenewalRepository {
                         rs.getObject("restructured_to_loan_id", UUID.class),
                         rs.getString("to_no"),
                         rs.getObject("restructured_on", LocalDate.class),
-                        rs.getString("restructure_kind")))
+                        rs.getString("restructure_kind"),
+                        rs.getObject("pending_id", UUID.class),
+                        rs.getLong("held")))
                 .single();
     }
 

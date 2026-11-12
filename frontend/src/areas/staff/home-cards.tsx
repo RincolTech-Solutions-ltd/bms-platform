@@ -9,7 +9,8 @@ import { ALL_BRANCHES, branchFilter } from '../../auth/branch';
 import { icons } from '../../components/icons';
 import { useStaff } from './context';
 import { money as lendingMoney } from './lending/loan-state';
-import { showLending } from './lending/permissions';
+import { mayDo, showLending } from './lending/permissions';
+import { HeldFeesCard } from './lending/held-fees-card';
 import { ALL_SELLERS, branchesWhere, canUse, holds, holdsAt, recordsSalesOffline, showRetail } from './retail/permissions';
 import { RetailAdvisorCard, canUseRetailAdvisor } from './retail/advisor-card';
 import { shortDate } from './retail/range-state';
@@ -340,6 +341,7 @@ export function HomeCards() {
       {brief && <RetailAdvisorCard />}
       {shop && <ShopCards parts={parts} />}
       {lendingCard && <LendingCard parts={parts} />}
+      {parts.loans && mayDo(me, 'repay') && branch !== null && <HeldFeesCard branchIds={branchFilter(branch)} />}
     </section>
   );
 }

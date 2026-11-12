@@ -326,6 +326,9 @@ class RenewalService {
             Loan loan = loans.lock(id)
                     .filter(l -> principal.may(REQUEST_PERMISSION, l.branchId()))
                     .orElseThrow(ApiException::notFound);
+            // A lapsed request still marked pending until the nightly run ends now, so it neither blocks this one
+            // (approval_requests_one_pending) nor can be approved (review of #919).
+            approvals.expireOverdue(RenewalAction.TYPE, id);
             if (renewals.pending(id).isPresent()) {
                 throw new ApiException(
                         HttpStatus.CONFLICT,
@@ -352,10 +355,10 @@ class RenewalService {
                     throw ApiException.validation(List.of(new ApiException.FieldProblem(
                             "payment_method_key", "required", "Required when money is collected.")));
                 }
-                books.methodAccount(r.paymentMethodKey(), loan.branchId());
+                // The fee alone is money across the counter too: the same checks as a repayment (review of #919).
+                servicer.checkRepayable(loan, r.valueDate(), r.paymentMethodKey());
             }
             if (collect > 0) {
-                servicer.checkRepayable(loan, r.valueDate(), r.paymentMethodKey());
                 receiptTxn = servicer.repay(
                         loan,
                         collect,

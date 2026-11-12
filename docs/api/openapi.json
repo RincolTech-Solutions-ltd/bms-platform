@@ -3418,6 +3418,54 @@
         },
         "required" : [ "code", "name" ]
       },
+      "HeldRenewalFee" : {
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "held_minor" : {
+            "description" : "What the loan holds: taken and neither made income nor handed back",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "loan_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "loan_no" : {
+            "type" : "string"
+          },
+          "loan_status" : {
+            "type" : "string"
+          },
+          "member_no" : {
+            "type" : "string"
+          },
+          "taken_on" : {
+            "description" : "When the fee was last taken",
+            "format" : "date",
+            "type" : "string"
+          }
+        }
+      },
+      "HeldRenewalFees" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/HeldRenewalFee"
+            },
+            "type" : "array"
+          },
+          "more" : {
+            "description" : "More loans hold a fee than the list shows (it shows the oldest 200)",
+            "type" : "boolean"
+          }
+        }
+      },
       "HostnameCheck" : {
         "properties" : {
           "host" : {
@@ -8069,6 +8117,16 @@
       "LoanRenewalLinks" : {
         "description" : "Issue #918: the loans before and after this one in its renewals",
         "properties" : {
+          "fee_held_minor" : {
+            "description" : "The renewal fee the loan holds, taken and neither made income nor handed back; 0 when none",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "pending_approval_id" : {
+            "description" : "The renewal request of this loan waiting for a checker, null when none (review of #919)",
+            "format" : "uuid",
+            "type" : "string"
+          },
           "renewal_no" : {
             "description" : "0 for a loan that is no renewal",
             "format" : "int32",
@@ -36384,6 +36442,37 @@
         },
         "summary" : "Confirm or reject a suggested link (FR-MEM-07)",
         "tags" : [ "lending-members" ]
+      }
+    },
+    "/api/v1/lending/renewal-fees/held" : {
+      "get" : {
+        "operationId" : "listHeldRenewalFees",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "branch_id",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/HeldRenewalFees"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Loans holding a renewal fee to hand back to the member, oldest first (issue #918)",
+        "tags" : [ "lending-loans" ]
       }
     },
     "/api/v1/lending/savings-accounts" : {

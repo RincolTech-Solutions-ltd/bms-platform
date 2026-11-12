@@ -31,11 +31,13 @@ the renewal"; the new loan shows "Renewal 1 of loan LN..." linking back, and, wh
 schedule with the amount noted and never added to what is due. Transactions read "Renewed: moved to the new loan" and "Renewal:
 brought from the old loan". Approvals names the request "Renew a loan", links the loan and says no money is paid out. The
 product's renewal settings (allowed, how many times, interest first, the fee) are set through the product API, like the other
-product terms: there is no loan product screen yet. An active or closed loan that holds a renewal fee no renewal used
-(rejected, cancelled, expired or stale) shows the cashier the task "Hand back (amount) to the member", with how it was paid
+product terms: there is no loan product screen yet. An active, closed or written-off loan that holds a renewal fee no
+renewal used (rejected, cancelled, expired or stale), with no renewal waiting (the loan's `renewal.pending_approval_id`),
+shows the cashier the task "Hand back (amount) to the member" (the amount is the loan's `renewal.fee_held_minor`), with how it was paid
 back and the button "Hand back (amount)", for someone with `lending.repayments.create`; it pays the fee out of the till with
 its own receipt (`POST .../renewal-fee/refund`), and the transactions read "Renewal fee handed back". What is held is worked
-out from the loan's own fee transactions.
+out by the server from the loan's own fee transactions. Home shows the same person a "Renewal fees to hand back" card listing
+each loan holding one, oldest first, with the amount, linking to the loan; nothing shows when there is none.
 | Waive fee or interest, on a schedule row with fees or interest still due (fees or interest, amount up to what is due, why, then a review of borrower, loan, item, amount, who asks and why; issue #265) | `lending.charges.waive_request` | active | 201: waived; 202: waiting for someone with the accountant's permission (`lending.charges.waive_fee_interest`) |
 
 The list follows the branch chosen in the staff header. Dates default to today (the browser's local date) and the

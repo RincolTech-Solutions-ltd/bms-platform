@@ -316,6 +316,52 @@ class LoanLedgerTest {
         assertThat(b.creditHeld).isEqualTo(40_000);
     }
 
+    /**
+     * Issue #918, review of #919: the renewal fee's lines are notes; the closing balance stays the loan's outstanding.
+     * JUSTIFICATION-A3: one new test for three new transaction types, in the file that tests the statement.
+     */
+    @Test
+    void aRenewalFeeTakenKeptAndHandedBackLeavesTheBalanceAlone() {
+        Book b = new Book();
+        b.disburse();
+        b.repay(100_000, LocalDate.of(2026, 2, 15));
+        b.add(
+                "renewal_fee_held",
+                20_000,
+                LocalDate.of(2026, 2, 15),
+                "RC-HQ-000009",
+                null,
+                UUID.randomUUID(),
+                List.of());
+        b.add(
+                "renewal_fee_refund",
+                20_000,
+                LocalDate.of(2026, 2, 20),
+                "RC-HQ-000010",
+                null,
+                UUID.randomUUID(),
+                List.of());
+        b.add(
+                "renewal_fee_held",
+                20_000,
+                LocalDate.of(2026, 2, 21),
+                "RC-HQ-000011",
+                null,
+                UUID.randomUUID(),
+                List.of());
+        b.add("renewal_fee", 20_000, LocalDate.of(2026, 2, 22), null, null, UUID.randomUUID(), List.of());
+        Statement st = statement(b, false, b.outstanding());
+        assertRunningBalance(st);
+        assertThat(st.closingMinor()).isEqualTo(b.outstanding());
+        assertThat(st.entries()).noneMatch(e -> e.description().startsWith("Other adjustments"));
+        assertThat(st.entries().stream().filter(e -> e.description().startsWith("Renewal fee")))
+                .hasSize(4)
+                .allMatch(e -> e.note() && e.chargedMinor() == 0 && e.creditedMinor() == 0);
+        assertThat(st.entries())
+                .anyMatch(e -> e.description().startsWith("Renewal fee handed back: 20,000"))
+                .anyMatch(e -> e.description().startsWith("Renewal fee kept for the renewal: 20,000"));
+    }
+
     @Test
     void aDifferenceTheLedgerCannotExplainShowsAsAnAdjustmentNotAsAWrongClosingBalance() {
         Book b = new Book();

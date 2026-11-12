@@ -47,10 +47,14 @@ a new loan and carries the unpaid amounts as a memorandum, and V8 and V29 alread
    old loan with its own receipt, on the same till and cash book day as the interest, debiting the payment method's account
    and crediting the liability 2050 Renewal fees held (`renewal_fees_held`, added to the lending chart by V152) with the old
    loan as subledger. The approval moves it to income with no new cash (`renewal_fee`: debit `renewal_fees_held`, credit
-   `loan_fee_income`). A fee no renewal used (the request rejected, cancelled, expired or stale) stays held; the loan page
-   shows the cashier the task "Hand back (amount) to the member", and `POST .../renewal-fee/refund`
-   (`lending.repayments.create`, an active or closed loan, no renewal waiting) pays it out of the till with its own receipt
-   (`renewal_fee_refund`: debit `renewal_fees_held`, credit the payment method's account). Until it is handed back, a new
+   `loan_fee_income`). The fee taken alone goes through the same checks as a repayment. A fee no renewal used (the request
+   rejected, cancelled, expired or stale) stays held; when no renewal waits, the loan page shows the cashier the task
+   "Hand back (amount) to the member" and Home lists every loan holding one (`GET /lending/renewal-fees/held`), and
+   `POST .../renewal-fee/refund` (`lending.repayments.create`; an active, closed or written-off loan, so 2050 is never
+   stranded; no renewal waiting; never dated before the fee was taken) pays it out of the till with its own receipt
+   (`renewal_fee_refund`: debit `renewal_fees_held`, credit the payment method's account). A request whose expiry passed
+   is ended as `expired` by the next request or hand-back on the loan, before the nightly run, so it neither blocks a new
+   request nor can be approved (review of #919). Until it is handed back, a new
    renewal request on the loan uses it instead of taking it again. What a loan holds is worked out from its own fee
    transactions, never from its credit balance. The schedule runs from the renewal date. Pledges and guarantors move to the new loan;
    the old loan's are released (the new loan is a draft while it takes them, the one state the V8 guards allow).

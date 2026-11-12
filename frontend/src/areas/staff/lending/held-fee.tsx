@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { PAYMENT_METHODS, lending, type Loan, type LoanTransaction, type PaymentMethod } from '../../../api/lending';
+import { PAYMENT_METHODS, lending, type Loan, type PaymentMethod } from '../../../api/lending';
 import { businessToday } from '../../../api/retail';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { Segmented } from '../../../app/ui/Segmented';
@@ -9,15 +9,20 @@ import { Problem } from '../retail/ui';
 import { money } from './loan-state';
 
 // A renewal fee the counter took and no renewal used (issue #918, the Lead's decision on the review of #919): the cashier's
-// task "Hand back (amount) to the member". The money sits in renewal fees held, worked out from the loan's own fee
-// transactions; handing it back pays it out of the till with its own receipt. The server refuses while a renewal still
-// waits for approval, since that one would use it. Shown to someone who may record repayments.
+// task "Hand back (amount) to the member". The money sits in renewal fees held; the loan response says how much
+// (renewal.fee_held_minor) and whether a renewal still waits (renewal.pending_approval_id), in which case no task shows.
+// Handing it back pays it out of the till with its own receipt. Shown to someone who may record repayments, on the loan
+// and, for loans nobody opens, in the list of loans holding a fee (HeldFeesCard).
 
-const SIGN: Record<string, number> = { renewal_fee_held: 1, renewal_fee: -1, renewal_fee_refund: -1 };
+/** What the loan holds of renewal fees, as the server works it out from all the loan's fee transactions. */
+export const heldFee = (loan: Loan): number => loan.renewal?.fee_held_minor ?? 0;
 
-/** What the loan holds of renewal fees: taken, less made income, less handed back. */
-export const heldFee = (txns: LoanTransaction[] | undefined): number =>
-  (txns ?? []).reduce((sum, t) => sum + (SIGN[t.txn_type ?? ''] ?? 0) * (t.amount_minor ?? 0), 0);
+/**
+ * The cashier's task shows only when a fee is held and no renewal waits for approval: while one waits, that renewal will
+ * use the fee and the server refuses a hand-back (409 renewal_pending), so the till is never paid out against it.
+ */
+export const handBackDue = (loan: Loan): boolean =>
+  heldFee(loan) > 0 && !loan.renewal?.pending_approval_id && ['active', 'closed', 'written_off'].includes(loan.status ?? '');
 
 export function HeldFeePanel({ loan, held }: { loan: Loan; held: number }) {
   const { me } = useStaff();
@@ -38,6 +43,7 @@ export function HeldFeePanel({ loan, held }: { loan: Loan; held: number }) {
     onSuccess: () => {
       finish();
       void queryClient.invalidateQueries({ queryKey: ['lending', 'loan', loanId] });
+      void queryClient.invalidateQueries({ queryKey: ['lending', 'renewal-fees-held'] });
     },
   });
   return (

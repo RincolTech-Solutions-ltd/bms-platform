@@ -210,6 +210,28 @@ class LoanRenewalIT extends LoanFixtures {
                 .query(String.class)
                 .list();
         assertThat(mismatches).as("subledger against loans_receivable").isEmpty();
+        // Review of #919: 2050 Renewal fees held, per loan, equals what the loan's fee transactions say it holds.
+        // JUSTIFICATION-A3: a second control account checked the same way as the first, in the same check.
+        List<String> held = TestDatabase.owner()
+                .sql("""
+                        SELECT l.loan_no || ': ' || coalesce(sum(j.credit - j.debit), 0)
+                          FROM lending_loans l
+                          LEFT JOIN journal_lines j ON j.subledger_id = l.id AND j.subledger_type = 'lending.loan'
+                               AND j.account_id = (SELECT id FROM gl_accounts WHERE tenant_id = l.tenant_id
+                                                    AND system_key = 'renewal_fees_held')
+                         WHERE l.tenant_id = ?
+                         GROUP BY l.id, l.loan_no
+                        HAVING coalesce(sum(j.credit - j.debit), 0) <> (
+                            SELECT coalesce(sum(CASE WHEN x.txn_type = 'renewal_fee_held' THEN x.amount_minor
+                                                     ELSE -x.amount_minor END), 0)
+                              FROM lending_loan_transactions x
+                             WHERE x.loan_id = l.id
+                               AND x.txn_type IN ('renewal_fee_held', 'renewal_fee', 'renewal_fee_refund'))
+                        """)
+                .param(t.tenantId())
+                .query(String.class)
+                .list();
+        assertThat(held).as("subledger against renewal_fees_held").isEmpty();
     }
 
     // ---- Tests --------------------------------------------------------------------------------
@@ -551,12 +573,29 @@ class LoanRenewalIT extends LoanFixtures {
         assertThat(refundFee(old).getStatusCode())
                 .as("not while the renewal waits")
                 .isEqualTo(HttpStatus.CONFLICT);
+        // The loan says a renewal waits, so the page shows no hand-back, and the cashier's list leaves it out.
+        JsonNode waiting = get(LOANS + "/" + old).get("renewal");
+        assertThat(waiting.get("pending_approval_id").asString())
+                .isEqualTo(r.getBody().get("approval_request_id").asString());
+        assertThat(heldList()).doesNotContain(old);
 
         String ended =
                 "/api/v1/approvals/" + r.getBody().get("approval_request_id").asString() + how;
         ResponseEntity<JsonNode> end = send(HttpMethod.POST, ended, as(who, managerPerms, "*", null), body);
         assertThat(end.getStatusCode()).as("%s", end.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(heldOn(old)).as("still on record, held for the member").isEqualTo(20_000);
+        JsonNode ended2 = get(LOANS + "/" + old).get("renewal");
+        assertThat(ended2.get("pending_approval_id").isNull()).isTrue();
+        assertThat(ended2.get("fee_held_minor").asLong()).isEqualTo(20_000);
+        assertThat(heldList()).contains(old);
+        ResponseEntity<JsonNode> early = send(
+                HttpMethod.POST,
+                LOANS + "/" + old + "/renewal-fee/refund",
+                withKey(as(cashier, cashierPerms, "*", null)),
+                Map.of("value_date", today.minusDays(1).toString(), "payment_method_key", "cash"));
+        assertThat(early.getBody().get("code").asString())
+                .as("never before it was taken")
+                .isEqualTo("before_fee_taken");
 
         ResponseEntity<JsonNode> back = refundFee(old);
         assertThat(back.getStatusCode()).as("%s", back.getBody()).isEqualTo(HttpStatus.CREATED);
@@ -569,6 +608,82 @@ class LoanRenewalIT extends LoanFixtures {
         assertThat(refundFee(old).getStatusCode())
                 .as("nothing left to hand back")
                 .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(heldList()).doesNotContain(old);
+        booksAgree();
+    }
+
+    /** The loan ids on the cashier's list of loans holding a renewal fee to hand back. */
+    List<String> heldList() {
+        ResponseEntity<JsonNode> r =
+                send(HttpMethod.GET, "/api/v1/lending/renewal-fees/held", as(cashier, cashierPerms, "*", null), null);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+        return r.getBody().get("items").findValuesAsString("loan_id");
+    }
+
+    /**
+     * Review of #919, the lapse path: a request whose expiry passed before the nightly run is ended by the next request or
+     * hand-back, cannot be approved, and does not block a new request. The fee is handed back once: the maker's retry replays
+     * the one refund, another person's key is refused and records nothing.
+     * JUSTIFICATION-A3: a new path (lapse) and a new route's key ownership, one test each needs its own setup.
+     */
+    @Test
+    void aFeeTakenForALapsedRenewalIsHandedBackOnceAndANewRequestIsTaken() {
+        String old = activeLoan(bulletProduct("RNW8", Map.of("fee_minor", 20_000)), 8);
+        ResponseEntity<JsonNode> r = renew(old, cashier, cashierPerms, 100_000L, null);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+        String lapsed = r.getBody().get("approval_request_id").asString();
+        TestDatabase.owner()
+                .sql("UPDATE approval_requests SET expires_at = now() - interval '1 minute' WHERE id = ?::uuid")
+                .param(lapsed)
+                .update();
+        assertThat(get(LOANS + "/" + old)
+                        .get("renewal")
+                        .get("pending_approval_id")
+                        .isNull())
+                .isTrue();
+        assertThat(heldList()).contains(old);
+
+        Map<String, Object> body = Map.of("value_date", today.toString(), "payment_method_key", "cash");
+        String k = "test-" + UUID.randomUUID();
+        HttpHeaders mine = as(cashier, cashierPerms, "*", null);
+        mine.add("Idempotency-Key", k);
+        String path = LOANS + "/" + old + "/renewal-fee/refund";
+        ResponseEntity<JsonNode> back = send(HttpMethod.POST, path, mine, body);
+        assertThat(back.getStatusCode()).as("%s", back.getBody()).isEqualTo(HttpStatus.CREATED);
+        KeyOwnership.replayed(send(HttpMethod.POST, path, mine, body), back);
+        HttpHeaders theirs = as(UUID.randomUUID(), cashierPerms, "*", null);
+        theirs.add("Idempotency-Key", k);
+        KeyOwnership.refused(send(HttpMethod.POST, path, theirs, body), back, old, body);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM lending_loan_transactions WHERE loan_id = ?::uuid"
+                                + " AND txn_type = 'renewal_fee_refund'")
+                        .param(old)
+                        .query(Long.class)
+                        .single())
+                .as("one refund, whatever was retried")
+                .isEqualTo(1);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT status FROM approval_requests WHERE id = ?::uuid")
+                        .param(lapsed)
+                        .query(String.class)
+                        .single())
+                .isEqualTo("expired");
+        assertThat(decide(lapsed, manager, managerPerms).getStatusCode().is2xxSuccessful())
+                .as("a lapsed request is never approved")
+                .isFalse();
+        assertThat(get(LOANS + "/" + old).get("status").asString()).isEqualTo("active");
+
+        // The fee alone is checked as a repayment is: not dated before the loan's latest repayment.
+        ResponseEntity<JsonNode> backdated = send(
+                HttpMethod.POST,
+                LOANS + "/" + old + "/renewals",
+                withKey(as(cashier, cashierPerms, "*", null)),
+                Map.of("value_date", today.minusDays(1).toString(), "payment_method_key", "cash"));
+        assertThat(backdated.getBody().get("code").asString()).isEqualTo("before_last_repayment");
+        // The interest is paid; a new request takes the fee again and waits for a checker.
+        ResponseEntity<JsonNode> again = renew(old, cashier, cashierPerms, null, null);
+        assertThat(again.getStatusCode()).as("%s", again.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(heldOn(old)).isEqualTo(20_000);
         booksAgree();
     }
 
