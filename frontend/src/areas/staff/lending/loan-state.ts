@@ -70,6 +70,8 @@ const TXN_WORDS: Record<string, string> = {
   write_off: 'Write-off',
   credit_refund: 'Credit refund',
   credit_to_savings: 'Credit to savings',
+  restructure_out: 'Renewed: moved to the new loan',
+  restructure_in: 'Renewal: brought from the old loan',
 };
 
 export const txnWords = (type: string | undefined): string => (type ? TXN_WORDS[type] ?? words(type) : '');
@@ -95,8 +97,9 @@ export function statusBadge(status: string | undefined): string {
   }
 }
 
-/** A loan status in plain words; a draft says it has not gone anywhere yet (issue #704). */
-export const loanStatusWords = (status: string | undefined): string => (status === 'draft' ? 'Draft, not sent yet' : words(status));
+/** A loan status in plain words; a draft says it has not gone anywhere yet (issue #704), a renewed loan says so (issue #918). */
+export const loanStatusWords = (status: string | undefined): string =>
+  status === 'draft' ? 'Draft, not sent yet' : status === 'restructured' ? 'Renewed' : words(status);
 
 /** A member's loans with the drafts on top, newest first, and the rest in the server's order (issue #704). */
 export function draftsFirst<T extends { status?: string; created_at?: string }>(items: T[]): T[] {

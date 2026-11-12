@@ -24,6 +24,9 @@ export type DisbursementRequest = S['DisbursementRequest'];
 export type LoanActionOutcome = S['LoanActionOutcome'];
 export type ScheduleItemWaiverRequest = S['ScheduleItemWaiverRequest'];
 export type PayoffQuote = S['PayoffQuote'];
+export type LoanRenewalQuote = S['LoanRenewalQuote'];
+export type LoanRenewalRequest = S['LoanRenewalRequest'];
+export type LoanRenewalLinks = S['LoanRenewalLinks'];
 export type LoanHomeSummary = S['LoanHomeSummary'];
 
 /** The payment methods the server maps to an account (payment_method_key). */
@@ -56,6 +59,14 @@ const BY_CODE: Record<string, string> = {
   lending_chart_missing: 'The lending accounts are not set up in the ledger yet. Ask an admin.',
   idempotency_in_progress: 'This is still being saved. Wait a moment and reload the loan before trying again.',
   module_not_enabled: 'Lending is not switched on for this business.',
+  renewal_not_allowed: 'This loan product does not allow renewals.',
+  renewal_limit_reached: 'This loan has been renewed as many times as its product allows.',
+  renewal_interest_unpaid: 'The interest due must be paid before the loan is renewed. Collect at least the amount shown.',
+  renewal_settles_loan: 'That amount pays the whole loan off, so there is nothing to renew. Record it as a repayment instead.',
+  renewal_term_out_of_range: 'That term is outside what the loan product allows.',
+  renewal_rate_above_loan: 'The new rate can be the same or lower, never higher than the loan has now.',
+  renewal_pending: 'A renewal of this loan is already waiting for approval.',
+  renewal_changed: 'The loan changed while the renewal waited. Ask for it again.',
 };
 
 /** The message to show a person for a failed lending call. */
@@ -159,6 +170,21 @@ export const lending = {
   async waiveItem(id: string, itemNo: number, body: ScheduleItemWaiverRequest, idempotencyKey: string): Promise<{ executed: boolean; outcome: LoanActionOutcome }> {
     const result = await api.POST('/api/v1/lending/loans/{loan_id}/schedule/{item_no}/waive', {
       params: { path: { loan_id: id, item_no: itemNo }, header: key(idempotencyKey) },
+      body,
+    });
+    const outcome = unwrap(result);
+    return { executed: executed(outcome, result.response.status), outcome };
+  },
+
+  /** Issue #918: what renewing would do on a date, with an amount collected first and a new term and rate. */
+  async renewalQuote(id: string, query: { value_date?: string; collect_minor?: number; term_count?: number; interest_rate_bp?: number }): Promise<LoanRenewalQuote> {
+    return unwrap(await api.GET('/api/v1/lending/loans/{loan_id}/renewal-quote', { params: { path: { loan_id: id }, query } }));
+  },
+
+  /** Issue #918: collect now as a repayment, then ask a second person to move the principal; 202 while it waits. */
+  async renew(id: string, body: LoanRenewalRequest, idempotencyKey: string): Promise<{ executed: boolean; outcome: LoanActionOutcome }> {
+    const result = await api.POST('/api/v1/lending/loans/{loan_id}/renewals', {
+      params: { path: { loan_id: id }, header: key(idempotencyKey) },
       body,
     });
     const outcome = unwrap(result);

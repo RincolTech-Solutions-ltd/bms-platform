@@ -10,13 +10,15 @@ import { holds, MEMBERS_READ } from './member-permissions';
 
 export const LOANS_READ = 'lending.loans.read';
 
-export type LoanAction = 'repay' | 'collect' | 'disburse' | 'payoff' | 'reverse' | 'write_off';
+export type LoanAction = 'repay' | 'collect' | 'disburse' | 'payoff' | 'renew' | 'reverse' | 'write_off';
 
 const NEEDS: Record<LoanAction, string> = {
   repay: 'lending.repayments.create',
   collect: 'core.payments.collect',
   disburse: 'lending.disbursements.request',
   payoff: LOANS_READ,
+  // Issue #918: taking the interest with it also needs lending.repayments.create, which the server checks and names.
+  renew: 'lending.loans.renew_request',
   reverse: 'lending.repayments.reverse_request',
   write_off: 'lending.loans.write_off_request',
 };
@@ -28,6 +30,7 @@ const STATUSES: Record<LoanAction, string[]> = {
   collect: ['active'],
   disburse: ['approved'],
   payoff: ['active'],
+  renew: ['active'],
   reverse: ['active', 'closed', 'written_off'],
   write_off: ['active'],
 };
@@ -48,7 +51,7 @@ export function mayDo(me: Pick<Me, 'permissions'>, action: LoanAction): boolean 
 
 /** The actions offered on a loan in `status`, in the order the page shows them. */
 export function actionsFor(me: Pick<Me, 'permissions'>, status: string | undefined): LoanAction[] {
-  const order: LoanAction[] = ['disburse', 'repay', 'collect', 'payoff', 'write_off'];
+  const order: LoanAction[] = ['disburse', 'repay', 'collect', 'payoff', 'renew', 'write_off'];
   return order.filter((a) => mayDo(me, a) && STATUSES[a].includes(status ?? ''));
 }
 

@@ -10,7 +10,9 @@ import { APPLICATION_STATUSES, ApplicationPanel } from './application-view';
 import { CollectPanel } from './collect';
 import { DisburseForm, PayoffQuotePanel, RepaymentForm, RepaymentReceipt, ReverseForm, WriteOffForm } from './actions';
 import { LendingGate } from './loans';
-import { methodWords, money, statusBadge, txnWords, words } from './loan-state';
+import { showDate } from '../../../app/ui/PeriodPicker';
+import { loanStatusWords, methodWords, money, statusBadge, txnWords, words } from './loan-state';
+import { RenewPanel } from './renew';
 import { actionsFor, canReverse, mayWaiveItem, type LoanAction } from './permissions';
 import { showSavings } from './savings-permissions';
 import { WaiveItemSheet } from './waive-item';
@@ -25,6 +27,7 @@ const ACTION_LABELS: Record<LoanAction, string> = {
   repay: 'Record repayment',
   collect: 'Collect by mobile money or card',
   payoff: 'Payoff quote',
+  renew: 'Renew',
   write_off: 'Request write-off',
   reverse: 'Reverse',
 };
@@ -37,8 +40,20 @@ export function LoanHeader({ loan, memberName }: { loan: Loan; memberName?: stri
     <section aria-label="Loan" className="rt-card ln-head">
       <p className="ln-item-head">
         <strong>{loan.loan_no}</strong>
-        <span className={statusBadge(loan.status)}>{words(loan.status)}</span>
+        <span className={statusBadge(loan.status)}>{loanStatusWords(loan.status)}</span>
       </p>
+      {loan.renewal?.renewed_from_loan_id && (
+        <p>
+          Renewal {loan.renewal.renewal_no} of loan{' '}
+          <Link to="/staff/lending/loans/$loanId" params={{ loanId: loan.renewal.renewed_from_loan_id }}>{loan.renewal.renewed_from_loan_no}</Link>
+        </p>
+      )}
+      {loan.renewal?.renewed_to_loan_id && (
+        <p>
+          Renewed on {showDate(loan.renewal.renewed_on)} into loan{' '}
+          <Link to="/staff/lending/loans/$loanId" params={{ loanId: loan.renewal.renewed_to_loan_id }}>{loan.renewal.renewed_to_loan_no}</Link>
+        </p>
+      )}
       <p>
         {memberName ? `${memberName} (${loan.member_no ?? ''})` : `Member ${loan.member_no ?? ''}`}
       </p>
@@ -117,6 +132,11 @@ export function ScheduleTable({ schedule, currency, onWaive }: { schedule: LoanS
   return (
     <div className="table-wrap" tabIndex={0} role="region" aria-labelledby="ln-schedule">
       <table>
+        {(rows[0]?.carried_arrears_minor ?? 0) > 0 && (
+          <caption className="ln-muted">
+            Not collected when the old loan was renewed, noted here and never added to what is due: {money(rows[0]?.carried_arrears_minor, c)}.
+          </caption>
+        )}
         <thead>
           <tr>
             <th className="num">No</th>
@@ -151,7 +171,7 @@ export function ScheduleTable({ schedule, currency, onWaive }: { schedule: LoanS
               <td className="num">{money(r.total_due_minor, c)}</td>
               <td className="num">{money(r.total_paid_minor, c)}</td>
               <td className="num">{money(r.outstanding_minor, c)}</td>
-              <td>{r.status === 'overdue' ? <span className="rt-flag">Overdue</span> : words(r.status)}</td>
+              <td>{r.status === 'overdue' ? <span className="rt-flag">Overdue</span> : r.status === 'restructured' ? 'Moved to the renewal' : words(r.status)}</td>
             </tr>
           ))}
         </tbody>
@@ -268,6 +288,7 @@ function ServicingView({ loan, memberName }: { loan: Loan; memberName?: string }
           {open === 'disburse' && <DisburseForm loan={loan} />}
           {open === 'payoff' && <PayoffQuotePanel loan={loan} />}
           {open === 'write_off' && <WriteOffForm loan={loan} />}
+          {open === 'renew' && <RenewPanel loan={loan} memberName={memberName} onClose={() => setOpen(null)} />}
         </section>
       )}
       {!open && receipt && <RepaymentReceipt result={receipt} currency={loan.currency} />}

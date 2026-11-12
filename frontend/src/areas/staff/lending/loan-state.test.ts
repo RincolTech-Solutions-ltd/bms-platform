@@ -87,7 +87,8 @@ describe('words and dates', () => {
   it('turns codes into words', () => {
     expect(words('written_off')).toBe('Written off');
     expect(txnWords('fee_upfront')).toBe('Upfront fee');
-    expect(txnWords('restructure_in')).toBe('Restructure in');
+    expect(txnWords('restructure_in')).toBe('Renewal: brought from the old loan');
+    expect(txnWords('some_later_kind')).toBe('Some later kind');
     expect(statusBadge('written_off')).toContain('badge-danger');
     expect(statusBadge('draft')).toBe('badge');
   });

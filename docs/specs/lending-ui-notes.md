@@ -24,6 +24,14 @@ The actions open in place on the loan page, offered only for the loan statuses t
 | Payoff quote (value date) | `lending.loans.read` | active | principal, interest, fees, penalties, rebate, total |
 | Reverse a repayment (reason) | `lending.repayments.reverse_request` | repayment on an active or closed loan, or a recovery, not yet reversed | waiting for a checker |
 | Request write-off (reason) | `lending.loans.write_off_request` | active | waiting for a checker |
+| Renew (issue #918, ADR-128): the interest due now, then the date, what is collected now (the least that clears the interest offered as a button, the amount that also clears fees and penalties in the hint), how it was paid, the new term (the loan's by default, the product's limits in the hint), the new rate (empty keeps the loan's, lower only) and why; then a review of the borrower, the loan, what is collected and how, the principal that moves (no cash paid out), the new term, the rate, the renewal fee, the new due date, what the borrower then owes, anything not collected (noted on the new loan, never lent) and who asks, before anything is sent | `lending.loans.renew_request`; collecting money also `lending.repayments.create` (the server names it if missing) | active | the money collected is a repayment at once; "Sent for approval": the loan moves once a branch manager (`lending.loans.renew_approve`) approves on Approvals |
+
+A renewed loan shows "Renewed" with "Renewed on (date) into loan LN..." linking the new loan, and its schedule rows say "Moved to
+the renewal"; the new loan shows "Renewal 1 of loan LN..." linking back, and, when something was not collected, a line above its
+schedule with the amount noted and never added to what is due. Transactions read "Renewed: moved to the new loan" and "Renewal:
+brought from the old loan". Approvals names the request "Renew a loan", links the loan and says no money is paid out. The
+product's renewal settings (allowed, how many times, interest first, the fee) are set through the product API, like the other
+product terms: there is no loan product screen yet.
 | Waive fee or interest, on a schedule row with fees or interest still due (fees or interest, amount up to what is due, why, then a review of borrower, loan, item, amount, who asks and why; issue #265) | `lending.charges.waive_request` | active | 201: waived; 202: waiting for someone with the accountant's permission (`lending.charges.waive_fee_interest`) |
 
 The list follows the branch chosen in the staff header. Dates default to today (the browser's local date) and the
@@ -85,7 +93,7 @@ number they have already loaded. See `docs/specs/retail-ui-notes.md`, section "B
 
 - Member self-service savings screens (increment 11), USSD and online payments (phase 2), transfers between accounts.
 - A savings receipt or statement PDF (with the loan documents follow-up).
-- Waivers, restructures and credit refunds. The member and collateral screens (section "Members and collateral") and the application, appraisal and decision screens (section "Loan applications") are built.
+- Waivers, restructures (other than a renewal, built in issue #918) and credit refunds. The member and collateral screens (section "Members and collateral") and the application, appraisal and decision screens (section "Loan applications") are built.
 - A pending reversal or write-off is not marked on the loan page; the server refuses a second request with
   `approval_already_pending`.
 - Printing or sending a receipt, a member statement, and a mock switch like `VITE_RETAIL_MOCK`.
