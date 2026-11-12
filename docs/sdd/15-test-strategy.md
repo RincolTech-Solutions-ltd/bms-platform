@@ -398,26 +398,30 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
     The configured row limit per batch is **100,000** (spec section 3.1, `bms.imports.max-rows`). Every case of the job
     runs at it; the sizes below it show how the times grow. The two commits at the row limit run last, among the rows the
     other cases committed for their businesses. Times on the runner of the `import-big-file` job, 12 November 2026 (CI run
-    43304250790, head 32ceac3, 10 cases, 0 failures; the runner was slower than in the runs before it, which gave the
-    commit at the row limit in 66 to 97 s), the cases in one database, in the order shown:
+    43318959997, head 32556e2, 10 cases, 0 failures, each commit's reconciliation stored; the runner was slower than in
+    the runs before it, which gave the commit at the row limit in 66 to 97 s; run 43304250790 on 32ceac3 gave the same
+    figures within 5 s and 1 MB), the cases in one database, in the order shown:
 
     | File | Heap | Upload | Validation | Preview | Dry run | Commit (batch) | Old generation peak |
     |---|---|---|---|---|---|---|---|
-    | CSV, 100,001 rows, 7 columns (one over the row limit) | 224 MB | refused `TOO_MANY_ROWS` in 14.4 s | | | | | 68 of 149 MB |
-    | CSV, 10,000 rows, 7 columns, 2.6 MB | 224 MB | 1.8 s | 5.7 s | 0.6 s | 16 s | 15 s (14 s) | 70 of 149 MB |
-    | CSV, 25,000 rows, 7 columns, 6.5 MB | 224 MB | 3.8 s | 31 s | 2.1 s | 40 s | 36 s (35 s) | 77 of 149 MB |
-    | CSV, 50,000 rows, 7 columns, 12.9 MB | 224 MB | 7.4 s | 41 s | 1.2 s | 75 s | 71 s (69 s) | 85 of 149 MB |
-    | CSV, 75,000 rows, 7 columns, 19.4 MB | 224 MB | 10.8 s | 39 s | 1.5 s | 111 s | 106 s (102 s) | 128 of 149 MB |
-    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits), up to the preview | 224 MB | 13.8 s | 71 s | 1.9 s | not run | not run | 81 of 149 MB |
-    | CSV, 20,000 rows, 200 columns (193 ignored), 20.6 MB (column limit) | 224 MB | 4.2 s | 12.5 s | 1.4 s | 37 s | 34 s (32 s) | 96 of 149 MB |
-    | XLSX, the 100,000 rows, 3.3 MB, up to the preview | 224 MB | 12.2 s | 49 s | 1.8 s | not run | not run | 107 of 149 MB |
-    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits) | 448 MB | 12.5 s | 137 s | 1.9 s | 141 s | 135 s (130 s) | 115 of 298 MB, not judged |
-    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits) | 224 MB | 12.0 s | 84 s | 2.1 s | 141 s | 139 s (135 s) | **117 of 149 MB** |
+    | CSV, 100,001 rows, 7 columns (one over the row limit) | 224 MB | refused `TOO_MANY_ROWS` in 13.7 s | | | | | 68 of 149 MB |
+    | CSV, 10,000 rows, 7 columns, 2.6 MB | 224 MB | 1.7 s | 5.8 s | 0.6 s | 16 s | 16 s (15 s) | 70 of 149 MB |
+    | CSV, 25,000 rows, 7 columns, 6.5 MB | 224 MB | 3.8 s | 30 s | 2.0 s | 38 s | 39 s (37 s) | 77 of 149 MB |
+    | CSV, 50,000 rows, 7 columns, 12.9 MB | 224 MB | 7.5 s | 39 s | 1.2 s | 72 s | 76 s (73 s) | 86 of 149 MB |
+    | CSV, 75,000 rows, 7 columns, 19.4 MB | 224 MB | 10.7 s | 39 s | 1.5 s | 107 s | 111 s (107 s) | 128 of 149 MB |
+    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits), up to the preview | 224 MB | 13.5 s | 68 s | 1.9 s | not run | not run | 81 of 149 MB |
+    | CSV, 20,000 rows, 200 columns (193 ignored), 20.6 MB (column limit) | 224 MB | 4.1 s | 11.8 s | 0.9 s | 33 s | 34 s (32 s) | 95 of 149 MB |
+    | XLSX, the 100,000 rows, 3.3 MB, up to the preview | 224 MB | 12.3 s | 57 s | 2.0 s | not run | not run | 107 of 149 MB |
+    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits) | 448 MB | 12.2 s | 123 s | 2.0 s | 140 s | 141 s (136 s) | 116 of 298 MB, not judged |
+    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits) | 224 MB | 12.5 s | 78 s | 2.0 s | 139 s | 142 s (136 s) | **116 of 149 MB** |
 
     Every commit fits the batch's 10 minute statement timeout, every dry run its 900 s limit, and every case on the staging
     heap keeps the old generation a tenth below its limit (134 MB). The validation's time varies most from run to run (72
-    to 376 s at 100,000 rows over the runs of #900): it is not bounded by a limit of its own. A larger file is split (the
-    cutover runbook, stage 2).
+    to 376 s at 100,000 rows over the runs of #900): it is not bounded by a limit of its own. Caddy and the API set no
+    response timeout, but on staging, behind the Cloudflare tunnel, the edge answers 524 to a request the API has not
+    answered within 100 s. The check (the validation) and the dry run are requests the screen waits on, so at this size the
+    screen may see that 524 while the API finishes the work and stores it. It was so at 25,000 rows too (a dry run of
+    185 s, #898). A larger file is split (the cutover runbook, stage 2).
 - **Normalisation tables.** Every table of examples in chapter 13 section 13.6 is a
   parametrised unit test.
 - **Loan servicing golden tests** (`ServicingTest`, #108). Fabricated schedules from worked
