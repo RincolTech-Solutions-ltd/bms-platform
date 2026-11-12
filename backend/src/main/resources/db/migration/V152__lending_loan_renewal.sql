@@ -184,9 +184,31 @@ BEGIN
 END
 $$;
 
+-- tenants and gl_accounts have FORCE ROW LEVEL SECURITY and no app.tenant_id is bound here. bms_owner has BYPASSRLS
+-- (deploy/postgres/initdb/01-roles.sh), so this reads every business. When the migrating owner cannot bypass row security,
+-- the two tables drop FORCE for this transaction only and get it back right after, as V123 does (two tiny tables, ACCESS
+-- EXCLUSIVE for milliseconds; with BYPASSRLS nothing is altered).
+DO $$
+BEGIN
+    IF NOT (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user) THEN
+        ALTER TABLE tenants NO FORCE ROW LEVEL SECURITY;
+        ALTER TABLE gl_accounts NO FORCE ROW LEVEL SECURITY;
+    END IF;
+END
+$$;
+
 SELECT bms_seed_lending_chart(t.id)
   FROM tenants t
  WHERE EXISTS (SELECT 1 FROM gl_accounts a WHERE a.tenant_id = t.id AND a.system_key = 'loans_receivable');
+
+DO $$
+BEGIN
+    IF NOT (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user) THEN
+        ALTER TABLE tenants FORCE ROW LEVEL SECURITY;
+        ALTER TABLE gl_accounts FORCE ROW LEVEL SECURITY;
+    END IF;
+END
+$$;
 
 ALTER TABLE lending_loan_transactions DROP CONSTRAINT lending_loan_transactions_txn_type_check;
 ALTER TABLE lending_loan_transactions ADD CONSTRAINT lending_loan_transactions_txn_type_check

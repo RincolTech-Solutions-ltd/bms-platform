@@ -90,8 +90,9 @@ class LoanRenewalIT extends LoanFixtures {
             var owner = TestDatabase.owner();
             owner.sql("""
                             INSERT INTO lending_collateral_items (id, tenant_id, branch_id, member_id, collateral_type,
-                                                                  description, currency, custody_status)
-                            VALUES (?, ?, ?, ?, 'other', 'Fabricated pledged item', 'UGX', 'pledged')
+                                                                  description, estimated_value_minor, currency,
+                                                                  custody_status)
+                            VALUES (?, ?, ?, ?, 'other', 'Fabricated pledged item', 800000, 'UGX', 'pledged')
                             """)
                     .params(item, t.tenantId(), t.headOffice(), UUID.fromString(member))
                     .update();
