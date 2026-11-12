@@ -108,6 +108,22 @@ class ReconciliationService implements ImportReconciliation {
             .build();
 
     private final JdbcClient jdbc;
+
+    /**
+     * The same connection and transaction, read 1,000 rows at a time (issue #900): pgjdbc otherwise holds a whole result,
+     * and the run's {@code import_refs} at 100,000 rows filled the staging heap's old generation after the commit.
+     */
+    private final JdbcClient streaming;
+
+    /** A client on the data source that reads its results {@link #FETCH} rows at a time inside a transaction. */
+    static JdbcClient streaming(javax.sql.DataSource dataSource) {
+        org.springframework.jdbc.core.JdbcTemplate template =
+                new org.springframework.jdbc.core.JdbcTemplate(dataSource);
+        template.setFetchSize(FETCH);
+        return JdbcClient.create(template);
+    }
+
+    static final int FETCH = 1_000;
     private final TransactionTemplate tx;
     private final PreviewService preview;
     private final ImportTemplates templates;
@@ -121,6 +137,7 @@ class ReconciliationService implements ImportReconciliation {
 
     ReconciliationService(
             JdbcClient jdbc,
+            javax.sql.DataSource dataSource,
             PlatformTransactionManager transactions,
             PreviewService preview,
             ImportTemplates templates,
@@ -132,6 +149,7 @@ class ReconciliationService implements ImportReconciliation {
             AuditLog audit,
             ObjectMapper mapper) {
         this.jdbc = jdbc;
+        this.streaming = streaming(dataSource);
         this.tx = new TransactionTemplate(transactions);
         this.preview = preview;
         this.templates = templates;
@@ -548,18 +566,18 @@ class ReconciliationService implements ImportReconciliation {
         // What the books hold for the run: every record it registered, its journals and their kinds.
         Map<String, List<UUID>> targets = new TreeMap<>();
         Map<UUID, String> journalKinds = new LinkedHashMap<>();
-        jdbc.sql("SELECT target_type, target_id, source_key FROM import_refs WHERE run_id = ? ORDER BY created_at, id")
-                .param(runId)
-                .query((rs, n) -> {
-                    String type = rs.getString(1);
-                    UUID id = rs.getObject(2, UUID.class);
-                    targets.computeIfAbsent(type, k -> new ArrayList<>()).add(id);
-                    if (JOURNAL.equals(type)) {
-                        journalKinds.put(id, kindOf(rs.getString(3)));
-                    }
-                    return null;
-                })
-                .list();
+        // Streamed, and the key read only for a journal, which needs its kind (issue #900).
+        streaming.sql("""
+                        SELECT target_type, target_id, CASE WHEN target_type = ? THEN source_key END
+                          FROM import_refs WHERE run_id = ? ORDER BY created_at, id
+                        """).params(JOURNAL, runId).query(rs -> {
+            String type = rs.getString(1);
+            UUID id = rs.getObject(2, UUID.class);
+            targets.computeIfAbsent(type, k -> new ArrayList<>()).add(id);
+            if (JOURNAL.equals(type)) {
+                journalKinds.put(id, kindOf(rs.getString(3)));
+            }
+        });
         ImportBooks.Scope scope = new ImportBooks.Scope(runId, targets);
 
         // The source: each row left out alone, with its own part, and the rows written netted together over the whole

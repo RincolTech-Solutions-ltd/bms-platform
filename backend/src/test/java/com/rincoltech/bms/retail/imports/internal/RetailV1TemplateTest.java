@@ -331,6 +331,6 @@ class RetailV1TemplateTest {
     }
 
     private static RetailV1Template template() {
-        return new RetailV1Template(null, null, null, null, null);
+        return new RetailV1Template(null, null, null, null, null, null);
     }
 }

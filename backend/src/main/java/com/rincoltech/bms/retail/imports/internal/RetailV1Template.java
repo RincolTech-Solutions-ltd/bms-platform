@@ -98,6 +98,7 @@ class RetailV1Template implements ImportTemplate {
     private final CatalogueHistory catalogue;
     private final Branches branches;
     private final JdbcClient jdbc;
+    private final JdbcClient streaming;
     private final TransactionTemplate readOnly;
 
     RetailV1Template(
@@ -105,11 +106,22 @@ class RetailV1Template implements ImportTemplate {
             CatalogueHistory catalogue,
             Branches branches,
             JdbcClient jdbc,
+            javax.sql.DataSource dataSource,
             PlatformTransactionManager transactions) {
         this.importer = importer;
         this.catalogue = catalogue;
         this.branches = branches;
         this.jdbc = jdbc;
+        if (dataSource == null) {
+            this.streaming = jdbc;
+        } else {
+            // The same connection and transaction, read 1,000 rows at a time (issue #900): pgjdbc otherwise holds a
+            // whole result, and every item's cost after a commit of 100,000 filled the staging heap's old generation.
+            org.springframework.jdbc.core.JdbcTemplate template =
+                    new org.springframework.jdbc.core.JdbcTemplate(dataSource);
+            template.setFetchSize(1_000);
+            this.streaming = JdbcClient.create(template);
+        }
         this.readOnly = new TransactionTemplate(transactions);
         this.readOnly.setReadOnly(true);
     }
@@ -388,7 +400,7 @@ class RetailV1Template implements ImportTemplate {
     /** What {@link #forecast(Map, UUID)} reads, read once for every forecast the supplier makes (issue #880). */
     @Override
     public java.util.function.Supplier<ImportForecast> forecasts(Map<String, String> policy, UUID runId) {
-        CompactKeys held = readOnly.execute(s -> heldCosts(jdbc));
+        CompactKeys held = readOnly.execute(s -> heldCosts(streaming));
         Set<String> opened = readOnly.execute(s -> openedBranches(jdbc, runId));
         Map<String, Map<String, Held>> before = readOnly.execute(s -> heldBefore(jdbc, runId));
         CompactKeys earlier = readOnly.execute(s -> earlierHistory(jdbc, runId));
