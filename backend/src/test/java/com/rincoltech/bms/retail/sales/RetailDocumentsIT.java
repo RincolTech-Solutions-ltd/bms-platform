@@ -1895,14 +1895,19 @@ class RetailDocumentsIT extends IntegrationTest {
         b.put("delivery_date", TODAY);
         b.put("delivery_fee_minor", fee);
         b.put("lines", List.of(Map.of("product_id", product, "qty", "1")));
-        ResponseEntity<JsonNode> placed = api.postKeyed("/orders", b, orders, "*", UUID.randomUUID().toString());
+        ResponseEntity<JsonNode> placed =
+                api.postKeyed("/orders", b, orders, "*", UUID.randomUUID().toString());
         assertThat(placed.getStatusCode()).as("%s", placed.getBody()).isEqualTo(HttpStatus.CREATED);
         Map<String, Object> pay = new LinkedHashMap<>();
         pay.put("payment_method", "credit");
         pay.put("fee_on_account", true);
         UUID order = RetailTestSupport.id(placed);
-        ResponseEntity<JsonNode> done =
-                api.postKeyed("/orders/" + order + "/deliver", pay, orders, "*", UUID.randomUUID().toString());
+        ResponseEntity<JsonNode> done = api.postKeyed(
+                "/orders/" + order + "/deliver",
+                pay,
+                orders,
+                "*",
+                UUID.randomUUID().toString());
         assertThat(done.getStatusCode()).as("%s", done.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(done.getBody().get("order").get("fee_method").asString()).isEqualTo("account");
         return done.getBody();
@@ -1916,7 +1921,8 @@ class RetailDocumentsIT extends IntegrationTest {
     void theStatementPrintsDeliveryFeeLinesInWords() throws Exception {
         capability("customer_accounts", true);
         UUID customer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Buyer 05"), DOCS));
-        String paidLater = deliveredWithFeeOnAccount(customer, 700).get("order").get("id").asString();
+        String paidLater =
+                deliveredWithFeeOnAccount(customer, 700).get("order").get("id").asString();
         assertThat(api.postKeyed(
                                 "/orders/" + paidLater + "/fee-payment",
                                 Map.of("method", "mobile_money"),
@@ -1931,7 +1937,8 @@ class RetailDocumentsIT extends IntegrationTest {
                 .isEqualTo(HttpStatus.OK);
 
         String range = "?from=2026-10-01&to=2028-06-30";
-        JsonNode screen = api.get("/customers/" + customer + "/statement" + range, DOCS).getBody();
+        JsonNode screen =
+                api.get("/customers/" + customer + "/statement" + range, DOCS).getBody();
         List<String> kinds = new ArrayList<>();
         for (JsonNode l : screen.get("lines")) {
             kinds.add(l.get("kind").asString());
