@@ -48,7 +48,8 @@ public interface ImportMetrics {
 
     /**
      * The platform report: every business's runs created since the moment (all when null), newest first, at most limit;
-     * each read recorded in the platform audit log as {@code platform.imports.report_read} (issue #894, N4).
+     * each read recorded in the platform audit log as {@code platform.imports.report_read} (issue #894, N4), once per
+     * operator and parameters in 15 minutes, so the queue's poll is one read.
      */
     List<PlatformRun> platformReport(Instant since, int limit, UUID operatorId);
 

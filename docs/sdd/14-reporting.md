@@ -435,16 +435,21 @@ differences, defects open and closed, cutover seconds), is recorded in the platf
 (`platform.imports.report_exported`). Test: `ImportMetricsIT` (anonymous calls and a tenant's staff refused, the function
 refused under a business's binding, slugs and no names).
 
-**The JSON read is audited too (issue #894, N4).** Decision: every `GET /platform/imports/report` writes one
+**The JSON read is audited too (issue #894, N4).** Decision: a `GET /platform/imports/report` writes a
 `platform.imports.report_read` row in the platform audit log, through the same path as the CSV export
 (`PlatformAuditLog.record` in the report's own transaction, `MetricsService.platformReport`), with the operator, the runs
 returned, `since` and the limit applied; never a slug or a business's name. Why: unlike the other platform lists, which read
 one business or the platform's own tables, this one reads every business's import runs at once through a definer function
 that steps past row security, and its JSON carries the same figures as the CSV; that it stays on the platform host makes
-it no less a cross-business read. The operator's import queue (`frontend/src/api/imports.ts`, `limit` 200) calls it each time
-the queue opens, so the log gains one row per opening: a few a day per operator, which the log is built for. Test:
-`ImportMetricsIT.thePlatformReportIsReadOnlyByAPlatformOperatorAndNamesBusinessesBySlug` (one `report_read` row with the
-limit, the count and `since`, and no slug or name).
+it no less a cross-business read. The operator's import queue (`frontend/src/areas/platform/imports.tsx`, `limit` 200)
+polls it every 15 seconds while it is open (`refetchInterval: 15000`, and TanStack Query's refetch on window focus), so
+one row per call would be about 240 rows an hour per open queue, all of the same read. A read is therefore recorded once
+per operator and parameters (`since`, limit) in 15 minutes: the row carries `read_key` (operator, `since`, limit) and a
+call whose key has a row in the last 15 minutes writes none (`PlatformAuditLog.recorded`, on the log's time index). An open
+queue writes at most 4 rows an hour; another `since` or limit is another read and is recorded at once. The CSV export is
+recorded every time. Test: `ImportMetricsIT.thePlatformReportIsReadOnlyByAPlatformOperatorAndNamesBusinessesBySlug` (one
+`report_read` row with the limit, the count and `since`, and no slug or name; the same read again writes none; a read with
+another limit writes its own).
 
 **Cost of the report (issue #894, N3).** One call runs `import_run_metrics` once per run, up to 500 runs, inside the
 connection's 60 second `statement_timeout`. Postgres was not run for this decision: the figures below are counted from the
@@ -461,9 +466,11 @@ and 50 questions to the customer.
 | when each question was asked: a correlated subquery per question | before: the `(tenant_id, run_id)` prefix of `import_issue_resolutions_by_row`, and a table read per resolution for its kind, code and line; after: the partial `import_issue_resolutions_asked (tenant_id, run_id, code, source_row_no)` | 50 x 1,000 = 50,000 | about 50 |
 | **total per run** | | **about 62,000** | **about 2,200** |
 
-At the limit of 500 such runs that is about 31 million rows visited before V151 (tens of seconds on a cold cache, close
-to the timeout, and growing with the questions times the resolutions of each run) and about 1.1 million after (around a
-second); at the default of 100, about 220,000 (a fraction of a second). The order and limit read `import_runs`, one row
+At the limit of 500 such runs that is about 31 million rows visited before V151, growing with the questions times the
+resolutions of each run, and about 1.1 million after; at the default of 100, about 220,000. These are counts, not times:
+nothing was timed, and how long a row takes depends on the cache and the host. The planner's use of both indexes is
+proven, not assumed: `ImportMetricsIT.theReportsGrowingReadsUseTheirPartialIndexes` seeds 3,000 staged rows and 2,000
+resolutions of a fabricated run and reads the plans of the two statements with EXPLAIN. The order and limit read `import_runs`, one row
 per onboarding run of any business (thousands at most), with a top-N sort. After V151 every read of a run is linear in its
 own issues and resolutions, which its files bound (25,000 rows per file, `UploadSettings.DEFAULT_MAX_ROWS`), and nothing is
 multiplied by another table's size.
@@ -473,7 +480,7 @@ Flyway's transaction; the migration's header says why the tables' size makes the
 100 and the limit of 500, which the CSV and the operator's queue (200) rely on. Per-run summaries are not stored: they
 would have to change with every review decision, upload and defect, and the report is bounded without them. Revisit when
 the slow-query log shows `platform_import_runs_report` above 5 seconds: then lower the limit or store the summaries. Test:
-`ImportMetricsIT.theReportsGrowingReadsHaveTheirPartialIndexes` proves both indexes exist with their predicates.
+`ImportMetricsIT.theReportsGrowingReadsUseTheirPartialIndexes` proves the planner uses both indexes.
 
 ## 14.7 Compliance reports (`lending.reports.compliance`)
 

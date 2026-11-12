@@ -3714,7 +3714,7 @@
             "description" : "The fix: an issue or pull request number (#123), a commit hash or a link to a pull request, issue or commit of RincolTech-Solutions-ltd/bms-platform",
             "maxLength" : 200,
             "minLength" : 0,
-            "pattern" : "#[0-9]{1,7}|[0-9a-f]{7,40}|https://github\\.com/RincolTech-Solutions-ltd/bms-platform/(pull|issues|commit)/[0-9a-f]{1,40}",
+            "pattern" : "^(#[0-9]{1,7}|[0-9a-f]{7,40}|https://github\\.com/RincolTech-Solutions-ltd/bms-platform/(pull|issues|commit)/[0-9a-f]{1,40})$",
             "type" : "string"
           },
           "version" : {
@@ -38993,7 +38993,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "The import runs of every business with their metrics, newest first; since (a moment) and limit (1 to 500, default 100); audited",
+        "summary" : "The import runs of every business with their metrics, newest first; since (a moment) and limit (1 to 500, default 100); audited once per operator and parameters in 15 minutes",
         "tags" : [ "platform" ]
       }
     },

@@ -4137,7 +4137,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The import runs of every business with their metrics, newest first; since (a moment) and limit (1 to 500, default 100); audited */
+        /** The import runs of every business with their metrics, newest first; since (a moment) and limit (1 to 500, default 100); audited once per operator and parameters in 15 minutes */
         get: operations["platformImportRunsReport"];
         put?: never;
         post?: never;

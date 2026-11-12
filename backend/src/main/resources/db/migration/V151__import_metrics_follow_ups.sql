@@ -12,9 +12,11 @@
 --
 -- N3. The platform report (`platform_import_runs_report`, up to 500 runs, each through `import_run_metrics`) had two reads
 -- that grow faster than the run's own issues and resolutions (chapter 14 section 14.6 gives the numbers):
---   the rows left out per batch, `count(*) FROM import_rows WHERE batch_id = ? AND excluded_by IS NOT NULL`, read every
---   row of the batch (up to 25,000 per file) through `(batch_id, source_row_no)` and its heap tuple. The partial index
---   `import_rows_excluded` holds the excluded rows only, so the count reads those and nothing else.
+--   the rows left out per batch, `count(*) FROM import_rows w WHERE w.tenant_id = b.tenant_id AND w.batch_id = b.id AND
+--   w.excluded_by IS NOT NULL` (V148, the batches of import_run_metrics), read every row of the batch (up to 25,000 per
+--   file) through `(tenant_id, batch_id, id)` or `(batch_id, source_row_no)` and its heap tuple. The partial index
+--   `import_rows_excluded (tenant_id, batch_id)` holds the excluded rows only and both columns the read names are
+--   equalities, so the count seeks to the batch's excluded rows and reads nothing else (ImportMetricsIT shows the plan).
 --   the time a question was asked, a correlated subquery per question over every resolution of the run through the
 --   `(tenant_id, run_id)` prefix of `import_issue_resolutions_by_row`: questions times resolutions. The partial index
 --   `import_issue_resolutions_asked` holds the `ask_customer` resolutions only, keyed by run, code and line, so each

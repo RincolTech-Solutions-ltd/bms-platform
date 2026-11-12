@@ -236,10 +236,16 @@ class ImportMetricsIT extends IntegrationTest {
                 .getBody()
                 .get("id")
                 .asString());
-        for (String foreign : List.of(
+        List<String> foreigners = List.of(
                 "https://github.com/someone-else/bms-platform/pull/12",
                 "https://github.com/RincolTech-Solutions-ltd/other-repo/issues/12",
-                "https://github.com/RincolTech-Solutions-ltd/bms-platform.evil/commit/0123abcd")) {
+                "https://github.com/RincolTech-Solutions-ltd/bms-platform.evil/commit/0123abcd",
+                "https://github.com.evil.com/RincolTech-Solutions-ltd/bms-platform/pull/1",
+                "https://github.com/RincolTech-Solutions-ltd/bms-platform/pull/1x",
+                "https://github.com/RincolTech-Solutions-ltd/bms-platform/pull/1/",
+                "https://evil.example/?u=https://github.com/RincolTech-Solutions-ltd/bms-platform/pull/1",
+                "xx#1yy");
+        for (String foreign : foreigners) {
             ResponseEntity<JsonNode> refused = close(t, first, 0, foreign);
             assertThat(refused.getStatusCode()).as(foreign).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
             assertThat(refused.getBody().get("code").asString()).isEqualTo("validation_failed");
@@ -254,13 +260,15 @@ class ImportMetricsIT extends IntegrationTest {
                 .getBody()
                 .get("id")
                 .asString());
-        assertThatThrownBy(() -> TestDatabase.owner()
-                        .sql(
-                                "UPDATE import_defects SET status = 'closed', fix_ref = ?, closed_by = ?, closed_at = now()"
-                                        + " WHERE id = ?")
-                        .params("https://github.com/someone-else/bms-platform/pull/12", staff, second)
-                        .update())
-                .hasStackTraceContaining("import_defects_fix_ref_this_repo");
+        for (String foreign : foreigners) {
+            assertThatThrownBy(() -> TestDatabase.owner()
+                            .sql("UPDATE import_defects SET status = 'closed', fix_ref = ?, closed_by = ?,"
+                                    + " closed_at = now() WHERE id = ?")
+                            .params(foreign, staff, second)
+                            .update())
+                    .as(foreign)
+                    .hasStackTraceContaining("import_defects_fix_ref_this_repo");
+        }
         // V151 replaced the V148 CHECK: the new one is there and validated, the old one is gone.
         assertThat(TestDatabase.owner()
                         .sql(
@@ -273,18 +281,47 @@ class ImportMetricsIT extends IntegrationTest {
     }
 
     @Test
-    void theReportsGrowingReadsHaveTheirPartialIndexes() {
-        // JUSTIFICATION-A3: issue #894 N3; chapter 14 section 14.6 bounds the report on these two V151 indexes.
-        List<String> defs = TestDatabase.owner()
-                .sql(
-                        "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public'"
-                                + " AND indexname IN ('import_rows_excluded', 'import_issue_resolutions_asked') ORDER BY indexname")
-                .query(String.class)
-                .list();
-        assertThat(defs).hasSize(2);
-        assertThat(defs.get(0))
-                .contains("import_issue_resolutions", "(tenant_id, run_id, code, source_row_no)", "ask_customer");
-        assertThat(defs.get(1)).contains("import_rows", "(tenant_id, batch_id)", "excluded_by IS NOT NULL");
+    void theReportsGrowingReadsUseTheirPartialIndexes() {
+        // JUSTIFICATION-A3: issue #894 N3 (review of #917, must-fix 1): the planner must use the two V151 indexes for
+        // the two reads chapter 14 section 14.6 bounds on them, so their plans are read with EXPLAIN.
+        JdbcClient owner = TestDatabase.owner();
+        UUID run = run(t, "committed");
+        catalogued(t, run, "fab-shop-plan", "item_list");
+        UUID batch = owner.sql("SELECT id FROM import_batches WHERE run_id = ?")
+                .param(run)
+                .query(UUID.class)
+                .single();
+        // A large fabricated run: 3,000 staged rows, none left out, and 2,000 resolutions, none a question.
+        owner.sql("INSERT INTO import_rows (id, tenant_id, batch_id, source_row_no, raw)"
+                        + " SELECT gen_random_uuid(), ?, ?, g, CAST('{}' AS jsonb) FROM generate_series(2, 3001) g")
+                .params(t.tenantId(), batch)
+                .update();
+        owner.sql("""
+                        INSERT INTO import_issue_resolutions (id, tenant_id, run_id, batch_id, issue_id, row_key,
+                                                              raw_sha256, source_row_no, code, field, resolution,
+                                                              resolved_by)
+                        SELECT gen_random_uuid(), ?, ?, ?, gen_random_uuid(), 'fab-row-' || g, repeat('a', 64), g,
+                               'TYPE_INVALID', 'name', 'edit_value', ?
+                          FROM generate_series(2, 2001) g
+                        """).params(t.tenantId(), run, batch, staff).update();
+        owner.sql("ANALYZE import_rows").update();
+        owner.sql("ANALYZE import_issue_resolutions").update();
+
+        // The two statements of import_run_metrics (V148) with the run's values in place of its variables. The ids are
+        // generated uuids, so writing them into the text is safe.
+        String excluded = "EXPLAIN SELECT count(*) FROM import_rows w JOIN import_batches b ON b.id = w.batch_id"
+                + " WHERE b.id = '" + batch + "' AND w.tenant_id = b.tenant_id AND w.batch_id = b.id"
+                + " AND w.excluded_by IS NOT NULL";
+        assertThat(String.join("\n", owner.sql(excluded).query(String.class).list()))
+                .contains("import_rows_excluded");
+        String asked = "EXPLAIN SELECT min(a.created_at) FROM import_issue_resolutions a"
+                + " JOIN import_batches ab ON ab.tenant_id = a.tenant_id AND ab.id = a.batch_id"
+                + " WHERE a.tenant_id = '" + t.tenantId() + "' AND a.run_id = '" + run + "'"
+                + " AND a.resolution = 'ask_customer' AND a.code = 'TYPE_INVALID'"
+                + " AND a.field IS NOT DISTINCT FROM 'name' AND a.source_row_no = 5"
+                + " AND ab.mapping_source IS NOT DISTINCT FROM 'item_list'";
+        assertThat(String.join("\n", owner.sql(asked).query(String.class).list()))
+                .contains("import_issue_resolutions_asked");
     }
 
     @Test
@@ -469,6 +506,22 @@ class ImportMetricsIT extends IntegrationTest {
         assertThat(reads.get(0))
                 .startsWith("500|" + report.getBody().get("items").size() + "|all|")
                 .doesNotContain(t.slug(), ourName);
+        // The queue polls every 15 seconds (review of #917): the same read again inside 15 minutes writes no second
+        // row;
+        // a read with other parameters does.
+        assertThat(platform.get("/api/v1/platform/imports/report?limit=500", operator.accessToken())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(platform.get("/api/v1/platform/imports/report?limit=200", operator.accessToken())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT data ->> 'limit' FROM platform_audit_log WHERE platform_user_id = ?"
+                                + " AND action = 'platform.imports.report_read' ORDER BY occurred_at")
+                        .param(operatorId)
+                        .query(String.class)
+                        .list())
+                .containsExactly("500", "200");
 
         HttpHeaders h = new HttpHeaders();
         h.setBearerAuth(operator.accessToken());

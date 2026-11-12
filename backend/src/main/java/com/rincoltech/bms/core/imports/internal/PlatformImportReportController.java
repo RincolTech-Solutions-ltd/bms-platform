@@ -41,7 +41,7 @@ class PlatformImportReportController {
     @RequiresPermission("platform.tenants.read")
     @Operation(
             summary = "The import runs of every business with their metrics, newest first; since (a moment) and limit"
-                    + " (1 to 500, default 100); audited",
+                    + " (1 to 500, default 100); audited once per operator and parameters in 15 minutes",
             operationId = "platformImportRunsReport")
     RunList report(
             @RequestParam(name = "since", required = false) Instant since,
