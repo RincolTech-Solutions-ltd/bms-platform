@@ -1655,7 +1655,7 @@ on lines touching `S` accounts carry the loan, savings account or investment id.
 | Repayment reversal | Mirror of the original entry (a reversing entry) | | FR-REP-05 |
 | Recovery on written-off loan | PM amount | `bad_debt_recovered` | FR-LCL-03 |
 | Write-off | `loan_write_off_expense` outstanding principal | `loans_receivable` outstanding principal | FR-LCL-02 |
-| Restructure | `loans_receivable` (new loan subledger) | `loans_receivable` (old loan subledger) | FR-LCL-04 |
+| Restructure, and a renewal (issue #918; one entry, the old loan's `restructure_out` and the new loan's `restructure_in` share it) | `loans_receivable` (new loan subledger) | `loans_receivable` (old loan subledger) | FR-LCL-04, FR-LCL-04a |
 | Cross-branch repayment | At receiving branch: PM amount / `interbranch_clearing` amount. At loan branch: `interbranch_clearing` amount / the repayment credits above | | FR-REP-07 |
 | Member credit refund | `member_overpayments` | PM | FR-REP-04a |
 | Member credit to savings | `member_overpayments` | `member_savings` | FR-REP-04a |
@@ -1794,6 +1794,11 @@ increment 4.
 | `requires_collateral` | `boolean NOT NULL DEFAULT false` | |
 | `min_collateral_cover_bp` | `integer` | For example 15000 = 1.5 times principal. `CHECK`: NOT NULL when `requires_collateral`. |
 | `requires_guarantor` | `boolean NOT NULL DEFAULT false` | |
+| `renewal_allowed` | `boolean NOT NULL DEFAULT true` | V152, ADR-128: loans of the product may be renewed (issue #918). Read from the product's current version at each renewal |
+| `renewal_max_count` | `integer` | V152: renewals one chain of loans may have; null for no limit. `CHECK (>= 1)` |
+| `renewal_interest_first` | `boolean NOT NULL DEFAULT true` | V152: a renewal is refused while interest is due on the old loan |
+| `renewal_fee_method` | `text NOT NULL DEFAULT 'none'` | V152: [`none`, `flat`, `percent_of_principal`] of the principal moved; added to the new loan's schedule |
+| `renewal_fee_minor`, `renewal_fee_bp` | `bigint`, `integer` | V152: the flat amount (1 to 10^15) or the rate (1 to 10000 bp), exactly the one the method uses |
 | `created_by` | `uuid NOT NULL` | |
 
 ### `lending_loan_product_fees`
@@ -1842,8 +1847,11 @@ creation and replaced by the approved terms at approval.
 | `disbursed_on` | `date` | |
 | `maturity_date` | `date` | Last schedule item's due date. |
 | `closed_on`, `written_off_on` | `date` | |
-| `restructured_from_loan_id`, `restructured_to_loan_id` | `uuid` | |
-| `principal_disbursed_minor` | `bigint NOT NULL DEFAULT 0` | |
+| `restructured_from_loan_id`, `restructured_to_loan_id` | `uuid` | The loan this one renewed and the loan that renewed it (issue #918). `lending_loans_restructured_from`: one successor per loan |
+| `renewal_no` | `integer NOT NULL DEFAULT 0` | V152, ADR-128: which renewal of its chain the loan is, 0 for none; `CHECK (renewal_no = 0 OR restructured_from_loan_id IS NOT NULL)` |
+| `restructured_on` | `date` | V152: the date the loan was renewed (restructured); index `(tenant_id, restructured_on)` for the reports |
+| `restructure_kind` | `text` | V152: [`renewal`, `restructure`]; only `renewal` is written. `lending_loans_restructured_shape`: a `restructured` loan has its successor, date and kind |
+| `principal_disbursed_minor` | `bigint NOT NULL DEFAULT 0` | On a renewal loan, the principal moved to it (no cash) |
 | `principal_outstanding_minor` | `bigint NOT NULL DEFAULT 0` | Denormalised; equals the schedule sum; reconciled nightly. |
 | `interest_outstanding_minor` | `bigint NOT NULL DEFAULT 0` | Scheduled interest unpaid and unwaived. |
 | `fees_outstanding_minor` | `bigint NOT NULL DEFAULT 0` | |
@@ -1972,8 +1980,9 @@ item's value (`pledge_exceeds_value`).
 | `principal_paid_minor`, `interest_paid_minor`, `fees_paid_minor`, `penalties_paid_minor` | `bigint NOT NULL DEFAULT 0` | |
 | `interest_waived_minor`, `fees_waived_minor`, `penalties_waived_minor` | `bigint NOT NULL DEFAULT 0` | Principal is never waived. |
 | `written_off_minor` | `bigint NOT NULL DEFAULT 0` | Set at write-off. |
-| `carried_arrears_minor` | `bigint NOT NULL DEFAULT 0` | Memorandum amounts carried from a restructured loan. |
-| `status` | `text NOT NULL` | [`pending`, `due`, `overdue`, `partially_paid`, `paid`, `waived`, `written_off`] |
+| `carried_arrears_minor` | `bigint NOT NULL DEFAULT 0` | Memorandum amounts carried from a restructured loan: on a renewal loan's first item, the interest, fees and penalties the old loan left unpaid and were not collected (issue #918). Never due, never principal. |
+| `restructured_minor` | `bigint NOT NULL DEFAULT 0` | V152: on a renewed loan's unsettled item, what was unpaid when the loan was renewed (principal moved, the rest carried or rebated); not outstanding. |
+| `status` | `text NOT NULL` | [`pending`, `due`, `overdue`, `partially_paid`, `paid`, `waived`, `written_off`, `restructured`]; `restructured` since V152 |
 | `paid_on` | `date` | Date the item became fully settled. |
 
 `CHECK` for each component: `paid + waived <= due`. Index `(tenant_id, due_date, status)`,
@@ -1981,6 +1990,14 @@ item's value (`pledge_exceeds_value`).
 Built in `V29` (#108). The trigger `lending_schedule_items_guard` refuses any change of `loan_id`,
 `item_no`, `due_date` or the principal, interest and fee due once written; only the paid, waived,
 written-off, penalty and status columns move.
+
+Changed by `V152__lending_loan_renewal.sql` (issue #918, ADR-128), expand only, after `V151` of pull request #917: the
+permissions `lending.loans.renew_request` and `lending.loans.renew_approve`; the renewal columns of
+`lending_loan_product_versions`; `renewal_no`, `restructured_on` and `restructure_kind` on `lending_loans` with the
+indexes `lending_loans_restructured_from` (unique) and `lending_loans_restructured_on`; `restructured_minor` and the
+`restructured` status on `lending_schedule_items` (the status check widened, then validated). A renewal writes the new loan
+as a `draft`, gives it the old loan's pledges and guarantors (the V8 guards allow that only on a draft) after releasing them
+from the old loan, and moves it to `active`.
 
 ### `lending_loan_charges`
 
