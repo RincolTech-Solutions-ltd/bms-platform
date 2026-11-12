@@ -71,13 +71,12 @@ done by hand as the notes say.
       `BRANCH_IN_TWO_FILES` and the run is not ready until its rows are left out, so merge the files
       first); a later run that adds loans to a branch already opened posts no journal and its report
       lists them for a correcting entry.
-- [ ] Rows per file: until #900 is closed, a batch holds at most 25,000 rows (`TOO_MANY_ROWS` above it),
-      the largest size the big file test commits on the staging heap inside the time limits (SDD chapter 15
-      section 15.7: 25,000 items dry run in 185 s and commit in 246 s with the heap at 60 percent; 10,000 took
-      11 s each; 50,000 stopped at the 900 s dry run limit). The time grows faster than the rows in a database
-      that already holds other businesses' imports, so plan the window from the dry run of the largest file, on
-      the host the import runs on. Split a larger product master into files of at most 25,000 rows, each its own
-      batch, and rehearse the dry run on the largest one first. The limit goes up to 100,000 with #900.
+- [ ] Rows per file: a batch holds at most 100,000 rows (`TOO_MANY_ROWS` above it), which the big file test
+      dry runs and commits on the staging heap inside the time limits (SDD chapter 15 section 15.7). Plan the
+      window from the dry run of the largest file, on the host the import runs on, and rehearse that dry run
+      first. Split a larger product master into files of at most 100,000 rows, each its own batch. Two
+      businesses' batches can run at the same time: the second keeps the statistics it has and may run slower
+      (SDD chapter 13 section 13.14.1 11/16, V153), so run the largest imports one at a time.
 
 ### 2.3 Cleaning and review (stage 3)
 

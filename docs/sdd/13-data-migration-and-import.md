@@ -759,7 +759,7 @@ retail command. ADR-027 makes the framework the one pipeline for every tenant's 
 - **Quarantine.** Uploaded files are encrypted with a per-run key under a quarantine prefix. The
   `import_*` tables are the staging area; no vertical or ledger table is written before commit.
   Columns a mapping ignores are not stored in `import_rows.raw`. Limits: 25 MB per file, 100,000
-  rows per batch (25,000 until #900, section 13.14.1 11/16), 200 columns, streaming parsers.
+  rows per batch (proven on the staging heap by #900, section 13.14.1 11/16), 200 columns, streaming parsers.
 - **Canonical templates and mappings.** A template (`retail_v1`, `lending_loans_v1`, later savings
   and investments) is code in its vertical, registered with the core. A customer's sheet is a
   versioned mapping document in `import_mappings` (append-only), validated against the template:
@@ -876,7 +876,7 @@ tooling, as the commit is. Every call works on the bound business only: a run or
   keys the columns). The header is the first of the first 20 rows that holds every header the mapping requires, or the first
   row that is not blank (`HEADER_NOT_FOUND`). Every row below it becomes one `import_rows` row with its cells in `raw`, blank
   rows included and trailing blank rows not, and columns the mapping ignores are dropped. Rows are written 1,000 at a time in
-  one transaction, so the limits (`TOO_MANY_ROWS` over 100,000, 25,000 until #900, `TOO_MANY_COLUMNS` over 200) and a damaged file
+  one transaction, so the limits (`TOO_MANY_ROWS` over 100,000, `TOO_MANY_COLUMNS` over 200) and a damaged file
   (`FILE_UNREADABLE`: an unclosed quote, a cell over 32,767 characters, a broken zip or XML) roll every row back: the batch
   is `failed` with its code and a reason that names a limit, a row or a column, never a value, and its file is deleted. A
   batch can be parsed again with other options before the run is ready; its rows are replaced. Since #129 the required
@@ -1588,18 +1588,33 @@ section 4.1; coordinated with #110, which builds no second framework).**
 - **The suite** is SDD chapter 15 section 15.7: the golden report of `retail_v1` over fabricated edge cases, the property
   tests on generated shop books, the fuzzed files, and the big file test at each limit of 13.14 on the staging heap, with
   its times.
-- **Open findings.** #900, what is left after #880 (PR #898: the loader of `retail_v1` streams the batch in pages of 250
-  rows and writes each page in statement batches, a batch plans each statement for its tables as they are, each key is
-  looked up by its index, the reconciliation reads a template's forecast inputs once, and the per-row keys of the
-  validation, the forecast and the loader are held compactly): the validation and preview of 100,000 rows fit the
-  staging heap, but in a database other businesses' imports already fill the batch's lookups of `import_refs` and of
-  the items of the same name still grow with its rows, and the commit of 100,000 items fills the old generation. The
-  test that shows it is disabled with that number. #881 (a restock's price change looked for within its batch only, so
-  splitting the restocks over two runs lost it) is fixed: see the restock price changes in section 13.13's table.
-- **The row limit is 25,000 per batch until #900** (`bms.imports.max-rows`, `BMS_IMPORTS_MAX_ROWS`): the big file test
-  dry runs it in 185 s and commits it in 246 s on the staging heap with the old generation at 60 percent; 50,000 stopped
-  at the 900 s dry run limit (chapter 15 section 15.7). It goes up to 100,000 with #900. The test profile keeps 100,000
-  for the readers' streaming proofs; `UploadServiceTest` pins production's.
+- **The big file findings, #880 and #900.** #880 (PR #898) streams the loader of `retail_v1` in pages of 250 rows,
+  writes each page in statement batches, plans each statement of a batch for its tables as they are, looks each key up
+  through `LATERAL ... OFFSET 0`, reads a template's forecast inputs once for the reconciliation, and holds the per-row
+  keys of the validation, the forecast and the loader compactly. #900 found what was left:
+  - *The statistics of a batch's own rows.* The planner estimates a business's rows from the table's statistics, which
+    ANALYZE gathers from committed rows only, so while a batch filled `import_refs` and `retail_products` the business
+    still looked nearly empty. Every index that leads with `tenant_id` then looked as cheap as the one holding the key,
+    and the planner took `import_refs_by_run` for the lookup of a key and `retail_products_category` for the lookup of a
+    product by its id and its name, filtering every row the batch had written: about 68,000 rows per key at 68,000 rows,
+    so the batch grew with the square of its rows. Twice the staging heap was never the cause: run first on a fresh
+    database the twice-heap dry run took 145 s, and the staging heap's stopped at 900 s once another business's 100,000
+    rows were in the tables. Since V153 a batch calls the definer function `bms_import_refresh_statistics()` each time its
+    registered rows double from 1,000 (`ImportRunService.RowCheckpoint`): ANALYZE of those two tables in the batch's own
+    transaction counts its own rows, and the key is then found through `import_refs_by_key` (a page of 250 lookups in
+    0.4 ms instead of 1,449 ms, measured on a copy of the table with 30,000 rows of the batch). ANALYZE holds SHARE UPDATE
+    EXCLUSIVE on the two tables to the end of the batch, which blocks no read or write; a second business's batch that
+    finds it held waits at most 2 s, keeps the statistics it has and goes on. A dry run rolls the statistics back.
+  - *The reconciliation after the commit* read every item the batch had just written as product objects and a copied
+    map of costs (the dry run reads the catalogue before the batch, so it never did), and filled the staging heap's old
+    generation at 100,000 items. The forecast now reads the costs a row at a time into compact keys
+    (`RetailV1Template.heldCosts`).
+
+  #881 (a restock's price change looked for within its batch only, so splitting the restocks over two runs lost it) is
+  fixed: see the restock price changes in section 13.13's table.
+- **The row limit is 100,000 per batch** (`bms.imports.max-rows`, `BMS_IMPORTS_MAX_ROWS`, spec section 3.1): the big
+  file test dry runs and commits it on the staging heap inside the time limits with a tenth of the old generation to
+  spare, among other businesses' committed rows (chapter 15 section 15.7). `UploadServiceTest` pins it.
 
 **12/16, the rehearsal on last night's backup (#138, migration `V146`, ADR-027 decision 9, spec section 5.5).**
 

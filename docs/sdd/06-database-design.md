@@ -1533,6 +1533,13 @@ V148 CHECK `import_defects_fix_ref_check` (any owner and repository) then droppe
 (tenant_id, batch_id) WHERE excluded_by IS NOT NULL` and `import_issue_resolutions_asked (tenant_id, run_id, code,
 source_row_no) WHERE resolution = 'ask_customer'`. No column, function or grant changes.
 
+Added by `V153__import_batch_statistics.sql` (issue #900, chapter 13 section 13.14.1 11/16), expand only: the definer
+function **`bms_import_refresh_statistics()`** (owned by `bms_owner`; `bms_app` alone may execute). It raises
+`insufficient_privilege` unless `app.import_commit` is `on`, which only an import batch's transaction sets (V143). It then
+runs ANALYZE on `import_refs` and `retail_products` (the columns a batch looks rows up by) inside the caller's transaction,
+so the batch's own uncommitted rows count. It waits at most 2 s for the lock (`lock_timeout`) and returns false when
+another batch holds it. No table, column, index or row changes.
+
 ## 6.6 General ledger (RLS)
 
 ### 6.6.1 Tables
