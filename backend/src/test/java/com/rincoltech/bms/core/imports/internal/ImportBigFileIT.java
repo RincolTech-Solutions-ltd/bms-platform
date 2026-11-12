@@ -48,9 +48,12 @@ import tools.jackson.databind.json.JsonMapper;
  * {@code tenant_id} alone and filtered every row the batch had written, so a dry run in a database other businesses' imports
  * already fill stopped at its limit whatever the heap; the batch now refreshes those statistics as it grows (V153). It also
  * found the reconciliation after the commit reading every item the batch wrote as objects; it now reads their costs
- * compactly. The configured row limit, {@link UploadSettings#DEFAULT_MAX_ROWS}, is the 100,000 of section 3.1, and every
- * case runs at it. The commits at the row limit run last, after the other cases have committed theirs, so their lookups
- * run among other businesses' rows, as on staging.
+ * compactly. A batch at the 100,000 of section 3.1 is proven here, judged, and its commits run last, after the other cases
+ * have committed theirs, so their lookups run among other businesses' rows, as on staging. The configured row limit,
+ * {@link UploadSettings#DEFAULT_MAX_ROWS}, is lower (the Lead's decision on the review of e771a17, SDD chapter 13 section
+ * 13.14.1 11/16): the largest measured size whose validation and dry run, requests the screen waits on, both finish
+ * within {@link #EDGE_BUDGET_MS}, under the 100 s after which Cloudflare's edge gives up on a request to staging. Every
+ * case at or under it is held to that budget; a case over it runs the child at its own size.
  *
  * <p><b>Not part of {@code mvn verify}.</b> The commits and their dry runs take longer than
  * the backend job can spare, and on the shared runner a stalled machine would fail the job for a reason that is not a
@@ -90,6 +93,12 @@ class ImportBigFileIT extends IntegrationTest {
     /** The batch's statement timeout (spec section 3.7): the commit of one batch must finish inside it. */
     static final long BATCH_TIMEOUT_MS = 10 * 60 * 1000L;
 
+    /**
+     * What the validation and the dry run of a batch at the configured limit may each take: 80 s, under the 100 s after
+     * which Cloudflare's edge answers 524 to a request to staging (the Lead's decision on the review of e771a17, #900).
+     */
+    static final long EDGE_BUDGET_MS = 80_000L;
+
     @TempDir
     Path dir;
 
@@ -97,7 +106,7 @@ class ImportBigFileIT extends IntegrationTest {
     @Test
     @Order(Integer.MAX_VALUE)
     void aCsvAtTheRowAndSizeLimitsIsCommittedOnTheStagingHeapInsideTheBatchTimeout() throws Exception {
-        String output = child("commit", "items=" + limitsCsv(), STAGING_HEAP_MB);
+        String output = child("commit", "items=" + limitsCsv(), STAGING_HEAP_MB, ROW_LIMIT);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "outcome=COMMITTED");
         assertThat(written(output)).as("every item written").isGreaterThanOrEqualTo(ROW_LIMIT);
         assertThat(stepMillis(output, "commit"))
@@ -113,7 +122,7 @@ class ImportBigFileIT extends IntegrationTest {
     @Test
     @Order(Integer.MAX_VALUE - 1)
     void aCsvAtTheRowAndSizeLimitsIsCommittedInsideTheBatchTimeoutOnTwiceTheStagingHeap() throws Exception {
-        String output = child("commit", "items=" + limitsCsv(), 2 * STAGING_HEAP_MB);
+        String output = child("commit", "items=" + limitsCsv(), 2 * STAGING_HEAP_MB, ROW_LIMIT);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "outcome=COMMITTED");
         assertThat(written(output)).as("every item written").isGreaterThanOrEqualTo(ROW_LIMIT);
         assertThat(stepMillis(output, "commit"))
@@ -125,7 +134,7 @@ class ImportBigFileIT extends IntegrationTest {
     void aWorkbookAtTheRowLimitIsValidatedAndPreviewedOnTheStagingHeap() throws Exception {
         Path xlsx = dir.resolve("fab-items-at-the-row-limit.xlsx");
         TestFiles.writeXlsx(xlsx, ITEM_HEADER, items(ROW_LIMIT, 0));
-        String output = child("preview", "items=" + xlsx, STAGING_HEAP_MB);
+        String output = child("preview", "items=" + xlsx, STAGING_HEAP_MB, ROW_LIMIT);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "step=preview");
     }
 
@@ -135,35 +144,46 @@ class ImportBigFileIT extends IntegrationTest {
         assertThat(output).contains("columns=" + COLUMN_LIMIT, "outcome=COMMITTED");
         assertThat(written(output)).isGreaterThanOrEqualTo(COLUMN_LIMIT_ROWS);
         assertThat(stepMillis(output, "commit")).isLessThan(BATCH_TIMEOUT_MS);
+        insideTheEdgeBudget(output);
     }
 
     /** The upload, validation and preview at the row and size limits of spec section 3.1, on the staging heap, judged. */
     @Test
     void aCsvAtTheRowAndSizeLimitsIsUploadedValidatedAndPreviewedOnTheStagingHeap() throws Exception {
-        String output = child("preview", "items=" + limitsCsv(), STAGING_HEAP_MB);
+        String output = child("preview", "items=" + limitsCsv(), STAGING_HEAP_MB, ROW_LIMIT);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "step=preview");
     }
 
-    // JUSTIFICATION-A3: the Lead's fallback on #880 asks the sizes measured and the largest that passes configured.
+    // JUSTIFICATION-A3: the Lead's decision on the review of e771a17 asks the limit held to its measured 80 s budget.
     /**
      * The whole path, commit included, for a product master of seven columns at each measured size below the row limit, on
-     * the staging heap and judged there (SDD chapter 15 section 15.7): how the times grow with the rows.
+     * the staging heap and judged there (SDD chapter 15 section 15.7): how the times grow with the rows. A size at or under
+     * the configured limit is held to {@link #EDGE_BUDGET_MS}; one over it runs the child at its own size.
      */
     @ParameterizedTest(name = "{0} rows")
-    @MethodSource("sizesUpToTheConfiguredLimit")
+    @MethodSource("measuredSizes")
     void aProductMasterIsCommittedOnTheStagingHeapInsideTheTimeLimits(int rows) throws Exception {
         Path csv = dir.resolve("fab-items-" + rows + ".csv");
         TestFiles.writeCsv(csv, ITEM_HEADER, items(rows, 0));
-        String output = child("commit", "items=" + csv, STAGING_HEAP_MB);
+        String output =
+                child("commit", "items=" + csv, STAGING_HEAP_MB, Math.max(rows, UploadSettings.DEFAULT_MAX_ROWS));
         assertThat(output).contains("rows=" + rows, "outcome=COMMITTED");
         assertThat(written(output)).isGreaterThanOrEqualTo(rows);
         assertThat(stepMillis(output, "commit")).isLessThan(BATCH_TIMEOUT_MS);
+        if (rows <= UploadSettings.DEFAULT_MAX_ROWS) {
+            insideTheEdgeBudget(output);
+        }
     }
 
-    /** The sizes measured for #880 and #900, those up to the configured limit. */
-    static java.util.stream.Stream<Integer> sizesUpToTheConfiguredLimit() {
-        return java.util.stream.Stream.of(10_000, 25_000, 50_000, 75_000)
-                .filter(rows -> rows <= UploadSettings.DEFAULT_MAX_ROWS);
+    /** The sizes measured for #880 and #900. */
+    static java.util.stream.Stream<Integer> measuredSizes() {
+        return java.util.stream.Stream.of(10_000, 25_000, 50_000, 75_000);
+    }
+
+    /** The validation and the dry run each finish within {@link #EDGE_BUDGET_MS} (#900). */
+    static void insideTheEdgeBudget(String output) {
+        assertThat(stepMillis(output, "validate")).as("the validation").isLessThan(EDGE_BUDGET_MS);
+        assertThat(stepMillis(output, "dry_run")).as("the dry run").isLessThan(EDGE_BUDGET_MS);
     }
 
     /** One row over the configured limit is refused at the upload with TOO_MANY_ROWS, in the child at that limit. */
@@ -289,7 +309,16 @@ class ImportBigFileIT extends IntegrationTest {
      * configured one.
      */
     private String child(String mode, String bigFile, int heapMb) throws Exception {
+        return child(mode, bigFile, heapMb, UploadSettings.DEFAULT_MAX_ROWS);
+    }
+
+    /**
+     * As {@link #child(String, String, int)}, with the child's row limit at {@code maxRows} (the 100,000-row proof of
+     * #900). The child keeps the quarantined files in a directory of this test's, deleted with it however the child ends.
+     */
+    private String child(String mode, String bigFile, int heapMb, int maxRows) throws Exception {
         TestDatabase.Fixture t = TestDatabase.tenant("import-big", false, true);
+        Path storage = Files.createDirectories(dir.resolve("storage-" + t.tenantId()));
         Path mappingFile = dir.resolve("mapping.json");
         Files.writeString(mappingFile, JsonMapper.builder().build().writeValueAsString(mapping()));
         Path categories = dir.resolve("fab-categories.csv");
@@ -304,6 +333,8 @@ class ImportBigFileIT extends IntegrationTest {
                 "-XX:MaxMetaspaceSize=128m",
                 "-XX:+ExitOnOutOfMemoryError",
                 "-Djava.awt.headless=true",
+                "-Dbigfile.maxRows=" + maxRows,
+                "-Dbigfile.storage=" + storage,
                 "-cp",
                 System.getProperty("java.class.path"),
                 ImportBigFileMain.class.getName(),

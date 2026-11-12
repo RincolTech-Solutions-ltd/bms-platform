@@ -893,7 +893,8 @@ class ReconciliationService implements ImportReconciliation {
                 if (unmeasurable != null) {
                     unmeasuredKinds.add(unmeasurable);
                 }
-                if (part != null && whole != null) {
+                // A row whose values could not be typed has no part and is counted above: only typed rows go on.
+                if (typed != null && part != null && whole != null) {
                     whole.row(b.set().key(), typed);
                     part.forEach((id, v) -> writtenParts.merge(id, v, BigDecimal::add));
                 }
@@ -908,7 +909,7 @@ class ReconciliationService implements ImportReconciliation {
                                     "written as reviewed; warning overridden (" + s.overridden() + ")",
                                     "0"));
                 }
-                if (part != null && !sameDecision) {
+                if (typed != null && part != null && !sameDecision) {
                     // The same rules under the recorded decision. If they cannot measure the row, its decision is not
                     // itemised, so its difference stays unexplained and holds the sign-off.
                     Map<CheckId, BigDecimal> asDecided = null;

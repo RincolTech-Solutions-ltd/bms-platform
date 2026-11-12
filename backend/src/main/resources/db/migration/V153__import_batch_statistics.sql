@@ -14,10 +14,12 @@
 --
 -- Locks: ANALYZE takes SHARE UPDATE EXCLUSIVE on each table, held to the end of the batch's transaction (10 minutes at
 -- most). That lock does not conflict with reads or writes, only with VACUUM, ANALYZE, CREATE INDEX CONCURRENTLY and some
--- forms of ALTER TABLE. The function waits for it at most 2 s (lock_timeout, longer than the 1 s deadlock_timeout after
--- which an autovacuum in the way is cancelled). A batch of a second business that finds the lock held gets false back,
--- keeps the statistics it has and asks again at its next registration: it is never stopped and never waits behind the
--- first for more than those 2 s a time. Autovacuum skips the table meanwhile.
+-- forms of ALTER TABLE. The function waits for it as long as the batch says, at most 2 s (longer than the 1 s
+-- deadlock_timeout after which an autovacuum in the way is cancelled). A batch that finds the lock held gets false back,
+-- keeps the statistics it has and asks again, waiting 100 ms, once its registered rows have doubled again or 30 s have
+-- passed: it is never stopped, and beside another batch it waits at most 2 s a doubling (14 s over 100,000 rows) and
+-- 100 ms each 30 s after that (ImportRunService.RowCheckpoint, the Lead on the review of e771a17). Autovacuum skips the
+-- table meanwhile.
 -- Large batches (over 20,000 rows) take a platform-wide advisory key first, so two never need this lock together
 -- (ImportRunService.LARGE_BATCH_ROWS, the review of 887dc57).
 --
@@ -29,7 +31,9 @@
 -- bms_app nothing of a table under row-level security, and bms_app is NOBYPASSRLS and owns no table
 -- (deploy/postgres/initdb/01-roles.sh).
 
-CREATE FUNCTION bms_import_refresh_statistics() RETURNS boolean
+-- p_wait_ms: how long to wait for the lock, 1 to 2,000 ms: 2,000 at a doubling, 100 when the batch asks again after a
+-- refusal. The lock_timeout set here ends with the function (its SET clause).
+CREATE FUNCTION bms_import_refresh_statistics(p_wait_ms integer) RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp SET lock_timeout = '2s' AS $$
 BEGIN
     -- A guard against misuse, not a privilege check: an import batch sets app.import_commit for its transaction (V143),
@@ -38,6 +42,10 @@ BEGIN
         RAISE EXCEPTION 'bms_import_refresh_statistics runs only inside an import batch'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    IF p_wait_ms IS NULL OR p_wait_ms < 1 OR p_wait_ms > 2000 THEN
+        RAISE EXCEPTION 'bms_import_refresh_statistics waits 1 to 2000 ms' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    PERFORM set_config('lock_timeout', p_wait_ms || 'ms', true);
     -- The columns a batch looks rows up by, and the tenant_id every policy adds.
     ANALYZE import_refs (tenant_id, source_key, run_id, target_type, target_id);
     ANALYZE retail_products (tenant_id, id, code, name_key, unit_id, category_id);
@@ -47,5 +55,5 @@ EXCEPTION WHEN lock_not_available THEN
 END
 $$;
 
-REVOKE ALL ON FUNCTION bms_import_refresh_statistics() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION bms_import_refresh_statistics() TO bms_app;
+REVOKE ALL ON FUNCTION bms_import_refresh_statistics(integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION bms_import_refresh_statistics(integer) TO bms_app;

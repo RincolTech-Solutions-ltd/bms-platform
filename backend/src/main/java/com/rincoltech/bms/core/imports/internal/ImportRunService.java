@@ -86,6 +86,14 @@ class ImportRunService implements ImportRuns {
     /** The rows a batch registers before the statistics of the tables it fills are first refreshed (V153, #900). */
     static final int STATISTICS_FIRST = 1_000;
 
+    /** How long a batch waits for the statistics lock: at each doubling, and when it asks again after a refusal. */
+    static final int FIRST_WAIT_MS = 2_000;
+
+    static final int RETRY_WAIT_MS = 100;
+
+    /** After a refusal the batch asks again once its rows doubled again, or after this long, whichever is first. */
+    static final long RETRY_AFTER_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+
     /**
      * A batch over this many rows is large: it takes {@link #LARGE_KEY} first (the Lead on the review of 887dc57, #900).
      * Two large batches of different businesses would each need the statistics the other's ANALYZE holds (V153), and
@@ -1680,6 +1688,10 @@ class ImportRunService implements ImportRuns {
         private long rows;
         private long registered;
         private long refreshAt = STATISTICS_FIRST;
+
+        /** When the last refresh was refused (System.nanoTime), or 0 when it was not. */
+        private long refusedAt;
+
         private Map<String, String> policy;
 
         RowCheckpoint(
@@ -1744,16 +1756,22 @@ class ImportRunService implements ImportRuns {
 
         /**
          * Each time the rows the batch registered double, from {@link #STATISTICS_FIRST}, the statistics of the tables it
-         * fills are refreshed inside its transaction (V153, issue #900): seven times for 100,000 rows.
+         * fills are refreshed inside its transaction (V153, issue #900): seven times for 100,000 rows. Each wait is at most
+         * {@link #FIRST_WAIT_MS}, and {@link #RETRY_WAIT_MS} when asked again after a refusal.
          */
         private void registered(int n) {
             registered += n;
-            // Refused while another batch holds the tables' statistics lock: tried again at the next registration
-            // (the review of 887dc57). A large batch holds the platform's large-batch key, so that other batch is
-            // small.
-            if (registered >= refreshAt && refs.refreshStatistics()) {
-                refreshAt = registered * 2;
+            boolean retry = refusedAt != 0 && System.nanoTime() - refusedAt >= RETRY_AFTER_NANOS;
+            if (registered < refreshAt && !retry) {
+                return;
             }
+            // Refused while another batch holds the tables' statistics lock (a large batch holds the platform's
+            // large-batch key, so that other one is small): asked again, waiting only RETRY_WAIT_MS, once the rows have
+            // doubled again or 30 s have passed (the Lead on the review of e771a17), so a batch beside another waits
+            // about 2 s a doubling at most.
+            boolean refreshed = refs.refreshStatistics(refusedAt == 0 ? FIRST_WAIT_MS : RETRY_WAIT_MS);
+            refusedAt = refreshed ? 0 : System.nanoTime();
+            refreshAt = registered * 2;
         }
 
         @Override

@@ -99,6 +99,30 @@ class RetailV1TemplateTest {
                 .isEmpty();
     }
 
+    // JUSTIFICATION-A3: the Lead on the review of e771a17 (#900) asks a test that no forecast changes its input.
+    /**
+     * The reconciliation gives each forecast the row's typed values unmodifiable, once for all of them (#900, the review
+     * of e771a17): the forecast of products and balances only reads them; a history row is copied into the export's own
+     * form before anything reads it ({@code ExportFile.staged}).
+     */
+    @Test
+    void theForecastOnlyReadsTheRowsItIsGiven() {
+        ImportForecast f = new RetailV1Template.StockForecast(costs(Map.of()));
+        f.batch(1);
+        for (Map.Entry<String, Map<String, Object>> row : List.of(
+                Map.entry("products", Map.<String, Object>of("code", "TS-001", "cost_minor", 700L)),
+                Map.entry(
+                        "balances",
+                        Map.<String, Object>of(
+                                "branch", "KLA", "product_code", "TS-001", "qty", new BigDecimal("4"))))) {
+            Map<String, Object> values = new java.util.LinkedHashMap<>(row.getValue());
+            Map<String, Object> before = Map.copyOf(values);
+            f.row(row.getKey(), java.util.Collections.unmodifiableMap(values));
+            assertThat(values).as(row.getKey()).isEqualTo(before);
+        }
+        assertThat(f.balances().journals()).isNotNull();
+    }
+
     @Test
     void theForecastJournalsOnlyWhatIsAboveZeroAndListsTheRestForTheFirstStockTake() {
         ImportForecast f = new RetailV1Template.StockForecast(costs(Map.of("TS-009", 9_000L)));

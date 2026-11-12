@@ -1038,10 +1038,99 @@ class ImportPreviewIT extends IntegrationTest {
                 .params(ImportRunService.LARGE_BATCH_ROWS, atThreshold)
                 .update();
         scripted(large, NOTHING);
+        whileAnotherBusinessHoldsTheLargeKey(() -> {
+            assertCode(() -> as(t, () -> runs.dryRun(large, operator)), ImportRunService.IMPORT_BUSY);
+            assertThat(as(t, () -> runs.dryRun(atThreshold, operator)).report().failure())
+                    .as("a batch at the threshold takes no key")
+                    .isNull();
+        });
+        assertThat(as(t, () -> runs.dryRunReport(large))).as("nothing stored").isEmpty();
+        assertThat(largeKeyFree()).as("free after a refused dry run").isTrue();
+        assertThat(as(t, () -> runs.dryRun(large, operator)).report().failure())
+                .as("once the key is free")
+                .isNull();
+        assertThat(largeKeyFree()).as("free after a large dry run").isTrue();
+        FixtureShopTemplate.SCRIPT = (runId, batchId, seq, checkpoint) -> {
+            throw new IllegalStateException("a fabricated failure of a large batch");
+        };
+        assertThat(as(t, () -> runs.dryRun(large, operator)).report().failure())
+                .as("a large dry run that fails")
+                .isNotNull();
+        assertThat(largeKeyFree()).as("free after a failed large dry run").isTrue();
+    }
+
+    // JUSTIFICATION-A3: the Lead on the review of e771a17 (#900) asks the commit's refusal proven: 409, committing,
+    // resume.
+    /**
+     * The commit of a large batch while another business's large batch is written is refused with {@code import_busy}
+     * (409), the run stays {@code committing}, and its resume commits it once the key is free.
+     */
+    @Test
+    void aLargeCommitIsRefusedAtOnceAndResumedOnceTheKeyIsFree() throws Exception {
+        UUID large = emptyRun(t);
+        TestDatabase.owner()
+                .sql("UPDATE import_batches SET row_count = ? WHERE run_id = ?")
+                .params(ImportRunService.LARGE_BATCH_ROWS + 1, large)
+                .update();
+        as(t, () -> runs.dryRun(scripted(large, NOTHING), operator));
+        as(t, () -> runs.transition(large, "ready"));
+        as(t, () -> runs.recordPreImportDump(large, "pre-import-fabricated.dump", Instant.now(), SHA));
+        CommitApproval.readyToCommit(http, t, runs, large, SHA);
+        whileAnotherBusinessHoldsTheLargeKey(() -> assertThatThrownBy(() -> as(t, () -> runs.commit(large)))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.code()).isEqualTo(ImportRunService.IMPORT_BUSY);
+                    assertThat(e.status()).isEqualTo(org.springframework.http.HttpStatus.CONFLICT);
+                }));
+        assertThat(as(t, () -> runs.get(large)).status()).isEqualTo("committing");
+        assertThat(largeKeyFree()).as("free after a refused commit").isTrue();
+        assertThat(as(t, () -> runs.resume(large))).isEqualTo(CommitOutcome.COMMITTED);
+        assertThat(as(t, () -> runs.get(large)).status()).isEqualTo("committed");
+        assertThat(largeKeyFree()).as("free after a large commit").isTrue();
+    }
+
+    // JUSTIFICATION-A3: the Lead on the review of e771a17 (#900) asks the refused refresh tested and its waits bounded.
+    /**
+     * A batch whose statistics refresh is refused, while something else holds {@code import_refs}' statistics lock for the
+     * whole batch, still writes, and waits 2 s once and 100 ms at each later doubling: 10,000 rows registered a page at a
+     * time take seconds, where asking at every registration would wait 2 s each of some 36 times.
+     */
+    @Test
+    void aRefusedStatisticsRefreshIsAskedAgainRarelyAndBriefly() throws Exception {
+        UUID run = emptyRun(t);
+        scripted(run, (runId, batchId, seq, checkpoint) -> {
+            for (int page = 0; page < 40; page++) {
+                List<BatchWriter.Registration> records = new ArrayList<>(250);
+                for (int line = page * 250 + 1; line <= page * 250 + 250; line++) {
+                    records.add(new BatchWriter.Registration(
+                            ImportRefs.sourceRef(
+                                    "fab-refresh.csv", "-", "line:" + line, ImportRefs.contentHash(Map.of("n", line))),
+                            "retail.product",
+                            UUID.randomUUID()));
+                }
+                checkpoint.registerAll(records);
+            }
+            return Map.of();
+        });
+        try (java.sql.Connection held = TestDatabase.ownerDataSource().getConnection()) {
+            held.setAutoCommit(false);
+            try (java.sql.Statement s = held.createStatement()) {
+                s.execute("LOCK TABLE import_refs IN SHARE UPDATE EXCLUSIVE MODE");
+            }
+            long started = System.nanoTime();
+            assertThat(as(t, () -> runs.dryRun(run, operator)).report().failure())
+                    .isNull();
+            assertThat(TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - started))
+                    .as("2 s once and 100 ms a doubling, not 2 s a registration")
+                    .isLessThan(15);
+            held.rollback();
+        }
+    }
+
+    /** Runs {@code work} while another business's large batch holds the platform's large-batch key in its transaction. */
+    private void whileAnotherBusinessHoldsTheLargeKey(Runnable work) throws Exception {
         TestDatabase.Fixture other = TestDatabase.tenant("import-busy", false);
         ExecutorService pool = Executors.newSingleThreadExecutor();
         try {
-            // Another business's large batch is being written: it holds the platform's key in its transaction.
             CountDownLatch holding = new CountDownLatch(1);
             CountDownLatch release = new CountDownLatch(1);
             Future<?> holder = pool.submit(() -> as(
@@ -1061,25 +1150,27 @@ class ImportPreviewIT extends IntegrationTest {
             assertThat(holding.await(20, TimeUnit.SECONDS)).isTrue();
             long started = System.nanoTime();
             try {
-                assertCode(() -> as(t, () -> runs.dryRun(large, operator)), ImportRunService.IMPORT_BUSY);
-                assertThat(as(t, () -> runs.dryRun(atThreshold, operator))
-                                .report()
-                                .failure())
-                        .as("a batch at the threshold takes no key")
-                        .isNull();
+                work.run();
             } finally {
                 release.countDown();
             }
             assertThat(TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - started))
+                    .as("answered at once, never after a wait")
                     .isLessThan(10);
             holder.get(60, TimeUnit.SECONDS);
         } finally {
             pool.shutdownNow();
         }
-        assertThat(as(t, () -> runs.dryRunReport(large))).as("nothing stored").isEmpty();
-        assertThat(as(t, () -> runs.dryRun(large, operator)).report().failure())
-                .as("once the key is free")
-                .isNull();
+    }
+
+    /** Whether another session takes the platform's large-batch key at once: no batch holds it. */
+    private boolean largeKeyFree() {
+        return Boolean.TRUE.equals(as(
+                t,
+                () -> new TransactionTemplate(transactionManager)
+                        .execute(s -> jdbc.sql("SELECT pg_try_advisory_xact_lock(" + ImportRunService.LARGE_KEY + ")")
+                                .query(Boolean.class)
+                                .single())));
     }
 
     @Test

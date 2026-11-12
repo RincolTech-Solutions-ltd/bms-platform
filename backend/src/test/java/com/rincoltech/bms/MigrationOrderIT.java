@@ -4305,44 +4305,71 @@ class MigrationOrderIT {
         try (Connection c = TestDatabase.appDataSource().getConnection()) {
             c.setAutoCommit(false);
             try (Statement s = c.createStatement()) {
-                assertThatThrownBy(() -> s.execute("SELECT bms_import_refresh_statistics()"))
+                assertThatThrownBy(() -> s.execute("SELECT bms_import_refresh_statistics(2000)"))
                         .hasMessageContaining("runs only inside an import batch");
             }
             c.rollback();
-            // Inside a batch's transaction: true (no other batch runs here), and the statistics count the rows the same
-            // transaction wrote (the review of 887dc57). pg_stats hides a table under row security from bms_app, so the
-            // count is read where everyone may, pg_class, against the committed rows the owner counts.
-            TestDatabase.Fixture f = TestDatabase.tenant("v153-stats", false);
-            long committed = TestDatabase.owner()
-                    .sql("SELECT count(*) FROM import_refs")
-                    .query(Long.class)
-                    .single();
             try (Statement s = c.createStatement()) {
-                s.execute("SET LOCAL app.tenant_id = '" + f.tenantId() + "'");
-                UUID run = UUID.randomUUID();
-                UUID batch = UUID.randomUUID();
-                s.execute("INSERT INTO import_runs (id, tenant_id, created_by) VALUES ('" + run
-                        + "', current_setting('app.tenant_id')::uuid, '" + UUID.randomUUID() + "')");
-                s.execute("INSERT INTO import_batches (id, tenant_id, run_id, seq, status, row_count) VALUES ('" + batch
-                        + "', current_setting('app.tenant_id')::uuid, '" + run + "', 1, 'parsed', 2000)");
-                s.execute(
-                        "INSERT INTO import_refs (id, tenant_id, run_id, batch_id, source_key, source_ref, target_type,"
-                                + " target_id) SELECT gen_random_uuid(), current_setting('app.tenant_id')::uuid, '"
-                                + run + "', '"
-                                + batch
-                                + "', 'fab-v153.csv|-|line:' || g, 'fab-v153.csv|-|line:' || g || '#h', 'retail.product',"
-                                + " gen_random_uuid() FROM generate_series(1, 2000) g");
                 s.execute("SET LOCAL app.import_commit = 'on'");
-                try (java.sql.ResultSet rs = s.executeQuery("SELECT bms_import_refresh_statistics()")) {
+                assertThatThrownBy(() -> s.execute("SELECT bms_import_refresh_statistics(0)"))
+                        .hasMessageContaining("waits 1 to 2000 ms");
+            }
+            c.rollback();
+            // In a batch's transaction, bms_app gets true: no other batch runs here.
+            try (Statement s = c.createStatement()) {
+                s.execute("SET LOCAL app.import_commit = 'on'");
+                try (java.sql.ResultSet rs = s.executeQuery("SELECT bms_import_refresh_statistics(2000)")) {
                     assertThat(rs.next()).isTrue();
                     assertThat(rs.getBoolean(1)).as("refreshed").isTrue();
                 }
-                try (java.sql.ResultSet rs =
-                        s.executeQuery("SELECT reltuples FROM pg_class WHERE oid = 'import_refs'::regclass")) {
+            }
+            c.rollback();
+        }
+        // Both tables' statistics count the rows the same transaction wrote (the review of e771a17): a new business
+        // with
+        // 2,000 uncommitted rows in each is among the most common tenant_id values right after the call. Read as the
+        // owner, whom pg_stats shows a table under row security (it shows bms_app nothing of one).
+        TestDatabase.Fixture f = TestDatabase.tenant("v153-stats", false, true);
+        try (Connection c = TestDatabase.ownerDataSource().getConnection()) {
+            c.setAutoCommit(false);
+            try (Statement s = c.createStatement()) {
+                String tenant = "'" + f.tenantId() + "'";
+                UUID run = UUID.randomUUID();
+                UUID batch = UUID.randomUUID();
+                UUID category = UUID.randomUUID();
+                UUID unit = UUID.randomUUID();
+                s.execute("INSERT INTO import_runs (id, tenant_id, created_by) VALUES ('" + run + "', " + tenant + ", '"
+                        + UUID.randomUUID() + "')");
+                s.execute("INSERT INTO import_batches (id, tenant_id, run_id, seq, status, row_count) VALUES ('" + batch
+                        + "', " + tenant + ", '" + run + "', 1, 'parsed', 2000)");
+                s.execute(
+                        "INSERT INTO import_refs (id, tenant_id, run_id, batch_id, source_key, source_ref, target_type,"
+                                + " target_id) SELECT gen_random_uuid(), " + tenant + ", '" + run + "', '" + batch
+                                + "', 'fab-v153.csv|-|line:' || g, 'fab-v153.csv|-|line:' || g || '#h', 'retail.product',"
+                                + " gen_random_uuid() FROM generate_series(1, 2000) g");
+                s.execute("INSERT INTO retail_categories (id, tenant_id, name) VALUES ('" + category + "', " + tenant
+                        + ", 'Test Category V153')");
+                s.execute("INSERT INTO retail_units (id, tenant_id, name) VALUES ('" + unit + "', " + tenant
+                        + ", 'test-unit-v153')");
+                s.execute("INSERT INTO retail_products (id, tenant_id, code, description, category_id, unit_id,"
+                        + " cost_minor, sell_minor, currency) SELECT gen_random_uuid(), " + tenant
+                        + ", 'V153-' || g, 'Fabricated item ' || g, '" + category + "', '" + unit
+                        + "', 100, 200, 'UGX' FROM generate_series(1, 2000) g");
+                s.execute("SET LOCAL app.import_commit = 'on'");
+                try (java.sql.ResultSet rs = s.executeQuery("SELECT bms_import_refresh_statistics(2000)")) {
                     assertThat(rs.next()).isTrue();
-                    assertThat(rs.getDouble(1) - committed)
-                            .as("the 2,000 rows written in the same transaction are counted")
-                            .isGreaterThan(1_000);
+                    assertThat(rs.getBoolean(1)).as("refreshed").isTrue();
+                }
+                for (String table : List.of("import_refs", "retail_products")) {
+                    try (java.sql.ResultSet rs =
+                            s.executeQuery("SELECT coalesce(most_common_vals::text, '') FROM pg_stats"
+                                    + " WHERE schemaname = 'public' AND tablename = '" + table
+                                    + "' AND attname = 'tenant_id'")) {
+                        assertThat(rs.next()).as(table).isTrue();
+                        assertThat(rs.getString(1))
+                                .as("%s counts the rows written in the same transaction", table)
+                                .contains(f.tenantId().toString());
+                    }
                 }
             }
             c.rollback();

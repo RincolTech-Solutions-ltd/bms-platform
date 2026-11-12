@@ -71,10 +71,11 @@ done by hand as the notes say.
       `BRANCH_IN_TWO_FILES` and the run is not ready until its rows are left out, so merge the files
       first); a later run that adds loans to a branch already opened posts no journal and its report
       lists them for a correcting entry.
-- [ ] Rows per file: a batch holds at most 100,000 rows (`TOO_MANY_ROWS` above it), which the big file test
-      dry runs and commits on the staging heap inside the time limits (SDD chapter 15 section 15.7). Plan the
+- [ ] Rows per file: until #922 a batch holds at most 25,000 rows (`TOO_MANY_ROWS` above it), the largest
+      size whose check and dry run both finish within 80 s on the staging heap; a longer request is cut at
+      Cloudflare's edge after 100 s (SDD chapter 13 section 13.14.1 11/16, chapter 15 section 15.7). Plan the
       window from the dry run of the largest file, on the host the import runs on, and rehearse that dry run
-      first. Split a larger product master into files of at most 100,000 rows, each its own batch. One batch
+      first. Split a larger product master into files of at most 25,000 rows, each its own batch. One batch
       over 20,000 rows is written at a time on the platform, dry runs included: while another business's large
       batch is being written, a dry run or commit of yours answers `import_busy` ("try again in a few
       minutes") and writes nothing. Wait for the other import, then run the dry run again, or resume the

@@ -57,10 +57,9 @@ public final class ImportBigFileMain {
                 JsonMapper.builder().build().readValue(Path.of(args[4]).toFile(), new TypeReference<>() {});
         boolean commit = "commit".equals(args[5]);
         SpringApplication app = new SpringApplication(BmsApplication.class);
-        // The quarantined file kept on disk, not in the heap judged: staging streams it to R2 (issue #900). Deleted
-        // with
-        // everything in it when the child ends.
-        Path storage = Files.createTempDirectory("import-big-file-storage-");
+        // The quarantined file kept on disk, not in the heap judged: staging streams it to R2 (issue #900). The parent
+        // gives the directory and deletes it, however the child ends (-Dbigfile.storage).
+        String storage = System.getProperty("bigfile.storage");
         // Command line arguments win over application.yml; the switches are those of IntegrationTest.
         String[] settings = {
             "--spring.profiles.active=test",
@@ -69,8 +68,9 @@ public final class ImportBigFileMain {
             "--spring.datasource.password=" + args[1],
             "--server.port=0",
             "--management.server.port=0",
-            // Production's row limit, whatever the test profile holds.
-            "--bms.imports.max-rows=" + UploadSettings.DEFAULT_MAX_ROWS,
+            // Production's row limit, whatever the test profile holds, unless the case measures a size over it
+            // (-Dbigfile.maxRows: the 100,000-row proof of #900).
+            "--bms.imports.max-rows=" + Integer.getInteger("bigfile.maxRows", UploadSettings.DEFAULT_MAX_ROWS),
             "--bms.storage.fake-dir=" + storage,
             "--bms.reports.runner-enabled=false",
             "--bms.lending.arrears-job-enabled=false",
@@ -92,12 +92,6 @@ public final class ImportBigFileMain {
             System.out.println("BIGFILE maxHeapMb=" + Runtime.getRuntime().maxMemory() / 1024 / 1024 + " oldPeakMb="
                     + Math.max(worst, oldPeak()) / 1024 / 1024 + " oldMaxMb=" + oldMax() / 1024 / 1024 + " gcMs="
                     + gcMillis());
-        } finally {
-            try (java.util.stream.Stream<Path> files = Files.walk(storage)) {
-                for (Path p : files.sorted(java.util.Comparator.reverseOrder()).toList()) {
-                    Files.deleteIfExists(p);
-                }
-            }
         }
         System.exit(ok ? 0 : 1);
     }

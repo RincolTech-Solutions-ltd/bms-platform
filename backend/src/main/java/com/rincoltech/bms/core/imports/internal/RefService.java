@@ -206,10 +206,12 @@ class RefService {
 
     /**
      * Refreshes the statistics of the tables a batch fills, inside the batch's transaction (V153, issue #900), so the
-     * planner sees the rows the batch wrote. False when another batch holds them: this one keeps the statistics it has.
+     * planner sees the rows the batch wrote, waiting at most {@code waitMillis} (1 to 2,000) for their lock. False when
+     * another batch holds it: this one keeps the statistics it has.
      */
-    boolean refreshStatistics() {
-        return Boolean.TRUE.equals(jdbc.sql("SELECT bms_import_refresh_statistics()")
+    boolean refreshStatistics(int waitMillis) {
+        return Boolean.TRUE.equals(jdbc.sql("SELECT bms_import_refresh_statistics(?)")
+                .param(waitMillis)
                 .query(Boolean.class)
                 .single());
     }
