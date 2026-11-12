@@ -15,7 +15,9 @@ export function HeldFeesCard({ branchIds }: { branchIds?: string[] }) {
   const held = useQuery({ queryKey: heldFeesKey(branchIds), queryFn: () => lending.heldRenewalFees(branchIds) });
   const items = held.data?.items ?? [];
   const difference = held.data?.difference_minor ?? 0;
-  if (items.length === 0 && difference === 0) return null;
+  // A branch over and another under can net to 0, so the server says whether every branch balances (review of #919).
+  const off = held.data?.balanced === false || difference !== 0;
+  if (items.length === 0 && !off) return null;
   return (
     <article className="card home-card" aria-labelledby="home-fees-back">
       <h2 id="home-fees-back" className="card-title">
@@ -38,10 +40,12 @@ export function HeldFeesCard({ branchIds }: { branchIds?: string[] }) {
         ))}
       </ol>
       {held.data?.more && <p className="hint">More loans hold a fee; the oldest are shown.</p>}
-      {difference !== 0 && (
+      {off && (
         <p role="alert">
-          Renewal fees held in the books differ from what the loans hold by {money(Math.abs(difference), items[0]?.currency)}. Tell the
-          accountant before handing anything back.
+          {difference !== 0
+            ? `Renewal fees held in the books differ from what the loans hold by ${money(Math.abs(difference), items[0]?.currency)}.`
+            : 'Renewal fees held in the books differ from what the loans hold in some branches.'}{' '}
+          Tell the accountant before handing anything back.
         </p>
       )}
     </article>

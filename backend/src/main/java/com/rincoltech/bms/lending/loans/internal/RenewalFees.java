@@ -46,11 +46,11 @@ class RenewalFees {
                         """).param(loanId).query(Long.class).single();
     }
 
-    /** The value date of the loan's latest {@code renewal_fee_held}, or null when it never took one. */
-    LocalDate lastHeldOn(UUID loanId) {
+    /** The value date of the loan's latest transaction of any kind, or null when it has none. */
+    LocalDate latestMovementOn(UUID loanId) {
         return jdbc.sql("""
                         SELECT value_date FROM lending_loan_transactions
-                         WHERE loan_id = ? AND txn_type = 'renewal_fee_held'
+                         WHERE loan_id = ?
                          ORDER BY value_date DESC LIMIT 1
                         """).param(loanId).query(LocalDate.class).optional().orElse(null);
     }

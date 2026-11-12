@@ -67,7 +67,12 @@ class RenewalFeesHeldController {
             @Schema(
                     description = "The ledger less what the loans hold by their fee transactions; not 0 means the books"
                             + " and the loans disagree (FR-GL-10)")
-            long differenceMinor) {}
+            long differenceMinor,
+
+            @Schema(
+                    description = "Every branch's ledger equals what its loans hold; false even when differences in two"
+                            + " branches cancel out in difference_minor")
+            boolean balanced) {}
 
     @GetMapping("/held")
     @RequiresPermission("lending.repayments.create")
@@ -78,7 +83,7 @@ class RenewalFeesHeldController {
     HeldList held(@RequestParam(name = "branch_id", required = false) List<UUID> branchIds) {
         List<UUID> branches = CurrentPrincipal.require().branchFilter("lending.repayments.create", branchIds);
         if (branches != null && branches.isEmpty()) {
-            return new HeldList(List.of(), false, 0, 0);
+            return new HeldList(List.of(), false, 0, 0, true);
         }
         List<RenewalFeesControl.Line> control = this.control.lines(branches);
         Map<String, Object> p = new LinkedHashMap<>();
@@ -124,6 +129,7 @@ class RenewalFeesHeldController {
                 control.stream().mapToLong(RenewalFeesControl.Line::ledgerMinor).sum(),
                 control.stream()
                         .mapToLong(RenewalFeesControl.Line::differenceMinor)
-                        .sum());
+                        .sum(),
+                control.stream().allMatch(l -> l.differenceMinor() == 0));
     }
 }

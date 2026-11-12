@@ -10920,6 +10920,8 @@ export interface components {
             taken_on?: string;
         };
         HeldRenewalFees: {
+            /** @description Every branch's ledger equals what its loans hold; false even when differences in two branches cancel out in difference_minor */
+            balanced?: boolean;
             /**
              * Format: int64
              * @description The ledger less what the loans hold by their fee transactions; not 0 means the books and the loans disagree (FR-GL-10)

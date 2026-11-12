@@ -73,13 +73,15 @@ class RenewalFeeRefunds {
                     if (r.valueDate().isAfter(servicer.today())) {
                         throw ApiException.rule("value_date_in_future", "The date is today or earlier.");
                     }
-                    // Never before the fee was taken, so renewal fees held is never negative on any date (review of
-                    // #919);
-                    // a closed period is refused by the ledger (period_closed) as for a repayment.
-                    LocalDate taken = fees.lastHeldOn(id);
-                    if (taken != null && r.valueDate().isBefore(taken)) {
+                    // A repayment's backdate rule, whatever the loan's status (the third review of #919): never before
+                    // the loan's latest money movement (repayment, recovery, the fee taken, a write-off), so a counted
+                    // till day is never rewritten, nothing lands before a later repayment, and renewal fees held is
+                    // never negative on any date. A closed period is refused by the ledger (period_closed).
+                    LocalDate latest = fees.latestMovementOn(id);
+                    if (latest != null && r.valueDate().isBefore(latest)) {
                         throw ApiException.rule(
-                                "before_fee_taken", "The date is before the renewal fee was taken (" + taken + ").");
+                                "before_latest_transaction",
+                                "The date is before the loan's latest transaction (" + latest + ").");
                     }
                     UUID txn = fees.refund(
                             loan,

@@ -55,6 +55,12 @@ describe('Renewal fees to hand back', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('differ from what the loans hold by UGX 5,000');
   });
 
+  it('warns when two branches are off in ways that cancel out', async () => {
+    heldRenewalFees.mockResolvedValue({ items: [], more: false, ledger_minor: 0, difference_minor: 0, balanced: false });
+    shell();
+    expect((await screen.findByRole('alert')).textContent).toContain('differ from what the loans hold in some branches');
+  });
+
   it('shows nothing when no loan holds a fee', async () => {
     heldRenewalFees.mockResolvedValue({ items: [], more: false });
     shell();

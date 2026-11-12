@@ -176,8 +176,7 @@ final class LoanLedger {
                             balance,
                             t.valueDate(),
                             number,
-                            (t.reason() == null ? "Fee paid before disbursement" : t.reason()) + ": "
-                                    + money.apply(t.amountMinor())
+                            "Fee paid before disbursement: " + money.apply(t.amountMinor())
                                     + ", not part of the balance");
                 case "reversal" -> {
                     LoanTransaction reversed = byId.get(t.reversesTxnId());

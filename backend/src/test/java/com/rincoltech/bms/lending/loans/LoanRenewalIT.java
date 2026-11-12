@@ -148,8 +148,12 @@ class LoanRenewalIT extends LoanFixtures {
     }
 
     ResponseEntity<JsonNode> renew(String loan, UUID user, String perms, Long collect, Integer term) {
+        return renewOn(today, loan, user, perms, collect, term);
+    }
+
+    ResponseEntity<JsonNode> renewOn(LocalDate on, String loan, UUID user, String perms, Long collect, Integer term) {
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("value_date", today.toString());
+        body.put("value_date", on.toString());
         if (collect != null) {
             body.put("collect_minor", collect);
         }
@@ -405,7 +409,10 @@ class LoanRenewalIT extends LoanFixtures {
         renewal.put("fee_minor", 20_000);
         String old = activeLoan(bulletProduct("RNW3", renewal), 3);
 
-        ResponseEntity<JsonNode> r = renew(old, manager, managerPerms, null, 2);
+        // Dated yesterday and approved today, so the fee's move to income (approval day) and the renewal (its own date)
+        // differ.
+        LocalDate renewedOn = today.minusDays(1);
+        ResponseEntity<JsonNode> r = renewOn(renewedOn, old, manager, managerPerms, null, 2);
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.ACCEPTED);
         String approval = r.getBody().get("approval_request_id").asString();
         ResponseEntity<JsonNode> self = decide(approval, manager, managerPerms);
@@ -437,7 +444,7 @@ class LoanRenewalIT extends LoanFixtures {
         assertThat(held.get("receipt_no").asString()).startsWith("RC-");
         assertThat(lines(held.get("journal_entry_id").asString()))
                 .containsExactly("cash_on_hand:20000:0", "renewal_fees_held:0:20000");
-        assertThat(entryDate(held)).isEqualTo(today.toString());
+        assertThat(entryDate(held)).as("taken on the request's date").isEqualTo(renewedOn.toString());
         JsonNode income = txnOf(old, "renewal_fee");
         assertThat(income.path("receipt_no").isMissingNode()
                         || income.path("receipt_no").isNull())
@@ -448,11 +455,14 @@ class LoanRenewalIT extends LoanFixtures {
         assertThat(entryDate(income))
                 .as("income on the approval's business date")
                 .isEqualTo(today.toString());
+        assertThat(entryDate(txnOf(old, "restructure_out")))
+                .as("the renewal keeps its own date")
+                .isEqualTo(renewedOn.toString());
         assertThat(heldOn(old))
                 .as("nothing is left held once the renewal used the fee")
                 .isZero();
         assertThat(first.get("due_date").asString())
-                .isEqualTo(today.plusMonths(2).toString());
+                .isEqualTo(renewedOn.plusMonths(2).toString());
 
         // The carried interest is not outstanding on either loan: it is a memorandum.
         assertThat(n.get("balances").get("interest_outstanding_minor").asLong()).isEqualTo(200_000);
@@ -598,7 +608,7 @@ class LoanRenewalIT extends LoanFixtures {
                 Map.of("value_date", today.minusDays(1).toString(), "payment_method_key", "cash"));
         assertThat(early.getBody().get("code").asString())
                 .as("never before it was taken")
-                .isEqualTo("before_fee_taken");
+                .isEqualTo("before_latest_transaction");
 
         ResponseEntity<JsonNode> back = refundFee(old);
         assertThat(back.getStatusCode()).as("%s", back.getBody()).isEqualTo(HttpStatus.CREATED);
@@ -707,6 +717,148 @@ class LoanRenewalIT extends LoanFixtures {
     JsonNode heldControl() {
         return send(HttpMethod.GET, "/api/v1/lending/renewal-fees/held", as(cashier, cashierPerms, "*", null), null)
                 .getBody();
+    }
+
+    // JUSTIFICATION-A3: the third review of #919 asks for four new paths (closed, written off, a lapsed request
+    // approved
+    // directly, a second business), each needing its own loan; the helpers below are shared by them.
+
+    /** Takes interest and a 20,000 fee on {@code on}, then the manager rejects the renewal: the fee stays held. */
+    String feeHeldAfterARejection(String code, int member, LocalDate on) {
+        String old = activeLoan(bulletProduct(code, Map.of("fee_minor", 20_000)), member);
+        ResponseEntity<JsonNode> r = renewOn(on, old, cashier, cashierPerms, 100_000L, null);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+        ResponseEntity<JsonNode> rejected = send(
+                HttpMethod.POST,
+                "/api/v1/approvals/" + r.getBody().get("approval_request_id").asString() + "/reject",
+                as(manager, managerPerms, "*", null),
+                Map.of("note", "Test borrower changed their mind"));
+        assertThat(rejected.getStatusCode()).as("%s", rejected.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(heldOn(old)).isEqualTo(20_000);
+        return old;
+    }
+
+    ResponseEntity<JsonNode> refundOn(String loan, LocalDate on) {
+        return send(
+                HttpMethod.POST,
+                LOANS + "/" + loan + "/renewal-fee/refund",
+                withKey(as(cashier, cashierPerms, "*", null)),
+                Map.of("value_date", on.toString(), "payment_method_key", "cash"));
+    }
+
+    /** The hand-back pays the 20,000 out of the till with a receipt, and nothing is left held. */
+    void handedBack(ResponseEntity<JsonNode> back, String loan) {
+        assertThat(back.getStatusCode()).as("%s", back.getBody()).isEqualTo(HttpStatus.CREATED);
+        JsonNode refund = back.getBody().get("transaction");
+        assertThat(refund.get("txn_type").asString()).isEqualTo("renewal_fee_refund");
+        assertThat(refund.get("receipt_no").asString()).startsWith("RC-");
+        assertThat(lines(refund.get("journal_entry_id").asString()))
+                .containsExactly("renewal_fees_held:20000:0", "cash_on_hand:0:20000");
+        assertThat(heldOn(loan)).isZero();
+    }
+
+    /**
+     * M1 and M2 of the third review of #919: a fee taken three days ago for a renewal then rejected; the loan is paid off two
+     * days later (closed). The hand-back is refused when dated before that repayment, as a repayment's backdate rule is,
+     * and goes through dated today.
+     */
+    @Test
+    void aFeeHeldOnALoanPaidOffIsHandedBackNeverBeforeTheLaterRepayment() {
+        LocalDate taken = today.minusDays(3);
+        String old = feeHeldAfterARejection("RNW10", 10, taken);
+        LocalDate paidOff = today.minusDays(1);
+        long total = send(
+                        HttpMethod.GET,
+                        LOANS + "/" + old + "/payoff-quote?value_date=" + paidOff,
+                        as(cashier, cashierPerms, "*", null),
+                        null)
+                .getBody()
+                .get("total_minor")
+                .asLong();
+        Map<String, Object> payoff = new LinkedHashMap<>();
+        payoff.put("amount_minor", total);
+        payoff.put("value_date", paidOff.toString());
+        payoff.put("payment_method_key", "cash");
+        ResponseEntity<JsonNode> paid = send(
+                HttpMethod.POST,
+                LOANS + "/" + old + "/repayments",
+                withKey(as(cashier, cashierPerms, "*", null)),
+                payoff);
+        assertThat(paid.getStatusCode()).as("%s", paid.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(get(LOANS + "/" + old).get("status").asString()).isEqualTo("closed");
+        assertThat(get(LOANS + "/" + old).get("renewal").get("fee_held_minor").asLong())
+                .as("a paid-off loan still holds the fee")
+                .isEqualTo(20_000);
+
+        ResponseEntity<JsonNode> early = refundOn(old, taken);
+        assertThat(early.getBody().get("code").asString())
+                .as("after the fee was taken but before the later repayment")
+                .isEqualTo("before_latest_transaction");
+        handedBack(refundOn(old, today), old);
+        booksAgree();
+    }
+
+    /** M2 of the third review of #919: a loan written off while holding a fee hands it back all the same. */
+    @Test
+    void aFeeHeldOnALoanWrittenOffIsHandedBack() {
+        String old = feeHeldAfterARejection("RNW11", 11, today);
+        UUID accountant = UUID.randomUUID();
+        ResponseEntity<JsonNode> asked = send(
+                HttpMethod.POST,
+                LOANS + "/" + old + "/write-off",
+                withKey(as(accountant, permissionsOf("accountant"), "*", null)),
+                Map.of("reason", "Test borrower unreachable"));
+        assertThat(asked.getStatusCode()).as("%s", asked.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+        ResponseEntity<JsonNode> approved =
+                decide(asked.getBody().get("approval_request_id").asString(), UUID.randomUUID(), adminPerms);
+        assertThat(approved.getStatusCode()).as("%s", approved.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(get(LOANS + "/" + old).get("status").asString()).isEqualTo("written_off");
+        assertThat(heldList()).contains(old);
+
+        handedBack(refundOn(old, today), old);
+        assertThat(get(LOANS + "/" + old).get("status").asString()).isEqualTo("written_off");
+        booksAgree();
+    }
+
+    /**
+     * S3 of the third review of #919: a request past its expiry, approved directly before the nightly run and before any
+     * hand-back, is refused as expired and the loan stays as it was.
+     */
+    @Test
+    void aLapsedRenewalApprovedDirectlyIsRefused() {
+        String old = activeLoan(bulletProduct("RNW12", null), 12);
+        ResponseEntity<JsonNode> r = renew(old, cashier, cashierPerms, 100_000L, null);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+        String lapsed = r.getBody().get("approval_request_id").asString();
+        TestDatabase.owner()
+                .sql("UPDATE approval_requests SET expires_at = now() - interval '1 minute' WHERE id = ?::uuid")
+                .param(lapsed)
+                .update();
+        ResponseEntity<JsonNode> d = decide(lapsed, manager, managerPerms);
+        assertThat(d.getStatusCode()).as("%s", d.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(d.getBody().get("code").asString()).isEqualTo("approval_expired");
+        JsonNode loan = get(LOANS + "/" + old);
+        assertThat(loan.get("status").asString()).isEqualTo("active");
+        assertThat(loan.get("renewal") == null || loan.get("renewal").isNull()).isTrue();
+    }
+
+    /**
+     * S4 of the third review of #919: another business's held fee is in neither this business's list nor its ledger figure,
+     * and is in its own.
+     */
+    @Test
+    void anotherBusinesssHeldFeeIsNotSeen() {
+        TestDatabase.Fixture mine = t;
+        t = TestDatabase.tenant("loans", true);
+        String theirs = feeHeldAfterARejection("RNW13", 13, today);
+        assertThat(heldControl().get("ledger_minor").asLong()).isEqualTo(20_000);
+        assertThat(heldList()).containsExactly(theirs);
+
+        t = mine;
+        JsonNode own = heldControl();
+        assertThat(own.get("items")).isEmpty();
+        assertThat(own.get("ledger_minor").asLong()).isZero();
+        assertThat(own.get("difference_minor").asLong()).isZero();
     }
 
     /** The renewal fee a loan holds: taken, less made income, less handed back. */

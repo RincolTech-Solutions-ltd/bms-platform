@@ -3454,6 +3454,10 @@
       },
       "HeldRenewalFees" : {
         "properties" : {
+          "balanced" : {
+            "description" : "Every branch's ledger equals what its loans hold; false even when differences in two branches cancel out in difference_minor",
+            "type" : "boolean"
+          },
           "difference_minor" : {
             "description" : "The ledger less what the loans hold by their fee transactions; not 0 means the books and the loans disagree (FR-GL-10)",
             "format" : "int64",

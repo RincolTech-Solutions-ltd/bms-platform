@@ -1068,14 +1068,16 @@ cancelled or lapsed) stays held, worked out from the loan's own fee transactions
 renewal waits the loan page shows the cashier "Hand back (amount) to the member", which calls `POST .../renewal-fee/refund`
 (`lending.repayments.create`, **M**, `Idempotency-Key`; `{value_date, payment_method_key, external_reference?}`; an
 active, closed or written-off loan; 409 `renewal_pending` while a renewal waits, 422 `nothing_held`, `value_date_in_future`,
-`before_fee_taken` for a date before the fee was taken, `period_closed`) to pay it out of the till as a
+`before_latest_transaction` for a date before the loan's latest transaction of any kind, so before the fee was taken or a
+later repayment, as a repayment's backdate rule, `period_closed`) to pay it out of the till as a
 `renewal_fee_refund` with its own receipt; it answers 201 `RepaymentResult`. A request or hand-back first ends as `expired`
 a renewal request of the loan whose expiry passed before the nightly run, so it neither blocks a new request nor can be
 approved. `GET /lending/renewal-fees/held?branch_id=` (`lending.repayments.create`, in the caller's branches) lists the
 loans holding a fee with no renewal waiting, oldest first (`{items: [{loan_id, loan_no, member_no, branch_id, loan_status,
-currency, held_minor, taken_on}], more, ledger_minor, difference_minor}`, at most 200 items): Home shows it to the cashier as
-"Renewal fees to hand back". `ledger_minor` is 2050 Renewal fees held in the caller's branches and `difference_minor` the
-ledger less what the loans hold by their fee transactions; Home warns when it is not 0 (the FR-GL-10 check of this account,
+currency, held_minor, taken_on}], more, ledger_minor, difference_minor, balanced}`, at most 200 items): Home shows it to the
+cashier as "Renewal fees to hand back". `ledger_minor` is 2050 Renewal fees held in the caller's branches, `difference_minor`
+the ledger less what the loans hold by their fee transactions, and `balanced` false when any one branch differs (two
+branches can cancel out in the sum); Home warns when either says so (the FR-GL-10 check of this account,
 which the nightly job `lending.renewal-fees-control` also runs). The approval books the fee as income on the approval's
 business date. The quote checks
 `collect_minor` (0 to 10^15), `term_count` (1 to 3660) and `interest_rate_bp` (0 to 100000) like the request, 422
