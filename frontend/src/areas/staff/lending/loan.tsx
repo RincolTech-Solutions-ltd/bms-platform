@@ -14,7 +14,7 @@ import { showDate } from '../../../app/ui/PeriodPicker';
 import { loanStatusWords, methodWords, money, statusBadge, txnWords, words } from './loan-state';
 import { RenewPanel } from './renew';
 import { actionsFor, canReverse, mayDo, mayWaiveItem, type LoanAction } from './permissions';
-import { HeldFeePanel, holdsFee } from './held-fee';
+import { HeldFeePanel, heldFee } from './held-fee';
 import { showSavings } from './savings-permissions';
 import { WaiveItemSheet } from './waive-item';
 import { waivable } from './waive-state';
@@ -289,11 +289,13 @@ function ServicingView({ loan, memberName }: { loan: Loan; memberName?: string }
           {open === 'disburse' && <DisburseForm loan={loan} />}
           {open === 'payoff' && <PayoffQuotePanel loan={loan} />}
           {open === 'write_off' && <WriteOffForm loan={loan} />}
-          {open === 'renew' && <RenewPanel loan={loan} memberName={memberName} onClose={() => setOpen(null)} />}
+          {open === 'renew' && <RenewPanel loan={loan} memberName={memberName} held={heldFee(txns.data)} onClose={() => setOpen(null)} />}
         </section>
       )}
       {!open && receipt && <RepaymentReceipt result={receipt} currency={loan.currency} />}
-      {holdsFee(loan) && mayDo(me, 'repay') && <HeldFeePanel loan={loan} />}
+      {heldFee(txns.data) > 0 && ['active', 'closed'].includes(loan.status ?? '') && mayDo(me, 'repay') && (
+        <HeldFeePanel loan={loan} held={heldFee(txns.data)} />
+      )}
       {loan.status === 'approved' && <ApplicationPanel loan={loan} />}
       <BalancesCard loan={loan} />
       <h2 id="ln-schedule" data-tour="loan-schedule">Schedule</h2>

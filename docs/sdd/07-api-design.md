@@ -1058,12 +1058,15 @@ renewed_to_loan_id, renewed_to_loan_no, renewed_on}` (null when the loan neither
 a renewal loan's first item). A loan product's `terms` and version take `renewal` `{allowed, max_count, interest_first,
 fee_minor}` (defaults true, null, true, null). `renewal_fee_minor` of the quote is that fixed fee: the request needs
 `payment_method_key` (and `lending.repayments.create`) when the loan does not already hold it. The counter takes it with the
-interest and it is recorded at once as `renewal_fee_held` (a receipt; the till debited, `member_overpayments` credited with
-the loan as subledger; the loan's `credit_balance_minor` holds it); the approval moves it to `loan_fee_income`
-(`renewal_fee`). A fee no renewal used stays held: the next request uses it, or `POST .../renewal-fee/refund`
-(`lending.repayments.create`, **M**, `Idempotency-Key`; `{value_date, payment_method_key, external_reference?}`; an active
-loan; 409 `renewal_pending` while a renewal waits, 422 `nothing_held`) gives it back as a `credit_refund` with a receipt and
-answers 201 `RepaymentResult`. The quote refuses `collect_minor` below 0 and a rate below 0. Codes (422 unless stated): `renewal_not_allowed`, `renewal_fee_not_held`,
+interest and it is recorded at once as `renewal_fee_held` (its own receipt; the payment method's account debited, 2050
+Renewal fees held credited with the loan as subledger); the approval moves it to `loan_fee_income` (`renewal_fee`, no cash).
+A fee no renewal used (rejected, cancelled or lapsed) stays held, worked out from the loan's own fee transactions: the next
+request uses it, and the loan page shows the cashier "Hand back (amount) to the member", which calls `POST
+.../renewal-fee/refund` (`lending.repayments.create`, **M**, `Idempotency-Key`; `{value_date, payment_method_key,
+external_reference?}`; an active or closed loan; 409 `renewal_pending` while a renewal waits, 422 `nothing_held`) to pay it
+out of the till as a `renewal_fee_refund` with its own receipt; it answers 201 `RepaymentResult`. The quote checks
+`collect_minor` (0 to 10^15), `term_count` (1 to 3660) and `interest_rate_bp` (0 to 100000) like the request, 422
+`validation_failed` with each field, and a rate below 0 is refused. Codes (422 unless stated): `renewal_not_allowed`, `renewal_fee_not_held`,
 `renewal_limit_reached`, `renewal_interest_unpaid`, `renewal_settles_loan`, `renewal_term_out_of_range`,
 `renewal_rate_above_loan`, `value_date_in_future`, `before_last_repayment`, 409 `renewal_pending`, 409
 `invalid_status_transition` (not active; a repayment on a renewed loan).

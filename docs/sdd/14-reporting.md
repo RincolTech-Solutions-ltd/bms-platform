@@ -92,7 +92,7 @@ daily cash count by the cashier and branch manager.
 
 Parameter: `as_at`. Per branch and control account (`loans_receivable`,
 `member_savings`, `investments_payable`, `investment_returns_payable`,
-`member_overpayments`): ledger balance, subledger total, difference.
+`member_overpayments`, `renewal_fees_held`): ledger balance, subledger total, difference.
 
 | Control account | Subledger total |
 |---|---|
@@ -101,6 +101,7 @@ Parameter: `as_at`. Per branch and control account (`loans_receivable`,
 | `investments_payable` | Sum of `principal_minor` over investments `active` or `matured` |
 | `investment_returns_payable` | Sum of `return_due_minor - return_paid_minor` over investments |
 | `member_overpayments` | Sum of `credit_balance_minor` over loans |
+| `renewal_fees_held` (V152, issue #918) | Sum over loans of `renewal_fee_held` less `renewal_fee` and `renewal_fee_refund` transactions; a renewal fee never touches `credit_balance_minor`, so `member_overpayments` keeps its own check |
 
 Any non-zero difference raises the FR-GL-10 alert.
 
@@ -143,8 +144,8 @@ Parameters: `as_at`, branches, group by.
   months after restructure (FR-LCL-04).
 - Renewals (issue #918, FR-LCL-04a, ADR-128): a renewed loan is no longer active and the loan that replaces it starts on time,
   so the report ends with a `renewals` table whenever there is a renewal to show: loans renewed from the first of the report
-  date's month to the report date with the principal they moved and the unpaid amounts carried as a memorandum, and, for
-  today's book, the active renewal loans with their principal outstanding, those in arrears with the arrears, and those
+  date's month to the report date with the principal they moved and the unpaid amounts carried as a memorandum, and, on
+  the report date (today's book, or that date's nightly snapshot for a past date), the active renewal loans with their principal outstanding, those in arrears with the arrears, and those
   more than 30 days late with their principal outstanding. With
   none, a note says no loan was renewed. `lending.portfolio_outstanding` ends with the same table.
 

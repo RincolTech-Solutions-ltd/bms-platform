@@ -14,8 +14,10 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * {@link RenewalFigures} over the loan tables (issue #918). A renewal is the old loan's move to {@code restructured} with
  * {@code restructure_kind = 'renewal'} on {@code restructured_on}; its principal is the amount of its
- * {@code restructure_out} transaction, and what it left unpaid is the memorandum on the new loan's first item. The scope's
- * branch, officer and product filter is the old loan's.
+ * {@code restructure_out} transaction, and what it left unpaid is the memorandum on the new loan's first item. The active
+ * renewal loans are read from the loan table for today's book and from the nightly snapshot of the date for an earlier one
+ * (the snapshot row's loan carries {@code renewal_no}, which never changes), the same source as the PAR figures. The scope's
+ * branch, officer and product filter is the old loan's for the renewals and the snapshot row's for the active loans.
  */
 @Service
 class RenewalFiguresService implements RenewalFigures {
@@ -40,8 +42,7 @@ class RenewalFiguresService implements RenewalFigures {
                 p.productId(),
                 tenant.profile().currency());
         if (s.empty()) {
-            Long none = live ? 0L : null;
-            return new Renewals(from, p.to(), 0, 0, 0, none, none, none, none, none, none);
+            return new Renewals(from, p.to(), 0, 0, 0, 0L, 0L, 0L, 0L, 0L, 0L);
         }
         Map<String, Object> q = new LinkedHashMap<>();
         q.put("from", Date.valueOf(from));
@@ -57,18 +58,31 @@ class RenewalFiguresService implements RenewalFigures {
                 .params(q)
                 .query((rs, n) -> new long[] {rs.getLong("n"), rs.getLong("moved"), rs.getLong("carried")})
                 .single();
-        if (!live) {
-            return new Renewals(from, p.to(), renewed[0], renewed[1], renewed[2], null, null, null, null, null, null);
-        }
+
         Map<String, Object> a = new LinkedHashMap<>();
-        long[] active = jdbc.sql("""
-                        SELECT count(*) AS n, coalesce(sum(l.principal_outstanding_minor), 0) AS po,
-                               coalesce(sum(l.arrears_minor), 0) AS arrears,
-                               count(*) FILTER (WHERE l.arrears_minor > 0) AS in_arrears,
-                               count(*) FILTER (WHERE l.days_past_due > 30) AS late30,
-                               coalesce(sum(l.principal_outstanding_minor) FILTER (WHERE l.days_past_due > 30), 0) AS late30_po
-                          FROM lending_loans l
-                         WHERE l.status = 'active' AND l.renewal_no > 0""" + s.loanFilter("l", a))
+        String sql;
+        if (live) {
+            sql = """
+                    SELECT count(*) AS n, coalesce(sum(l.principal_outstanding_minor), 0) AS po,
+                           coalesce(sum(l.arrears_minor), 0) AS arrears,
+                           count(*) FILTER (WHERE l.arrears_minor > 0) AS in_arrears,
+                           count(*) FILTER (WHERE l.days_past_due > 30) AS late30,
+                           coalesce(sum(l.principal_outstanding_minor) FILTER (WHERE l.days_past_due > 30), 0) AS late30_po
+                      FROM lending_loans l
+                     WHERE l.status = 'active' AND l.renewal_no > 0""" + s.loanFilter("l", a);
+        } else {
+            a.put("d", Date.valueOf(p.to()));
+            sql = """
+                    SELECT count(*) AS n, coalesce(sum(sn.principal_outstanding_minor), 0) AS po,
+                           coalesce(sum(sn.arrears_minor), 0) AS arrears,
+                           count(*) FILTER (WHERE sn.arrears_minor > 0) AS in_arrears,
+                           count(*) FILTER (WHERE sn.days_past_due > 30) AS late30,
+                           coalesce(sum(sn.principal_outstanding_minor) FILTER (WHERE sn.days_past_due > 30), 0) AS late30_po
+                      FROM lending_loan_daily_snapshots sn
+                      JOIN lending_loans l ON l.id = sn.loan_id
+                     WHERE sn.business_date = :d AND l.renewal_no > 0""" + s.snapshotFilter("sn", a);
+        }
+        long[] active = jdbc.sql(sql)
                 .params(a)
                 .query((rs, n) -> new long[] {
                     rs.getLong("n"),

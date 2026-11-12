@@ -112,6 +112,33 @@ class LendingRenewalsReportIT extends LendingBookSupport {
                 .isEqualTo("[\"Loans renewed in the period, principal moved\",1,1000000]");
     }
 
+    /**
+     * The Lead on #919: a past date reads the nightly snapshot, and the renewal loans are in it. On 7 October LN0003 is 29
+     * days late (1,050,000 in arrears, not yet over 30); the renewed LN0008 is in neither the PAR nor the snapshot.
+     */
+    @Test
+    void aPastDateCountsTheRenewalLoansOfThatDaysSnapshot() throws Exception {
+        Book book = goldenBook();
+        renew(book);
+        UUID user = UUID.randomUUID();
+        tenantJobs.callAs(
+                book.t().tenantId(),
+                () -> new org.springframework.transaction.support.TransactionTemplate(transactions)
+                        .execute(x -> snapshots.backfill(
+                                java.time.LocalDate.of(2026, 10, 7), java.time.LocalDate.of(2026, 10, 7))));
+
+        JsonNode file = file(book, user, PAR_PERMS, par(book, user, PAR_PERMS, Map.of("as_at", "2026-10-07"), "json"));
+
+        assertThat(rows(table(file, "par"))).containsExactly("[\"All loans\",6,10000000,1860000,1800,300,300,0]");
+        assertThat(rows(table(file, "renewals")))
+                .containsExactly(
+                        "[\"Loans renewed in the period, principal moved\",1,1000000]",
+                        "[\"Unpaid interest, fees and penalties carried (not added to principal)\",1,25000]",
+                        "[\"Active loans that are renewals, principal outstanding\",1,1000000]",
+                        "[\"Of them, in arrears, the arrears\",1,1050000]",
+                        "[\"Of them, more than 30 days late, principal outstanding\",0,0]");
+    }
+
     @Test
     void withoutRenewalsTheReportSaysSoAndAddsNoTable() throws Exception {
         Book book = goldenBook();

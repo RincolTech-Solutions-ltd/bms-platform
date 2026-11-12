@@ -17,7 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * {@code POST /lending/loans/{loan_id}/renewal-fee/refund} (review of #919): gives back a renewal fee the counter took and no
  * renewal used, whatever ended the request (rejected, cancelled, expired or stale), with a receipt and the entry that
- * takes it out of member overpayments. Needs {@code lending.repayments.create} in the loan's branch, like taking it;
+ * takes it out of renewal fees held and pays it out of the till (the Lead's decision on the review of #919). Needs {@code lending.repayments.create} in the loan's branch, like taking it;
  * refused while a renewal of the loan still waits for approval, since that one would use it.
  */
 @Service
@@ -53,9 +53,9 @@ class RenewalFeeRefunds {
                     Loan loan = loans.lock(id)
                             .filter(l -> principal.may("lending.repayments.create", l.branchId()))
                             .orElseThrow(ApiException::notFound);
-                    // An active loan holds credit only from a renewal fee (an overpayment comes with a payoff, which
-                    // closes the loan), so what it holds is that fee and nothing else.
-                    LoanServicer.requireStatus(loan, Set.of("active"));
+                    // What is held is the loan's renewal fee transactions only (RenewalFees.held), never its credit
+                    // balance; a loan paid off after a rejected renewal still holds the fee until it is handed back.
+                    LoanServicer.requireStatus(loan, Set.of("active", "closed"));
                     if (renewals.pending(id).isPresent()) {
                         throw new ApiException(
                                 HttpStatus.CONFLICT,

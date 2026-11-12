@@ -91,10 +91,13 @@ class ProductCatalogService implements ProductCatalog {
 
     @Override
     @Transactional(readOnly = true)
-    public Optional<RenewalRule> renewal(UUID productId) {
-        return repo.find(productId)
-                .flatMap(row -> repo.versions(row.id()).stream()
-                        .filter(v -> v.id().equals(row.currentVersionId()))
+    public Optional<RenewalRule> renewal(UUID productVersionId) {
+        return jdbc.sql("SELECT product_id FROM lending_loan_product_versions WHERE id = ?")
+                .param(productVersionId)
+                .query(UUID.class)
+                .optional()
+                .flatMap(productId -> repo.versions(productId).stream()
+                        .filter(v -> v.id().equals(productVersionId))
                         .findFirst()
                         .map(v -> new RenewalRule(
                                 v.renewal().allowed(),

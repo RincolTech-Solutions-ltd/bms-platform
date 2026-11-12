@@ -12,6 +12,7 @@ import com.rincoltech.bms.core.tenancy.TenantSequences;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
+import com.rincoltech.bms.lending.collateral.CollateralTimeline;
 import com.rincoltech.bms.lending.loans.internal.LoanBooks.Leg;
 import com.rincoltech.bms.lending.loans.internal.LoanRepository.GuarantorRow;
 import com.rincoltech.bms.lending.loans.internal.LoanRepository.Loan;
@@ -63,6 +64,7 @@ class RenewalService {
     private final AuditLog audit;
     private final LoanNotices notices;
     private final RenewalFees fees;
+    private final CollateralTimeline timeline;
 
     RenewalService(
             LoanRepository loans,
@@ -76,7 +78,8 @@ class RenewalService {
             Idempotency idempotency,
             AuditLog audit,
             LoanNotices notices,
-            RenewalFees fees) {
+            RenewalFees fees,
+            CollateralTimeline timeline) {
         this.loans = loans;
         this.repo = repo;
         this.renewals = renewals;
@@ -89,6 +92,7 @@ class RenewalService {
         this.audit = audit;
         this.notices = notices;
         this.fees = fees;
+        this.timeline = timeline;
     }
 
     /** What a renewal works out to: the quote the screen shows, and the new schedule execution writes. */
@@ -106,6 +110,20 @@ class RenewalService {
         Loan loan = loans.find(id)
                 .filter(l -> principal.may(REQUEST_PERMISSION, l.branchId()))
                 .orElseThrow(ApiException::notFound);
+        // The request's own bounds (RenewalApi.RenewalRequest), field by field (the Lead on #919).
+        List<ApiException.FieldProblem> problems = new java.util.ArrayList<>();
+        if (collectMinor != null && (collectMinor < 0 || collectMinor > LoanApi.MAX_MONEY_MINOR)) {
+            problems.add(new ApiException.FieldProblem("collect_minor", "invalid", "From 0 to 10^15."));
+        }
+        if (termCount != null && (termCount < 1 || termCount > 3660)) {
+            problems.add(new ApiException.FieldProblem("term_count", "invalid", "From 1 to 3660."));
+        }
+        if (rateBp != null && (rateBp < 0 || rateBp > 100000)) {
+            problems.add(new ApiException.FieldProblem("interest_rate_bp", "invalid", "From 0 to 100000."));
+        }
+        if (!problems.isEmpty()) {
+            throw ApiException.validation(problems);
+        }
         LocalDate date = valueDate != null ? valueDate : servicer.today();
         return plan(loan, repo.items(id), date, collectMinor == null ? 0 : collectMinor, termCount, rateBp, false)
                 .quote();
@@ -137,8 +155,8 @@ class RenewalService {
         LoanServicer.requireStatus(loan, Set.of("active"));
         ProductTerms terms = products.version(loan.productVersionId())
                 .orElseThrow(() -> new IllegalStateException("loan " + loan.id() + " has no product version"));
-        RenewalRule rule = products.renewal(terms.productId())
-                .orElseThrow(() -> new IllegalStateException("product " + terms.productId() + " has no version"));
+        RenewalRule rule = products.renewal(loan.productVersionId())
+                .orElseThrow(() -> new IllegalStateException("loan " + loan.id() + " has no product version"));
         if (!rule.allowed()) {
             throw ApiException.rule("renewal_not_allowed", "This loan product does not allow renewals.");
         }
@@ -471,6 +489,11 @@ class RenewalService {
                 .toList();
         renewals.releaseSecurity(oldId);
         loans.replacePledges(fresh.id(), pledges);
+        // Each item's custody timeline says which loan it now secures (review of #919); custody itself does not change.
+        pledges.forEach(p -> timeline.note(
+                p.collateralId(),
+                "Pledge moved from loan " + old.loanNo() + " to its renewal " + fresh.loanNo(),
+                checkerId));
         loans.replaceGuarantors(fresh.id(), guarantors);
         repo.insertItems(fresh.id(), plan.schedule(), today);
         if (q.carriedMinor() > 0) {

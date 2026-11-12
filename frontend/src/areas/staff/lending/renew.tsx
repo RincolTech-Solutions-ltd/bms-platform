@@ -19,7 +19,7 @@ import { bpToPercent, rateWords, renewStep, termWords, type RenewDraft } from '.
 // is sent. Sending records the money at once as a normal repayment and asks a branch manager to approve the move; nothing else
 // changes until they do. The draft and its Idempotency-Key stay in this tab until the server answers, so a retry sends it once.
 
-export function RenewPanel({ loan, memberName, onClose }: { loan: Loan; memberName?: string; onClose: () => void }) {
+export function RenewPanel({ loan, memberName, held, onClose }: { loan: Loan; memberName?: string; held: number; onClose: () => void }) {
   const { me } = useStaff();
   const loanId = loan.id ?? '';
   const c = loan.currency;
@@ -45,7 +45,8 @@ export function RenewPanel({ loan, memberName, onClose }: { loan: Loan; memberNa
   // The product's fixed renewal fee (the client's answer of 12 Nov 2026): taken now with the interest, income once approved.
   const fee = base.data?.renewal_fee_minor ?? 0;
   // A fee an earlier request took and the loan still holds is used again (review of #919), so only the rest is taken.
-  const feeToTake = Math.max(0, fee - (loan.balances?.credit_balance_minor ?? 0));
+  // a fee already held for a renewal that did not go ahead is used again, as the server does
+  const feeToTake = Math.max(0, fee - held);
   const takes = step.collectMinor + feeToTake;
   // What this renewal does, worked out by the server for the review.
   const review = useQuery({

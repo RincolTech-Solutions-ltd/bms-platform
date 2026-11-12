@@ -44,13 +44,15 @@ a new loan and carries the unpaid amounts as a memorandum, and V8 and V29 alread
    loan's by default. The rate is the old loan's by default and may be lowered, never raised: the product states one rate and
    no range. The product's renewal fee is a fixed amount per renewal (`renewal_fee_minor`, null for none), never added to
    the schedule. It is on record the moment the counter takes it (review of #919): a `renewal_fee_held` transaction on the
-   old loan with its own receipt, debiting the payment method's account and crediting `member_overpayments` with the old
-   loan as subledger, the loan's credit balance holding it. The approval moves it to income (`renewal_fee`: debit
-   `member_overpayments`, credit `loan_fee_income`). A fee no renewal used (the request rejected, cancelled, expired or
-   stale) stays the borrower's credit on the loan, shown on the loan page: the next renewal request uses it instead of
-   taking it again, or `POST .../renewal-fee/refund` (`lending.repayments.create`, an active loan, no renewal waiting) gives
-   it back with a receipt as a `credit_refund`. An active loan holds credit only from such a fee, since an overpayment comes
-   with a payoff, which closes the loan. The schedule runs from the renewal date. Pledges and guarantors move to the new loan;
+   old loan with its own receipt, on the same till and cash book day as the interest, debiting the payment method's account
+   and crediting the liability 2050 Renewal fees held (`renewal_fees_held`, added to the lending chart by V152) with the old
+   loan as subledger. The approval moves it to income with no new cash (`renewal_fee`: debit `renewal_fees_held`, credit
+   `loan_fee_income`). A fee no renewal used (the request rejected, cancelled, expired or stale) stays held; the loan page
+   shows the cashier the task "Hand back (amount) to the member", and `POST .../renewal-fee/refund`
+   (`lending.repayments.create`, an active or closed loan, no renewal waiting) pays it out of the till with its own receipt
+   (`renewal_fee_refund`: debit `renewal_fees_held`, credit the payment method's account). Until it is handed back, a new
+   renewal request on the loan uses it instead of taking it again. What a loan holds is worked out from its own fee
+   transactions, never from its credit balance. The schedule runs from the renewal date. Pledges and guarantors move to the new loan;
    the old loan's are released (the new loan is a draft while it takes them, the one state the V8 guards allow).
 5. **Maker-checker: `loan_renewal`, decided by the branch manager.** The maker holds `lending.loans.renew_request` (tenant admin,
    branch manager, loan officer, cashier); collecting money also needs `lending.repayments.create`. The checker holds
@@ -60,26 +62,29 @@ a new loan and carries the unpaid amounts as a memorandum, and V8 and V29 alread
    request.
 6. **Product settings, as the client answered.** On each product version: `renewal_allowed` (true), `renewal_max_count` (null,
    no limit), `renewal_interest_first` (true: refused while interest due is unpaid), `renewal_fee_minor` (null, no fee). They
-   are read from the product's current version, so a changed setting applies to the next renewal of every loan. Code and
-   fixtures carry no client figure.
+   are read from the same product version as the loan (review of #919), so a renewal follows the terms the borrower signed and
+   a changed setting applies to loans made on the new version. Code and fixtures carry no client figure.
 7. **Reports show renewals.** A renewed loan is no longer active; the loan that replaces it starts on time. The PAR and portfolio
    reports end with a renewals table when there is any: loans renewed from the first of the report date's month, the principal
-   moved, what was carried, and, for today's book, the active renewal loans with their principal, arrears and those more than 30
-   days late. Disbursement figures count only `disbursement` transactions, so a renewal is never a disbursement; the expected
+   moved, what was carried, and, on the report date (today's book, or that date's nightly snapshot for a past date), the
+   active renewal loans with their principal, those in arrears with their arrears, and those more than 30 days late with
+   their principal. Disbursement figures count only `disbursement` transactions, so a renewal is never a disbursement; the expected
    and collected figures leave out a renewed loan's items due after its renewal date.
 
 ## Consequences
 
 - The old loan takes no repayment after the renewal (`invalid_status_transition`), and its repayments are not reversed (a
   repayment is reversed only on an active or closed loan). A mistaken renewal is not undone in the app.
-- Guarantors move without being asked again. A client who wants their consent will need a step for it.
+- Guarantors move without being asked again. A step for their consent is follow-up issue #920.
 - Pledged items move with the debt they secure: the collateral itself does not change hands or custody, so no
-  `collateral_release` is asked for and no custody event is written; only the pledge row points at the new loan.
-- The renewal rule (allowed, how many, interest first, the fee) is read from the product's current version, the business's
-  present policy, while the new loan keeps the old loan's version and its term limits, the terms the borrower signed.
+  `collateral_release` is asked for. Each moved item gets a `note` event on its custody timeline ("Pledge moved from loan
+  ... to its renewal ..."), as other collateral moves are recorded there.
+- The renewal rule (allowed, how many, interest first, the fee) and the new loan's term limits come from the old loan's
+  product version, the terms the borrower signed; a business that changes its policy does so on a new version.
 - Renewal loans carry no `submitted_at`: they never were applications, so the application funnel and the officers'
   submissions leave them out; the average term of disbursed loans leaves out `renewal_no > 0`.
 - The renewal of a past date is allowed (not before the latest repayment), like a repayment. A nightly run between the request
   and the approval that charges a penalty on the old loan changes its version, and the request goes stale; the maker asks again.
 - `principal_disbursed_minor` of the new loan is the principal moved, so the data export reads it as the loan's principal.
-- The nightly snapshot does not say which loan is a renewal, so the active renewal loans are reported for today's date only.
+- The nightly snapshot keeps each loan's id, so a past date's renewal rows join it to `lending_loans.renewal_no`; a loan
+  renewed after that date is still counted as it stood then.

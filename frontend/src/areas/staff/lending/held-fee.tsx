@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { PAYMENT_METHODS, lending, type Loan, type PaymentMethod } from '../../../api/lending';
+import { PAYMENT_METHODS, lending, type Loan, type LoanTransaction, type PaymentMethod } from '../../../api/lending';
 import { businessToday } from '../../../api/retail';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { Segmented } from '../../../app/ui/Segmented';
@@ -8,25 +8,29 @@ import { usePersistedDraft } from '../retail/idempotency';
 import { Problem } from '../retail/ui';
 import { money } from './loan-state';
 
-// A renewal fee the counter took and no renewal used (issue #918, review of #919): the loan holds it for the borrower,
-// and this gives it back with a receipt. The server refuses while a renewal still waits for approval, since that one
-// would use it. Shown to someone who may record repayments, while the loan holds something.
+// A renewal fee the counter took and no renewal used (issue #918, the Lead's decision on the review of #919): the cashier's
+// task "Hand back (amount) to the member". The money sits in renewal fees held, worked out from the loan's own fee
+// transactions; handing it back pays it out of the till with its own receipt. The server refuses while a renewal still
+// waits for approval, since that one would use it. Shown to someone who may record repayments.
 
-export const holdsFee = (loan: Loan): boolean =>
-  (loan.balances?.credit_balance_minor ?? 0) > 0 && loan.status === 'active';
+const SIGN: Record<string, number> = { renewal_fee_held: 1, renewal_fee: -1, renewal_fee_refund: -1 };
 
-export function HeldFeePanel({ loan }: { loan: Loan }) {
+/** What the loan holds of renewal fees: taken, less made income, less handed back. */
+export const heldFee = (txns: LoanTransaction[] | undefined): number =>
+  (txns ?? []).reduce((sum, t) => sum + (SIGN[t.txn_type ?? ''] ?? 0) * (t.amount_minor ?? 0), 0);
+
+export function HeldFeePanel({ loan, held }: { loan: Loan; held: number }) {
   const { me } = useStaff();
   const loanId = loan.id ?? '';
   const queryClient = useQueryClient();
-  const held = loan.balances?.credit_balance_minor ?? 0;
+  const amount = money(held, loan.currency);
   const { key, draft, setDraft, finish, sending } = usePersistedDraft<{ method: PaymentMethod }>(
     `lending-fee-back:${me.user_id ?? ''}:${loanId}`,
     { method: 'cash' },
   );
-  // success-screen: the loan reloads and the panel goes with the held amount
+  // success-screen: the loan reloads, the task goes with the amount, and the receipt is on the loan's transactions
   const save = useMutation({
-    meta: { success: () => `Renewal fee of ${money(held, loan.currency)} given back` },
+    meta: { success: () => `${amount} handed back to the member` },
     mutationFn: () => {
       sending();
       return lending.refundRenewalFee(loanId, { value_date: businessToday(), payment_method_key: draft.method }, key);
@@ -37,21 +41,21 @@ export function HeldFeePanel({ loan }: { loan: Loan }) {
     },
   });
   return (
-    <section aria-label="Renewal fee held" className="rt-card">
-      <h2>Renewal fee held</h2>
+    <section aria-label="Hand back the renewal fee" className="rt-card" role="region">
+      <h2>Hand back {amount} to the member</h2>
       <p>
-        {money(held, loan.currency)} was taken for a renewal that did not go ahead. It is the borrower's until it is given back
-        or the next renewal uses it.
+        The renewal fee was taken for a renewal that did not go ahead. Give it back to the borrower and record it here; it has
+        its own receipt.
       </p>
       <Segmented<PaymentMethod>
-        label="Given back by"
+        label="Paid back by"
         value={draft.method}
         onChange={(method) => setDraft({ method })}
         options={PAYMENT_METHODS.map((m) => ({ value: m.value, label: m.label }))}
       />
       <Problem error={save.error} />
       <BusyButton busy={save.isPending} type="button" className="rt-primary" onClick={() => save.mutate()}>
-        Give back {money(held, loan.currency)}
+        Hand back {amount}
       </BusyButton>
     </section>
   );

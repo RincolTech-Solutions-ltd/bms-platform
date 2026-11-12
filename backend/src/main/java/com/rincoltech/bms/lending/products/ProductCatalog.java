@@ -38,10 +38,10 @@ public interface ProductCatalog {
     List<FeeCharge> fees(UUID productVersionId, long principalMinor);
 
     /**
-     * Issue #918, ADR-128: how loans of the product may be renewed, by its current version, so a change of the settings
-     * applies to the next renewal of every loan.
+     * Issue #918, ADR-128: how a loan of this product version may be renewed. A loan keeps the version it was made under
+     * (FR-PRD-04), so its renewal rule and its term limits come from the same version (the Lead on #919).
      */
-    Optional<RenewalRule> renewal(UUID productId);
+    Optional<RenewalRule> renewal(UUID productVersionId);
 
     /** {@code maxCount} null is no limit; {@code feeMinor} null is no fee (the fixed fee of one renewal). */
     record RenewalRule(boolean allowed, Integer maxCount, boolean interestFirst, Long feeMinor) {
