@@ -2010,7 +2010,9 @@ indexes `lending_loans_restructured_from` (unique) and `lending_loans_restructur
 `renewal_fee_refund` on `lending_loan_transactions` (both checks widened `NOT VALID` with no `VALIDATE`, so no table is
 scanned under the lock of the `DROP`; the old sets of V29 are subsets of the new ones, and every new check on `lending_loans`
 is `NOT VALID` too; the header gives the sizes, staging's 299 loans and 833 schedule items, and the lock times); and the
-account 2050 Renewal fees held, added to `bms_seed_lending_chart` and seeded for every business with the lending chart. A renewal writes the new loan
+account 2050 Renewal fees held, added to `bms_seed_lending_chart` and seeded for every business with the lending chart
+(with `FORCE ROW LEVEL SECURITY` dropped on `tenants` and `gl_accounts` for that statement only when the owner cannot bypass
+row security, as V123 does). A renewal writes the new loan
 as a `draft`, gives it the old loan's pledges and guarantors (the V8 guards allow that only on a draft) after releasing them
 from the old loan, and moves it to `active`.
 
