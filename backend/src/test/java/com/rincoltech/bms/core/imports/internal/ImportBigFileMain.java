@@ -67,6 +67,9 @@ public final class ImportBigFileMain {
             "--management.server.port=0",
             // Production's row limit, whatever the test profile holds.
             "--bms.imports.max-rows=" + UploadSettings.DEFAULT_MAX_ROWS,
+            // The quarantined file kept on disk, not in the heap judged: staging streams it to R2 (issue #900).
+            "--bms.storage.fake-dir="
+                    + Files.createTempDirectory("import-big-file-storage-").toString(),
             "--bms.reports.runner-enabled=false",
             "--bms.lending.arrears-job-enabled=false",
             "--bms.platform.billing-job-enabled=false",

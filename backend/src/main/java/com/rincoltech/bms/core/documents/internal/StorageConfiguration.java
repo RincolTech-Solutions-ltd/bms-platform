@@ -21,9 +21,11 @@ class StorageConfiguration {
 
     /**
      * @param fakeSecret HMAC key of the fake's signed URLs; random per start when empty
+     * @param fakeDir where the fake keeps its objects' bytes; in memory when empty. The big file test sets it, so the
+     *     heap it judges holds no quarantined file, as on staging, where the file streams to R2 (issue #900)
      */
     @ConfigurationProperties("bms.storage")
-    record StorageProperties(String provider, R2 r2, String fakeSecret) {
+    record StorageProperties(String provider, R2 r2, String fakeSecret, String fakeDir) {
 
         record R2(String endpoint, String accessKeyId, String secretAccessKey, String bucket) {}
     }
@@ -60,7 +62,10 @@ class StorageConfiguration {
                                 || properties.fakeSecret().isBlank()
                         ? HexFormat.of().formatHex(new SecureRandom().generateSeed(32))
                         : properties.fakeSecret();
-                yield new FakeObjectStorage(secret, clock);
+                yield new FakeObjectStorage(
+                        secret,
+                        clock,
+                        blank(properties.fakeDir()) ? null : java.nio.file.Path.of(properties.fakeDir()));
             }
             case "r2" -> {
                 if (allBlank(properties.r2())) {

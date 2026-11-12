@@ -56,8 +56,9 @@ import tools.jackson.databind.json.JsonMapper;
  * the backend job can spare, and on the shared runner a stalled machine would fail the job for a reason that is not a
  * defect (the reason {@code ReportMemoryIT} left it). It runs with {@code -Dimports.bigfile.run=true}: locally, or in the
  * manually started CI job {@code import-big-file} ({@code .github/workflows/ci.yml}, "Run workflow"). The test storage
- * double holds each quarantined file in the heap, so the figure is pessimistic by the file's size: staging streams it to
- * object storage. Fabricated rows only.
+ * double keeps each quarantined file in a directory of the child's ({@code bms.storage.fake-dir}), not in the heap judged,
+ * as staging streams it to object storage (#900: in the heap it was 25.8 MB of the old generation at the row limit).
+ * Fabricated rows only.
  */
 @EnabledIfSystemProperty(
         named = "imports.bigfile.run",
