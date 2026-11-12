@@ -4288,6 +4288,38 @@ class MigrationOrderIT {
         }
     }
 
+    /**
+     * V153 (issue #900) is expand only: one definer function, owned by bms_owner and callable by bms_app alone, that
+     * refuses outside an import batch and inside one refreshes the statistics of the tables a batch fills, in the
+     * caller's transaction. The big file test measures what it is for (SDD chapter 15 section 15.7).
+     * JUSTIFICATION-A3: a new test case; no existing case covers V153.
+     */
+    @Test
+    void importStatisticsMigrationAnalyzesOnlyInsideABatch() throws Exception {
+        assertThat(TestDatabase.owner().sql("""
+                                SELECT p.prosecdef AND pg_get_userbyid(p.proowner) = 'bms_owner'
+                                   AND has_function_privilege('bms_app', p.oid, 'EXECUTE')
+                                   AND NOT EXISTS (SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee = 0)
+                                  FROM pg_proc p WHERE p.proname = 'bms_import_refresh_statistics'
+                                """).query(Boolean.class).single()).isTrue();
+        try (Connection c = TestDatabase.appDataSource().getConnection()) {
+            c.setAutoCommit(false);
+            try (Statement s = c.createStatement()) {
+                assertThatThrownBy(() -> s.execute("SELECT bms_import_refresh_statistics()"))
+                        .hasMessageContaining("runs only inside an import batch");
+            }
+            c.rollback();
+            try (Statement s = c.createStatement()) {
+                s.execute("SET LOCAL app.import_commit = 'on'");
+                // True, or false when another batch holds the tables' statistics lock: never an error.
+                try (java.sql.ResultSet rs = s.executeQuery("SELECT bms_import_refresh_statistics()")) {
+                    assertThat(rs.next()).isTrue();
+                }
+            }
+            c.rollback();
+        }
+    }
+
     /** A function's definition with its whitespace collapsed, so two bodies compare by their words. */
     private static String functionBody(JdbcClient owner, String function) {
         return owner.sql("SELECT pg_get_functiondef(CAST(? AS regproc))")
