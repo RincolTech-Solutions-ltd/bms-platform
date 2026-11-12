@@ -388,11 +388,7 @@ class RetailV1Template implements ImportTemplate {
     /** What {@link #forecast(Map, UUID)} reads, read once for every forecast the supplier makes (issue #880). */
     @Override
     public java.util.function.Supplier<ImportForecast> forecasts(Map<String, String> policy, UUID runId) {
-        Map<String, Long> held = readOnly.execute(s -> {
-            Map<String, Long> costs = new HashMap<>();
-            catalogue.productsByCode().values().forEach(p -> costs.put(compare(p.code()), p.costMinor()));
-            return costs;
-        });
+        CompactKeys held = readOnly.execute(s -> heldCosts(jdbc));
         Set<String> opened = readOnly.execute(s -> openedBranches(jdbc, runId));
         Map<String, Map<String, Held>> before = readOnly.execute(s -> heldBefore(jdbc, runId));
         CompactKeys earlier = readOnly.execute(s -> earlierHistory(jdbc, runId));
@@ -401,7 +397,7 @@ class RetailV1Template implements ImportTemplate {
                 .filter(b -> !b.active())
                 .map(b -> compare(b.code()))
                 .collect(Collectors.toSet()));
-        Map<String, Long> costs = held == null ? Map.of() : Map.copyOf(held);
+        CompactKeys costs = held == null ? new CompactKeys() : held;
         // Copied once here; each forecast shares what was read and copies none of it (issue #876, nice-to-have 4).
         Set<String> openedBefore = opened == null ? Set.of() : Set.copyOf(opened);
         Set<String> closed = inactive == null ? Set.of() : Set.copyOf(inactive);
@@ -488,6 +484,21 @@ class RetailV1Template implements ImportTemplate {
                 .query((rs, n) -> out.computeIfAbsent(compare(rs.getString(1)), k -> new HashMap<>())
                         .put(compare(rs.getString(2)), new Held(rs.getBigDecimal(3), rs.getBoolean(4))))
                 .list();
+        return out;
+    }
+
+    /**
+     * The business's cost of each item, by its code in compare form, read a row at a time into compact keys (issue #900):
+     * the reconciliation after a commit reads every item the batch just wrote, which as product objects and a copied map
+     * filled the staging heap at 100,000 items. The last code in {@code lower(code)} order wins, as it did when this was
+     * read through {@code CatalogueHistory#productsByCode}.
+     */
+    static CompactKeys heldCosts(JdbcClient jdbc) {
+        CompactKeys out = new CompactKeys();
+        jdbc.sql("SELECT code, cost_minor FROM retail_products ORDER BY lower(code) DESC")
+                .query(rs -> {
+                    out.putIfAbsent(compare(rs.getString(1)), rs.getLong(2));
+                });
         return out;
     }
 
@@ -604,7 +615,7 @@ class RetailV1Template implements ImportTemplate {
     static final class StockForecast implements ImportForecast {
 
         /** The business's costs as read, shared by every forecast of one read and never changed (issue #880). */
-        private final Map<String, Long> held;
+        private final CompactKeys held;
 
         /** The costs of new items this forecast's own products rows gave: one per row of a product master (#880). */
         private final CompactKeys added = new CompactKeys();
@@ -632,15 +643,12 @@ class RetailV1Template implements ImportTemplate {
         private final Map<String, Map<String, Held>> books;
         private final CompactKeys earlier;
 
-        StockForecast(Map<String, Long> held) {
+        StockForecast(CompactKeys held) {
             this(held, Set.of(), Set.of(), Map.of());
         }
 
         StockForecast(
-                Map<String, Long> held,
-                Set<String> opened,
-                Set<String> inactive,
-                Map<String, Map<String, Held>> books) {
+                CompactKeys held, Set<String> opened, Set<String> inactive, Map<String, Map<String, Held>> books) {
             this(held, opened, inactive, books, new CompactKeys());
         }
 
@@ -651,7 +659,7 @@ class RetailV1Template implements ImportTemplate {
          * compare form, never changed, so every forecast of one read shares them (issue #876).
          */
         StockForecast(
-                Map<String, Long> held,
+                CompactKeys held,
                 Set<String> opened,
                 Set<String> inactive,
                 Map<String, Map<String, Held>> books,
@@ -708,8 +716,7 @@ class RetailV1Template implements ImportTemplate {
         }
 
         private long cost(String product) {
-            Long c = held.get(product);
-            return c != null ? c : added.get(product, 0L);
+            return held.contains(product) ? held.get(product, 0L) : added.get(product, 0L);
         }
 
         @Override
@@ -723,7 +730,7 @@ class RetailV1Template implements ImportTemplate {
                 case "products" -> {
                     if (values.get("code") instanceof String code && values.get("cost_minor") instanceof Long c) {
                         // An item the business holds keeps its own cost (issue #73); a new one its first row's.
-                        if (!held.containsKey(compare(code))) {
+                        if (!held.contains(compare(code))) {
                             added.putIfAbsent(compare(code), c);
                         }
                     }
