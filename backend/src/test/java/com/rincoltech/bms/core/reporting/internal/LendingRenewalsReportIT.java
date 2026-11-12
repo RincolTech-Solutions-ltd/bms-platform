@@ -93,8 +93,8 @@ class LendingRenewalsReportIT extends LendingBookSupport {
                         "[\"Loans renewed in the period, principal moved\",1,1000000]",
                         "[\"Unpaid interest, fees and penalties carried (not added to principal)\",1,25000]",
                         "[\"Active loans that are renewals, principal outstanding\",1,1000000]",
-                        "[\"Of them, arrears\",1,1050000]",
-                        "[\"Of them, more than 30 days late\",0,null]");
+                        "[\"Of them, in arrears, the arrears\",1,1050000]",
+                        "[\"Of them, more than 30 days late, principal outstanding\",0,0]");
         assertThat(file.get("notes").toString()).contains("Renewed loans are counted from 2026-10-01 to 2026-10-08");
     }
 

@@ -2378,6 +2378,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/lending/loans/{loan_id}/renewal-fee/refund": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Give back the renewal fee the loan holds because no renewal used it, with a receipt (issue #918) */
+        post: operations["refundLoanRenewalFee"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/lending/loans/{loan_id}/renewal-quote": {
         parameters: {
             query?: never;
@@ -14521,6 +14538,16 @@ export interface components {
         RemoveMerchantAccountRequest: {
             /** @description A current code of the signed-in administrator's own authenticator (step-up), used once */
             totp_code?: string;
+        };
+        /** @description Give back the renewal fee a loan holds because no renewal used it (review of #919) */
+        RenewalFeeRefundRequest: {
+            external_reference?: string;
+            payment_method_key: string;
+            /**
+             * Format: date
+             * @description Today or earlier
+             */
+            value_date: string;
         };
         RepaymentRequest: {
             /** Format: int64 */
@@ -27740,6 +27767,34 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PayoffQuote"];
+                };
+            };
+        };
+    };
+    refundLoanRenewalFee: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenewalFeeRefundRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepaymentResult"];
                 };
             };
         };

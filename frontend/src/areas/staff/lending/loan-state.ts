@@ -72,6 +72,8 @@ const TXN_WORDS: Record<string, string> = {
   credit_to_savings: 'Credit to savings',
   restructure_out: 'Renewed: moved to the new loan',
   restructure_in: 'Renewal: brought from the old loan',
+  renewal_fee_held: 'Renewal fee taken, held for the borrower',
+  renewal_fee: 'Renewal fee',
 };
 
 export const txnWords = (type: string | undefined): string => (type ? TXN_WORDS[type] ?? words(type) : '');

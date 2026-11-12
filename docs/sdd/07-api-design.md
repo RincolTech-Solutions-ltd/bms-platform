@@ -1057,9 +1057,13 @@ renewed_to_loan_id, renewed_to_loan_no, renewed_on}` (null when the loan neither
 `restructured_minor` (what was unpaid on an item of a renewed loan, not outstanding) and `carried_arrears_minor` (the memo on
 a renewal loan's first item). A loan product's `terms` and version take `renewal` `{allowed, max_count, interest_first,
 fee_minor}` (defaults true, null, true, null). `renewal_fee_minor` of the quote is that fixed fee: the request needs
-`payment_method_key` (and `lending.repayments.create`) when it is above 0, the counter takes it with the interest, and the
-approval posts it as a `fee_upfront` transaction with its own receipt on the new loan; nothing is posted for a renewal that is
-rejected or lapses. Codes (422 unless stated): `renewal_not_allowed`,
+`payment_method_key` (and `lending.repayments.create`) when the loan does not already hold it. The counter takes it with the
+interest and it is recorded at once as `renewal_fee_held` (a receipt; the till debited, `member_overpayments` credited with
+the loan as subledger; the loan's `credit_balance_minor` holds it); the approval moves it to `loan_fee_income`
+(`renewal_fee`). A fee no renewal used stays held: the next request uses it, or `POST .../renewal-fee/refund`
+(`lending.repayments.create`, **M**, `Idempotency-Key`; `{value_date, payment_method_key, external_reference?}`; an active
+loan; 409 `renewal_pending` while a renewal waits, 422 `nothing_held`) gives it back as a `credit_refund` with a receipt and
+answers 201 `RepaymentResult`. The quote refuses `collect_minor` below 0 and a rate below 0. Codes (422 unless stated): `renewal_not_allowed`, `renewal_fee_not_held`,
 `renewal_limit_reached`, `renewal_interest_unpaid`, `renewal_settles_loan`, `renewal_term_out_of_range`,
 `renewal_rate_above_loan`, `value_date_in_future`, `before_last_repayment`, 409 `renewal_pending`, 409
 `invalid_status_transition` (not active; a repayment on a renewed loan).
@@ -1092,6 +1096,7 @@ rejected or lapses. Codes (422 unless stated): `renewal_not_allowed`,
 | POST | `/lending/loans/{loan_id}/restructure` | `lending.loans.restructure_request` | **M A**. FR-LCL-04 (P2) |
 | GET | `/lending/loans/{loan_id}/renewal-quote` | `lending.loans.renew_request` | Issue #918, FR-LCL-04a: the renewal's review figures |
 | POST | `/lending/loans/{loan_id}/renewals` | `lending.loans.renew_request` | **M A**. Issue #918, FR-LCL-04a, ADR-128: collect, then `loan_renewal` |
+| POST | `/lending/loans/{loan_id}/renewal-fee/refund` | `lending.repayments.create` | **M**. Issue #918, ADR-128: give back a held renewal fee no renewal used |
 | PUT | `/lending/loans/{loan_id}/officer` | `lending.collections.assign` | FR-CLN-01. `{officer_user_id}`; `{officer_user_id, reassigned}`; 422 `officer_not_eligible` |
 | GET, POST | `/lending/loans/{loan_id}/collection-actions` | `lending.collections.read` / `lending.collections.log_action` | FR-CLN-04. Newest first. POST `{action_type, note?, promised_date?, promised_amount_minor?}`, 201; 422 `invalid_action_type`, `note_required`, `promise_incomplete`, `promised_date_in_past`, `promise_fields_not_allowed` |
 | POST | `/lending/loans/{loan_id}/documents/{doc_type}` | `lending.loans.read` | Generates statement, schedule, or agreement PDF. Built (#120, ADR-034): `schedule` and `loan_statement` return the PDF itself as at the business date, numbered `SCH-<branch>-<loan no>` and `ST-<branch>-<loan no>`, never stored, numbered with the statement date; 409 `invalid_status_transition` before disbursement; 503 `documents_busy` with `Retry-After` when too many are being produced. Every document response is `Cache-Control: no-store`. The statement is the loan account with a running balance whose closing balance is the loan's outstanding (ADR-034). |

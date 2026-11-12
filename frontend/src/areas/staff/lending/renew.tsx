@@ -44,7 +44,9 @@ export function RenewPanel({ loan, memberName, onClose }: { loan: Loan; memberNa
   const step = renewStep(draft, base.data, c, today);
   // The product's fixed renewal fee (the client's answer of 12 Nov 2026): taken now with the interest, income once approved.
   const fee = base.data?.renewal_fee_minor ?? 0;
-  const takes = step.collectMinor + fee;
+  // A fee an earlier request took and the loan still holds is used again (review of #919), so only the rest is taken.
+  const feeToTake = Math.max(0, fee - (loan.balances?.credit_balance_minor ?? 0));
+  const takes = step.collectMinor + feeToTake;
   // What this renewal does, worked out by the server for the review.
   const review = useQuery({
     queryKey: ['lending', 'loan', loanId, 'renewal-review', draft.valueDate, step.collectMinor, step.termCount, step.rateBp],
@@ -106,7 +108,7 @@ export function RenewPanel({ loan, memberName, onClose }: { loan: Loan; memberNa
         {q && (
           <>
             <KeyFigure label="Moves to the new loan" value={money(q.principal_moved_minor, c)}>
-              <KeyFigureRow label="Interest collected now" value={money(q.collect_minor, c)} />
+              <KeyFigureRow label="Collected now (interest first, then any fees and penalties)" value={money(q.collect_minor, c)} />
               <KeyFigureRow label="Interest that was due" value={money(q.interest_due_minor, c)} />
             </KeyFigure>
             <dl className="ln-facts ln-review" aria-label="The renewal">
@@ -123,7 +125,7 @@ export function RenewPanel({ loan, memberName, onClose }: { loan: Loan; memberNa
               <dt>Interest rate</dt>
               <dd>{rateWords(q.interest_rate_bp, q.rate_unit)}</dd>
               <dt>Renewal fee</dt>
-              <dd>{(q.renewal_fee_minor ?? 0) > 0 ? `${money(q.renewal_fee_minor, c)}, taken now with the interest, given back if the renewal is not approved` : 'None'}</dd>
+              <dd>{(q.renewal_fee_minor ?? 0) > 0 ? `${money(q.renewal_fee_minor, c)}, taken now with its own receipt and held for the borrower until the renewal is approved; given back if it is not` : 'None'}</dd>
               <dt>New due date</dt>
               <dd>{showDate(q.new_due_date)}</dd>
               <dt>The borrower then owes</dt>
@@ -215,7 +217,11 @@ export function RenewPanel({ loan, memberName, onClose }: { loan: Loan; memberNa
           Use {money(b.minimum_collect_minor, c)}
         </button>
       )}
-      {fee > 0 && <p className="ln-muted">The renewal fee of {money(fee, c)} is taken now too.</p>}
+      {fee > 0 && (
+        <p className="ln-muted">
+          {feeToTake > 0 ? `The renewal fee of ${money(fee, c)} is taken now too, with its own receipt.` : `The renewal fee of ${money(fee, c)} is already held on this loan.`}
+        </p>
+      )}
       {takes > 0 && (
         <Segmented<PaymentMethod>
           label="Paid by"

@@ -11447,6 +11447,26 @@
           }
         }
       },
+      "RenewalFeeRefundRequest" : {
+        "description" : "Give back the renewal fee a loan holds because no renewal used it (review of #919)",
+        "properties" : {
+          "external_reference" : {
+            "maxLength" : 100,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "payment_method_key" : {
+            "pattern" : "cash|bank|mtn_momo|airtel_money",
+            "type" : "string"
+          },
+          "value_date" : {
+            "description" : "Today or earlier",
+            "format" : "date",
+            "type" : "string"
+          }
+        },
+        "required" : [ "payment_method_key", "value_date" ]
+      },
       "RepaymentRequest" : {
         "properties" : {
           "amount_minor" : {
@@ -35152,6 +35172,51 @@
           }
         },
         "summary" : "The payoff amount as at a value date, today by default (FR-REP-06)",
+        "tags" : [ "lending-loans" ]
+      }
+    },
+    "/api/v1/lending/loans/{loan_id}/renewal-fee/refund" : {
+      "post" : {
+        "operationId" : "refundLoanRenewalFee",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "loan_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RenewalFeeRefundRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RepaymentResult"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Give back the renewal fee the loan holds because no renewal used it, with a receipt (issue #918)",
         "tags" : [ "lending-loans" ]
       }
     },

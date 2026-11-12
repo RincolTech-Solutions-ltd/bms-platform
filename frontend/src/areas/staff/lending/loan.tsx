@@ -13,7 +13,8 @@ import { LendingGate } from './loans';
 import { showDate } from '../../../app/ui/PeriodPicker';
 import { loanStatusWords, methodWords, money, statusBadge, txnWords, words } from './loan-state';
 import { RenewPanel } from './renew';
-import { actionsFor, canReverse, mayWaiveItem, type LoanAction } from './permissions';
+import { actionsFor, canReverse, mayDo, mayWaiveItem, type LoanAction } from './permissions';
+import { HeldFeePanel, holdsFee } from './held-fee';
 import { showSavings } from './savings-permissions';
 import { WaiveItemSheet } from './waive-item';
 import { waivable } from './waive-state';
@@ -292,6 +293,7 @@ function ServicingView({ loan, memberName }: { loan: Loan; memberName?: string }
         </section>
       )}
       {!open && receipt && <RepaymentReceipt result={receipt} currency={loan.currency} />}
+      {holdsFee(loan) && mayDo(me, 'repay') && <HeldFeePanel loan={loan} />}
       {loan.status === 'approved' && <ApplicationPanel loan={loan} />}
       <BalancesCard loan={loan} />
       <h2 id="ln-schedule" data-tour="loan-schedule">Schedule</h2>

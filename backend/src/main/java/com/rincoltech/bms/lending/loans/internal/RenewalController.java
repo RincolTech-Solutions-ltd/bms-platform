@@ -33,9 +33,11 @@ import org.springframework.web.bind.annotation.RestController;
 class RenewalController {
 
     private final RenewalService service;
+    private final RenewalFeeRefunds refunds;
 
-    RenewalController(RenewalService service) {
+    RenewalController(RenewalService service, RenewalFeeRefunds refunds) {
         this.service = service;
+        this.refunds = refunds;
     }
 
     @GetMapping("/renewal-quote")
@@ -51,6 +53,24 @@ class RenewalController {
             @RequestParam(name = "term_count", required = false) Integer termCount,
             @RequestParam(name = "interest_rate_bp", required = false) Integer interestRateBp) {
         return service.quote(id, valueDate, collectMinor, termCount, interestRateBp);
+    }
+
+    @PostMapping("/renewal-fee/refund")
+    @RequiresPermission("lending.repayments.create")
+    @Operation(
+            summary =
+                    "Give back the renewal fee the loan holds because no renewal used it, with a receipt (issue #918)",
+            operationId = "refundLoanRenewalFee")
+    ResponseEntity<ServicingApi.RepaymentResult> refundFee(
+            @PathVariable("loan_id") UUID id,
+            @RequestHeader(name = "Idempotency-Key", required = false) String key,
+            @Valid @RequestBody RenewalApi.FeeRefundRequest request) {
+        Outcome<ServicingApi.RepaymentResult> o = refunds.refund(id, key, request);
+        var response = ResponseEntity.status(HttpStatus.CREATED);
+        if (o.replayed()) {
+            response.header("Idempotent-Replayed", "true");
+        }
+        return response.body(o.body());
     }
 
     @PostMapping("/renewals")

@@ -43,8 +43,11 @@ final class RenewalsTable {
         if (r.activeLoans() != null) {
             table.row(
                     "Active loans that are renewals, principal outstanding", r.activeLoans(), r.activePrincipalMinor());
-            table.row("Of them, arrears", r.activeLoans(), r.activeArrearsMinor());
-            table.row("Of them, more than 30 days late", r.activeLate30Loans(), null);
+            table.row("Of them, in arrears, the arrears", r.activeInArrearsLoans(), r.activeArrearsMinor());
+            table.row(
+                    "Of them, more than 30 days late, principal outstanding",
+                    r.activeLate30Loans(),
+                    r.activeLate30PrincipalMinor());
         } else {
             out.note("The active renewal loans are shown for today's date only.");
         }

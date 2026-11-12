@@ -26,7 +26,9 @@ public interface RenewalFigures {
      * @param activeLoans active loans that are renewals; null when not live
      * @param activePrincipalMinor their principal outstanding; null when not live
      * @param activeArrearsMinor their arrears; null when not live
+     * @param activeInArrearsLoans those of them with arrears; null when not live
      * @param activeLate30Loans those of them more than 30 days late; null when not live
+     * @param activeLate30PrincipalMinor the principal outstanding of those; null when not live
      */
     record Renewals(
             LocalDate from,
@@ -37,5 +39,7 @@ public interface RenewalFigures {
             Long activeLoans,
             Long activePrincipalMinor,
             Long activeArrearsMinor,
-            Long activeLate30Loans) {}
+            Long activeInArrearsLoans,
+            Long activeLate30Loans,
+            Long activeLate30PrincipalMinor) {}
 }

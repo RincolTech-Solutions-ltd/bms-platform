@@ -67,6 +67,8 @@ const BY_CODE: Record<string, string> = {
   renewal_rate_above_loan: 'The new rate can be the same or lower, never higher than the loan has now.',
   renewal_pending: 'A renewal of this loan is already waiting for approval.',
   renewal_changed: 'The loan changed while the renewal waited. Ask for it again.',
+  renewal_fee_not_held: 'The renewal fee is no longer held on the loan. Ask for the renewal again.',
+  nothing_held: 'The loan holds no renewal fee to give back.',
 };
 
 /** The message to show a person for a failed lending call. */
@@ -189,6 +191,16 @@ export const lending = {
     });
     const outcome = unwrap(result);
     return { executed: executed(outcome, result.response.status), outcome };
+  },
+
+  /** Review of #919: give back a renewal fee the loan holds because no renewal used it; a receipt like a repayment's. */
+  async refundRenewalFee(id: string, body: S['RenewalFeeRefundRequest'], idempotencyKey: string): Promise<RepaymentResult> {
+    return unwrap(
+      await api.POST('/api/v1/lending/loans/{loan_id}/renewal-fee/refund', {
+        params: { path: { loan_id: id }, header: key(idempotencyKey) },
+        body,
+      }),
+    );
   },
 
   async writeOff(id: string, reason: string, idempotencyKey: string): Promise<{ executed: boolean; outcome: LoanActionOutcome }> {

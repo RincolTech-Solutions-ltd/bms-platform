@@ -144,7 +144,8 @@ Parameters: `as_at`, branches, group by.
 - Renewals (issue #918, FR-LCL-04a, ADR-128): a renewed loan is no longer active and the loan that replaces it starts on time,
   so the report ends with a `renewals` table whenever there is a renewal to show: loans renewed from the first of the report
   date's month to the report date with the principal they moved and the unpaid amounts carried as a memorandum, and, for
-  today's book, the active renewal loans with their principal outstanding, arrears and those more than 30 days late. With
+  today's book, the active renewal loans with their principal outstanding, those in arrears with the arrears, and those
+  more than 30 days late with their principal outstanding. With
   none, a note says no loan was renewed. `lending.portfolio_outstanding` ends with the same table.
 
 Worked example (fabricated): active `PO` totals 10,000,000; loans with DPD 1 to 30 hold

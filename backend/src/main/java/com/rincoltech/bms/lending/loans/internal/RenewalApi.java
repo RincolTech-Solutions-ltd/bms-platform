@@ -115,6 +115,16 @@ final class RenewalApi {
             @Schema(description = "Renewals the product allows in a chain; null for no limit")
             Integer maxRenewals) {}
 
+    @Schema(
+            name = "RenewalFeeRefundRequest",
+            description = "Give back the renewal fee a loan holds because no renewal used it (review of #919)")
+    record FeeRefundRequest(
+            @NotNull @Schema(description = "Today or earlier")
+            LocalDate valueDate,
+
+            @NotNull @Pattern(regexp = ServicingApi.METHODS) String paymentMethodKey,
+            @Size(max = 100) String externalReference) {}
+
     @Schema(name = "LoanRenewalLinks", description = "Issue #918: the loans before and after this one in its renewals")
     record Links(
             @Schema(description = "0 for a loan that is no renewal")

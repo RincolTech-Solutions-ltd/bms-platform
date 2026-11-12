@@ -40,8 +40,8 @@ class RenewalFiguresService implements RenewalFigures {
                 p.productId(),
                 tenant.profile().currency());
         if (s.empty()) {
-            return new Renewals(
-                    from, p.to(), 0, 0, 0, live ? 0L : null, live ? 0L : null, live ? 0L : null, live ? 0L : null);
+            Long none = live ? 0L : null;
+            return new Renewals(from, p.to(), 0, 0, 0, none, none, none, none, none, none);
         }
         Map<String, Object> q = new LinkedHashMap<>();
         q.put("from", Date.valueOf(from));
@@ -58,20 +58,38 @@ class RenewalFiguresService implements RenewalFigures {
                 .query((rs, n) -> new long[] {rs.getLong("n"), rs.getLong("moved"), rs.getLong("carried")})
                 .single();
         if (!live) {
-            return new Renewals(from, p.to(), renewed[0], renewed[1], renewed[2], null, null, null, null);
+            return new Renewals(from, p.to(), renewed[0], renewed[1], renewed[2], null, null, null, null, null, null);
         }
         Map<String, Object> a = new LinkedHashMap<>();
         long[] active = jdbc.sql("""
                         SELECT count(*) AS n, coalesce(sum(l.principal_outstanding_minor), 0) AS po,
                                coalesce(sum(l.arrears_minor), 0) AS arrears,
-                               count(*) FILTER (WHERE l.days_past_due > 30) AS late30
+                               count(*) FILTER (WHERE l.arrears_minor > 0) AS in_arrears,
+                               count(*) FILTER (WHERE l.days_past_due > 30) AS late30,
+                               coalesce(sum(l.principal_outstanding_minor) FILTER (WHERE l.days_past_due > 30), 0) AS late30_po
                           FROM lending_loans l
                          WHERE l.status = 'active' AND l.renewal_no > 0""" + s.loanFilter("l", a))
                 .params(a)
-                .query((rs, n) ->
-                        new long[] {rs.getLong("n"), rs.getLong("po"), rs.getLong("arrears"), rs.getLong("late30")})
+                .query((rs, n) -> new long[] {
+                    rs.getLong("n"),
+                    rs.getLong("po"),
+                    rs.getLong("arrears"),
+                    rs.getLong("in_arrears"),
+                    rs.getLong("late30"),
+                    rs.getLong("late30_po")
+                })
                 .single();
         return new Renewals(
-                from, p.to(), renewed[0], renewed[1], renewed[2], active[0], active[1], active[2], active[3]);
+                from,
+                p.to(),
+                renewed[0],
+                renewed[1],
+                renewed[2],
+                active[0],
+                active[1],
+                active[2],
+                active[3],
+                active[4],
+                active[5]);
     }
 }

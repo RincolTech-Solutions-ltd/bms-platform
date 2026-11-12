@@ -355,16 +355,20 @@ class LoanRenewalIT extends LoanFixtures {
                 .as("the fee is collected, never lent")
                 .isZero();
         assertThat(first.get("interest_due_minor").asLong()).isEqualTo(200_000);
-        // The fixed renewal fee the counter took is income on approval, with its own receipt, on the new loan.
-        JsonNode fee = java.util.stream.StreamSupport.stream(
-                        get(LOANS + "/" + fresh + "/transactions").get("items").spliterator(), false)
-                .filter(x -> x.get("txn_type").asString().equals("fee_upfront"))
-                .findFirst()
-                .orElseThrow(() -> new AssertionError("no renewal fee on the new loan"));
-        assertThat(fee.get("amount_minor").asLong()).isEqualTo(20_000);
-        assertThat(fee.get("receipt_no").asString()).startsWith("RC-");
-        assertThat(lines(fee.get("journal_entry_id").asString()))
-                .containsExactly("cash_on_hand:20000:0", "loan_fee_income:0:20000");
+        // The fixed fee was taken at the counter with a receipt and held for the member; the approval made it income.
+        JsonNode held = txnOf(old, "renewal_fee_held");
+        assertThat(held.get("amount_minor").asLong()).isEqualTo(20_000);
+        assertThat(held.get("receipt_no").asString()).startsWith("RC-");
+        assertThat(lines(held.get("journal_entry_id").asString()))
+                .containsExactly("cash_on_hand:20000:0", "member_overpayments:0:20000");
+        assertThat(lines(txnOf(old, "renewal_fee").get("journal_entry_id").asString()))
+                .containsExactly("member_overpayments:20000:0", "loan_fee_income:0:20000");
+        assertThat(get(LOANS + "/" + old)
+                        .get("balances")
+                        .get("credit_balance_minor")
+                        .asLong())
+                .as("nothing is left held once the renewal used the fee")
+                .isZero();
         assertThat(first.get("due_date").asString())
                 .isEqualTo(today.plusMonths(2).toString());
 
@@ -394,6 +398,23 @@ class LoanRenewalIT extends LoanFixtures {
         assertThat(q.getBody().get("code").asString()).isEqualTo("renewal_not_allowed");
     }
 
+    /** The loan's transaction of this type; fails when there is none. */
+    JsonNode txnOf(String loan, String type) {
+        return java.util.stream.StreamSupport.stream(
+                        get(LOANS + "/" + loan + "/transactions").get("items").spliterator(), false)
+                .filter(x -> x.get("txn_type").asString().equals(type))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no " + type + " on " + loan));
+    }
+
+    ResponseEntity<JsonNode> refundFee(String loan) {
+        return send(
+                HttpMethod.POST,
+                LOANS + "/" + loan + "/renewal-fee/refund",
+                withKey(as(cashier, cashierPerms, "*", null)),
+                Map.of("value_date", today.toString(), "payment_method_key", "cash"));
+    }
+
     /**
      * Issue #852 (ADR-026 decision 5) on the renewal route: the maker's retry replays one request and one repayment;
      * another cashier with the same key is refused, sees none of the stored answer and records nothing.
@@ -419,5 +440,44 @@ class LoanRenewalIT extends LoanFixtures {
         KeyOwnership.refused(other, first, old, body);
         // The disbursement and one repayment: neither the replay nor the refusal took the money again.
         assertThat(get(LOANS + "/" + old + "/transactions").get("items")).hasSize(2);
+    }
+
+    /**
+     * Review of #919: a renewal fee taken at the counter is on record from that moment (a receipt, the till debited, held
+     * for the member). A rejected renewal leaves it held, and it is given back with its own receipt.
+     */
+    @Test
+    void aFeeTakenForARejectedRenewalIsHeldAndGivenBackWithAReceipt() {
+        String old = activeLoan(bulletProduct("RNW6", Map.of("fee_minor", 20_000)), 6);
+        ResponseEntity<JsonNode> r = renew(old, cashier, cashierPerms, 100_000L, null);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(lines(txnOf(old, "renewal_fee_held").get("journal_entry_id").asString()))
+                .containsExactly("cash_on_hand:20000:0", "member_overpayments:0:20000");
+        assertThat(refundFee(old).getStatusCode())
+                .as("not while the renewal waits")
+                .isEqualTo(HttpStatus.CONFLICT);
+
+        ResponseEntity<JsonNode> rejected = send(
+                HttpMethod.POST,
+                "/api/v1/approvals/" + r.getBody().get("approval_request_id").asString() + "/reject",
+                as(manager, managerPerms, "*", null),
+                Map.of("note", "Test borrower to come back next week"));
+        assertThat(rejected.getStatusCode()).as("%s", rejected.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(get(LOANS + "/" + old)
+                        .get("balances")
+                        .get("credit_balance_minor")
+                        .asLong())
+                .isEqualTo(20_000);
+
+        ResponseEntity<JsonNode> back = refundFee(old);
+        assertThat(back.getStatusCode()).as("%s", back.getBody()).isEqualTo(HttpStatus.CREATED);
+        JsonNode refund = back.getBody().get("transaction");
+        assertThat(refund.get("txn_type").asString()).isEqualTo("credit_refund");
+        assertThat(refund.get("receipt_no").asString()).startsWith("RC-");
+        assertThat(lines(refund.get("journal_entry_id").asString()))
+                .containsExactly("member_overpayments:20000:0", "cash_on_hand:0:20000");
+        assertThat(back.getBody().get("balances").get("credit_balance_minor").asLong())
+                .isZero();
+        booksAgree();
     }
 }

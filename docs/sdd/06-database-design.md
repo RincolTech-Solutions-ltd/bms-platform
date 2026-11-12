@@ -1663,6 +1663,9 @@ on lines touching `S` accounts carry the loan, savings account or investment id.
 | Repayment reversal | Mirror of the original entry (a reversing entry) | | FR-REP-05 |
 | Recovery on written-off loan | PM amount | `bad_debt_recovered` | FR-LCL-03 |
 | Write-off | `loan_write_off_expense` outstanding principal | `loans_receivable` outstanding principal | FR-LCL-02 |
+| Renewal fee taken (`renewal_fee_held`, issue #918) | PM fee | `member_overpayments` (old loan subledger) | FR-LCL-04a |
+| Renewal fee on approval (`renewal_fee`) | `member_overpayments` (old loan subledger) | `loan_fee_income` | FR-LCL-04a |
+| Held renewal fee given back (`credit_refund`) | `member_overpayments` (loan subledger) | PM fee | FR-LCL-04a |
 | Restructure, and a renewal (issue #918; one entry, the old loan's `restructure_out` and the new loan's `restructure_in` share it) | `loans_receivable` (new loan subledger) | `loans_receivable` (old loan subledger) | FR-LCL-04, FR-LCL-04a |
 | Cross-branch repayment | At receiving branch: PM amount / `interbranch_clearing` amount. At loan branch: `interbranch_clearing` amount / the repayment credits above | | FR-REP-07 |
 | Member credit refund | `member_overpayments` | PM | FR-REP-04a |
@@ -1805,7 +1808,7 @@ increment 4.
 | `renewal_allowed` | `boolean NOT NULL DEFAULT true` | V152, ADR-128: loans of the product may be renewed (issue #918). Read from the product's current version at each renewal |
 | `renewal_max_count` | `integer` | V152: renewals one chain of loans may have; null for no limit. `CHECK (>= 1)` |
 | `renewal_interest_first` | `boolean NOT NULL DEFAULT true` | V152: a renewal is refused while interest is due on the old loan |
-| `renewal_fee_minor` | `bigint` | V152: the fixed fee of one renewal (1 to 10^15), null for none; collected with the interest and posted as income (a `fee_upfront` transaction on the new loan) when the renewal is approved, never added to the schedule |
+| `renewal_fee_minor` | `bigint` | V152: the fixed fee of one renewal (1 to 10^15), null for none; taken with the interest and held for the borrower (`renewal_fee_held`, member overpayments) until the approval makes it income (`renewal_fee`); never added to the schedule |
 | `created_by` | `uuid NOT NULL` | |
 
 ### `lending_loan_product_fees`
@@ -2002,7 +2005,10 @@ Changed by `V152__lending_loan_renewal.sql` (issue #918, ADR-128), expand only, 
 permissions `lending.loans.renew_request` and `lending.loans.renew_approve`; the renewal columns of
 `lending_loan_product_versions`; `renewal_no`, `restructured_on` and `restructure_kind` on `lending_loans` with the
 indexes `lending_loans_restructured_from` (unique) and `lending_loans_restructured_on`; `restructured_minor` and the
-`restructured` status on `lending_schedule_items` (the status check widened, then validated). A renewal writes the new loan
+`restructured` status on `lending_schedule_items`, and the transaction types `renewal_fee_held` and `renewal_fee` on
+`lending_loan_transactions` (both checks widened `NOT VALID` with no `VALIDATE`, so no table is scanned under the lock of the
+`DROP`; the old sets are subsets of the new ones, and every new check on `lending_loans` is `NOT VALID` too; the header gives
+the sizes and lock times). A renewal writes the new loan
 as a `draft`, gives it the old loan's pledges and guarantors (the V8 guards allow that only on a draft) after releasing them
 from the old loan, and moves it to `active`.
 

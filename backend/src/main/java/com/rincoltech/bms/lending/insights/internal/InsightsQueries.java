@@ -321,7 +321,8 @@ class InsightsQueries {
         String sql = """
                 SELECT coalesce(sum(l.maturity_date - l.disbursed_on), 0) AS days, count(*) AS n
                   FROM lending_loans l
-                 WHERE l.disbursed_on BETWEEN :from AND :to AND l.maturity_date IS NOT NULL""" + s.loanFilter("l", p);
+                 WHERE l.disbursed_on BETWEEN :from AND :to AND l.maturity_date IS NOT NULL
+                   AND l.renewal_no = 0""" + s.loanFilter("l", p);
         return jdbc.sql(sql)
                 .params(p)
                 .query((rs, n) -> new long[] {rs.getLong("days"), rs.getLong("n")})
