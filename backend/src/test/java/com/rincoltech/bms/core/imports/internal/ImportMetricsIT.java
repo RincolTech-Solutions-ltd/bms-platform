@@ -261,10 +261,15 @@ class ImportMetricsIT extends IntegrationTest {
                         .params("https://github.com/someone-else/bms-platform/pull/12", staff, second)
                         .update())
                 .hasStackTraceContaining("import_defects_fix_ref_this_repo");
-        // V151 replaced the V148 CHECK, so exactly one CHECK reads fix_ref's form.
-        assertThat(count("SELECT count(*) FROM pg_constraint WHERE conrelid = CAST('import_defects' AS regclass)"
-                        + " AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%fix_ref ~%'"))
-                .isEqualTo(1);
+        // V151 replaced the V148 CHECK: the new one is there and validated, the old one is gone.
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT conname || '|' || convalidated FROM pg_constraint"
+                                        + " WHERE conrelid = CAST('import_defects' AS regclass)"
+                                        + " AND conname IN ('import_defects_fix_ref_check', 'import_defects_fix_ref_this_repo')")
+                        .query(String.class)
+                        .list())
+                .containsExactly("import_defects_fix_ref_this_repo|true");
     }
 
     @Test
