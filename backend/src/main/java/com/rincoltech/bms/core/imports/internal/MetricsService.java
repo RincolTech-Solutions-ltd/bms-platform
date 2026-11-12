@@ -62,6 +62,7 @@ class MetricsService implements ImportMetrics {
     private final PlatformAuditLog platformAudit;
     private final ImportTemplates templates;
     private final PreviewService preview;
+    private final com.rincoltech.bms.kernel.BusinessClock clock;
 
     MetricsService(
             JdbcClient jdbc,
@@ -70,7 +71,8 @@ class MetricsService implements ImportMetrics {
             AuditLog audit,
             PlatformAuditLog platformAudit,
             ImportTemplates templates,
-            PreviewService preview) {
+            PreviewService preview,
+            com.rincoltech.bms.kernel.BusinessClock clock) {
         this.jdbc = jdbc;
         this.tx = new TransactionTemplate(transactions);
         this.mapper = mapper;
@@ -78,6 +80,7 @@ class MetricsService implements ImportMetrics {
         this.platformAudit = platformAudit;
         this.templates = templates;
         this.preview = preview;
+        this.clock = clock;
     }
 
     /** Milliseconds since a {@link System#nanoTime()} reading, for a step's time stored on its run or batch. */
@@ -116,7 +119,7 @@ class MetricsService implements ImportMetrics {
                     java.util.Set.of(REPORT_READ),
                     "read_key",
                     readKey,
-                    Instant.now().minus(READ_WINDOW))) {
+                    clock.now().minus(READ_WINDOW))) {
                 Map<String, Object> data = new LinkedHashMap<>();
                 data.put("runs", runs.size());
                 data.put("since", sinceText);
