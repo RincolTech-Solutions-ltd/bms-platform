@@ -185,7 +185,7 @@ class RetailOfflineEntriesClockIT extends IntegrationTest {
         assertThat(RetailTestSupport.id(again)).isEqualTo(RetailTestSupport.id(sent));
     }
 
-    // JUSTIFICATION-A3: issue #912 moves this test unchanged in intent from RetailOfflineEntriesIT onto this class's clock.
+    // JUSTIFICATION-A3: issue #912 moves this test unchanged in intent from RetailOfflineEntriesIT onto this clock.
     /**
      * Review of #839: a banking or withdrawal time sent with an offline entry is not used; the phone's judged time is. On this
      * class's clock (issue #912): made 10 minutes before 15:00 Kampala, so the banking never closes a day before the
@@ -209,7 +209,11 @@ class RetailOfflineEntriesClockIT extends IntegrationTest {
             }
             b.put("offline", offline(made));
             ResponseEntity<JsonNode> r = cb.api.postKeyed(
-                    path, b, RetailOfflineEntriesIT.SELLER, hq.toString(), UUID.randomUUID().toString());
+                    path,
+                    b,
+                    RetailOfflineEntriesIT.SELLER,
+                    hq.toString(),
+                    UUID.randomUUID().toString());
             assertThat(r.getStatusCode()).as("%s %s", path, r.getBody()).isEqualTo(HttpStatus.CREATED);
             String at = r.getBody()
                     .get(path.equals("/bankings") ? "banked_at" : "withdrawn_at")
