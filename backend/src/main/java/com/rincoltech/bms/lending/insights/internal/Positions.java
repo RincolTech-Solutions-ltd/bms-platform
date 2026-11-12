@@ -179,6 +179,7 @@ class Positions {
                       JOIN lending_loans l ON l.id = si.loan_id
                       LEFT JOIN a ON a.item_id = si.id
                      WHERE l.disbursed_on <= :d AND (l.written_off_on IS NULL OR l.written_off_on > :d)
+                       AND (l.restructured_on IS NULL OR l.restructured_on > :d)
                 )
                 SELECT l.id, l.loan_no, l.member_id, l.branch_id, l.officer_user_id, pv.product_id,
                        sum(i.p_un) AS po, sum(i.i_un) AS io,

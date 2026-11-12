@@ -211,6 +211,8 @@ class LoanLedgerTest {
                         "pending",
                         null,
                         0,
+                        0,
+                        0,
                         0));
             }
             return rows;

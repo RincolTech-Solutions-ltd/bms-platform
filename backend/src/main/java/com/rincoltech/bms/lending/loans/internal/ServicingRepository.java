@@ -271,6 +271,26 @@ class ServicingRepository {
         }
     }
 
+    /** Issue #918: a renewed loan's unsettled items keep what was unpaid on each, now moved or carried, as restructured. */
+    void restructureItems(List<Item> items) {
+        for (Item i : items) {
+            if (!i.settled()) {
+                jdbc.sql("""
+                                UPDATE lending_schedule_items SET restructured_minor = ?, status = 'restructured',
+                                    updated_at = now(), version = version + 1
+                                 WHERE id = ?
+                                """).params(i.unpaidTotal(), i.id).update();
+            }
+        }
+    }
+
+    /** FR-LCL-04: what the old loan left unpaid and was not collected, as a memorandum on the new loan's first item. */
+    void carryArrears(UUID loanId, long amountMinor) {
+        jdbc.sql("UPDATE lending_schedule_items SET carried_arrears_minor = ? WHERE loan_id = ? AND item_no = 1")
+                .params(amountMinor, loanId)
+                .update();
+    }
+
     /** The schedule view rows of FR-DIS-04, with the written-off and status columns as stored. */
     List<ServicingApi.ScheduleRow> scheduleRows(UUID loanId) {
         return jdbc.sql("SELECT * FROM lending_schedule_items WHERE loan_id = ? ORDER BY item_no")
@@ -288,6 +308,7 @@ class ServicingRepository {
                     long feesWaived = rs.getLong("fees_waived_minor");
                     long waived = interestWaived + feesWaived + rs.getLong("penalties_waived_minor");
                     long writtenOff = rs.getLong("written_off_minor");
+                    long restructured = rs.getLong("restructured_minor");
                     long due = principalDue + interestDue + feesDue + penaltiesDue;
                     long paid = principalPaid + interestPaid + feesPaid + penaltiesPaid;
                     return new ServicingApi.ScheduleRow(
@@ -305,11 +326,13 @@ class ServicingRepository {
                             paid,
                             waived,
                             writtenOff,
-                            due - paid - waived - writtenOff,
+                            due - paid - waived - writtenOff - restructured,
                             rs.getString("status"),
                             rs.getObject("paid_on", LocalDate.class),
-                            interestDue - interestPaid - interestWaived,
-                            feesDue - feesPaid - feesWaived);
+                            restructured > 0 ? 0 : interestDue - interestPaid - interestWaived,
+                            restructured > 0 ? 0 : feesDue - feesPaid - feesWaived,
+                            restructured,
+                            rs.getLong("carried_arrears_minor"));
                 })
                 .list();
     }

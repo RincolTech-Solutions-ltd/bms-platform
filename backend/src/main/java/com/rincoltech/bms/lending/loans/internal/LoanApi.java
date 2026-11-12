@@ -141,6 +141,9 @@ final class LoanApi {
             @Schema(description = "Balances, DPD and dates once disbursed (FR-DIS-04, R-DPD); zeros before")
             ServicingApi.LoanBalances balances,
 
+            @Schema(description = "Issue #918: the loan it renewed and the loan that renewed it; null when neither")
+            RenewalApi.Links renewal,
+
             UUID createdBy,
             Instant createdAt,
             Instant updatedAt,

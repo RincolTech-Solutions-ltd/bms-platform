@@ -8,6 +8,7 @@ import com.rincoltech.bms.lending.insights.InsightsFigures.ParBucket;
 import com.rincoltech.bms.lending.insights.InsightsFigures.ParFigures;
 import com.rincoltech.bms.lending.insights.InsightsFigures.ParGroup;
 import com.rincoltech.bms.lending.insights.InsightsFigures.ParGroupBy;
+import com.rincoltech.bms.lending.insights.RenewalFigures;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -27,13 +28,15 @@ import tools.jackson.databind.ObjectMapper;
  *       loans, principal outstanding, share of the group's principal and arrears.
  * </ul>
  *
- * Written-off loans are not active and are in neither. A restructured loan's separate line (FR-LCL-04) arrives
- * with restructuring, which is not built yet.
+ * Written-off loans are not active and are in neither. A third table, {@code renewals} (issue #918, FR-LCL-04), counts the
+ * loans renewed in the month and the active renewal loans with their arrears, so a renewal never hides arrears.
  */
 @Component
 class ParReport extends PortfolioReport {
 
     static final String KEY = "lending.par";
+
+    private final RenewalFigures renewals;
 
     private static final Map<String, String> BUCKET_LABELS = Map.of(
             "current", "Current (not late)",
@@ -42,8 +45,9 @@ class ParReport extends PortfolioReport {
             "61_90", "61 to 90 days late",
             "over_90", "Over 90 days late");
 
-    ParReport(InsightsFigures figures, ObjectMapper mapper) {
+    ParReport(InsightsFigures figures, RenewalFigures renewals, ObjectMapper mapper) {
         super(figures, mapper);
+        this.renewals = renewals;
     }
 
     @Override
@@ -129,5 +133,6 @@ class ParReport extends PortfolioReport {
                         b.arrearsMinor());
             }
         }
+        RenewalsTable.write(out, renewals, scope(prepared), f.source().equals("live"));
     }
 }

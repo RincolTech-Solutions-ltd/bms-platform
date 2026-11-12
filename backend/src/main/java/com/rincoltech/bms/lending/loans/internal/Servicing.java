@@ -86,6 +86,18 @@ final class Servicing {
             return i;
         }
 
+        /** The item exactly as it stands, paid and waived amounts included: a renewal quote tries payments on copies. */
+        Item copy() {
+            Item i = fresh();
+            i.principalPaid = principalPaid;
+            i.interestPaid = interestPaid;
+            i.feesPaid = feesPaid;
+            i.penaltiesPaid = penaltiesPaid;
+            i.interestWaived = interestWaived;
+            i.paidOn = paidOn;
+            return i;
+        }
+
         /** Adds one dated penalty charge to the item's dated charges (the loader's step). */
         void chargedOn(LocalDate date, long amountMinor) {
             if (penaltyCharges == null) {

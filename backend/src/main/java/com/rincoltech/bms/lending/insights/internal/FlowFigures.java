@@ -114,6 +114,7 @@ class FlowFigures {
                  coalesce(sum(a.amount_minor) FILTER (WHERE a.component IN ('principal', 'interest', 'fee')
                      AND si.due_date BETWEEN :from AND :to AND l.disbursed_on IS NOT NULL
                      AND (l.written_off_on IS NULL OR l.written_off_on >= :from)
+                     AND (l.restructured_on IS NULL OR si.due_date <= l.restructured_on)
                      AND (l.closed_on IS NULL OR l.closed_on >= :from)), 0) AS on_due,
                  coalesce(sum(a.amount_minor) FILTER (WHERE t.value_date >= :from AND t.txn_type = 'repayment'
                      AND a.component IN ('principal', 'interest', 'fee') AND si.due_date BETWEEN :from AND :to), 0) AS in_range,

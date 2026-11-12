@@ -369,6 +369,8 @@ platform API and holds no tenant permissions.
 | `lending.loans.write_off_approve` | Y | | | | | | | | | | | |
 | `lending.loans.restructure_request` | Y | Y | | | | | | | | | | |
 | `lending.loans.restructure_approve` | Y | | | | Y | | | | | | | |
+| `lending.loans.renew_request` | Y | Y | Y | Y | | | | | | | | |
+| `lending.loans.renew_approve` | Y | Y | | | | | | | | | | |
 | `lending.collateral.read` | Y | Y | Y | Y | Y | Y | | | | | | |
 | `lending.collateral.manage` | Y | Y | Y | | | | | | | | | |
 | `lending.collateral.release_request` | Y | Y | Y | | | | | | | | | |
@@ -951,6 +953,7 @@ CHECK constraint as well as the service.
 | `charge_waiver` | `lending.charges.waive_request` | `lending.charges.waive_approve`; for a fee or interest waiver also `lending.charges.waive_fee_interest` (the accountant's, issue #265) | Yes, on everything waived on the loan with the request; a fee or interest waiver asked by someone without `lending.charges.waive_fee_interest` always waits |
 | `loan_write_off` | `lending.loans.write_off_request` | `lending.loans.write_off_approve` | No |
 | `loan_restructure` | `lending.loans.restructure_request` | `lending.loans.restructure_approve` | No |
+| `loan_renewal` | `lending.loans.renew_request` (collecting money with it also needs `lending.repayments.create`) | `lending.loans.renew_approve` (the branch manager or the tenant admin) | No (always checked) |
 | `manual_journal` | `core.journals.create` | `core.journals.approve` | No |
 | `period_close` | `core.periods.close` | `core.periods.approve_close` | No |
 | `savings_withdrawal` | `lending.savings.withdraw` | `lending.savings.withdraw_approve` | Yes |
@@ -992,6 +995,12 @@ it adds declares a permission already in the matrix above (`lending.disbursement
 and `lending.loans.read` for the schedule, transactions and payoff quote), and the route permission
 test covers them. The `seed-lending` command has no route and no permission: it is refused in
 production and on any tenant holding data (`docs/runbooks/seed-lending.md`).
+
+Loan renewal (#918, `lending.loans`, ADR-128, migration `V152`) registers `loan_renewal` with two new permissions:
+`lending.loans.renew_request` (tenant admin, branch manager, loan officer, cashier), which also guards the renewal quote, and
+`lending.loans.renew_approve` (tenant admin and branch manager: the issue asks for a branch manager to approve, which is why
+it is not `loan_restructure`, whose checker is the accountant). Collecting the interest within the request records a normal
+repayment, so it also needs `lending.repayments.create`; a loan officer without it renews after a cashier has taken the money.
 
 Savings (#151, `lending.savings`, ADR-032) registers `savings_withdrawal` (a closure is the same
 action with `close` set, the threshold applying to the balance) and `savings_reversal`, added to the

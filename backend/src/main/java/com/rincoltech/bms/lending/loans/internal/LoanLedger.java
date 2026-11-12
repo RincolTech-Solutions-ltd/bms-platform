@@ -198,6 +198,26 @@ final class LoanLedger {
                         }
                     }
                 }
+                case "restructure_in" -> {
+                    // Issue #918: a renewal loan starts with the principal the old loan moved to it; no cash was paid.
+                    String of = t.reason() == null ? "Renewal" : t.reason();
+                    charge(entries, balance, t.valueDate(), "", of + ": principal brought in", t.amountMinor());
+                    charge(entries, balance, t.valueDate(), "", "Interest charged (schedule)", interest);
+                    charge(entries, balance, t.valueDate(), "", "Fees added (schedule)", fees);
+                }
+                case "restructure_out" -> {
+                    String to = t.reason() == null ? "Renewed" : t.reason();
+                    credit(entries, balance, t.valueDate(), "", to + ": principal moved", t.amountMinor());
+                    if (balance[0] > 0) {
+                        credit(
+                                entries,
+                                balance,
+                                t.valueDate(),
+                                "",
+                                "Not collected: carried or no longer charged",
+                                balance[0]);
+                    }
+                }
                 case "write_off" -> {
                     long amount = writtenOff > 0 ? writtenOff : t.amountMinor();
                     credit(entries, balance, t.valueDate(), "", "Written off", amount);
@@ -339,7 +359,7 @@ final class LoanLedger {
     /** A disbursement before its fee payment, and either before the repayments of the same instant. */
     private static int rank(LoanTransaction t) {
         return switch (t.txnType()) {
-            case "disbursement" -> 0;
+            case "disbursement", "restructure_in" -> 0;
             case "fee_upfront" -> 1;
             default -> 2;
         };

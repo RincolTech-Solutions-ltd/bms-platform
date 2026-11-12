@@ -169,7 +169,19 @@ final class ServicingApi {
             long interestOutstandingMinor,
 
             @Schema(description = "Fees still due on the item: the most a fee waiver may take (FR-ARR-04)")
-            long feesOutstandingMinor) {}
+            long feesOutstandingMinor,
+
+            @Schema(
+                    description =
+                            "Issue #918: what was unpaid on the item when the loan was renewed (its principal moved"
+                                    + " to the new loan, the rest carried or rebated); not outstanding")
+            long restructuredMinor,
+
+            @Schema(
+                    description =
+                            "FR-LCL-04: on the first item of a renewal loan, what the old loan left unpaid and was"
+                                    + " not collected; a memorandum, never part of what is due")
+            long carriedArrearsMinor) {}
 
     @Schema(name = "LoanSchedule", description = "FR-DIS-04: the items and a totals row that equals the loan totals")
     record Schedule(UUID loanId, String currency, List<ScheduleRow> items, ScheduleRow totals) {}

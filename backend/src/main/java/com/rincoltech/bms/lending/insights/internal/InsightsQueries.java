@@ -204,7 +204,8 @@ class InsightsQueries {
     static final String ACTIVE_IN_RANGE = " " + """
              AND l.disbursed_on IS NOT NULL
              AND (l.written_off_on IS NULL OR l.written_off_on >= :from)
-             AND (l.closed_on IS NULL OR l.closed_on >= :from)""";
+             AND (l.closed_on IS NULL OR l.closed_on >= :from)
+             AND (l.restructured_on IS NULL OR si.due_date <= l.restructured_on)""";
 
     /** Principal, interest and fees due by due date in the range. */
     List<DayTotal> expectedByDay(Scope s) {
