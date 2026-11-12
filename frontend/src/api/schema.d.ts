@@ -2378,6 +2378,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/lending/loans/{loan_id}/renewal-quote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What renewing the loan would do on a date: interest due, what to collect, principal moved, the new term, fee and due date (issue #918) */
+        get: operations["getLoanRenewalQuote"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/loans/{loan_id}/renewals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Renew an active loan: collect what is due as a repayment now, and ask a second person to move the principal to a new loan (issue #918); 202 while it waits */
+        post: operations["requestLoanRenewal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/lending/loans/{loan_id}/repayments": {
         parameters: {
             query?: never;
@@ -12375,6 +12409,7 @@ export interface components {
             purpose_text?: string;
             rate_unit?: string;
             rejected_reason?: string;
+            renewal?: components["schemas"]["LoanRenewalLinks"];
             repayment_pattern?: string;
             /** Format: int64 */
             requested_principal_minor?: number;
@@ -12712,6 +12747,23 @@ export interface components {
         LoanProductList: {
             items?: components["schemas"]["LoanProduct"][];
         };
+        /** @description Loan renewal (issue #918); left out: allowed, no limit, interest first, no fee */
+        LoanProductRenewal: {
+            /** @description True by default */
+            allowed?: boolean;
+            /**
+             * Format: int64
+             * @description The fixed fee of one renewal, collected with the interest; null (the default) for none
+             */
+            fee_minor?: number;
+            /** @description True by default: the interest due is collected before the principal moves */
+            interest_first?: boolean;
+            /**
+             * Format: int32
+             * @description How many renewals one chain of loans may have; null for no limit
+             */
+            max_count?: number;
+        };
         LoanProductTerms: {
             /** @description A permutation of penalty, fee, interest, principal; that order by default */
             allocation_order?: string[];
@@ -12748,6 +12800,7 @@ export interface components {
             /** Format: int32 */
             penalty_rate_bp?: number;
             rate_unit: string;
+            renewal?: components["schemas"]["LoanProductRenewal"];
             repayment_pattern: string;
             requires_collateral?: boolean;
             requires_guarantor?: boolean;
@@ -12790,6 +12843,7 @@ export interface components {
             /** Format: int32 */
             penalty_rate_bp?: number;
             rate_unit?: string;
+            renewal?: components["schemas"]["LoanProductRenewal"];
             repayment_pattern?: string;
             requires_collateral?: boolean;
             requires_guarantor?: boolean;
@@ -12860,6 +12914,144 @@ export interface components {
             /** Format: date */
             date?: string;
         };
+        /** @description Issue #918: the loans before and after this one in its renewals */
+        LoanRenewalLinks: {
+            /**
+             * Format: int32
+             * @description 0 for a loan that is no renewal
+             */
+            renewal_no?: number;
+            /** Format: uuid */
+            renewed_from_loan_id?: string;
+            renewed_from_loan_no?: string;
+            /** Format: date */
+            renewed_on?: string;
+            /** Format: uuid */
+            renewed_to_loan_id?: string;
+            renewed_to_loan_no?: string;
+        };
+        /** @description What a renewal would do, worked out on the value date */
+        LoanRenewalQuote: {
+            /**
+             * Format: int64
+             * @description Interest, fees and penalties left unpaid, carried to the new loan as a memorandum
+             */
+            carried_minor?: number;
+            /**
+             * Format: int64
+             * @description The amount this quote collects
+             */
+            collect_minor?: number;
+            currency?: string;
+            /** Format: int64 */
+            fees_due_minor?: number;
+            /** Format: date */
+            first_due_date?: string;
+            /** Format: int64 */
+            first_instalment_minor?: number;
+            instalment_frequency?: string;
+            /**
+             * Format: int64
+             * @description Interest due on the value date (R-PAYOFF)
+             */
+            interest_due_minor?: number;
+            /** @description True: the product needs the interest due collected before the principal moves */
+            interest_first?: boolean;
+            interest_method?: string;
+            /** Format: int32 */
+            interest_rate_bp?: number;
+            /** Format: uuid */
+            loan_id?: string;
+            loan_no?: string;
+            /**
+             * Format: int32
+             * @description Renewals the product allows in a chain; null for no limit
+             */
+            max_renewals?: number;
+            /** Format: int32 */
+            max_term_count?: number;
+            /** Format: int32 */
+            min_term_count?: number;
+            /**
+             * Format: int64
+             * @description The least to collect so that no interest is left due (0 when interest_first is false)
+             */
+            minimum_collect_minor?: number;
+            /** Format: date */
+            new_due_date?: string;
+            /** Format: int64 */
+            new_total_due_minor?: number;
+            /** Format: int64 */
+            new_total_interest_minor?: number;
+            /** Format: int64 */
+            penalties_due_minor?: number;
+            /**
+             * Format: int64
+             * @description Principal that moves to the new loan, no cash
+             */
+            principal_moved_minor?: number;
+            /**
+             * Format: int64
+             * @description Principal still owed before anything is collected
+             */
+            principal_outstanding_minor?: number;
+            rate_unit?: string;
+            /**
+             * Format: int64
+             * @description Interest of later periods that is no longer charged (R-PAYOFF rebate)
+             */
+            rebated_minor?: number;
+            /**
+             * Format: int64
+             * @description The product's fixed renewal fee, collected with the interest (the request's payment method) and income once the renewal is approved; never added to the new loan
+             */
+            renewal_fee_minor?: number;
+            /**
+             * Format: int32
+             * @description Which renewal the new loan is: 1 for the first
+             */
+            renewal_no?: number;
+            repayment_pattern?: string;
+            /**
+             * Format: int64
+             * @description What clears the interest, fees and penalties due, so nothing is carried
+             */
+            suggested_collect_minor?: number;
+            /** Format: int32 */
+            term_count?: number;
+            term_unit?: string;
+            /** Format: date */
+            value_date?: string;
+        };
+        /** @description Renew an active loan: what is collected now is recorded at once as a normal repayment; the principal still owed then moves to a new loan once a second person approves */
+        LoanRenewalRequest: {
+            /**
+             * Format: int64
+             * @description Collected now as a repayment (receipt, journal, allocation as any repayment); 0 or left out when the interest is already paid
+             */
+            collect_minor?: number;
+            external_reference?: string;
+            /**
+             * Format: int32
+             * @description The new loan's rate; the old loan's when left out, never above it
+             */
+            interest_rate_bp?: number;
+            /** @description As on a repayment: false sends no receipt text message (an administrator only) */
+            notify_member?: boolean;
+            /** @description Required when collect_minor or the renewal fee is above 0 */
+            payment_method_key?: string;
+            reason?: string;
+            /**
+             * Format: int32
+             * @description The new loan's term; the old loan's when left out
+             */
+            term_count?: number;
+            /**
+             * Format: date
+             * @description Today or earlier, not before the loan's latest repayment
+             */
+            value_date: string;
+        };
         /** @description FR-DIS-04: the items and a totals row that equals the loan totals */
         LoanSchedule: {
             currency?: string;
@@ -12884,6 +13076,11 @@ export interface components {
             total_minor?: number;
         };
         LoanScheduleRow: {
+            /**
+             * Format: int64
+             * @description FR-LCL-04: on the first item of a renewal loan, what the old loan left unpaid and was not collected; a memorandum, never part of what is due
+             */
+            carried_arrears_minor?: number;
             /** Format: date */
             due_date?: string;
             /** Format: int64 */
@@ -12918,6 +13115,11 @@ export interface components {
             principal_due_minor?: number;
             /** Format: int64 */
             principal_paid_minor?: number;
+            /**
+             * Format: int64
+             * @description Issue #918: what was unpaid on the item when the loan was renewed (its principal moved to the new loan, the rest carried or rebated); not outstanding
+             */
+            restructured_minor?: number;
             /** @description pending, due, overdue, partially_paid, paid, waived or written_off; null on totals */
             status?: string;
             /** Format: int64 */
@@ -27538,6 +27740,61 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PayoffQuote"];
+                };
+            };
+        };
+    };
+    getLoanRenewalQuote: {
+        parameters: {
+            query?: {
+                value_date?: string;
+                collect_minor?: number;
+                term_count?: number;
+                interest_rate_bp?: number;
+            };
+            header?: never;
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoanRenewalQuote"];
+                };
+            };
+        };
+    };
+    requestLoanRenewal: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoanRenewalRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoanActionOutcome"];
                 };
             };
         };

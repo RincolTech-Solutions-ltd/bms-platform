@@ -101,7 +101,7 @@ class RenewalService {
                 .filter(l -> principal.may(REQUEST_PERMISSION, l.branchId()))
                 .orElseThrow(ApiException::notFound);
         LocalDate date = valueDate != null ? valueDate : servicer.today();
-        return plan(loan, repo.items(id), date, collectMinor == null ? 0 : collectMinor, termCount, rateBp)
+        return plan(loan, repo.items(id), date, collectMinor == null ? 0 : collectMinor, termCount, rateBp, false)
                 .quote();
     }
 
@@ -113,6 +113,21 @@ class RenewalService {
      * {@code renewal_rate_above_loan}.
      */
     Plan plan(Loan loan, List<Item> items, LocalDate date, long collect, Integer termCount, Integer rateBp) {
+        return plan(loan, items, date, collect, termCount, rateBp, true);
+    }
+
+    /**
+     * As above; {@code requireInterest} false is the quote's: it answers the figures (the least to collect among them) for any
+     * amount, so the screen can show what is due before anything is typed, and leaves the refusal to the request.
+     */
+    Plan plan(
+            Loan loan,
+            List<Item> items,
+            LocalDate date,
+            long collect,
+            Integer termCount,
+            Integer rateBp,
+            boolean requireInterest) {
         LoanServicer.requireStatus(loan, Set.of("active"));
         ProductTerms terms = products.version(loan.productVersionId())
                 .orElseThrow(() -> new IllegalStateException("loan " + loan.id() + " has no product version"));
@@ -151,7 +166,7 @@ class RenewalService {
                     "renewal_settles_loan",
                     "That amount pays the loan off, so there is nothing to renew. Record it as a repayment instead.");
         }
-        if (rule.interestFirst() && after.interestMinor() > 0) {
+        if (requireInterest && rule.interestFirst() && after.interestMinor() > 0) {
             throw ApiException.rule(
                     "renewal_interest_unpaid",
                     "The interest due must be paid before the loan is renewed: collect at least " + minimum

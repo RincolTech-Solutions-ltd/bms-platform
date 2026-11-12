@@ -128,8 +128,7 @@ describe('Renew', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Take UGX 100,000 and send the renewal' }));
     await screen.findByText(/Sent for approval/);
     expect(lend.renew).toHaveBeenCalledTimes(1);
-    const [, body] = lend.renew.mock.calls[0];
-    expect(body).toMatchObject({ collect_minor: 100_000, payment_method_key: 'cash', term_count: 2 });
+    expect(lend.renew.mock.calls[0]?.[1]).toMatchObject({ collect_minor: 100_000, payment_method_key: 'cash', term_count: 2 });
     await waitFor(() => expect(screen.getByText(/once a branch manager approves it/)).toBeTruthy());
   });
 
