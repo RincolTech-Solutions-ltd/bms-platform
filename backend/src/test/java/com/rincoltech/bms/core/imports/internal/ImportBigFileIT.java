@@ -81,50 +81,72 @@ class ImportBigFileIT extends IntegrationTest {
     void probe() throws Exception {
         TestDatabase.Fixture t = TestDatabase.tenant("import-probe", false, true);
         StringBuilder out = new StringBuilder("IMPORT BIG FILE PROBE\n");
-        try (java.sql.Connection c =
-                java.sql.DriverManager.getConnection(TestDatabase.url(), "bms_app", TestDatabase.APP_PASSWORD)) {
-            c.setAutoCommit(false);
-            try (java.sql.Statement s = c.createStatement()) {
-                s.execute("SET LOCAL app.tenant_id = '" + t.tenantId() + "'");
-                s.execute("SET LOCAL plan_cache_mode = force_custom_plan");
-                s.execute("SET LOCAL enable_seqscan = off");
-                s.execute("SET LOCAL enable_bitmapscan = off");
-                for (String q : List.of(
-                        "SELECT * FROM import_refs i WHERE i.source_key = 'k'",
-                        "SELECT * FROM import_refs i WHERE i.source_key LIKE 'k%'",
-                        "SELECT * FROM unnest('{a,b}'::text[]) k(key) CROSS JOIN LATERAL"
-                                + " (SELECT * FROM import_refs i WHERE i.source_key = k.key OFFSET 0) r",
-                        "SELECT * FROM import_refs i WHERE i.source_key = 'k' AND i.tenant_id = '" + t.tenantId() + "'",
-                        "SELECT * FROM retail_products p WHERE p.id = '" + t.tenantId() + "'",
-                        "SELECT * FROM retail_products p WHERE p.name_key = 'k'")) {
-                    out.append("Q ").append(q).append('\n');
-                    try (java.sql.ResultSet rs = s.executeQuery("EXPLAIN " + q)) {
-                        while (rs.next()) {
-                            out.append("  ").append(rs.getString(1)).append('\n');
+        StringBuilder keys = new StringBuilder();
+        for (int n = 30_001; n <= 30_250; n++) {
+            keys.append(keys.isEmpty() ? "" : ",")
+                    .append("\"upload:abc|-|line:")
+                    .append(n)
+                    .append('"');
+        }
+        String lookup = "SELECT r.source_key, r.source_ref FROM unnest(CAST('{" + keys + "}' AS text[])) AS k(key)"
+                + " CROSS JOIN LATERAL (SELECT * FROM %s i WHERE i.source_key = k.key OFFSET 0) r";
+        for (String table : List.of("probe_refs", "probe_refs_plain")) {
+            String opclass = table.equals("probe_refs") ? " text_pattern_ops" : "";
+            try (java.sql.Connection o = java.sql.DriverManager.getConnection(
+                            TestDatabase.url(), "bms_owner", TestDatabase.OWNER_PASSWORD);
+                    java.sql.Statement s = o.createStatement()) {
+                s.execute("DROP TABLE IF EXISTS " + table);
+                s.execute("CREATE TABLE " + table + " (id uuid PRIMARY KEY, tenant_id uuid NOT NULL, run_id uuid NOT"
+                        + " NULL, source_key varchar(330) NOT NULL, source_ref varchar(400) NOT NULL, target_type"
+                        + " varchar(60) NOT NULL, target_id uuid NOT NULL, UNIQUE (tenant_id, source_ref, target_type,"
+                        + " target_id))");
+                s.execute("CREATE INDEX " + table + "_by_key ON " + table + " (tenant_id, source_key" + opclass + ")");
+                s.execute("CREATE INDEX " + table + "_by_target ON " + table + " (tenant_id, target_id)");
+                s.execute("CREATE INDEX " + table + "_by_run ON " + table + " (tenant_id, run_id, target_type)");
+                s.execute("ALTER TABLE " + table + " ENABLE ROW LEVEL SECURITY");
+                s.execute("ALTER TABLE " + table + " FORCE ROW LEVEL SECURITY");
+                s.execute("CREATE POLICY p ON " + table + " USING (tenant_id = current_setting('app.tenant_id')::uuid)"
+                        + " WITH CHECK (tenant_id = current_setting('app.tenant_id')::uuid)");
+                s.execute("GRANT SELECT, INSERT ON " + table + " TO bms_app");
+                s.execute("INSERT INTO " + table + " SELECT gen_random_uuid(), '" + java.util.UUID.randomUUID()
+                        + "', gen_random_uuid(), 'upload:abc|-|line:' || g, 'upload:abc|-|line:' || g || '#h',"
+                        + " 'retail.product', gen_random_uuid() FROM generate_series(1, 100000) g");
+                s.execute("ANALYZE " + table);
+                s.execute("CREATE OR REPLACE FUNCTION " + table + "_analyze() RETURNS void LANGUAGE plpgsql SECURITY"
+                        + " DEFINER SET search_path = public, pg_temp AS $$ BEGIN ANALYZE " + table + "; END $$");
+                s.execute("GRANT EXECUTE ON FUNCTION " + table + "_analyze() TO bms_app");
+            }
+            try (java.sql.Connection c =
+                    java.sql.DriverManager.getConnection(TestDatabase.url(), "bms_app", TestDatabase.APP_PASSWORD)) {
+                c.setAutoCommit(false);
+                try (java.sql.Statement s = c.createStatement()) {
+                    s.execute("SET LOCAL app.tenant_id = '" + t.tenantId() + "'");
+                    s.execute("SET LOCAL plan_cache_mode = force_custom_plan");
+                    s.execute("INSERT INTO " + table + " SELECT gen_random_uuid(),"
+                            + " current_setting('app.tenant_id')::uuid, gen_random_uuid(), 'upload:abc|-|line:' || g,"
+                            + " 'upload:abc|-|line:' || g || '#h', 'retail.product', gen_random_uuid()"
+                            + " FROM generate_series(1, 30000) g");
+                    for (String step : List.of("before ANALYZE", "after ANALYZE")) {
+                        if (step.startsWith("after")) {
+                            s.execute("SELECT " + table + "_analyze()");
+                        }
+                        out.append("P ").append(table).append(' ').append(step).append('\n');
+                        try (java.sql.ResultSet rs =
+                                s.executeQuery("EXPLAIN (ANALYZE, BUFFERS, TIMING OFF) " + lookup.formatted(table))) {
+                            while (rs.next()) {
+                                out.append("  ").append(rs.getString(1)).append('\n');
+                            }
                         }
                     }
                 }
+                c.rollback();
             }
-            c.rollback();
-        }
-        for (String q : List.of(
-                "SELECT i.indexrelid::regclass || ' coll=' || i.indcollation::text || ' class=' || i.indclass::text"
-                        + " FROM pg_index i WHERE i.indrelid = 'import_refs'::regclass",
-                "SELECT string_agg(o.oprname || ':' || o.oprleft::regtype || ',' || o.oprright::regtype, ' ')"
-                        + " FROM pg_amop a JOIN pg_operator o ON o.oid = a.amopopr JOIN pg_opclass c"
-                        + " ON c.opcfamily = a.amopfamily WHERE c.opcname = 'text_pattern_ops'"
-                        + " AND c.opcmethod = (SELECT oid FROM pg_am WHERE amname = 'btree')",
-                "SELECT string_agg(proname || '=' || proleakproof, ' ') FROM pg_proc"
-                        + " WHERE proname IN ('texteq', 'uuid_eq', 'textlike')",
-                "SELECT string_agg(attname || ' coll=' || attcollation::regcollation, ' ') FROM pg_attribute"
-                        + " WHERE attrelid = 'import_refs'::regclass AND attname IN ('source_key', 'source_ref')",
-                "SELECT current_setting('server_version') || ' ' || datcollate || ' ' || coalesce(datlocprovider::text,"
-                        + " '') FROM pg_database WHERE datname = current_database()")) {
-            TestDatabase.owner()
-                    .sql(q)
-                    .query(String.class)
-                    .list()
-                    .forEach(l -> out.append("C ").append(l).append('\n'));
+            try (java.sql.Connection o = java.sql.DriverManager.getConnection(
+                            TestDatabase.url(), "bms_owner", TestDatabase.OWNER_PASSWORD);
+                    java.sql.Statement s = o.createStatement()) {
+                s.execute("DROP FUNCTION " + table + "_analyze()");
+                s.execute("DROP TABLE " + table);
+            }
         }
         System.out.println(out);
     }
