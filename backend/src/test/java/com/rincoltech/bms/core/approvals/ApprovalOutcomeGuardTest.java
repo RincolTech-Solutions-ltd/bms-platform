@@ -59,6 +59,7 @@ class ApprovalOutcomeGuardTest {
             "CollateralService.java",
             "ExistingLoanService.java",
             "ServicingService.java",
+            "RenewalService.java",
             "SavingsService.java",
             "InvestmentService.java");
 
