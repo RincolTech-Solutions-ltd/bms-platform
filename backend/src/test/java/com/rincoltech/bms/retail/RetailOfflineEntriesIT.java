@@ -409,8 +409,9 @@ class RetailOfflineEntriesIT extends IntegrationTest {
         assertThat(first.getStatusCode()).as("%s", first.getBody()).isEqualTo(HttpStatus.CREATED);
         Map<String, Object> again = new LinkedHashMap<>(online);
         // A minute ago, but never before today began in Kampala (issue #912).
-        Instant aMinuteAgo = Instant.now().minus(Duration.ofMinutes(1));
-        Instant startOfToday = today.atStartOfDay(ZONE).toInstant();
+        Instant now = Instant.now();
+        Instant aMinuteAgo = now.minus(Duration.ofMinutes(1));
+        Instant startOfToday = LocalDate.ofInstant(now, ZONE).atStartOfDay(ZONE).toInstant();
         again.put("offline", offline(aMinuteAgo.isBefore(startOfToday) ? startOfToday : aMinuteAgo, null));
         ResponseEntity<JsonNode> replay = cb.api.postKeyed("/expenses", again, SELLER, hq.toString(), key);
         assertThat(replay.getStatusCode().is2xxSuccessful())
