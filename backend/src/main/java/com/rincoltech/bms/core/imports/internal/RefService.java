@@ -204,6 +204,16 @@ class RefService {
                 """, rows);
     }
 
+    /**
+     * Refreshes the statistics of the tables a batch fills, inside the batch's transaction (V153, issue #900), so the
+     * planner sees the rows the batch wrote. False when another batch holds them: this one keeps the statistics it has.
+     */
+    boolean refreshStatistics() {
+        return Boolean.TRUE.equals(jdbc.sql("SELECT bms_import_refresh_statistics()")
+                .query(Boolean.class)
+                .single());
+    }
+
     private void insert(UUID runId, UUID batchId, String sourceRef, String targetType, UUID targetId) {
         String key = ImportRefs.keyOf(sourceRef);
         boolean other = jdbc.sql("SELECT EXISTS (SELECT 1 FROM import_refs WHERE source_key = ? AND source_ref <> ?)")

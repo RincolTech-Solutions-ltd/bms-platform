@@ -83,6 +83,9 @@ class ImportRunService implements ImportRuns {
     /** Rows between two reads of the kill switch and the halt inside a batch (spec section 5.4). */
     static final int CHECKPOINT_ROWS = 1_000;
 
+    /** The rows a batch registers before the statistics of the tables it fills are first refreshed (V153, #900). */
+    static final int STATISTICS_FIRST = 1_000;
+
     /** The business's import key: the advisory lock every batch takes, the import-retail command's too (#135). */
     static final String LOCK_KEY = "hashtextextended('core.imports:' || current_setting('app.tenant_id'), 0)";
 
@@ -1648,6 +1651,8 @@ class ImportRunService implements ImportRuns {
         private final PreviewService.RunPrivacy privacy;
         private final CommitReport.Builder part;
         private long rows;
+        private long registered;
+        private long refreshAt = STATISTICS_FIRST;
         private Map<String, String> policy;
 
         RowCheckpoint(
@@ -1701,11 +1706,25 @@ class ImportRunService implements ImportRuns {
         @Override
         public void register(String sourceRef, String targetType, UUID targetId) {
             refs.register(runId, batchId, sourceRef, targetType, targetId);
+            registered(1);
         }
 
         @Override
         public void registerAll(List<BatchWriter.Registration> records) {
             refs.registerAll(runId, batchId, records);
+            registered(records.size());
+        }
+
+        /**
+         * Each time the rows the batch registered double, from {@link #STATISTICS_FIRST}, the statistics of the tables it
+         * fills are refreshed inside its transaction (V153, issue #900): seven times for 100,000 rows.
+         */
+        private void registered(int n) {
+            registered += n;
+            if (registered >= refreshAt) {
+                refs.refreshStatistics();
+                refreshAt = registered * 2;
+            }
         }
 
         @Override
