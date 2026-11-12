@@ -1475,11 +1475,15 @@ class RetailDocumentsIT extends IntegrationTest {
         List<Word> printed = words(statementPdf(customer, "?from=2026-10-01&to=2026-10-31", DOCS));
 
         Word ref = find(printed, w -> w.text().equals(no), "the reference whole on one line");
-        // A cell is centred in its row, so a Description wrapped onto two lines starts half a line above the reference.
-        Word description = find(
-                printed,
-                w -> w.text().equals("Goods") && Math.abs(baseline(w) - baseline(ref)) < 10,
-                "the return's Description on the reference's row");
+        // A cell is centred in its row, so the narrowed Description, wrapped onto three lines, starts a line above the
+        // reference: the nearest "Goods", closer than one single-line row (about 21pt) away.
+        Word description = printed.stream()
+                .filter(w -> w.text().equals("Goods"))
+                .min(java.util.Comparator.comparingDouble(w -> Math.abs(baseline(w) - baseline(ref))))
+                .orElseThrow(() -> new AssertionError("the return's Description not printed"));
+        assertThat(Math.abs(baseline(description) - baseline(ref)))
+                .as("Description on the reference's row")
+                .isLessThan(20f);
         assertThat(left(description)).as("Description starts after the reference ends").isGreaterThan(right(ref));
 
         // The figures are right-aligned, so a column's place is where its figures end.
