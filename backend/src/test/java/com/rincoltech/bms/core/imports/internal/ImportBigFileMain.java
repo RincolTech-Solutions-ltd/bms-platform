@@ -86,7 +86,6 @@ public final class ImportBigFileMain {
             System.out.println("BIGFILE oldBaselineMb=" + oldUsed() / 1024 / 1024);
             ManagementFactory.getMemoryPoolMXBeans().forEach(MemoryPoolMXBean::resetPeakUsage);
             gcBefore = gcMillis();
-            watchCollections(Thread.currentThread());
             ok = run(ctx, tenant, slug, document, commit, args);
             System.out.println("BIGFILE maxHeapMb=" + Runtime.getRuntime().maxMemory() / 1024 / 1024 + " oldPeakMb="
                     + Math.max(worst, oldPeak()) / 1024 / 1024 + " oldMaxMb=" + oldMax() / 1024 / 1024 + " gcMs="
@@ -246,56 +245,6 @@ public final class ImportBigFileMain {
         String out = " stepOldPeakMb=" + peak / 1024 / 1024 + " stepGcMs=" + (gc - gcBefore);
         gcBefore = gc;
         return out;
-    }
-
-    // JUSTIFICATION-A3: issue #900, the commit's old generation peak: a passive log of one CI run, removed before
-    // review.
-    /**
-     * #900 diagnosis (temporary): prints each full collection and each 8 MB the old generation grows by after a young one,
-     * with the old generation before and after and the importing thread's place. It forces no collection.
-     */
-    private static void watchCollections(Thread main) {
-        long[] printed = {0};
-        for (java.lang.management.GarbageCollectorMXBean gc : ManagementFactory.getGarbageCollectorMXBeans()) {
-            ((javax.management.NotificationEmitter) gc)
-                    .addNotificationListener(
-                            (n, h) -> {
-                                var info = com.sun.management.GarbageCollectionNotificationInfo.from(
-                                        (javax.management.openmbean.CompositeData) n.getUserData());
-                                long before = oldOf(info.getGcInfo().getMemoryUsageBeforeGc());
-                                long after = oldOf(info.getGcInfo().getMemoryUsageAfterGc());
-                                boolean full = !info.getGcName().contains("Copy");
-                                if (!full && after - printed[0] < (8L << 20)) {
-                                    return;
-                                }
-                                printed[0] = after;
-                                StringBuilder at = new StringBuilder();
-                                int frames = 0;
-                                for (StackTraceElement f : main.getStackTrace()) {
-                                    if (f.getClassName().startsWith("com.rincoltech") && frames++ < 6) {
-                                        at.append(f.getClassName()
-                                                        .substring(
-                                                                f.getClassName().lastIndexOf('.') + 1))
-                                                .append('.')
-                                                .append(f.getMethodName())
-                                                .append(':')
-                                                .append(f.getLineNumber())
-                                                .append(" < ");
-                                    }
-                                }
-                                System.out.println("BIGFILE diag gc=" + info.getGcName() + " oldBeforeMb="
-                                        + before / 1024 / 1024 + " oldAfterMb=" + after / 1024 / 1024 + " at " + at);
-                            },
-                            null,
-                            null);
-        }
-    }
-
-    private static long oldOf(Map<String, java.lang.management.MemoryUsage> pools) {
-        return pools.entrySet().stream()
-                .filter(e -> e.getKey().contains("Tenured") || e.getKey().contains("Old"))
-                .mapToLong(e -> e.getValue().getUsed())
-                .sum();
     }
 
     private static long gcMillis() {

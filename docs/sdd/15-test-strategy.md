@@ -374,29 +374,50 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
     per row until 100,000 rows filled the old generation. The fix of #880 streams the loader in pages of 250
     rows, writes and registers each page in statement batches, plans each statement of a batch for its tables as they
     are (`plan_cache_mode = force_custom_plan`), looks each key up by its index, reads a template's forecast inputs once
-    for the reconciliation, and holds the per-row keys compactly (`CompactKeys`). Until #900 is closed the configured row
-    limit per batch is **25,000** (spec section 3.1, `bms.imports.max-rows`): the largest measured size whose dry run and
-    commit fit their limits with a tenth of the old generation to spare in every case of the job. Times on the runner of
-    the `import-big-file` job, 10 November 2026 (CI run 42824679713), the cases in one database, in the order shown:
+    for the reconciliation, and holds the per-row keys compactly (`CompactKeys`). #900 found the rest, both measured in
+    this job (chapter 13 section 13.14.1 11/16):
+    - *The twice-heap dry run that stopped at 900 s* was never the heap. Run first, on a fresh database, the dry run of
+      100,000 rows on twice the staging heap took 145 s; on the staging heap after another business's 100,000 rows it
+      stopped at 900 s (CI run 43261756689). `auto_explain` showed why. The planner's statistics cannot see the rows a batch
+      writes in its own transaction, so it took an index on `tenant_id` alone for each key and each product and filtered
+      every row the batch had written, about 68,000 per lookup at 68,000 rows. A batch now refreshes the statistics of
+      `import_refs` and `retail_products` inside its transaction each time its registered rows double (V153). A probe on a
+      copy of `import_refs` with 30,000 rows of the batch measured a page of 250 lookups at 1,449 ms before and 0.4 ms
+      after (CI run 43272850631).
+    - *The commit that filled the old generation* was the reconciliation after it. The old generation's peak counts what
+      young collections promote until a full one, and a passive log of the child's collections showed what each step
+      promoted. The forecasts read every item the batch had written as product objects, twice, and pgjdbc held the run's
+      `import_refs` and the items' costs as whole results. Each per-row forecast began with 7 KB of empty tables, each row
+      was typed three times, and each key was compared through a pattern compiled per call. The reads now stream 1,000 rows
+      at a time into compact keys sized at once, and each row is typed once.
+    - *The test's own storage double* held the 25.8 MB quarantined file in the heap for the whole run (68 to 93 MB of old
+      generation from the upload on), which staging streams to R2; the double now keeps it in a directory of the child's
+      (`bms.storage.fake-dir`). The last run with it in the heap gave 140 of 149 MB for the commit at the row limit (CI run
+      43297629214).
 
-    | File | Heap | Upload | Validation | Preview | Dry run | Commit | Old generation peak |
+    The configured row limit per batch is **100,000** (spec section 3.1, `bms.imports.max-rows`). Every case of the job
+    runs at it; the sizes below it show how the times grow. The two commits at the row limit run last, among the rows the
+    other cases committed for their businesses. Times on the runner of the `import-big-file` job, 12 November 2026 (CI run
+    43304250790, head 32ceac3, 10 cases, 0 failures; the runner was slower than in the runs before it, which gave the
+    commit at the row limit in 66 to 97 s), the cases in one database, in the order shown:
+
+    | File | Heap | Upload | Validation | Preview | Dry run | Commit (batch) | Old generation peak |
     |---|---|---|---|---|---|---|---|
-    | CSV, 10,000 rows, 7 columns, 2.6 MB | 224 MB | 1.2 s | 4.1 s | 0.4 s | 11 s | 11 s | 74 of 149 MB |
-    | CSV, 25,000 rows, 7 columns, 6.5 MB (configured row limit) | 224 MB | 2.6 s | 11.9 s | 0.9 s | 185 s | 246 s | 89 of 149 MB |
-    | CSV, 50,000 rows, 7 columns, 12.9 MB | 224 MB | 4.7 s | 30 s | 1.0 s | stopped at its 900 s limit | not reached | 86 of 149 MB |
-    | CSV, 75,000 rows, 7 columns, 19.4 MB | 224 MB | 7.2 s | 206 s | 1.2 s | stopped at its 900 s limit | not reached | 96 of 149 MB |
-    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits), up to the preview | 224 MB | 9.1 s | 106 s | 1.4 s | not run | not run | 104 of 149 MB |
-    | CSV, 20,000 rows, 200 columns (193 ignored), 20.6 MB (column limit) | 224 MB | 3.0 s | 16.5 s | 0.7 s | 116 s | 149 s | 101 of 149 MB |
-    | XLSX, the 100,000 rows, 3.3 MB, up to the preview | 224 MB | 9.0 s | 99 s | 1.4 s | not run | not run | 110 of 149 MB |
+    | CSV, 100,001 rows, 7 columns (one over the row limit) | 224 MB | refused `TOO_MANY_ROWS` in 14.4 s | | | | | 68 of 149 MB |
+    | CSV, 10,000 rows, 7 columns, 2.6 MB | 224 MB | 1.8 s | 5.7 s | 0.6 s | 16 s | 15 s (14 s) | 70 of 149 MB |
+    | CSV, 25,000 rows, 7 columns, 6.5 MB | 224 MB | 3.8 s | 31 s | 2.1 s | 40 s | 36 s (35 s) | 77 of 149 MB |
+    | CSV, 50,000 rows, 7 columns, 12.9 MB | 224 MB | 7.4 s | 41 s | 1.2 s | 75 s | 71 s (69 s) | 85 of 149 MB |
+    | CSV, 75,000 rows, 7 columns, 19.4 MB | 224 MB | 10.8 s | 39 s | 1.5 s | 111 s | 106 s (102 s) | 128 of 149 MB |
+    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits), up to the preview | 224 MB | 13.8 s | 71 s | 1.9 s | not run | not run | 81 of 149 MB |
+    | CSV, 20,000 rows, 200 columns (193 ignored), 20.6 MB (column limit) | 224 MB | 4.2 s | 12.5 s | 1.4 s | 37 s | 34 s (32 s) | 96 of 149 MB |
+    | XLSX, the 100,000 rows, 3.3 MB, up to the preview | 224 MB | 12.2 s | 49 s | 1.8 s | not run | not run | 107 of 149 MB |
+    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits) | 448 MB | 12.5 s | 137 s | 1.9 s | 141 s | 135 s (130 s) | 115 of 298 MB, not judged |
+    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits) | 224 MB | 12.0 s | 84 s | 2.1 s | 141 s | 139 s (135 s) | **117 of 149 MB** |
 
-    What is left, #900, and why the limit is not yet 100,000: the batch's lookups of `import_refs` by key and of the
-    items of the same name still grow with its rows once the database holds other businesses' imports (the first case
-    of a job, in a database nearly empty, dry runs 10,000 items in 11 s; the later ones grow faster than their rows), and
-    at 100,000 rows in a database nearly empty the dry run (77 s) and the commit (64 s, of which the batch 60.5 s) fit
-    their limits, but the commit fills the old generation (149 of 149 MB; CI run 42816727582). Those two cases at
-    100,000 are disabled with #900; the validation and preview at 100,000 run, judged, in a child at that limit. The
-    cases at each measured size up to the configured limit run in every `import-big-file` job, with one row over the
-    limit refused with `TOO_MANY_ROWS` in the same child. A larger file is split (the cutover runbook, stage 2).
+    Every commit fits the batch's 10 minute statement timeout, every dry run its 900 s limit, and every case on the staging
+    heap keeps the old generation a tenth below its limit (134 MB). The validation's time varies most from run to run (72
+    to 376 s at 100,000 rows over the runs of #900): it is not bounded by a limit of its own. A larger file is split (the
+    cutover runbook, stage 2).
 - **Normalisation tables.** Every table of examples in chapter 13 section 13.6 is a
   parametrised unit test.
 - **Loan servicing golden tests** (`ServicingTest`, #108). Fabricated schedules from worked
