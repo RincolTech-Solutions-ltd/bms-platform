@@ -4,8 +4,10 @@
 
 Accepted (issue #918, a lending client's question of 12 November 2026; FR-LCL-04a). Builds on FR-LCL-04 (restructure, written
 in chapter 3 but not built), ADR-026 (loan servicing, the ledger and reallocation), ADR-015 (maker-checker) and ADR-004 (money
-and the ledger). Migration `V152`. The defaults below wait for the client's answers to four questions (same amount and rate,
-the length of the new period, a fee, more than one renewal); each is a product setting, so an answer changes a setting, not code.
+and the ledger). Migration `V152`. The client answered the four open questions on 12 November 2026 (the Lead's comment on pull
+request #919): the same amount and rate as the old loan (the rate editable within the product's limits), the same period as
+the old loan, a fixed fee per renewal collected with the interest (a product setting, off by default; the business's own figure
+goes in its settings), and renewal any number of times as long as the interest due is paid.
 
 ## Context
 
@@ -39,8 +41,11 @@ a new loan and carries the unpaid amounts as a memorandum, and V8 and V29 alread
 4. **The new loan.** Same product version (so the allocation order and penalty rule the borrower signed stay), same branch,
    officer, purpose, interest method, units and pattern. The term is the maker's choice within the version's limits, the old
    loan's by default. The rate is the old loan's by default and may be lowered, never raised: the product states one rate and
-   no range. The product's renewal fee (`none`, `flat` or `percent_of_principal` of the principal moved) is added to the new
-   schedule like an `added_to_loan` fee. The schedule runs from the renewal date. Pledges and guarantors move to the new loan;
+   no range. The product's renewal fee is a fixed amount per renewal (`renewal_fee_minor`, null for none). The counter takes
+   it with the interest, by the request's payment method, and it becomes income when the renewal is approved: an
+   `fee_upfront` transaction on the new loan with its own receipt, debiting the method's account and crediting
+   `loan_fee_income`, never added to the schedule. A rejected, cancelled or lapsed renewal posts no fee, so the fee is handed
+   back with nothing to reverse in the books. The schedule runs from the renewal date. Pledges and guarantors move to the new loan;
    the old loan's are released (the new loan is a draft while it takes them, the one state the V8 guards allow).
 5. **Maker-checker: `loan_renewal`, decided by the branch manager.** The maker holds `lending.loans.renew_request` (tenant admin,
    branch manager, loan officer, cashier); collecting money also needs `lending.repayments.create`. The checker holds
@@ -48,9 +53,10 @@ a new loan and carries the unpaid amounts as a memorandum, and V8 and V29 alread
    accountant, because the client asks for a branch manager. No threshold: every renewal waits for a second person. One request
    per loan at a time. At execution the plan is worked out again on the payload's date; a different principal supersedes the
    request.
-6. **Product settings, defaults until the client answers.** On each product version: `renewal_allowed` (true),
-   `renewal_max_count` (null, no limit), `renewal_interest_first` (true), `renewal_fee_method` (`none`). They are read from the
-   product's current version, so a changed setting applies to the next renewal of every loan.
+6. **Product settings, as the client answered.** On each product version: `renewal_allowed` (true), `renewal_max_count` (null,
+   no limit), `renewal_interest_first` (true: refused while interest due is unpaid), `renewal_fee_minor` (null, no fee). They
+   are read from the product's current version, so a changed setting applies to the next renewal of every loan. Code and
+   fixtures carry no client figure.
 7. **Reports show renewals.** A renewed loan is no longer active; the loan that replaces it starts on time. The PAR and portfolio
    reports end with a renewals table when there is any: loans renewed from the first of the report date's month, the principal
    moved, what was carried, and, for today's book, the active renewal loans with their principal, arrears and those more than 30

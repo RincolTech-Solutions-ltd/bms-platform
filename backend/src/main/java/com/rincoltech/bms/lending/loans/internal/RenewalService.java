@@ -170,7 +170,9 @@ class RenewalService {
                     "renewal_rate_above_loan",
                     "The new rate is at most the loan's own rate; the product states no range above it.");
         }
-        long fee = rule.feeFor(principal);
+        // The client's answer (Lead on #919): a fixed fee per renewal, collected with the interest, never added to the
+        // loan.
+        long fee = rule.fee();
         List<ScheduleCalculator.Item> schedule = ScheduleCalculator.schedule(
                 new ScheduleCalculator.Terms(
                         loan.interestMethod(),
@@ -181,7 +183,7 @@ class RenewalService {
                         loan.repaymentPattern(),
                         loan.instalmentFrequency()),
                 principal,
-                fee,
+                0,
                 date);
         long interest = schedule.stream()
                 .mapToLong(ScheduleCalculator.Item::interestMinor)
@@ -291,19 +293,23 @@ class RenewalService {
             long collect = r.collectMinor() == null ? 0 : r.collectMinor();
             Plan plan = plan(loan, repo.items(id), r.valueDate(), collect, r.termCount(), r.interestRateBp());
             UUID receiptTxn = null;
-            if (collect > 0) {
+            long fee = plan.quote().renewalFeeMinor();
+            if (collect > 0 || fee > 0) {
                 if (!principal.may("lending.repayments.create", loan.branchId())) {
                     throw new ApiException(
                             HttpStatus.FORBIDDEN,
                             "permission_denied",
                             "Permission denied",
-                            "Taking the money needs the permission to record repayments. Ask a cashier to record the"
-                                    + " repayment, then renew with nothing to collect.");
+                            "Taking the money needs the permission to record repayments. Ask a cashier to take it and"
+                                    + " renew the loan.");
                 }
                 if (r.paymentMethodKey() == null) {
                     throw ApiException.validation(List.of(new ApiException.FieldProblem(
                             "payment_method_key", "required", "Required when money is collected.")));
                 }
+                books.methodAccount(r.paymentMethodKey(), loan.branchId());
+            }
+            if (collect > 0) {
                 servicer.checkRepayable(loan, r.valueDate(), r.paymentMethodKey());
                 receiptTxn = servicer.repay(
                         loan,
@@ -334,7 +340,9 @@ class RenewalService {
             payload.put("collected_minor", collect);
             payload.put("receipt_txn_id", receiptTxn == null ? null : receiptTxn.toString());
             payload.put("carried_minor", q.carriedMinor());
-            payload.put("renewal_fee_minor", q.renewalFeeMinor());
+            payload.put(RenewalAction.FEE, fee);
+            payload.put(RenewalAction.METHOD, fee > 0 ? r.paymentMethodKey() : null);
+            payload.put(RenewalAction.REFERENCE, fee > 0 ? blankToNull(r.externalReference()) : null);
             payload.put("term_unit", q.termUnit());
             payload.put("first_due_date", q.firstDueDate().toString());
             payload.put("new_due_date", q.newDueDate().toString());
@@ -489,6 +497,46 @@ class RenewalService {
         loans.move(fresh.id(), "draft", "active", checkerId, "Renewal of " + old.loanNo(), newColumns);
         servicer.refreshPosition(fresh.id(), repo.items(fresh.id()), today);
 
+        // The fee the counter took with the interest is income now, on approval: a rejected or lapsed renewal posts
+        // nothing
+        // and the fee goes back to the borrower. Like an upfront fee, it is never part of what the loan owes.
+        long fee = ((Number) payload.getOrDefault(RenewalAction.FEE, 0)).longValue();
+        if (fee > 0) {
+            String method = (String) payload.get(RenewalAction.METHOD);
+            String receipt = servicer.number("RC", "receipt", old.branchId());
+            UUID feeId = UUID.randomUUID();
+            PostedEntry feeEntry = books.post(
+                    old.branchId(),
+                    date,
+                    receipt,
+                    "Renewal fee " + fresh.loanNo(),
+                    feeId,
+                    "lending.renewal_fee:" + oldId,
+                    List.of(
+                            Leg.debit(books.methodAccount(method, old.branchId()), fee),
+                            Leg.credit(LoanBooks.FEE_INCOME, fee)));
+            Txn t = txn(feeId, fresh, "fee_upfront", fee, date, "Renewal fee", feeEntry, approvalId, makerId);
+            repo.insertTxn(new Txn(
+                    t.id(),
+                    t.branchId(),
+                    t.loanId(),
+                    t.txnType(),
+                    fee,
+                    t.currency(),
+                    date,
+                    method,
+                    (String) payload.get(RenewalAction.REFERENCE),
+                    receipt,
+                    t.reason(),
+                    null,
+                    t.journalEntryId(),
+                    approvalId,
+                    null,
+                    t.source(),
+                    makerId,
+                    null));
+        }
+
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("status", "restructured");
         after.put("restructure_kind", "renewal");
@@ -518,7 +566,7 @@ class RenewalService {
         created.put("principal_minor", principal);
         created.put("term_count", term);
         created.put("interest_rate_bp", rate);
-        created.put("renewal_fee_minor", q.renewalFeeMinor());
+        created.put("renewal_fee_minor", fee);
         created.put("carried_arrears_minor", q.carriedMinor());
         created.put("first_due_date", q.firstDueDate().toString());
         created.put("maturity_date", q.newDueDate().toString());

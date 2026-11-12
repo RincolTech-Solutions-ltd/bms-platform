@@ -255,7 +255,7 @@ class ProductService {
                     "min_collateral_cover_bp", "required", "Required when the product requires collateral."));
         }
         List<Fee> fees = t.fees() == null ? List.of() : t.fees();
-        ProductApi.Renewal renewal = renewal(t.renewal(), problems);
+        ProductApi.Renewal renewal = renewal(t.renewal());
         if (!problems.isEmpty()) {
             throw ApiException.validation(problems);
         }
@@ -292,25 +292,16 @@ class ProductService {
                 null);
     }
 
-    /** Issue #918: the renewal settings with their defaults; a fee method names exactly the one amount it uses. */
-    private static ProductApi.Renewal renewal(ProductApi.Renewal r, List<FieldProblem> problems) {
+    /** Issue #918: the renewal settings with their defaults (allowed, no limit, interest first, no fee). */
+    private static ProductApi.Renewal renewal(ProductApi.Renewal r) {
         if (r == null) {
             return ProductApi.Renewal.DEFAULTS;
-        }
-        String method = r.feeMethod() == null ? "none" : r.feeMethod();
-        if (method.equals("flat") && r.feeMinor() == null) {
-            problems.add(new FieldProblem("renewal.fee_minor", "required", "Required for a flat renewal fee."));
-        }
-        if (method.equals("percent_of_principal") && r.feeBp() == null) {
-            problems.add(new FieldProblem("renewal.fee_bp", "required", "Required for a percentage renewal fee."));
         }
         return new ProductApi.Renewal(
                 r.allowed() == null || r.allowed(),
                 r.maxCount(),
                 r.interestFirst() == null || r.interestFirst(),
-                method,
-                method.equals("flat") ? r.feeMinor() : null,
-                method.equals("percent_of_principal") ? r.feeBp() : null);
+                r.feeMinor());
     }
 
     /** R-TERM: instalments need a frequency that fits the term unit; a bullet has none. */

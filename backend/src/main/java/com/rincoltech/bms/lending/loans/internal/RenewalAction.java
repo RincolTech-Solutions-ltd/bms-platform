@@ -23,6 +23,9 @@ class RenewalAction implements ApprovalAction {
     static final String RATE = "interest_rate_bp";
     static final String REASON = "reason";
     static final String PRINCIPAL = "principal_moved_minor";
+    static final String FEE = "renewal_fee_minor";
+    static final String METHOD = "fee_payment_method_key";
+    static final String REFERENCE = "fee_external_reference";
 
     private final LoanRepository loans;
     private final RenewalService renewals;

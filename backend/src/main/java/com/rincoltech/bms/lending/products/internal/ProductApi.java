@@ -114,16 +114,14 @@ final class ProductApi {
             @Schema(description = "True by default: the interest due is collected before the principal moves")
             Boolean interestFirst,
 
-            @Pattern(regexp = "none|flat|percent_of_principal") @Schema(description = "none by default")
-            String feeMethod,
+            @Positive
+            @Max(MAX_MONEY_MINOR)
+            @Schema(
+                    description =
+                            "The fixed fee of one renewal, collected with the interest; null (the default) for none")
+            Long feeMinor) {
 
-            @Positive @Max(MAX_MONEY_MINOR) @Schema(description = "For flat")
-            Long feeMinor,
-
-            @Positive @Max(MAX_FEE_RATE_BP) @Schema(description = "For percent_of_principal, of the principal moved")
-            Integer feeBp) {
-
-        static final Renewal DEFAULTS = new Renewal(true, null, true, "none", null, null);
+        static final Renewal DEFAULTS = new Renewal(true, null, true, null);
     }
 
     @Schema(name = "CreateLoanProductRequest")

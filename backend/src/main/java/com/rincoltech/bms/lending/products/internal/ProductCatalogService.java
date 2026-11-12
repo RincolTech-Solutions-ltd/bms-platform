@@ -100,9 +100,7 @@ class ProductCatalogService implements ProductCatalog {
                                 v.renewal().allowed(),
                                 v.renewal().maxCount(),
                                 v.renewal().interestFirst(),
-                                v.renewal().feeMethod(),
-                                v.renewal().feeMinor(),
-                                v.renewal().feeBp())));
+                                v.renewal().feeMinor())));
     }
 
     private Optional<ProductTerms> terms(Row row, UUID versionId) {

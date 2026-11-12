@@ -1056,7 +1056,10 @@ loan `active`. `GET` of a loan carries `renewal` `{renewal_no, renewed_from_loan
 renewed_to_loan_id, renewed_to_loan_no, renewed_on}` (null when the loan neither is nor was renewed). Schedule rows carry
 `restructured_minor` (what was unpaid on an item of a renewed loan, not outstanding) and `carried_arrears_minor` (the memo on
 a renewal loan's first item). A loan product's `terms` and version take `renewal` `{allowed, max_count, interest_first,
-fee_method, fee_minor, fee_bp}` (defaults true, null, true, `none`). Codes (422 unless stated): `renewal_not_allowed`,
+fee_minor}` (defaults true, null, true, null). `renewal_fee_minor` of the quote is that fixed fee: the request needs
+`payment_method_key` (and `lending.repayments.create`) when it is above 0, the counter takes it with the interest, and the
+approval posts it as a `fee_upfront` transaction with its own receipt on the new loan; nothing is posted for a renewal that is
+rejected or lapses. Codes (422 unless stated): `renewal_not_allowed`,
 `renewal_limit_reached`, `renewal_interest_unpaid`, `renewal_settles_loan`, `renewal_term_out_of_range`,
 `renewal_rate_above_loan`, `value_date_in_future`, `before_last_repayment`, 409 `renewal_pending`, 409
 `invalid_status_transition` (not active; a repayment on a renewed loan).

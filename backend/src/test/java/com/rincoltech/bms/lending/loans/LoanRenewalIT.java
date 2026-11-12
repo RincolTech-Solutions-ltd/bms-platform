@@ -126,8 +126,8 @@ class LoanRenewalIT extends LoanFixtures {
         body.put("value_date", today.toString());
         if (collect != null) {
             body.put("collect_minor", collect);
-            body.put("payment_method_key", "cash");
         }
+        body.put("payment_method_key", "cash");
         if (term != null) {
             body.put("term_count", term);
         }
@@ -320,15 +320,14 @@ class LoanRenewalIT extends LoanFixtures {
 
     /**
      * A product that renews without the interest first, with a fee and one renewal: what is not collected is carried to
-     * the new loan's first item as a memorandum, never principal; the fee is on the new schedule; a second renewal is
-     * refused; the maker never approves their own renewal.
+     * the new loan's first item as a memorandum, never principal; the fixed fee is collected and is income on approval,
+     * never on the schedule; a second renewal is refused; the maker never approves their own renewal.
      */
     @Test
     void uncollectedInterestIsCarriedAsAMemoAndTheProductLimitsTheRenewals() {
         Map<String, Object> renewal = new LinkedHashMap<>();
         renewal.put("interest_first", false);
         renewal.put("max_count", 1);
-        renewal.put("fee_method", "flat");
         renewal.put("fee_minor", 20_000);
         String old = activeLoan(bulletProduct("RNW3", renewal), 3);
 
@@ -352,8 +351,20 @@ class LoanRenewalIT extends LoanFixtures {
         assertThat(schedule.get("items")).hasSize(1);
         JsonNode first = schedule.get("items").get(0);
         assertThat(first.get("carried_arrears_minor").asLong()).isEqualTo(100_000);
-        assertThat(first.get("fees_due_minor").asLong()).isEqualTo(20_000);
+        assertThat(first.get("fees_due_minor").asLong())
+                .as("the fee is collected, never lent")
+                .isZero();
         assertThat(first.get("interest_due_minor").asLong()).isEqualTo(200_000);
+        // The fixed renewal fee the counter took is income on approval, with its own receipt, on the new loan.
+        JsonNode fee = java.util.stream.StreamSupport.stream(
+                        get(LOANS + "/" + fresh + "/transactions").get("items").spliterator(), false)
+                .filter(x -> x.get("txn_type").asString().equals("fee_upfront"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no renewal fee on the new loan"));
+        assertThat(fee.get("amount_minor").asLong()).isEqualTo(20_000);
+        assertThat(fee.get("receipt_no").asString()).startsWith("RC-");
+        assertThat(lines(fee.get("journal_entry_id").asString()))
+                .containsExactly("cash_on_hand:20000:0", "loan_fee_income:0:20000");
         assertThat(first.get("due_date").asString())
                 .isEqualTo(today.plusMonths(2).toString());
 

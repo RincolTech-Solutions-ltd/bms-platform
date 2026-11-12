@@ -30,9 +30,10 @@ INSERT INTO role_permissions (role_key, permission_key) VALUES
 ON CONFLICT DO NOTHING;
 
 -- ---------------------------------------------------------------------------------------------
--- 2. The product's renewal settings, on each version like every other term (FR-PRD-04). The defaults are the ones the
---    issue asks for until the client answers: allowed, as many times as wanted, the interest due collected first, no
---    fee. The rate of the new loan is the old loan's (it may be lowered, never raised; the product states one rate).
+-- 2. The product's renewal settings, on each version like every other term (FR-PRD-04), as the client answered on
+--    12 November 2026 (Lead on #919): renewals allowed any number of times while the interest due is paid, and a fixed fee
+--    per renewal collected with the interest, off by default; the business's own figure goes in its settings. The rate and
+--    the term of the new loan are the old loan's by default (the rate may be lowered, never raised: one rate per product).
 -- ---------------------------------------------------------------------------------------------
 
 ALTER TABLE lending_loan_product_versions
@@ -41,18 +42,11 @@ ALTER TABLE lending_loan_product_versions
     ADD COLUMN renewal_max_count      integer,
     -- True: a renewal is refused while interest is due on the old loan (it is collected first, as a repayment).
     ADD COLUMN renewal_interest_first boolean NOT NULL DEFAULT true,
-    ADD COLUMN renewal_fee_method     text    NOT NULL DEFAULT 'none',
+    -- The fixed fee of one renewal, collected with the interest and income when the renewal is approved; null for none.
     ADD COLUMN renewal_fee_minor      bigint,
-    ADD COLUMN renewal_fee_bp         integer,
     ADD CONSTRAINT lending_loan_product_versions_renewal_max CHECK (renewal_max_count IS NULL OR renewal_max_count >= 1),
-    ADD CONSTRAINT lending_loan_product_versions_renewal_fee_method
-        CHECK (renewal_fee_method IN ('none', 'flat', 'percent_of_principal')),
-    ADD CONSTRAINT lending_loan_product_versions_renewal_fee_shape CHECK (
-        (renewal_fee_method = 'flat') = (renewal_fee_minor IS NOT NULL)
-        AND (renewal_fee_method = 'percent_of_principal') = (renewal_fee_bp IS NOT NULL)),
-    ADD CONSTRAINT lending_loan_product_versions_renewal_fee_bounds CHECK (
-        (renewal_fee_minor IS NULL OR renewal_fee_minor BETWEEN 1 AND 1000000000000000)
-        AND (renewal_fee_bp IS NULL OR renewal_fee_bp BETWEEN 1 AND 10000));
+    ADD CONSTRAINT lending_loan_product_versions_renewal_fee
+        CHECK (renewal_fee_minor IS NULL OR renewal_fee_minor BETWEEN 1 AND 1000000000000000);
 
 -- ---------------------------------------------------------------------------------------------
 -- 3. The loan: which renewal it is in its chain (0 for a loan that is no renewal), the date it was restructured, and

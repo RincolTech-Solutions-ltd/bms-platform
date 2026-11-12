@@ -43,17 +43,12 @@ public interface ProductCatalog {
      */
     Optional<RenewalRule> renewal(UUID productId);
 
-    /** {@code maxCount} null is no limit; {@code feeMethod} is {@code none}, {@code flat} or {@code percent_of_principal}. */
-    record RenewalRule(
-            boolean allowed, Integer maxCount, boolean interestFirst, String feeMethod, Long feeMinor, Integer feeBp) {
+    /** {@code maxCount} null is no limit; {@code feeMinor} null is no fee (the fixed fee of one renewal). */
+    record RenewalRule(boolean allowed, Integer maxCount, boolean interestFirst, Long feeMinor) {
 
-        /** The renewal fee on the principal moved. */
-        public long feeFor(long principalMinor) {
-            return switch (feeMethod) {
-                case "flat" -> feeMinor;
-                case "percent_of_principal" -> ScheduleCalculator.percentOf(principalMinor, feeBp);
-                default -> 0;
-            };
+        /** The renewal fee, 0 when the product charges none. */
+        public long fee() {
+            return feeMinor == null ? 0 : feeMinor;
         }
     }
 

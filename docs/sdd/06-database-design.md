@@ -1797,8 +1797,7 @@ increment 4.
 | `renewal_allowed` | `boolean NOT NULL DEFAULT true` | V152, ADR-128: loans of the product may be renewed (issue #918). Read from the product's current version at each renewal |
 | `renewal_max_count` | `integer` | V152: renewals one chain of loans may have; null for no limit. `CHECK (>= 1)` |
 | `renewal_interest_first` | `boolean NOT NULL DEFAULT true` | V152: a renewal is refused while interest is due on the old loan |
-| `renewal_fee_method` | `text NOT NULL DEFAULT 'none'` | V152: [`none`, `flat`, `percent_of_principal`] of the principal moved; added to the new loan's schedule |
-| `renewal_fee_minor`, `renewal_fee_bp` | `bigint`, `integer` | V152: the flat amount (1 to 10^15) or the rate (1 to 10000 bp), exactly the one the method uses |
+| `renewal_fee_minor` | `bigint` | V152: the fixed fee of one renewal (1 to 10^15), null for none; collected with the interest and posted as income (a `fee_upfront` transaction on the new loan) when the renewal is approved, never added to the schedule |
 | `created_by` | `uuid NOT NULL` | |
 
 ### `lending_loan_product_fees`

@@ -1153,7 +1153,7 @@ class LoanServicer implements LoanServicing {
     }
 
     /** FR-DOC-04: {@code RC-HQ-000123}, gap-free per branch (a row-locked tenant sequence). */
-    private String number(String prefix, String sequence, UUID branchId) {
+    String number(String prefix, String sequence, UUID branchId) {
         String code = branches.all().stream()
                 .filter(b -> b.id().equals(branchId))
                 .findFirst()

@@ -42,6 +42,9 @@ export function RenewPanel({ loan, memberName, onClose }: { loan: Loan; memberNa
     enabled: draft.valueDate <= today && draft.valueDate.length === 10,
   });
   const step = renewStep(draft, base.data, c, today);
+  // The product's fixed renewal fee (the client's answer of 12 Nov 2026): taken now with the interest, income once approved.
+  const fee = base.data?.renewal_fee_minor ?? 0;
+  const takes = step.collectMinor + fee;
   // What this renewal does, worked out by the server for the review.
   const review = useQuery({
     queryKey: ['lending', 'loan', loanId, 'renewal-review', draft.valueDate, step.collectMinor, step.termCount, step.rateBp],
@@ -64,7 +67,7 @@ export function RenewPanel({ loan, memberName, onClose }: { loan: Loan; memberNa
         {
           value_date: draft.valueDate,
           collect_minor: step.collectMinor > 0 ? step.collectMinor : undefined,
-          payment_method_key: step.collectMinor > 0 ? draft.method : undefined,
+          payment_method_key: takes > 0 ? draft.method : undefined,
           term_count: step.termCount ?? undefined,
           interest_rate_bp: step.rateBp ?? undefined,
           reason: draft.reason.trim() || undefined,
@@ -120,7 +123,7 @@ export function RenewPanel({ loan, memberName, onClose }: { loan: Loan; memberNa
               <dt>Interest rate</dt>
               <dd>{rateWords(q.interest_rate_bp, q.rate_unit)}</dd>
               <dt>Renewal fee</dt>
-              <dd>{(q.renewal_fee_minor ?? 0) > 0 ? `${money(q.renewal_fee_minor, c)}, added to the new loan` : 'None'}</dd>
+              <dd>{(q.renewal_fee_minor ?? 0) > 0 ? `${money(q.renewal_fee_minor, c)}, taken now with the interest, given back if the renewal is not approved` : 'None'}</dd>
               <dt>New due date</dt>
               <dd>{showDate(q.new_due_date)}</dd>
               <dt>The borrower then owes</dt>
@@ -151,7 +154,7 @@ export function RenewPanel({ loan, memberName, onClose }: { loan: Loan; memberNa
             Change it
           </button>
           <BusyButton key="send" busy={save.isPending} type="button" className="rt-primary" notReady={!q} onClick={() => q && save.mutate()}>
-            {(q?.collect_minor ?? 0) > 0 ? `Take ${money(q?.collect_minor, c)} and send the renewal` : 'Send the renewal'}
+            {takes > 0 ? `Take ${money(takes, c)} and send the renewal` : 'Send the renewal'}
           </BusyButton>
         </div>
       </div>
@@ -212,7 +215,8 @@ export function RenewPanel({ loan, memberName, onClose }: { loan: Loan; memberNa
           Use {money(b.minimum_collect_minor, c)}
         </button>
       )}
-      {step.collectMinor > 0 && (
+      {fee > 0 && <p className="ln-muted">The renewal fee of {money(fee, c)} is taken now too.</p>}
+      {takes > 0 && (
         <Segmented<PaymentMethod>
           label="Paid by"
           value={draft.method}

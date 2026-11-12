@@ -30,7 +30,8 @@ final class RenewalApi {
                             + " left out when the interest is already paid")
             Long collectMinor,
 
-            @Pattern(regexp = ServicingApi.METHODS) @Schema(description = "Required when collect_minor is above 0")
+            @Pattern(regexp = ServicingApi.METHODS)
+            @Schema(description = "Required when collect_minor or the renewal fee is above 0")
             String paymentMethodKey,
 
             @Size(max = 100) String externalReference,
@@ -97,7 +98,9 @@ final class RenewalApi {
             String repaymentPattern,
             String instalmentFrequency,
 
-            @Schema(description = "The product's renewal fee on the principal moved, added to the new schedule")
+            @Schema(
+                    description = "The product's fixed renewal fee, collected with the interest (the request's payment"
+                            + " method) and income once the renewal is approved; never added to the new loan")
             long renewalFeeMinor,
 
             LocalDate firstDueDate,
