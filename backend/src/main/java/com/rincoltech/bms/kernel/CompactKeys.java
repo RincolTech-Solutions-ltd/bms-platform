@@ -15,13 +15,15 @@ public final class CompactKeys {
     /** The bytes before each key's own: its length. */
     private static final int LENGTH = 4;
 
-    private byte[] bytes = new byte[1 << 12];
+    // Small to start (issue #900): the reconciliation makes a forecast, with its keys, for each row of a batch, and
+    // 7 KB each at 100,000 rows filled the staging heap's old generation. The tables double as keys are added.
+    private byte[] bytes = new byte[1 << 6];
     private int used;
 
     /** Per slot, one more than where its key starts in {@link #bytes}; 0 for a free slot. */
-    private int[] slots = new int[1 << 8];
+    private int[] slots = new int[1 << 3];
 
-    private long[] values = new long[1 << 8];
+    private long[] values = new long[1 << 3];
     private int size;
 
     /** The number of keys. */

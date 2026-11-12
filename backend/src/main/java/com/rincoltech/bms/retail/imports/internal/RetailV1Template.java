@@ -618,7 +618,7 @@ class RetailV1Template implements ImportTemplate {
         private final CompactKeys held;
 
         /** The costs of new items this forecast's own products rows gave: one per row of a product master (#880). */
-        private final CompactKeys added = new CompactKeys();
+        private CompactKeys added;
 
         private final Map<String, Map<String, BigDecimal>> qty = new TreeMap<>();
 
@@ -716,7 +716,10 @@ class RetailV1Template implements ImportTemplate {
         }
 
         private long cost(String product) {
-            return held.contains(product) ? held.get(product, 0L) : added.get(product, 0L);
+            if (held.contains(product)) {
+                return held.get(product, 0L);
+            }
+            return added == null ? 0L : added.get(product, 0L);
         }
 
         @Override
@@ -731,6 +734,9 @@ class RetailV1Template implements ImportTemplate {
                     if (values.get("code") instanceof String code && values.get("cost_minor") instanceof Long c) {
                         // An item the business holds keeps its own cost (issue #73); a new one its first row's.
                         if (!held.contains(compare(code))) {
+                            if (added == null) {
+                                added = new CompactKeys();
+                            }
                             added.putIfAbsent(compare(code), c);
                         }
                     }
