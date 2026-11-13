@@ -592,18 +592,34 @@ a personal value of the run is hidden.
 
 The **sign-off** (spec section 3.10, `core.imports.sign_off`, the tenant admin's): the admin opens the newest
 reconciliation, ticks each section, types their name and today's date; the sign-off names the reconciliation and its
-SHA-256 as read (409 `reconciliation_changed` if it was made again), and inside its own transaction, which holds the run,
+SHA-256 as read (`reconciliation_changed` if it was made again), and inside its own transaction, which holds the run,
 measures the books again: when the text that measurement gives has another SHA-256 than the one read, what the import
-brought in changed since: that measurement is stored as the next version (audited `core.import_run.reconciled` by the
-signer) and the sign-off is refused (409 `reconciliation_changed` with `reconciliation_id` and `version` of the new one,
-and words that name it), so the signer reads the books as they are now and never gets the same version back. The screen
-shows the API's words, refetches the newest and clears the ticks; should a refetch still bring back the version refused,
-it offers "Make the reconciliation again" to whoever holds `core.imports.manage` rather than sign it once more. Whether every section is ticked is checked
-before the measurement. That measurement runs with a 60-second limit per statement, not a batch's 10 minutes, because it
-holds the run inside a request; a run too big for it is refused with 503 `sign_off_too_big` ("too big to sign here at
-once, and nothing was signed; ask Rincol Tech to help you sign it"). The limit is per statement, so a run of many
-1,000-row chunks can still take longer in all; that and the wait for the run's lock behind a remake are what #874 removes. A sign-off that
-measures in the background for very large runs is #874. It is stored in
+brought in changed since: that measurement is stored as the next version (audited `core.import_run.reconciled`, generated
+by the signer) and the sign-off is refused (`reconciliation_changed`), so the signer reads the books as they are now and
+never gets the same version back. Whether every section is ticked is checked before the measurement.
+
+**In the background (issue #874, migration `V155`).** At the row limit of 100,000 that measurement can outlast a request,
+so every sign-off, small or large, runs as a background job: one path, no size to guess in the request. It is the check's
+and the dry run's job of section 13.14.1 (#922), not a new mechanism: `POST .../sign-off` checks in the request what needs
+no lock (the typed name, today's date, the run of the import screens with a reconciliation: 422 and 404 or 409 at once),
+then `ImportRunService.startSignOffJob` claims the business's import loop (409 `IMPORT_IN_PROGRESS` while any check, dry
+run, commit, resume or sign-off of the business is alive), requires the run `committed` under its row lock, records the job
+on the run (`job_kind` = `sign_off`, `job_by` the signer, the job's own token lock) and audits
+`core.import_run.job_started` with the signer's intent: the reconciliation's id, its SHA-256, the sections and the date,
+never the name. It answers 202 with the reconciliation as it stands and the job running. The job, on its own thread bound
+to the business, runs the sign-off above with a batch's 10-minute limit per statement, calls the claim's probe before it
+writes (a job that lost its claim writes nothing), and stamps how it ended: `done` (signed), or `failed` with the
+refusal's code (`reconciliation_changed`, `unitemised_difference`, `sections_not_ticked`, `run_not_committed`,
+`sign_off_date_not_today` when the day turned, `sign_off_too_big` should even a batch's limit pass, `failed` for any other
+error), or read as `interrupted` when its process died. The typed name is held only by the job's thread until it is
+written to `import_signoffs`; a job that dies loses it, and the signer signs again. Because the next version is stored in
+the job's transaction before its outcome is stamped, and `GET .../reconciliation` reads the job before the reconciliation,
+a refusal is never shown beside the version it refused. The screen shows the sign-off pending (nothing to tick or type)
+and polls the reconciliation every 2 seconds while the job runs; a reload finds it running and follows it the same; the
+list says "Being signed". When the job ends the ticks are cleared, and a refusal is said in plain words by its code
+(nothing was signed, and what to do); should the version on screen still be the one sent after `reconciliation_changed`,
+it offers "Make the reconciliation again" to whoever holds `core.imports.manage` rather than sign it once more. The
+signed-off audit row is written by the job as the system, so it names the signer in `signed_by`. It is stored in
 `import_signoffs` (append-only, one per run), moves the run to `signed_off` and is audited `core.import_run.signed_off`
 without the name. The run reaches `signed_off` no other way. After it, no new reconciliation of the run is stored (the
 trigger takes the run `FOR UPDATE` in both cases, so a reconciliation and a sign-off never pass each other), so the signed

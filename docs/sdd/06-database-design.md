@@ -1559,6 +1559,12 @@ and token all set or all NULL, an end only after a start and a failure code only
 only while some session holds its token's lock in `pg_locks`; otherwise it reads `failed`, `interrupted`. A token, unlike
 a backend pid, is never reused by the pooled session's next claim (review of 3d86d31). No index, function, trigger or grant changes; the purge leaves the columns (codes, `ImportPurgeIT`).
 
+Changed by `V155__import_sign_off_job.sql` (issue #874, chapter 13 section 13.11), expand only: the CHECK
+`import_runs_job_kind_check` on `import_runs.job_kind` also accepts `sign_off`, the customer's sign-off run as a background
+job with V154's columns (`job_by` the signer, the outcome a refusal's code such as `reconciliation_changed`). Every stored
+row already holds NULL, `check` or `dry_run`. No column, index, function, trigger or grant changes; the typed name is never
+written to `import_runs`, only to `import_signoffs.signed_name` (V144) once signed.
+
 ## 6.6 General ledger (RLS)
 
 ### 6.6.1 Tables
