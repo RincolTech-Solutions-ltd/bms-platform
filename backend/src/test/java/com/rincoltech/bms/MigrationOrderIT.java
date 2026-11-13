@@ -4325,6 +4325,46 @@ class MigrationOrderIT {
             }
             c.rollback();
         }
+        // JUSTIFICATION-A3: the Lead on the review of 668c0ec asks the shared deadline of V153 proven.
+        // One deadline for both tables: import_refs is held for 1.5 s and retail_products throughout, so a wait of
+        // 2 s each would answer after about 3.5 s; the shared one after 2 s.
+        try (Connection refsHeld = TestDatabase.ownerDataSource().getConnection();
+                Connection productsHeld = TestDatabase.ownerDataSource().getConnection();
+                Connection c = TestDatabase.appDataSource().getConnection()) {
+            refsHeld.setAutoCommit(false);
+            productsHeld.setAutoCommit(false);
+            c.setAutoCommit(false);
+            try (Statement s = refsHeld.createStatement()) {
+                s.execute("LOCK TABLE import_refs IN SHARE UPDATE EXCLUSIVE MODE");
+            }
+            try (Statement s = productsHeld.createStatement()) {
+                s.execute("LOCK TABLE retail_products IN SHARE UPDATE EXCLUSIVE MODE");
+            }
+            Thread release = new Thread(() -> {
+                try {
+                    Thread.sleep(1_500);
+                    refsHeld.rollback();
+                } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                }
+            });
+            try (Statement s = c.createStatement()) {
+                s.execute("SET LOCAL app.import_commit = 'on'");
+                long started = System.nanoTime();
+                release.start();
+                try (java.sql.ResultSet rs = s.executeQuery("SELECT bms_import_refresh_statistics(2000)")) {
+                    assertThat(rs.next()).isTrue();
+                    assertThat(rs.getBoolean(1))
+                            .as("refused: retail_products is held")
+                            .isFalse();
+                }
+                long ms = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+                assertThat(ms).as("both tables waited 2 s together").isBetween(1_900L, 2_700L);
+            }
+            release.join(10_000);
+            c.rollback();
+            productsHeld.rollback();
+        }
         // Both tables' statistics count the rows the same transaction wrote (the review of e771a17): a new business
         // with
         // 2,000 uncommitted rows in each is among the most common tenant_id values right after the call. Read as the

@@ -60,6 +60,9 @@ public final class ImportBigFileMain {
         // The quarantined file kept on disk, not in the heap judged: staging streams it to R2 (issue #900). The parent
         // gives the directory and deletes it, however the child ends (-Dbigfile.storage).
         String storage = System.getProperty("bigfile.storage");
+        if (storage == null) {
+            throw new IllegalArgumentException("-Dbigfile.storage: the directory the parent gives the fake storage");
+        }
         // Command line arguments win over application.yml; the switches are those of IntegrationTest.
         String[] settings = {
             "--spring.profiles.active=test",

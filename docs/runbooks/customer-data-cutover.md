@@ -76,9 +76,9 @@ done by hand as the notes say.
       Cloudflare's edge after 100 s (SDD chapter 13 section 13.14.1 11/16, chapter 15 section 15.7). Plan the
       window from the dry run of the largest file, on the host the import runs on, and rehearse that dry run
       first. Split a larger product master into files of at most 25,000 rows, each its own batch. One batch
-      over 20,000 rows is written at a time on the platform, dry runs included: while another business's large
-      batch is being written, a dry run or commit of yours answers `import_busy` ("try again in a few
-      minutes") and writes nothing. Wait for the other import, then run the dry run again, or resume the
+      over 5,000 rows is written at a time on the platform, dry runs included: while another business's large
+      batch is being written, a dry run or commit of yours answers `import_busy` (the screen says "Another
+      large import is running, try again in a few minutes.") and writes nothing. Wait for the other import, then run the dry run again, or resume the
       commit. A large batch written beside the other's could not see its own rows in the database's statistics
       and could reach the dry run limit or the batch timeout (SDD chapter 13 section 13.14.1 11/16, V153).
 

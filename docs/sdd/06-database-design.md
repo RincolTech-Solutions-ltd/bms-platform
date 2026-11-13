@@ -1538,9 +1538,10 @@ function **`bms_import_refresh_statistics(p_wait_ms integer)`** (owned by `bms_o
 `insufficient_privilege` unless `app.import_commit` is `on`, which an import batch's transaction sets (V143): a guard
 against misuse, not a privilege check, since any `bms_app` session may set that setting. It then runs ANALYZE on
 `import_refs` and `retail_products` (the columns a batch looks rows up by) inside the caller's transaction, so the batch's
-own uncommitted rows count. It waits `p_wait_ms` (1 to 2,000) for the lock (`lock_timeout`, restored when it returns)
-and returns false when another batch holds it: a batch waits 2,000 ms at a doubling of its rows and 100 ms when it asks
-again after a refusal. A rollback undoes the new `pg_statistic` rows but not what ANALYZE writes in place: `pg_class.relpages` and
+own uncommitted rows count. It takes both tables' locks first, under one deadline of `p_wait_ms` (1 to 2,000): the
+second waits only what the first left, at least 1 ms (`lock_timeout`, restored when it returns). It returns false when
+a lock is held elsewhere: a large batch (only a batch over `ImportRunService.LARGE_BATCH_ROWS`, 5,000 rows, calls it)
+waits 2,000 ms at a doubling of its rows and 100 ms when it asks again after a refusal. A rollback undoes the new `pg_statistic` rows but not what ANALYZE writes in place: `pg_class.relpages` and
 `reltuples` (after a dry run they count its rolled-back rows until the next analyze) and the reset of the table's count
 of rows changed since its last analyze (autovacuum analyzes it later). `pg_class` is readable by every role, so the sum
 of every business's rows in each table is seen earlier than autovacuum would show it; no row or value is, `pg_stats`

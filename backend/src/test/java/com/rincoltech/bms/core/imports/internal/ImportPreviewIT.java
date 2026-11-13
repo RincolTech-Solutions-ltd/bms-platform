@@ -1046,9 +1046,16 @@ class ImportPreviewIT extends IntegrationTest {
         });
         assertThat(as(t, () -> runs.dryRunReport(large))).as("nothing stored").isEmpty();
         assertThat(largeKeyFree()).as("free after a refused dry run").isTrue();
+        // The running batch holds the key in its transaction: another session cannot take it (the review of 668c0ec).
+        boolean[] heldInside = {false};
+        scripted(large, (runId, batchId, seq, checkpoint) -> {
+            heldInside[0] = !largeKeyFreeToAnotherSession();
+            return Map.of();
+        });
         assertThat(as(t, () -> runs.dryRun(large, operator)).report().failure())
                 .as("once the key is free")
                 .isNull();
+        assertThat(heldInside[0]).as("held while the large batch runs").isTrue();
         assertThat(largeKeyFree()).as("free after a large dry run").isTrue();
         FixtureShopTemplate.SCRIPT = (runId, batchId, seq, checkpoint) -> {
             throw new IllegalStateException("a fabricated failure of a large batch");
@@ -1090,13 +1097,18 @@ class ImportPreviewIT extends IntegrationTest {
 
     // JUSTIFICATION-A3: the Lead on the review of e771a17 (#900) asks the refused refresh tested and its waits bounded.
     /**
-     * A batch whose statistics refresh is refused, while something else holds {@code import_refs}' statistics lock for the
-     * whole batch, still writes, and waits 2 s once and 100 ms at each later doubling: 10,000 rows registered a page at a
-     * time take seconds, where asking at every registration would wait 2 s each of some 36 times.
+     * A large batch whose statistics refresh is refused, while something else holds {@code import_refs}' statistics lock
+     * for the whole batch, still writes, and waits 2 s once and 100 ms at each later doubling: 10,000 rows registered a
+     * page at a time take about 2.3 s longer than without the lock, at most 5 s (the exact waits:
+     * {@link StatisticsRefreshTest}), where 2 s at each doubling would take 8 s longer.
      */
     @Test
     void aRefusedStatisticsRefreshIsAskedAgainRarelyAndBriefly() throws Exception {
         UUID run = emptyRun(t);
+        TestDatabase.owner()
+                .sql("UPDATE import_batches SET row_count = ? WHERE run_id = ?")
+                .params(ImportRunService.LARGE_BATCH_ROWS + 1, run)
+                .update();
         scripted(run, (runId, batchId, seq, checkpoint) -> {
             for (int page = 0; page < 40; page++) {
                 List<BatchWriter.Registration> records = new ArrayList<>(250);
@@ -1111,6 +1123,9 @@ class ImportPreviewIT extends IntegrationTest {
             }
             return Map.of();
         });
+        long baseline = System.nanoTime();
+        assertThat(as(t, () -> runs.dryRun(run, operator)).report().failure()).isNull();
+        baseline = System.nanoTime() - baseline;
         try (java.sql.Connection held = TestDatabase.ownerDataSource().getConnection()) {
             held.setAutoCommit(false);
             try (java.sql.Statement s = held.createStatement()) {
@@ -1119,9 +1134,9 @@ class ImportPreviewIT extends IntegrationTest {
             long started = System.nanoTime();
             assertThat(as(t, () -> runs.dryRun(run, operator)).report().failure())
                     .isNull();
-            assertThat(TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - started))
-                    .as("2 s once and 100 ms a doubling, not 2 s a registration")
-                    .isLessThan(15);
+            assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started - baseline))
+                    .as("2 s once and 100 ms a doubling: about 2.3 s more than without the lock")
+                    .isBetween(1_000L, 5_000L);
             held.rollback();
         }
     }
@@ -1160,6 +1175,18 @@ class ImportPreviewIT extends IntegrationTest {
             holder.get(60, TimeUnit.SECONDS);
         } finally {
             pool.shutdownNow();
+        }
+    }
+
+    /** Whether a session of its own, outside the caller's transaction, takes the large-batch key at once. */
+    private static boolean largeKeyFreeToAnotherSession() {
+        try (java.sql.Connection c = TestDatabase.ownerDataSource().getConnection();
+                java.sql.Statement s = c.createStatement();
+                java.sql.ResultSet rs =
+                        s.executeQuery("SELECT pg_try_advisory_xact_lock(" + ImportRunService.LARGE_KEY + ")")) {
+            return rs.next() && rs.getBoolean(1);
+        } catch (java.sql.SQLException e) {
+            throw new IllegalStateException(e);
         }
     }
 

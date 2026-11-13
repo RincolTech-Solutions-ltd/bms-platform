@@ -86,9 +86,10 @@ class ImportRunService implements ImportRuns {
     /** The rows a batch registers before the statistics of the tables it fills are first refreshed (V153, #900). */
     static final int STATISTICS_FIRST = 1_000;
 
-    /** How long a batch waits for the statistics lock: at each doubling, and when it asks again after a refusal. */
+    /** How long a batch waits for the statistics locks of both tables together at a doubling (V153). */
     static final int FIRST_WAIT_MS = 2_000;
 
+    /** How long it waits for them when it asks again after a refusal (the Lead on the review of e771a17). */
     static final int RETRY_WAIT_MS = 100;
 
     /** After a refusal the batch asks again once its rows doubled again, or after this long, whichever is first. */
@@ -97,9 +98,12 @@ class ImportRunService implements ImportRuns {
     /**
      * A batch over this many rows is large: it takes {@link #LARGE_KEY} first (the Lead on the review of 887dc57, #900).
      * Two large batches of different businesses would each need the statistics the other's ANALYZE holds (V153), and
-     * the one left without them falls back to the lookups whose time grows with the square of its rows.
+     * the one left without them falls back to the lookups whose time grows with the square of its rows. Only a large
+     * batch refreshes the statistics, so a small one never holds their lock while a large one needs it (the Lead on the
+     * review of 668c0ec). A small batch keeps the old plans: before V153 a dry run of 25,000 rows took 185 s, so 5,000,
+     * a twenty-fifth of the square, should take some 7 s (an estimate, SDD 13.14.1).
      */
-    static final int LARGE_BATCH_ROWS = 20_000;
+    static final int LARGE_BATCH_ROWS = 5_000;
 
     /** The platform's large-batch key: one large batch is written at a time, of any business. */
     static final String LARGE_KEY = "hashtextextended('core.imports.large', 0)";
@@ -1572,8 +1576,8 @@ class ImportRunService implements ImportRuns {
         }
         // One large batch at a time on the platform, never a wait: held to the end of the batch's transaction (a dry
         // run's outer one), and the batch is refused at once when another business's holds it (#900).
-        if (row.get("row_count") instanceof Integer rows
-                && rows > LARGE_BATCH_ROWS
+        boolean large = row.get("row_count") instanceof Integer rows && rows > LARGE_BATCH_ROWS;
+        if (large
                 && !jdbc.sql("SELECT pg_try_advisory_xact_lock(" + LARGE_KEY + ")")
                         .query(Boolean.class)
                         .single()) {
@@ -1607,7 +1611,7 @@ class ImportRunService implements ImportRuns {
                 ? "batch " + batch.seq()
                 : RowValidator.shortName((String) row.get("source_filename"));
         RowCheckpoint checkpoint =
-                new RowCheckpoint(runId, batch.id(), writers.source(batch.id()), !dryRun, file, privacy);
+                new RowCheckpoint(runId, batch.id(), writers.source(batch.id()), !dryRun, file, privacy, large);
         Map<String, Object> counts = writer.write(runId, batch.id(), batch.seq(), checkpoint);
         // No journal but the registered opening journals (Lead ruling 6 on #872): checked at the batch's end, in both.
         refs.requireOnlyOpeningJournals(runId, batch.id());
@@ -1669,6 +1673,42 @@ class ImportRunService implements ImportRuns {
         }
     }
 
+    // JUSTIFICATION-A3: the Lead on the review of 668c0ec (#900) asks the waits proven exactly, with a test clock.
+    /**
+     * When a large batch refreshes the statistics of the tables it fills (V153, issue #900). Each time the rows it
+     * registered double, from {@link #STATISTICS_FIRST}, it asks, waiting {@link #FIRST_WAIT_MS}: seven times for 100,000
+     * rows. After a refusal it asks again, waiting only {@link #RETRY_WAIT_MS}, once the rows have doubled again or
+     * {@link #RETRY_AFTER_NANOS} have passed (the Lead on the review of e771a17).
+     */
+    static final class StatisticsRefresh {
+
+        private final java.util.function.IntPredicate refresh;
+        private final java.util.function.LongSupplier clock;
+        private long registered;
+        private long refreshAt = STATISTICS_FIRST;
+        private boolean refused;
+        private long refusedAt;
+
+        /** {@code refresh} takes the wait in ms and answers whether it refreshed; {@code clock} gives nanoseconds. */
+        StatisticsRefresh(java.util.function.IntPredicate refresh, java.util.function.LongSupplier clock) {
+            this.refresh = refresh;
+            this.clock = clock;
+        }
+
+        void registered(int n) {
+            registered += n;
+            boolean retry = refused && clock.getAsLong() - refusedAt >= RETRY_AFTER_NANOS;
+            if (registered < refreshAt && !retry) {
+                return;
+            }
+            refused = !refresh.test(refused ? RETRY_WAIT_MS : FIRST_WAIT_MS);
+            refusedAt = clock.getAsLong();
+            if (registered >= refreshAt) {
+                refreshAt = registered * 2;
+            }
+        }
+    }
+
     // JUSTIFICATION-A3: issue #132 makes the checkpoint the report's sink as well as the guard.
     /**
      * The guard a writer calls after each row, and the sink of the batch's part of the report. Every text a writer gives it
@@ -1686,11 +1726,9 @@ class ImportRunService implements ImportRuns {
         private final PreviewService.RunPrivacy privacy;
         private final CommitReport.Builder part;
         private long rows;
-        private long registered;
-        private long refreshAt = STATISTICS_FIRST;
 
-        /** When the last refresh was refused (System.nanoTime), or 0 when it was not. */
-        private long refusedAt;
+        /** The statistics refresh of a large batch, or null: a small batch never takes their lock (V153). */
+        private final StatisticsRefresh statistics;
 
         private Map<String, String> policy;
 
@@ -1700,7 +1738,8 @@ class ImportRunService implements ImportRuns {
                 PreviewService.BatchSource source,
                 boolean stops,
                 String file,
-                PreviewService.RunPrivacy privacy) {
+                PreviewService.RunPrivacy privacy,
+                boolean large) {
             this.runId = runId;
             this.batchId = batchId;
             this.source = source;
@@ -1708,6 +1747,7 @@ class ImportRunService implements ImportRuns {
             this.file = file;
             this.privacy = privacy;
             this.part = new CommitReport.Builder(file);
+            this.statistics = large ? new StatisticsRefresh(refs::refreshStatistics, System::nanoTime) : null;
         }
 
         @Override
@@ -1754,24 +1794,10 @@ class ImportRunService implements ImportRuns {
             registered(records.size());
         }
 
-        /**
-         * Each time the rows the batch registered double, from {@link #STATISTICS_FIRST}, the statistics of the tables it
-         * fills are refreshed inside its transaction (V153, issue #900): seven times for 100,000 rows. Each wait is at most
-         * {@link #FIRST_WAIT_MS}, and {@link #RETRY_WAIT_MS} when asked again after a refusal.
-         */
         private void registered(int n) {
-            registered += n;
-            boolean retry = refusedAt != 0 && System.nanoTime() - refusedAt >= RETRY_AFTER_NANOS;
-            if (registered < refreshAt && !retry) {
-                return;
+            if (statistics != null) {
+                statistics.registered(n);
             }
-            // Refused while another batch holds the tables' statistics lock (a large batch holds the platform's
-            // large-batch key, so that other one is small): asked again, waiting only RETRY_WAIT_MS, once the rows have
-            // doubled again or 30 s have passed (the Lead on the review of e771a17), so a batch beside another waits
-            // about 2 s a doubling at most.
-            boolean refreshed = refs.refreshStatistics(refusedAt == 0 ? FIRST_WAIT_MS : RETRY_WAIT_MS);
-            refusedAt = refreshed ? 0 : System.nanoTime();
-            refreshAt = registered * 2;
         }
 
         @Override

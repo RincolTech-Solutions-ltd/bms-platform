@@ -41,8 +41,12 @@ export class ImportError extends Error {
   }
 }
 
+/** The words for import_busy: another business's large batch is being written (issue #900, SDD chapter 7). */
+export const IMPORT_BUSY_MESSAGE = 'Another large import is running, try again in a few minutes.';
+
 function fail(error: unknown, fallback: string): never {
   const problem = problemOf(error);
+  if (problem.code === 'import_busy') throw new ImportError(IMPORT_BUSY_MESSAGE, problem.code);
   const fields = problem.errors ?? [];
   throw new ImportError(fields.length > 0 ? fields.map((f) => f.message).join(' ') : (problem.detail ?? fallback), problem.code);
 }

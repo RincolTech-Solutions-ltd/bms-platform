@@ -895,7 +895,14 @@ class ReconciliationService implements ImportReconciliation {
                 }
                 // A row whose values could not be typed has no part and is counted above: only typed rows go on.
                 if (typed != null && part != null && whole != null) {
-                    whole.row(b.set().key(), typed);
+                    try {
+                        whole.row(b.set().key(), typed);
+                    } catch (RuntimeException e) {
+                        // A forecast that fails on a row (one that changed the unmodifiable row, say) is counted and
+                        // named like any row the rules cannot measure, and holds the sign-off (the review of 668c0ec).
+                        unmeasured++;
+                        unmeasuredKinds.add("forecast:" + e.getClass().getSimpleName());
+                    }
                     part.forEach((id, v) -> writtenParts.merge(id, v, BigDecimal::add));
                 }
                 if (s.overridden() != null) {
