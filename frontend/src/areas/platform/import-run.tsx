@@ -104,7 +104,15 @@ export function OperatorImportRun({ slug, runId }: { slug: string; runId: string
       setConfirming(false);
       settle(next, ACTION_DONE[action]);
     },
+    // A start refused with import_busy leaves the run being brought in (#900): show it as it is now, with Resume.
+    onError: (error) => {
+      if (error instanceof ImportError && error.code === 'import_busy') {
+        setConfirming(false);
+        void queryClient.invalidateQueries({ queryKey: runKey(slug, runId) });
+      }
+    },
   });
+  const busy = act.error instanceof ImportError && act.error.code === 'import_busy';
 
   const s = state.data;
   const r = s?.run;
@@ -187,7 +195,7 @@ export function OperatorImportRun({ slug, runId }: { slug: string; runId: string
             />
           )}
           {/* JUSTIFICATION-A3: the review of e3f95b2 asks Resume for a run that stopped by itself; one card beside Stop. */}
-          {canAct && stoppedBySelf(r, s.commit_enabled ?? false, Date.now(), act.error instanceof ImportError && act.error.code === 'IMPORT_IN_PROGRESS') && !confirming && (
+          {canAct && stoppedBySelf(r, s.commit_enabled ?? false, Date.now(), busy || (act.error instanceof ImportError && act.error.code === 'IMPORT_IN_PROGRESS')) && !confirming && (
             <section className="card stack" aria-labelledby="resume-title">
               <h2 id="resume-title">Stopped by itself?</h2>
               <p>
@@ -199,7 +207,7 @@ export function OperatorImportRun({ slug, runId }: { slug: string; runId: string
                   Resume the import
                 </BusyButton>
               </p>
-              {act.isError && act.variables === 'resume' && (
+              {act.isError && (act.variables === 'resume' || busy) && (
                 <p role="alert" className="alert alert-danger">
                   {act.error instanceof Error ? act.error.message : 'Could not resume it.'}
                 </p>

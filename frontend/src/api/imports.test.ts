@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// The refusal of a large batch while another business's large batch is written (issue #900): the trial run, the start and the
-// resume of an import answer import_busy (409) in plain words, whatever the server's detail says. Fabricated data only.
+// The refusal of a large batch while another large batch is written (issue #900): the trial run, the start and the resume of an
+// import answer import_busy (409) in plain words, whatever the server's detail says; after a start or a resume the next step is
+// Resume (the Lead on the review of 3d86afa). Fabricated data only.
 
 const post = vi.hoisted(() => vi.fn());
 vi.mock('./client', () => ({ api: { POST: post, GET: vi.fn() }, problemOf: (error: unknown) => error ?? {} }));
@@ -21,10 +22,10 @@ describe('import_busy', () => {
     await expect(tryImport('run-1')).rejects.toBeInstanceOf(ImportError);
   });
 
-  it.each(['start', 'resume'] as const)('answers the %s of an import in plain words, with its code', async (action) => {
+  it.each(['start', 'resume'] as const)('answers the %s of an import with Resume as the next step, with its code', async (action) => {
     const refused = await platformAction('test-shop-one', 'run-1', action).catch((e: unknown) => e);
     expect(refused).toBeInstanceOf(ImportError);
-    expect((refused as ImportError).message).toBe('Another large import is running, try again in a few minutes.');
+    expect((refused as ImportError).message).toBe('Another large import is running. Wait a few minutes, then resume this import.');
     expect((refused as ImportError).code).toBe('import_busy');
   });
 

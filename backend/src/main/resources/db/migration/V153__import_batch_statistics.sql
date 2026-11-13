@@ -22,8 +22,9 @@
 -- after that (ImportRunService.StatisticsRefresh, the Lead on the review of e771a17). Autovacuum skips the table
 -- meanwhile. The 100 ms is shorter than deadlock_timeout, so a retry does not cancel an autovacuum that started after
 -- the refusal: the batch keeps its statistics until that vacuum ends (a documented limit, SDD 13.14.1).
--- Only large batches (over ImportRunService.LARGE_BATCH_ROWS rows) call this function, and each takes a platform-wide
--- advisory key first, so no other batch ever holds this lock while one needs it (the reviews of 887dc57 and 668c0ec).
+-- Only a large transaction (its batches registered over ImportRunService.LARGE_BATCH_ROWS rows, a dry run's counted
+-- across all its batches) calls this function, and it takes a platform-wide advisory key first, so no other batch ever
+-- holds this lock while one needs it (the reviews of 887dc57, 668c0ec and 3d86afa).
 --
 -- What a rollback keeps (the review of 887dc57). The new pg_statistic rows are rolled back with a dry run. ANALYZE also
 -- writes pg_class.relpages and reltuples in place, which no rollback undoes, and resets the table's count of rows changed

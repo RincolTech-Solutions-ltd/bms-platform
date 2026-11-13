@@ -401,9 +401,10 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
     within 100 s (Caddy and the API set no response timeout). At 100,000 rows the validation took 32 to 376 s over the runs
     of #900 and the dry run 97 to 141 s, so the screen would show that error while the API finished the work. By the
     Lead's decision on #921 (reversible) the configured row limit per batch is therefore **25,000**
-    (`bms.imports.max-rows`): the largest measured size whose validation and dry run both finish within 80 s. Over eight
-    runs of the job 25,000 rows took at most 31 s to validate and 40 s to dry run, while 50,000 took up to 102 s to
-    validate (CI run 43297629214). The job holds every case at or under the configured limit to that budget
+    (`bms.imports.max-rows`): the largest measured size whose validation and dry run both finish within 80 s. Over nine
+    runs of the job 25,000 rows took 8.2, 9.9, 11.4, 12.1, 12.2, 15.7, 30.4, 30.6 and 30.7 s to validate (median
+    12.2 s) and 22.8, 22.9, 24.2, 25.6, 26.5, 27.4, 38.1, 40.1 and 40.4 s to dry run (median 26.5 s): three runs near
+    30 s and 40 s, the other six under 16 s and 28 s. 50,000 took up to 102 s to validate (CI run 43297629214). The job holds every case at or under the configured limit to that budget
     (`ImportBigFileIT.EDGE_BUDGET_MS`), and runs the larger sizes in a child at their own size. #922 moves the two
     requests into the background (202 and poll) and then raises the limit to 100,000. Times on the runner of the
     `import-big-file` job, 13 November 2026 (CI run 43343330536, head e38ecb1: V153's shared deadline, and only batches

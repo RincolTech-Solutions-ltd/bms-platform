@@ -1097,20 +1097,18 @@ class ImportPreviewIT extends IntegrationTest {
 
     // JUSTIFICATION-A3: the Lead on the review of e771a17 (#900) asks the refused refresh tested and its waits bounded.
     /**
-     * A large batch whose statistics refresh is refused, while something else holds {@code import_refs}' statistics lock
-     * for the whole batch, still writes, and waits 2 s once and 100 ms at each later doubling: 10,000 rows registered a
-     * page at a time take about 2.3 s longer than without the lock, at most 5 s (the exact waits:
-     * {@link StatisticsRefreshTest}), where 2 s at each doubling would take 8 s longer.
+     * A batch whose registered rows pass the threshold, and whose statistics refresh is refused while something else
+     * holds {@code import_refs}' statistics lock for the whole batch, still writes, and waits 2 s once and 100 ms at each
+     * later doubling: 21,000 rows registered a page at a time ask at 5,250, 10,500 and 21,000, about 2.2 s longer than
+     * without the lock, at most 4.5 s (the exact waits: {@link StatisticsRefreshTest}), where 2 s at each would take 6 s
+     * longer. The run without the lock does up to three ANALYZEs the refused one does not, so the lower bound is wide
+     * (the review of 3d86afa).
      */
     @Test
     void aRefusedStatisticsRefreshIsAskedAgainRarelyAndBriefly() throws Exception {
         UUID run = emptyRun(t);
-        TestDatabase.owner()
-                .sql("UPDATE import_batches SET row_count = ? WHERE run_id = ?")
-                .params(ImportRunService.LARGE_BATCH_ROWS + 1, run)
-                .update();
         scripted(run, (runId, batchId, seq, checkpoint) -> {
-            for (int page = 0; page < 40; page++) {
+            for (int page = 0; page < 84; page++) {
                 List<BatchWriter.Registration> records = new ArrayList<>(250);
                 for (int line = page * 250 + 1; line <= page * 250 + 250; line++) {
                     records.add(new BatchWriter.Registration(
@@ -1135,8 +1133,8 @@ class ImportPreviewIT extends IntegrationTest {
             assertThat(as(t, () -> runs.dryRun(run, operator)).report().failure())
                     .isNull();
             assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started - baseline))
-                    .as("2 s once and 100 ms a doubling: about 2.3 s more than without the lock")
-                    .isBetween(1_000L, 5_000L);
+                    .as("2 s once and 100 ms a doubling: about 2.2 s more than without the lock")
+                    .isBetween(500L, 4_500L);
             held.rollback();
         }
     }

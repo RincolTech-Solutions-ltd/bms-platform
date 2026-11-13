@@ -889,21 +889,23 @@ class ReconciliationService implements ImportReconciliation {
                     itemise(sheet, part, file, s.line(), "already imported by an earlier run");
                     continue;
                 }
-                written++;
-                if (unmeasurable != null) {
-                    unmeasuredKinds.add(unmeasurable);
-                }
-                // A row whose values could not be typed has no part and is counted above: only typed rows go on.
+                // A row whose values could not be typed has no part and is counted below: only typed rows go on.
                 if (typed != null && part != null && whole != null) {
                     try {
                         whole.row(b.set().key(), typed);
                     } catch (RuntimeException e) {
-                        // A forecast that fails on a row (one that changed the unmodifiable row, say) is counted and
-                        // named like any row the rules cannot measure, and holds the sign-off (the review of 668c0ec).
+                        // A forecast that fails on a row (one that changed the unmodifiable row, say) counts the row
+                        // as unmeasured only, not written, named like any row the rules cannot measure; the
+                        // difference it leaves holds the sign-off (the Lead on the reviews of 668c0ec and 3d86afa).
                         unmeasured++;
                         unmeasuredKinds.add("forecast:" + e.getClass().getSimpleName());
+                        continue;
                     }
                     part.forEach((id, v) -> writtenParts.merge(id, v, BigDecimal::add));
+                }
+                written++;
+                if (unmeasurable != null) {
+                    unmeasuredKinds.add(unmeasurable);
                 }
                 if (s.overridden() != null) {
                     sheet.item(

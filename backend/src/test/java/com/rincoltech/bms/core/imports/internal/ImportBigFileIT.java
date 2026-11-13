@@ -175,6 +175,31 @@ class ImportBigFileIT extends IntegrationTest {
         }
     }
 
+    // JUSTIFICATION-A3: the Lead on the review of 3d86afa asks five batches of 5,000 in one dry run held to the budget.
+    /**
+     * The configured limit split as the runbook says, five files of 5,000 items in one run: no batch is large, but the
+     * dry run writes them in one transaction, so the rows its batches registered pass the threshold and it refreshes
+     * the statistics (V153) and stays inside {@link #EDGE_BUDGET_MS}.
+     */
+    @Test
+    void fiveBatchesOf5000InOneDryRunRefreshTheStatisticsInsideTheEdgeBudget() throws Exception {
+        String[] files = new String[5];
+        for (int i = 0; i < files.length; i++) {
+            Path csv = dir.resolve("fab-items-part-" + (i + 1) + ".csv");
+            TestFiles.writeCsv(csv, ITEM_HEADER, items(ImportRunService.LARGE_BATCH_ROWS, 0, i * 5_000));
+            files[i] = "items=" + csv;
+        }
+        String output = child("commit", STAGING_HEAP_MB, UploadSettings.DEFAULT_MAX_ROWS, files);
+        assertThat(output).contains("outcome=COMMITTED");
+        assertThat(written(output)).isGreaterThanOrEqualTo(25_000);
+        insideTheEdgeBudget(output);
+        Matcher analyzed = Pattern.compile("step=dry_run\\b.*?analyzed=(\\d+)").matcher(output);
+        assertThat(analyzed.find()).as(output).isTrue();
+        assertThat(Long.parseLong(analyzed.group(1)))
+                .as("the dry run refreshed the statistics")
+                .isPositive();
+    }
+
     /** The sizes measured for #880 and #900. */
     static java.util.stream.Stream<Integer> measuredSizes() {
         return java.util.stream.Stream.of(10_000, 25_000, 50_000, 75_000);
@@ -228,13 +253,18 @@ class ImportBigFileIT extends IntegrationTest {
      * CSV, every code and description different, and {@code extra} short cells after the seven columns.
      */
     static Iterator<List<Object>> items(int rows, int extra) {
+        return items(rows, extra, 0);
+    }
+
+    /** As {@link #items(int, int)}, numbered from {@code first + 1}, so the files of one run name different items. */
+    static Iterator<List<Object>> items(int rows, int extra, int first) {
         String filler = "of the big file test, made up for the row and size limits only and nothing else; ".repeat(4);
         return new Iterator<>() {
-            int n;
+            int n = first;
 
             @Override
             public boolean hasNext() {
-                return n < rows;
+                return n < first + rows;
             }
 
             @Override
@@ -317,6 +347,11 @@ class ImportBigFileIT extends IntegrationTest {
      * #900). The child keeps the quarantined files in a directory of this test's, deleted with it however the child ends.
      */
     private String child(String mode, String bigFile, int heapMb, int maxRows) throws Exception {
+        return child(mode, heapMb, maxRows, bigFile);
+    }
+
+    /** As {@link #child(String, String, int, int)}, with every file in {@code bigFiles} its own batch, in order. */
+    private String child(String mode, int heapMb, int maxRows, String... bigFiles) throws Exception {
         TestDatabase.Fixture t = TestDatabase.tenant("import-big", false, true);
         Path storage = Files.createDirectories(dir.resolve("storage-" + t.tenantId()));
         Path mappingFile = dir.resolve("mapping.json");
@@ -326,7 +361,7 @@ class ImportBigFileIT extends IntegrationTest {
         Path units = dir.resolve("fab-units.csv");
         Files.writeString(units, "Unit\r\npiece\r\n");
         String javaBin = Path.of(System.getProperty("java.home"), "bin", "java").toString();
-        List<String> command = List.of(
+        List<String> command = new ArrayList<>(List.of(
                 javaBin,
                 "-Xmx" + heapMb + "m",
                 "-XX:+UseSerialGC",
@@ -345,8 +380,8 @@ class ImportBigFileIT extends IntegrationTest {
                 mappingFile.toString(),
                 mode,
                 "categories=" + categories,
-                "units=" + units,
-                bigFile);
+                "units=" + units));
+        command.addAll(List.of(bigFiles));
         // The child writes to a file, so a full pipe never stalls it and the wait below is a real bound.
         File log = File.createTempFile("import-big-file-", ".log");
         Process child = new ProcessBuilder(command)
@@ -360,6 +395,7 @@ class ImportBigFileIT extends IntegrationTest {
         String output = Files.readString(log.toPath(), StandardCharsets.UTF_8);
         Files.delete(log.toPath());
         String lines = output.lines().filter(l -> l.startsWith("BIGFILE ")).reduce("", (a, b) -> a + b + "\n");
+        String bigFile = bigFiles[bigFiles.length - 1];
         System.out.println("IMPORT BIG FILE " + bigFile.substring(bigFile.lastIndexOf('/') + 1) + " heap " + heapMb
                 + " MB\n" + lines);
         assertThat(finished)

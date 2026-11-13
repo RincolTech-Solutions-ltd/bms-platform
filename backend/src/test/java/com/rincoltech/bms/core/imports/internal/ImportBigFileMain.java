@@ -160,10 +160,13 @@ public final class ImportBigFileMain {
         if (!commit) {
             return true;
         }
+        // The manual ANALYZEs of import_refs the dry run ran (V153): counted at once, even though it rolls back.
+        long analyzed = analyzeCount(ctx, tenant);
         started = System.nanoTime();
         ImportRuns.DryRun dry = as(tenant, () -> runs.dryRun(runId, operator));
         System.out.println("BIGFILE step=dry_run ms=" + millis(started) + " failure="
-                + dry.report().failure() + " previewMatches=" + dry.previewMatches() + heap());
+                + dry.report().failure() + " previewMatches=" + dry.previewMatches() + " analyzed="
+                + (analyzeCount(ctx, tenant) - analyzed) + heap());
         if (dry.report().failure() != null || !dry.previewMatches()) {
             return false;
         }
@@ -229,6 +232,16 @@ public final class ImportBigFileMain {
 
     private static <T> T as(UUID tenant, Supplier<T> work) {
         return TenantContext.callAs(tenant, work);
+    }
+
+    /** The times import_refs was analyzed by hand, as V153's function does (pg_stat_user_tables, outside a tx). */
+    private static long analyzeCount(ConfigurableApplicationContext ctx, UUID tenant) {
+        return as(
+                tenant,
+                () -> ctx.getBean(JdbcClient.class)
+                        .sql("SELECT analyze_count FROM pg_stat_user_tables WHERE relname = 'import_refs'")
+                        .query(Long.class)
+                        .single());
     }
 
     private static long millis(long started) {

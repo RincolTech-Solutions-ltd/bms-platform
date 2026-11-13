@@ -96,14 +96,18 @@ class ImportRunService implements ImportRuns {
     static final long RETRY_AFTER_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
 
     /**
-     * A batch over this many rows is large: it takes {@link #LARGE_KEY} first (the Lead on the review of 887dc57, #900).
+     * A transaction whose batches registered over this many rows is large, counted across a dry run's batches (the Lead
+     * on the review of 3d86afa): it takes {@link #LARGE_KEY} (the Lead on the review of 887dc57, #900).
      * Two large batches of different businesses would each need the statistics the other's ANALYZE holds (V153), and
      * the one left without them falls back to the lookups whose time grows with the square of its rows. Only a large
-     * batch refreshes the statistics, so a small one never holds their lock while a large one needs it (the Lead on the
-     * review of 668c0ec). A small batch keeps the old plans: before V153 a dry run of 25,000 rows took 185 s, so 5,000,
+     * transaction refreshes the statistics, so a small one never holds their lock while a large one needs it (the Lead on
+     * the review of 668c0ec). A small one keeps the old plans: before V153 a dry run of 25,000 rows took 185 s, so 5,000,
      * a twenty-fifth of the square, should take some 7 s (an estimate, SDD 13.14.1).
      */
     static final int LARGE_BATCH_ROWS = 5_000;
+
+    /** The rows the transaction's batches registered so far: a setting local to the transaction (the review of 3d86afa). */
+    static final String REGISTERED = "app.import_registered";
 
     /** The platform's large-batch key: one large batch is written at a time, of any business. */
     static final String LARGE_KEY = "hashtextextended('core.imports.large', 0)";
@@ -1574,18 +1578,17 @@ class ImportRunService implements ImportRuns {
         if ("committed".equals(row.get("status"))) {
             return null;
         }
-        // One large batch at a time on the platform, never a wait: held to the end of the batch's transaction (a dry
-        // run's outer one), and the batch is refused at once when another business's holds it (#900).
-        boolean large = row.get("row_count") instanceof Integer rows && rows > LARGE_BATCH_ROWS;
-        if (large
-                && !jdbc.sql("SELECT pg_try_advisory_xact_lock(" + LARGE_KEY + ")")
-                        .query(Boolean.class)
-                        .single()) {
-            throw new ApiException(
-                    HttpStatus.CONFLICT,
-                    IMPORT_BUSY,
-                    "Import busy",
-                    "Another business's large import is being written; try again in a few minutes.");
+        // Large is counted over the transaction (the Lead on the review of 3d86afa): a dry run's outer one holds every
+        // batch, a commit's holds one. The rows registered by its earlier batches, plus this batch's rows: when they
+        // pass the threshold the key is taken here, before anything is written. Otherwise StatisticsRefresh takes it
+        // once the running total passes the threshold, after the rows so far (the late refusal, SDD 13.14.1).
+        String earlier = jdbc.sql("SELECT coalesce(current_setting('" + REGISTERED + "', true), '')")
+                .query(String.class)
+                .single();
+        long prior = earlier.isEmpty() ? 0 : Long.parseLong(earlier);
+        boolean large = row.get("row_count") instanceof Integer rows && prior + rows > LARGE_BATCH_ROWS;
+        if (large) {
+            takeLargeKey();
         }
         if (!dryRun) {
             stopIfRequested(runId);
@@ -1611,8 +1614,12 @@ class ImportRunService implements ImportRuns {
                 ? "batch " + batch.seq()
                 : RowValidator.shortName((String) row.get("source_filename"));
         RowCheckpoint checkpoint =
-                new RowCheckpoint(runId, batch.id(), writers.source(batch.id()), !dryRun, file, privacy, large);
+                new RowCheckpoint(runId, batch.id(), writers.source(batch.id()), !dryRun, file, privacy, prior, large);
         Map<String, Object> counts = writer.write(runId, batch.id(), batch.seq(), checkpoint);
+        jdbc.sql("SELECT set_config('" + REGISTERED + "', ?, true)")
+                .param(Long.toString(checkpoint.statistics.registered()))
+                .query()
+                .singleRow();
         // No journal but the registered opening journals (Lead ruling 6 on #872): checked at the batch's end, in both.
         refs.requireOnlyOpeningJournals(runId, batch.id());
         CommitReport part = checkpoint.part(counts, (Integer) row.get("row_count"));
@@ -1629,6 +1636,22 @@ class ImportRunService implements ImportRuns {
                         batch.id())
                 .update();
         return part;
+    }
+
+    /**
+     * Takes the platform's large-batch key to the end of the transaction, never waiting: refused with {@code import_busy}
+     * while another large import, of any business, holds it (#900).
+     */
+    private void takeLargeKey() {
+        if (!jdbc.sql("SELECT pg_try_advisory_xact_lock(" + LARGE_KEY + ")")
+                .query(Boolean.class)
+                .single()) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    IMPORT_BUSY,
+                    "Import busy",
+                    "Another large import is being written; try again in a few minutes.");
+        }
     }
 
     /**
@@ -1675,28 +1698,55 @@ class ImportRunService implements ImportRuns {
 
     // JUSTIFICATION-A3: the Lead on the review of 668c0ec (#900) asks the waits proven exactly, with a test clock.
     /**
-     * When a large batch refreshes the statistics of the tables it fills (V153, issue #900). Each time the rows it
-     * registered double, from {@link #STATISTICS_FIRST}, it asks, waiting {@link #FIRST_WAIT_MS}: seven times for 100,000
-     * rows. After a refusal it asks again, waiting only {@link #RETRY_WAIT_MS}, once the rows have doubled again or
-     * {@link #RETRY_AFTER_NANOS} have passed (the Lead on the review of e771a17).
+     * When a transaction refreshes the statistics of the tables its batches fill (V153, issue #900). Nothing happens
+     * until the rows its batches registered pass {@link #LARGE_BATCH_ROWS}: then the large-batch key is taken, unless
+     * the batch took it before writing, and the statistics are refreshed, waiting {@link #FIRST_WAIT_MS}, and again each
+     * time the rows double: five times for 100,000 rows. After a refusal it asks again, waiting only
+     * {@link #RETRY_WAIT_MS}, once the rows have doubled again or {@link #RETRY_AFTER_NANOS} have passed (the Lead on
+     * the reviews of e771a17 and 3d86afa).
      */
     static final class StatisticsRefresh {
 
+        private final Runnable takeKey;
         private final java.util.function.IntPredicate refresh;
         private final java.util.function.LongSupplier clock;
+        private boolean keyed;
         private long registered;
         private long refreshAt = STATISTICS_FIRST;
         private boolean refused;
         private long refusedAt;
 
-        /** {@code refresh} takes the wait in ms and answers whether it refreshed; {@code clock} gives nanoseconds. */
-        StatisticsRefresh(java.util.function.IntPredicate refresh, java.util.function.LongSupplier clock) {
+        /**
+         * {@code prior}: the rows the transaction's earlier batches registered; {@code keyed}: whether it holds the key
+         * already. {@code refresh} takes the wait in ms and answers whether it refreshed; {@code clock} gives
+         * nanoseconds.
+         */
+        StatisticsRefresh(
+                long prior,
+                boolean keyed,
+                Runnable takeKey,
+                java.util.function.IntPredicate refresh,
+                java.util.function.LongSupplier clock) {
+            this.registered = prior;
+            this.keyed = keyed;
+            this.takeKey = takeKey;
             this.refresh = refresh;
             this.clock = clock;
         }
 
+        long registered() {
+            return registered;
+        }
+
         void registered(int n) {
             registered += n;
+            if (registered <= LARGE_BATCH_ROWS) {
+                return;
+            }
+            if (!keyed) {
+                takeKey.run();
+                keyed = true;
+            }
             boolean retry = refused && clock.getAsLong() - refusedAt >= RETRY_AFTER_NANOS;
             if (registered < refreshAt && !retry) {
                 return;
@@ -1727,7 +1777,7 @@ class ImportRunService implements ImportRuns {
         private final CommitReport.Builder part;
         private long rows;
 
-        /** The statistics refresh of a large batch, or null: a small batch never takes their lock (V153). */
+        /** The statistics refresh: no lock is taken until the transaction's rows pass the threshold (V153). */
         private final StatisticsRefresh statistics;
 
         private Map<String, String> policy;
@@ -1739,7 +1789,8 @@ class ImportRunService implements ImportRuns {
                 boolean stops,
                 String file,
                 PreviewService.RunPrivacy privacy,
-                boolean large) {
+                long prior,
+                boolean keyed) {
             this.runId = runId;
             this.batchId = batchId;
             this.source = source;
@@ -1747,7 +1798,8 @@ class ImportRunService implements ImportRuns {
             this.file = file;
             this.privacy = privacy;
             this.part = new CommitReport.Builder(file);
-            this.statistics = large ? new StatisticsRefresh(refs::refreshStatistics, System::nanoTime) : null;
+            this.statistics = new StatisticsRefresh(
+                    prior, keyed, ImportRunService.this::takeLargeKey, refs::refreshStatistics, System::nanoTime);
         }
 
         @Override
@@ -1795,9 +1847,7 @@ class ImportRunService implements ImportRuns {
         }
 
         private void registered(int n) {
-            if (statistics != null) {
-                statistics.registered(n);
-            }
+            statistics.registered(n);
         }
 
         @Override

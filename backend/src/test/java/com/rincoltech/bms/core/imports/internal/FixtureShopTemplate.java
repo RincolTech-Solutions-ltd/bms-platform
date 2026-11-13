@@ -172,8 +172,14 @@ class FixtureShopTemplate implements ImportTemplate {
                 products.closeBatch(inventory);
             }
 
+            private int given;
+
             @Override
             public void row(String entitySet, Map<String, Object> values) {
+                // A test's forecast that fails on the second row it is given: only the run's whole forecast sees two.
+                if (++given == 2 && FAIL_SECOND_ROW) {
+                    values.put("amount", 0L);
+                }
                 if (!"sales".equals(entitySet)) {
                     return;
                 }
@@ -391,6 +397,12 @@ class FixtureShopTemplate implements ImportTemplate {
 
     /** What a test has the fixture's loader do for every batch, or null for nothing; reset after each test. */
     static volatile BatchWriter SCRIPT;
+
+    /**
+     * When set, the forecast changes the second row it is given, which the reconciliation gives unmodifiable: the failure
+     * of a forecast on a row (the review of 3d86afa).
+     */
+    static volatile boolean FAIL_SECOND_ROW;
 
     // ---------------------------------------------------------------------------------------------
     // The receivable decision (issue #133), declared only while a test switches it on.

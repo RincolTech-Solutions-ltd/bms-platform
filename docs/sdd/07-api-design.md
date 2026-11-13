@@ -826,11 +826,12 @@ answer are fixed now: 422 `mapping_invalid` (every problem in `errors`, each wit
 convention of #127 and #128: a code that is also an issue code of the onboarding catalogue (spec section 3.4.1:
 `IMPORT_IN_PROGRESS`, `TENANT_TRADING`, `FILE_TYPE_UNSUPPORTED`, `UPLOAD_DISK_LOW`, and now `TEMPLATE_UNKNOWN` and
 `SOURCE_UNKNOWN`) is written in capitals, so a screen shows the same code in a refusal and in a report; every other code is
-lower case, as elsewhere in the API. Since #900 a dry run or a commit whose batch holds more than 5,000 rows may be answered
-409 `import_busy` ("Another business's large import is being written; try again in a few minutes."): one large batch is
-written at a time on the platform (chapter 13 section 13.14.1 11/16). A refused dry run stores nothing; a refused commit
-stays `committing` and is resumed. The import screens show it as "Another large import is running, try again in a few
-minutes." (`frontend/src/api/imports.ts`).
+lower case, as elsewhere in the API. Since #900 a dry run or a commit whose transaction registers more than 5,000 rows (a dry run's
+across all its batches) may be answered 409 `import_busy` ("Another large import is being written; try again in a few
+minutes."): one large import is written at a time on the platform, of any business (chapter 13 section 13.14.1 11/16).
+A refused dry run stores nothing; a refused commit stays `committing` and is resumed. The import screens show it as
+"Another large import is running, try again in a few minutes." on a dry run, and after a start or resume as "Another
+large import is running. Wait a few minutes, then resume this import." with Resume offered (`frontend/src/api/imports.ts`).
 
 As built (the review queue, #131, FR-IMP-05, chapter 13 section 13.14.1 5/16): the first routes of the pipeline. They take a
 run's and an issue's own ids in place of the planned `/imports/{batch_id}/rows/...` routes, which the operator screens of

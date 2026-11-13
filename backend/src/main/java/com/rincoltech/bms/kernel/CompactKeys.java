@@ -36,8 +36,10 @@ public final class CompactKeys {
      * #900); more keys are taken as ever.
      */
     public CompactKeys(int expected) {
-        // At most a million keys at once (about 40 MB); more are taken as ever (the review of 668c0ec).
-        int keys = Math.min(Math.max(expected, 0), 1 << 20);
+        // At most about a million keys at once: a table of 2^21 slots (8 MB of int, 16 MB of long) and 16 MB of key
+        // bytes,
+        // 40 MB in all; more are taken as ever (the reviews of 668c0ec and 3d86afa).
+        int keys = Math.min(Math.max(expected, 0), (1 << 20) - 1);
         int table = 1 << 3;
         while (table < keys * 2 + 2) {
             table <<= 1;
