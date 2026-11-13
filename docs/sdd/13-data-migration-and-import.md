@@ -1902,7 +1902,9 @@ Now:
   `run_not_open`, the dry run's `run_not_open` and `batch_not_parsed`, the build), and the job is recorded on the run with
   the backend pid of the claim's session (V154: `job_kind`, `job_by`, `job_started_at`, `job_finished_at`,
   `job_failure_code`, `job_pid`). Only then does the work go on on a virtual thread (`ImportJobs`), bound to the business
-  and to the person who started it, so its audit rows name them as before. The work holds the claim until it ends and
+  through `core.jobs` (`TenantJobs.callAs`, as the report runner binds a run's business; only `core.jobs` and the
+  platform console may act as a tenant, `SecurityArchitectureTest`). No person is bound on that thread, so the work's
+  audit rows are the system's; the request audits `core.import_run.job_started` with the kind and the person. The work holds the claim until it ends and
   stamps how it ended: done, or failed with the refusal's code (`import_busy`, `IMPORT_IN_PROGRESS`, `batch_changed`,
   `review_changed`, `run_changed`, `TENANT_TRADING`, ...) or `failed` for any other error, never a message. The dry run
   is the same code as before under that claim (`dryRunClaimed`); its time limit, the batch timeout, the large-import key
@@ -1926,7 +1928,7 @@ Now:
   `ImportBigFileIT`'s child starts both steps through `ImportJobs` and polls the run, as the screen does; the 80 s edge
   budget is gone, and every dry run is held to its 15 minute limit and every commit to the 10 minute batch timeout
   (chapter 15 section 15.7).
-- **Tests.** `ImportJobsIT` (202 at once and the polled run done, its audit row naming the person; a run in no state to
+- **Tests.** `ImportJobsIT` (202 at once and the polled run done, the start audited with the person and the validation as the system; a run in no state to
   check refused in the request; a dry run refused `import_busy` while another large import holds the key, stored on the
   run with nothing else stored; one job of a business at a time, a second check, dry run or commit refused while one
   runs; a job whose session died reads `interrupted` and a new one starts), `ImportPurgeIT` (the two code columns),

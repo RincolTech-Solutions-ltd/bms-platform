@@ -1,15 +1,13 @@
 package com.rincoltech.bms.core.imports.internal;
 
 import com.rincoltech.bms.core.imports.ImportRuns;
+import com.rincoltech.bms.core.jobs.TenantJobs;
 import com.rincoltech.bms.kernel.ApiException;
-import com.rincoltech.bms.kernel.CurrentPrincipal;
-import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.TenantContext;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -25,7 +23,7 @@ import org.springframework.stereotype.Component;
  * the request the business's commit loop is claimed, so a second check, dry run, commit or resume of the business is
  * refused at once with {@code IMPORT_IN_PROGRESS}, the run's state is checked and the job is recorded on the run with the
  * backend pid of the claim's session ({@link ImportRunService#startJob}); only then does the work go on on its own virtual
- * thread, bound to the business and the person who started it, holding the claim until it ends. It records how it ended:
+ * thread, bound to the business, holding the claim until it ends. It records how it ended:
  * done, or failed with the refusal's code ({@code import_busy} and the rest), or {@code failed} for any other error, never a
  * message. A process that dies leaves the job unfinished and its claim gone, which every read of the run shows as failed,
  * {@code interrupted} ({@link #read}); the next check or dry run starts again.
@@ -50,10 +48,12 @@ class ImportJobs {
 
     private final ImportRunService runs;
     private final ValidationService validation;
+    private final TenantJobs tenantJobs;
 
-    ImportJobs(ImportRunService runs, ValidationService validation) {
+    ImportJobs(ImportRunService runs, ValidationService validation, TenantJobs tenantJobs) {
         this.runs = runs;
         this.validation = validation;
+        this.tenantJobs = tenantJobs;
     }
 
     /** Starts the check of a run (the validation of every file) in the background; answers the run as it stands. */
@@ -69,16 +69,17 @@ class ImportJobs {
     }
 
     /**
-     * Runs the work on its own virtual thread, bound to the request's business and person, so the audit rows it writes
-     * name who started it, as they did when the request waited for it. A failure is logged by run id and kind only.
+     * Runs the work on its own virtual thread, bound to the request's business through the job runner of {@code core.jobs}
+     * ({@link TenantJobs#callAs}, as the report runner binds a queued run's business), the one module besides the platform
+     * console that may act as a tenant ({@code SecurityArchitectureTest}). The business is the one tenancy bound to the
+     * request, never a request's input. No person is bound: the audit rows the work writes are the system's, and the
+     * request's own row ({@code core.import_run.job_started}) names who started it. A failure is logged by run id and kind.
      */
-    private static void background(UUID runId, String kind, Runnable work) {
+    private void background(UUID runId, String kind, Runnable work) {
         UUID tenant = TenantContext.require();
-        Optional<Principal> principal = CurrentPrincipal.get();
         Thread.ofVirtual().name("import-" + kind + "-" + runId).start(() -> {
-            principal.ifPresent(CurrentPrincipal::set);
             try {
-                TenantContext.callAs(tenant, () -> {
+                tenantJobs.callAs(tenant, () -> {
                     work.run();
                     return null;
                 });
@@ -88,8 +89,6 @@ class ImportJobs {
                         kind,
                         runId,
                         e.getClass().getSimpleName());
-            } finally {
-                CurrentPrincipal.clear();
             }
         });
     }

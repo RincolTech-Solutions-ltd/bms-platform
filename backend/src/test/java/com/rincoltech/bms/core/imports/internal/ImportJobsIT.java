@@ -168,14 +168,15 @@ class ImportJobsIT extends IntegrationTest {
                 .as("the check moved it to review")
                 .isEqualTo("in_review");
         assertThat(run.get("job").get("state").asString()).isEqualTo("done");
-        // The background thread is bound to the person who started it: the audit row names them, as before #922.
+        // The request's audit row names who started it; the work, on its own thread, audits as the system.
         assertThat(TestDatabase.owner()
-                        .sql("SELECT actor_user_id FROM audit_log WHERE tenant_id = ? AND action ="
-                                + " 'core.import_run.validated' AND entity_id = ?")
+                        .sql("SELECT actor_kind || ':' || coalesce(actor_user_id::text, '-') FROM audit_log"
+                                + " WHERE tenant_id = ? AND entity_id = ? AND action IN"
+                                + " ('core.import_run.job_started', 'core.import_run.validated') ORDER BY created_at")
                         .params(t.tenantId(), runId)
-                        .query(UUID.class)
+                        .query(String.class)
                         .list())
-                .containsExactly(staff);
+                .containsExactly("staff:" + staff, "system:-");
 
         ResponseEntity<JsonNode> dry = call(HttpMethod.POST, "/api/v1/imports/runs/" + runId + "/dry-run");
         assertThat(dry.getStatusCode()).as("%s", dry.getBody()).isEqualTo(HttpStatus.ACCEPTED);

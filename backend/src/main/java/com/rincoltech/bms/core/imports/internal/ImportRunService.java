@@ -881,6 +881,8 @@ class ImportRunService implements ImportRuns {
                                        job_failure_code = NULL, job_pid = ?
                                  WHERE id = ?
                                 """).params(kind, by, pid, runId).update();
+                // Who started it, in the request: the work runs as the system on its own thread (#922).
+                audit(runId, "core.import_run.job_started", Map.of(), Map.of("kind", kind));
             });
         } catch (RuntimeException e) {
             claim.close();
