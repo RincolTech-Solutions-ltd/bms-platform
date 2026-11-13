@@ -1099,9 +1099,8 @@ class ImportPreviewIT extends IntegrationTest {
     /**
      * A batch whose registered rows pass the threshold, and whose statistics refresh is refused while something else
      * holds {@code import_refs}' statistics lock for the whole batch, still writes, and waits 2 s once and 100 ms at each
-     * later doubling: 21,000 rows registered a page at a time ask at 5,250, 10,500 and 21,000, so the refused run waits
-     * at least 2.2 s and takes at most 4.5 s longer than without the lock (the exact waits:
-     * {@link StatisticsRefreshTest}), where 2 s at each would take 6 s longer.
+     * later doubling: 21,000 rows registered a page at a time ask at 5,250, 10,500 and 21,000. Without the lock those
+     * are three ANALYZEs; with it, none, and at least 2.2 s of waits (the exact waits: {@link StatisticsRefreshTest}).
      */
     @Test
     void aRefusedStatisticsRefreshIsAskedAgainRarelyAndBriefly() throws Exception {
@@ -1120,29 +1119,38 @@ class ImportPreviewIT extends IntegrationTest {
             }
             return Map.of();
         });
-        long baseline = System.nanoTime();
+        // The refreshes counted directly (the review of 3d86afa): a manual ANALYZE of import_refs counts at once, even
+        // in a dry run that rolls back, and autovacuum counts apart. Times would measure the plans as well: a refused
+        // run keeps the slow ones, 17 s longer at 21,000 rows on CI.
+        long before = analyzeCount();
         assertThat(as(t, () -> runs.dryRun(run, operator)).report().failure()).isNull();
-        baseline = System.nanoTime() - baseline;
+        assertThat(analyzeCount() - before)
+                .as("granted at 5,250, 10,500 and 21,000")
+                .isEqualTo(3);
         try (java.sql.Connection held = TestDatabase.ownerDataSource().getConnection()) {
             held.setAutoCommit(false);
             try (java.sql.Statement s = held.createStatement()) {
                 s.execute("LOCK TABLE import_refs IN SHARE UPDATE EXCLUSIVE MODE");
             }
+            before = analyzeCount();
             long started = System.nanoTime();
             assertThat(as(t, () -> runs.dryRun(run, operator)).report().failure())
+                    .as("a refused refresh never stops the batch")
                     .isNull();
-            long refused = System.nanoTime() - started;
-            // The waits are real: 2 s, 100 ms and 100 ms at least. The run without the lock does up to three ANALYZEs
-            // the refused one does not (1.8 s on CI's shared database), so the lower bound is on the refused run alone
-            // and the upper one on its difference (the review of 3d86afa).
-            assertThat(TimeUnit.NANOSECONDS.toMillis(refused))
-                    .as("waited 2 s once and 100 ms at two doublings")
-                    .isGreaterThanOrEqualTo(2_200L);
-            assertThat(TimeUnit.NANOSECONDS.toMillis(refused - baseline))
-                    .as("never 2 s at each doubling: at most 4.5 s more than without the lock")
-                    .isLessThan(4_500L);
+            long refused = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+            assertThat(analyzeCount() - before).as("every refresh refused").isZero();
+            assertThat(refused).as("the waits are real: 2 s, then 100 ms twice").isGreaterThanOrEqualTo(2_200L);
+            assertThat(refused).as("never stuck on the lock").isLessThan(120_000L);
             held.rollback();
         }
+    }
+
+    /** The times import_refs was analyzed by hand, as V153's function does. */
+    private static long analyzeCount() {
+        return TestDatabase.owner()
+                .sql("SELECT analyze_count FROM pg_stat_user_tables WHERE relname = 'import_refs'")
+                .query(Long.class)
+                .single();
     }
 
     /** Runs {@code work} while another business's large batch holds the platform's large-batch key in its transaction. */
