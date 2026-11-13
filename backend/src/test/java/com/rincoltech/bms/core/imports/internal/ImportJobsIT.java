@@ -272,6 +272,26 @@ class ImportJobsIT extends IntegrationTest {
      * A job whose server died (its connection, and with it the loop key, gone) is never left running: the run reads failed,
      * {@code interrupted}, and a new check or dry run starts at once.
      */
+    /**
+     * A job whose work throws an {@link Error} (running out of memory, say) is stamped {@code failed} before its claim is
+     * given back, never {@code interrupted}, which says the server restarted (the Lead on the review of 3d86d31, NH1).
+     */
+    @Test
+    void aJobThatThrowsAnErrorIsStampedFailedNotInterrupted() throws Exception {
+        UUID runId = emptyRun();
+        FixtureShopTemplate.SCRIPT = (r, b, s, c) -> {
+            throw new AssertionError("a fabricated error of the work");
+        };
+        as(() -> jobs.startDryRun(runId, staff));
+        ImportRuns.Job job = ended(runId);
+        assertThat(job.state()).isEqualTo("failed");
+        assertThat(job.failureCode()).isEqualTo(ImportJobs.FAILED);
+        assertThat(job.finishedAt()).as("stamped, not read from a lost lock").isNotNull();
+        FixtureShopTemplate.SCRIPT = (r, b, s, c) -> Map.of();
+        as(() -> jobs.startDryRun(runId, staff));
+        assertThat(ended(runId).state()).as("the claim was given back").isEqualTo("done");
+    }
+
     // JUSTIFICATION-A3: the review of 3d86d31 (nice-to-have 2) asks the lost claim's probe proven; a new case.
     /**
      * A check whose claim was lost before it writes (the probe of the review of 3d86d31) writes nothing: the run stays
