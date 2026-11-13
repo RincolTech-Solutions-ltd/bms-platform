@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, createLazyRoute, getRouteApi } from '@tanstack/react-router';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
 import {
   MAPPINGS_LISTED,
   askApproval,
@@ -35,7 +35,7 @@ import { showDate } from '../../../app/ui/PeriodPicker';
 import { Sheet } from '../../../app/ui/Sheet';
 import { Skeleton } from '../../../app/ui/Skeleton';
 import { useStaff } from '../context';
-import { mayOpen, nextStep, quantity, stateWords, type NextStep } from './pipeline';
+import { jobLine, jobRunning, mayOpen, nextStep, quantity, stateWords, type NextStep } from './pipeline';
 import { RUNS_KEY } from './runs';
 import { StageProgress } from './stage-progress';
 
@@ -61,9 +61,10 @@ export function ImportRunScreen({ runId }: { runId: string }) {
     queryKey: runKey(runId),
     queryFn: () => importRun(runId),
     enabled: allowed,
-    // While it is being brought in, the page follows it by itself.
-    refetchInterval: (q) => (q.state.data?.status === 'committing' ? 5000 : false),
+    // While it is being brought in, or its check or trial run runs in the background (issue #922), the page follows it by itself.
+    refetchInterval: (q) => (q.state.data?.status === 'committing' ? 5000 : jobRunning(q.state.data) ? 2000 : false),
   });
+  const running = jobRunning(run.data);
   const status = run.data?.status;
   const files = useQuery({ queryKey: filesKey(runId), queryFn: () => importFiles(runId), enabled: allowed });
   const metrics = useQuery({ queryKey: metricsKey(runId), queryFn: () => runMetrics(runId), enabled: allowed });
@@ -80,15 +81,23 @@ export function ImportRunScreen({ runId }: { runId: string }) {
       [runKey(runId), filesKey(runId), metricsKey(runId), dryRunKey(runId), RUNS_KEY].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
     );
   };
+  // When the background job ends, what it found is read again; a reload while it runs finds it running and follows it the same.
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    if (wasRunning.current && !running) void refresh();
+    wasRunning.current = running;
+  });
+  // The check and the trial run answer at once with the run and its job (202, issue #922); the page then follows the job.
+  const started = (r: ImportRun) => queryClient.setQueryData(runKey(runId), r);
   const check = useMutation({
-    meta: { success: (r: { blocking?: number; warning?: number }) => `Files checked: ${(r.blocking ?? 0) + (r.warning ?? 0)} problems to look at` },
+    meta: { success: 'Check started' },
     mutationFn: () => checkFiles(runId),
-    onSuccess: refresh,
+    onSuccess: started,
   });
   const trial = useMutation({
-    meta: { success: 'Trial run finished, nothing was written' },
+    meta: { success: 'Trial run started, nothing is written' },
     mutationFn: () => tryImport(runId),
-    onSuccess: refresh,
+    onSuccess: started,
   });
   const ready = useMutation({ meta: { success: 'Import marked ready for approval' }, mutationFn: () => markReady(runId), onSuccess: refresh });
   // toast-exempt: waits for approval: the request goes to Approvals, and the screen says a second person approves it
@@ -125,14 +134,20 @@ export function ImportRunScreen({ runId }: { runId: string }) {
   const open = openProblems(metrics.data);
   const next = nextStep(r, fileList.length, open, dryRun.data ?? null);
   const editable = r.status === 'draft' || r.status === 'uploaded' || r.status === 'in_review';
-  const busy = check.isPending || trial.isPending || ready.isPending || approval.isPending;
+  const busy = running || check.isPending || trial.isPending || ready.isPending || approval.isPending;
   const failed = [check, trial, ready, approval].find((m) => m.isError)?.error;
+  const job = jobLine(r.job);
 
   return (
     <main className="stack">
       <h1>{stateWords(r.status)}</h1>
       <Hint tour="import-run-intro">Each step must be finished before the next. Nothing enters your books until a second person approves.</Hint>
       <StageProgress status={r.status} />
+      {job && (
+        <p role={job.failed ? 'alert' : 'status'} className={`alert ${job.failed ? 'alert-danger' : 'alert-info'}`}>
+          {job.words}
+        </p>
+      )}
       {approval.isSuccess && r.status === 'ready' && !r.commit_approved && (
         <p role="status" className="alert alert-info">
           Sent to Approvals. A second person who may approve imports approves it there.

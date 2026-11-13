@@ -41,7 +41,7 @@ public record ImportRunView(
         Instant committedAt,
         boolean fabricated,
 
-        @Schema(description = "The last background check or dry run (issue #922); null while none was started")
+        // The last background check or dry run (issue #922); null while none was started.
         ImportRuns.Job job) {
 
     public static ImportRunView of(ImportRuns.Run r) {

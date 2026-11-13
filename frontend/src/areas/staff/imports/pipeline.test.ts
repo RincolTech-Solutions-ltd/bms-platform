@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { DryRun, ImportIssue } from '../../../api/imports';
+import { IMPORT_BUSY_MESSAGE, type DryRun, type ImportIssue } from '../../../api/imports';
 import {
   IMPORT_ROUTE_PERMISSION,
   bulkWays,
@@ -7,6 +7,8 @@ import {
   currentStage,
   groupByCode,
   holding,
+  jobLine,
+  jobRunning,
   mayOpen,
   nextStep,
   openOfKind,
@@ -141,5 +143,28 @@ describe('route permissions', () => {
   it('groups quantities by thousands and never rounds', () => {
     expect(quantity('1234567.125')).toBe('1,234,567.125');
     expect(quantity(-1500)).toBe('-1,500');
+  });
+});
+
+// JUSTIFICATION-A3: issue #922 adds the background job's words; their cases need a block of their own.
+describe('the background job in plain words (issue #922)', () => {
+  const failed = (kind: string, failure_code?: string) => jobLine({ kind, state: 'failed', started_at: '2026-11-13T09:05:00Z', failure_code });
+
+  it('says nothing once done or while none was started, and is running only while it runs', () => {
+    expect(jobLine({ kind: 'check', state: 'done' })).toBeNull();
+    expect(jobLine(undefined)).toBeNull();
+    expect(jobRunning({ job: { kind: 'check', state: 'running' } })).toBe(true);
+    expect(jobRunning({ job: { kind: 'check', state: 'failed' } })).toBe(false);
+    expect(jobLine({ kind: 'dry_run', state: 'running', started_at: '2026-11-13T09:05:00Z' })).toEqual({
+      failed: false,
+      words: expect.stringMatching(/^Trying the import, nothing is written, since \d\d:\d\d\. /),
+    });
+  });
+
+  it('words each failure, naming the check or the trial run', () => {
+    expect(failed('check', 'interrupted')?.words).toBe('The check stopped because the server restarted. Nothing was written. Start it again.');
+    expect(failed('dry_run', 'import_busy')?.words).toBe(IMPORT_BUSY_MESSAGE);
+    expect(failed('dry_run', 'run_changed')?.words).toBe('A file or a fix changed while the trial run ran. Start it again.');
+    expect(failed('check', 'failed')).toEqual({ failed: true, words: 'The check stopped before it finished. Nothing was written. Try again, or ask Rincol Tech.' });
   });
 });

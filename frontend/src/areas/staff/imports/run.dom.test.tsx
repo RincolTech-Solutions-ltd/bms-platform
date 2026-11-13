@@ -4,7 +4,7 @@ import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanst
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../../api/client';
-import type { Certificate, ImportRun, MappingChoice, RunMetrics } from '../../../api/imports';
+import { IMPORT_BUSY_MESSAGE, type Certificate, type ImportRun, type MappingChoice, type RunMetrics } from '../../../api/imports';
 import { mockMe } from '../../../api/retail-mock';
 import { router as appRouter } from '../../../app/router';
 import { StaffContext } from '../context';
@@ -22,6 +22,9 @@ const saved: string[] = [];
 const uploads: string[] = [];
 const layout = (n: number): MappingChoice => ({ id: `m-${n}`, name: `test-shop-${n}`, version: 1, sources: [{ key: 'items', file: 'items.csv', entity_set: 'retail_items' }] });
 let layouts: MappingChoice[] = [];
+let metricsReads = 0;
+/** The run as the server answers a POST of the check or the trial run (202, issue #922): its job running. */
+const started = (kind: string): ImportRun => ({ ...run, job: { kind, state: 'running', started_at: '2026-11-13T09:05:00Z' } });
 
 vi.mock('../../../api/imports', async (original) => {
   const real = await original<typeof import('../../../api/imports')>();
@@ -29,7 +32,12 @@ vi.mock('../../../api/imports', async (original) => {
     ...real,
     importRun: () => Promise.resolve(run),
     importFiles: () => Promise.resolve([{ id: 'b-1', seq: 1, status: 'committed', file_name: 'test-items.csv', row_count: 1200 }]),
-    runMetrics: () => Promise.resolve(metrics),
+    runMetrics: () => {
+      metricsReads += 1;
+      return Promise.resolve(metrics);
+    },
+    checkFiles: () => Promise.resolve(started('check')),
+    tryImport: () => Promise.resolve(started('dry_run')),
     dryRunOf: () => Promise.resolve({ at: '2026-11-08T08:00:00Z', current: true, preview_matches: true, sources: [] }),
     certificateOf: () => Promise.resolve(certificate),
     askApproval: () => {
@@ -79,6 +87,50 @@ beforeEach(() => {
   saved.length = 0;
   uploads.length = 0;
   layouts = [layout(1), layout(2)];
+  metricsReads = 0;
+});
+
+// JUSTIFICATION-A3: issue #922 asks the polling states tested: running, done, failed, busy and a reload.
+// Issue #922: the check and the trial run answer at once and run in the background; the page polls the run and says how it goes.
+describe('the check and the trial run in the background', () => {
+  const job = () => screen.findByText(/Checking your files|Trying the import|stopped|Another large import/);
+
+  it('starts the check, says it runs, and once the polled run says done reads what it found', async () => {
+    run = { id: 'run-3', status: 'uploaded', version: 2 };
+    metrics = { ...metrics, status: 'uploaded' };
+    show(importer);
+    fireEvent.click(await screen.findByRole('button', { name: 'Check the files' }));
+    expect((await job()).textContent).toMatch(/^Checking your files, since \d\d:\d\d\. A large file takes a few minutes/);
+    expect(screen.getByRole('button', { name: 'Check the files' }).getAttribute('aria-busy')).toBe('true');
+    const before = metricsReads;
+    run = { id: 'run-3', status: 'in_review', version: 3, job: { kind: 'check', state: 'done', started_at: '2026-11-13T09:05:00Z', finished_at: '2026-11-13T09:09:00Z' } };
+    await waitFor(() => expect(screen.queryByText(/Checking your files/)).toBeNull(), { timeout: 5000 });
+    await waitFor(() => expect(metricsReads).toBeGreaterThan(before));
+    expect(await screen.findByRole('heading', { name: 'Being checked' })).toBeTruthy();
+  });
+
+  it('after a reload finds the trial run still running, says so and offers no step until it ends', async () => {
+    run = { id: 'run-3', status: 'in_review', version: 4, job: { kind: 'dry_run', state: 'running', started_at: '2026-11-13T09:05:00Z' } };
+    metrics = { ...metrics, status: 'in_review' };
+    show(importer);
+    expect((await job()).textContent).toMatch(/^Trying the import, nothing is written, since \d\d:\d\d\./);
+    expect((await screen.findByRole('button', { name: 'Mark it ready' })).getAttribute('aria-busy')).toBe('true');
+  });
+
+  it('says the server restarted when the job was interrupted, and lets it start again', async () => {
+    run = { id: 'run-3', status: 'uploaded', version: 2, job: { kind: 'check', state: 'failed', started_at: '2026-11-13T09:05:00Z', failure_code: 'interrupted' } };
+    metrics = { ...metrics, status: 'uploaded' };
+    show(importer);
+    expect((await screen.findByRole('alert')).textContent).toBe('The check stopped because the server restarted. Nothing was written. Start it again.');
+    expect(screen.getByRole('button', { name: 'Check the files' }).getAttribute('aria-busy')).not.toBe('true');
+  });
+
+  it('says another large import is running when the trial run was refused import_busy', async () => {
+    run = { id: 'run-3', status: 'in_review', version: 4, job: { kind: 'dry_run', state: 'failed', started_at: '2026-11-13T09:05:00Z', finished_at: '2026-11-13T09:05:30Z', failure_code: 'import_busy' } };
+    metrics = { ...metrics, status: 'in_review' };
+    show(importer);
+    expect((await screen.findByRole('alert')).textContent).toBe(IMPORT_BUSY_MESSAGE);
+  });
 });
 
 // JUSTIFICATION-A3: issue #897 item 2 and 4 need their own cases; the upload sheet had none.
