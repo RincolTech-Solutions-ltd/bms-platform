@@ -165,7 +165,8 @@ class ImportReconciliationIT extends IntegrationTest {
         CommitApproval.note = CommitApproval.NOTE;
         FixtureShopTemplate.SLOW_BOOKS = false;
         FixtureShopTemplate.FAIL_SECOND_ROW = false;
-        ReconciliationService.signOffTimeout = "60s";
+        ReconciliationService.signOffTimeout = "10min";
+        FixtureShopTemplate.SLOW_BOOKS_SECONDS = 1;
     }
 
     /** Rows a test adds to the end of the golden till roll, in its columns; none by default. */
@@ -739,6 +740,8 @@ class ImportReconciliationIT extends IntegrationTest {
         ResponseEntity<JsonNode> refused = signOff(t, run, r, allSections(r), "Fabricated Signer", today(t));
         assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(refused.getBody().get("code").asString()).isEqualTo("unitemised_difference");
+        // Refused by the job (issue #874): the request answered 202 and the job stamped the refusal's code.
+        assertThat(refused.getBody().get("job").get("failure_code").asString()).isEqualTo("unitemised_difference");
         assertThat(status(run)).isEqualTo("committed");
         assertThat(signoffs(run)).isZero();
 
@@ -837,7 +840,55 @@ class ImportReconciliationIT extends IntegrationTest {
         body.put("sections", sections);
         body.put("name", name);
         body.put("date", date.toString());
-        return send(f, admin, ADMIN, HttpMethod.POST, "/api/v1/imports/runs/" + run + "/sign-off", body);
+        ResponseEntity<JsonNode> started =
+                send(f, admin, ADMIN, HttpMethod.POST, "/api/v1/imports/runs/" + run + "/sign-off", body);
+        if (!started.getStatusCode().equals(HttpStatus.ACCEPTED)) {
+            // Refused in the request: the typed name, the date, the run and its state.
+            return started;
+        }
+        assertThat(started.getBody().get("job").get("kind").asString()).isEqualTo("sign_off");
+        return signOffOutcome(f, run);
+    }
+
+    // JUSTIFICATION-A3: issue #874 moves the sign-off to a job; its tests read the outcome as the screen does.
+    /**
+     * Polls the reconciliation, as the screen does, until the sign-off job ends and its claim is given back (so the next
+     * call is never refused IMPORT_IN_PROGRESS by a job that is ending); answers the reconciliation with 200 once signed,
+     * or, when the job refused, the reconciliation as it stands with the refusal's {@code code}, as 409.
+     */
+    ResponseEntity<JsonNode> signOffOutcome(TestDatabase.Fixture f, UUID run) {
+        String path = "/api/v1/imports/runs/" + run + "/reconciliation";
+        long end = System.nanoTime() + java.util.concurrent.TimeUnit.MINUTES.toNanos(3);
+        while (System.nanoTime() < end) {
+            JsonNode read = send(f, admin, ADMIN, HttpMethod.GET, path, null).getBody();
+            JsonNode job = read.get("job");
+            if (!"running".equals(job.get("state").asString()) && !jobLockHeld(run)) {
+                if ("done".equals(job.get("state").asString())) {
+                    return ResponseEntity.ok(read);
+                }
+                tools.jackson.databind.node.ObjectNode refused =
+                        (tools.jackson.databind.node.ObjectNode) read.deepCopy();
+                refused.put("code", job.get("failure_code").asString());
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(refused);
+            }
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError(e);
+            }
+        }
+        throw new AssertionError("the sign-off of run " + run + " still runs after three minutes");
+    }
+
+    /** Whether a session still holds the token lock of the run's job (V154). */
+    boolean jobLockHeld(UUID run) {
+        return TestDatabase.owner().sql("""
+                        SELECT EXISTS (SELECT 1 FROM pg_locks l, import_runs r
+                                        WHERE r.id = ? AND l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
+                                          AND ((l.classid::bigint << 32) | l.objid::bigint)
+                                              = hashtextextended('core.imports.job:' || r.job_token::text, 0))
+                        """).param(run).query(Boolean.class).single();
     }
 
     static List<String> allSections(Report r) {
@@ -942,6 +993,22 @@ class ImportReconciliationIT extends IntegrationTest {
                 .list();
         assertThat(audits).hasSize(1);
         assertThat(audits.getFirst()).contains(again.sha256()).doesNotContain("Fabricated Signer");
+        // The request records the signer's intent in the job's audit row, under the signer's name as actor, never the
+        // typed name; no audit row of the business holds it (issue #874).
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT actor_user_id::text || ' ' || data::text FROM audit_log WHERE tenant_id = ?"
+                                + " AND action = 'core.import_run.job_started' ORDER BY created_at DESC LIMIT 1")
+                        .param(t.tenantId())
+                        .query(String.class)
+                        .single())
+                .contains(admin.toString(), "sign_off", again.id().toString(), again.sha256(), today(t).toString());
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND data::text LIKE '%Fabricated Signer%'")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isZero();
 
         // Signed once: no second sign-off, no new reconciliation, and the signed one is the newest for good.
         assertThat(code(signOff(t, run, again, allSections(again), "Fabricated Signer", today(t))))
@@ -1118,9 +1185,10 @@ class ImportReconciliationIT extends IntegrationTest {
         assertThat(signoffs(run)).isZero();
         // What it measured is stored as the next version, named in the refusal, so the signer reads the books as they
         // are, never the same version again (review of 1ea73e5): here the extra unit is a difference nothing explains.
+        // Refused by the job (issue #874): the reconciliation read with its outcome is already the next version.
         Report next = as(t, () -> reconciliation.latest(run)).orElseThrow();
-        assertThat(refused.getBody().get("reconciliation_id").asString())
-                .isEqualTo(next.id().toString());
+        assertThat(refused.getBody().get("job").get("failure_code").asString()).isEqualTo("reconciliation_changed");
+        assertThat(refused.getBody().get("id").asString()).isEqualTo(next.id().toString());
         assertThat(next.version()).isEqualTo(again.version() + 1);
         assertThat(next.sha256()).isNotEqualTo(again.sha256());
         assertThat(check(next, "stock_quantity", "HQ FAB-900").system()).isEqualTo("2.5");
@@ -1166,23 +1234,191 @@ class ImportReconciliationIT extends IntegrationTest {
         assertThat(after.sha256()).isEqualTo(read.sha256());
     }
 
+    // JUSTIFICATION-A3: issue #874's acceptance test: the measure forced past the request's limit, signed through the
+    // job.
+    /**
+     * A run whose books take longer to read than a request may last: the request's limit, the edge's 100 seconds in
+     * production, is shortened here to a client that gives up after {@value #REQUEST_LIMIT_SECONDS} seconds, and the books
+     * take {@value #BOOKS_SECONDS} (review of 03e9515, point 8: no 61 seconds of sleep). The request answers 202 within
+     * that limit with the sign-off pending, the screen's poll reads it pending, and the job, with a batch's limit, measures
+     * again under the run's lock and signs.
+     */
+    @Test
+    void aMeasurePastTheRequestLimitSignsThroughTheJob() throws Exception {
+        UUID run = committedGoldenRun(null);
+        Report r = as(t, () -> reconciliation.latest(run)).orElseThrow();
+        FixtureShopTemplate.SLOW_BOOKS = true;
+        FixtureShopTemplate.SLOW_BOOKS_SECONDS = BOOKS_SECONDS;
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("reconciliation_id", r.id());
+        body.put("sha256", r.sha256());
+        body.put("sections", allSections(r));
+        body.put("name", "Fabricated Signer");
+        body.put("date", today(t).toString());
+        tools.jackson.databind.json.JsonMapper json =
+                tools.jackson.databind.json.JsonMapper.builder().build();
+        java.net.http.HttpRequest.Builder post = java.net.http.HttpRequest.newBuilder(
+                        java.net.URI.create(http.getRootUri() + "/api/v1/imports/runs/" + run + "/sign-off"))
+                .timeout(java.time.Duration.ofSeconds(REQUEST_LIMIT_SECONDS))
+                .POST(java.net.http.HttpRequest.BodyPublishers.ofString(json.writeValueAsString(body)))
+                .header("X-Tenant", t.slug())
+                .header("X-Dev-User-Id", admin.toString())
+                .header("X-Dev-Permissions", ADMIN)
+                .header("X-Dev-Branch-Ids", "*")
+                .header("Content-Type", MediaType.APPLICATION_JSON_VALUE);
+        java.net.http.HttpResponse<String> answer;
+        try (java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient()) {
+            // Throws HttpTimeoutException should the request wait for the measure.
+            answer = client.send(post.build(), java.net.http.HttpResponse.BodyHandlers.ofString());
+        }
+
+        assertThat(answer.statusCode()).as(answer.body()).isEqualTo(202);
+        JsonNode accepted = json.readTree(answer.body());
+        assertThat(accepted.get("job").get("state").asString()).isEqualTo("running");
+        JsonNode notYet = accepted.get("signed");
+        assertThat(notYet == null || notYet.isNull()).as("not signed yet").isTrue();
+        // Pending, as the screen's poll and the list read it, after a reload too: nothing is signed yet.
+        JsonNode polled = send(t, admin, ADMIN, HttpMethod.GET, "/api/v1/imports/runs/" + run + "/reconciliation", null)
+                .getBody();
+        assertThat(polled.get("job").get("kind").asString()).isEqualTo("sign_off");
+        assertThat(polled.get("job").get("state").asString()).isEqualTo("running");
+        JsonNode listed = send(t, admin, ADMIN, HttpMethod.GET, "/api/v1/imports/sign-off", null)
+                .getBody();
+        assertThat(listed.get("items").get(0).get("job").get("state").asString())
+                .isEqualTo("running");
+        assertThat(status(run)).isEqualTo("committed");
+        // A second sign-off meanwhile is refused at once: the job holds the business's import loop.
+        assertThat(code(send(t, admin, ADMIN, HttpMethod.POST, "/api/v1/imports/runs/" + run + "/sign-off", body)))
+                .isEqualTo("IMPORT_IN_PROGRESS");
+        // A remake meanwhile waits for the run's lock 5 seconds at most, then says so (review of 03e9515, point 3).
+        try {
+            Thread.sleep(2_000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError(e);
+        }
+        long remakeStarted = System.nanoTime();
+        assertThat(code(send(
+                        t, admin, ADMIN, HttpMethod.POST, "/api/v1/imports/runs/" + run + "/reconciliation", null)))
+                .isEqualTo("IMPORT_IN_PROGRESS");
+        assertThat((System.nanoTime() - remakeStarted) / 1_000_000).isLessThan(30_000);
+
+        ResponseEntity<JsonNode> signed = signOffOutcome(t, run);
+        assertThat(signed.getStatusCode()).as("%s", signed.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(signed.getBody().get("signed").get("signed_name").asString()).isEqualTo("Fabricated Signer");
+        assertThat(signed.getBody().get("id").asString()).isEqualTo(r.id().toString());
+        assertThat(status(run)).isEqualTo("signed_off");
+        assertThat(signoffs(run)).isOne();
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT job_finished_at - job_started_at > make_interval(secs => ?) FROM import_runs"
+                                + " WHERE id = ?")
+                        .params(BOOKS_SECONDS, run)
+                        .query(Boolean.class)
+                        .single())
+                .as("the job measured past the request's limit")
+                .isTrue();
+    }
+
+    /** The request's limit in the test above, shortened from the edge's 100 seconds. */
+    static final int REQUEST_LIMIT_SECONDS = 3;
+
+    /**
+     * How long the books take in the test above: past the request's limit, and past the remake's 5 second wait for the
+     * run's lock after a 2 second pause.
+     */
+    static final int BOOKS_SECONDS = 12;
+
+    // JUSTIFICATION-A3: must-fix 1 of the review of 03e9515: the sign-off job whose claim is lost mid-measure.
+    /**
+     * A sign-off job whose claim connection is ended while it measures (as an idle timeout or a dropped connection would)
+     * stops at its probe before it writes anything: no sign-off, no next reconciliation version although the books moved
+     * (so the probe is before the store of the remade version too), the run still {@code committed}, and the job stamped
+     * {@code claim_connection_lost}.
+     */
+    @Test
+    void aSignOffWhoseClaimIsLostMidMeasureWritesNothing() throws IOException {
+        UUID run = committedGoldenRun(null);
+        Report r = as(t, () -> reconciliation.latest(run)).orElseThrow();
+        // The books move as the run's: without the probe, the job would store the next version and refuse.
+        UUID moved = moveStock(BigDecimal.ONE);
+        UUID batch = TestDatabase.owner()
+                .sql("SELECT id FROM import_batches WHERE run_id = ? ORDER BY seq LIMIT 1")
+                .param(run)
+                .query(UUID.class)
+                .single();
+        TestDatabase.owner()
+                .sql("INSERT INTO import_refs (id, tenant_id, run_id, batch_id, source_key, source_ref, target_type,"
+                        + " target_id) VALUES (?, ?, ?, ?, 'fab-extra|-|line:1', 'fab-extra|-|line:1#0', ?, ?)")
+                .params(UUID.randomUUID(), t.tenantId(), run, batch, "retail.stock_movement", moved)
+                .update();
+        FixtureShopTemplate.SLOW_BOOKS = true;
+        FixtureShopTemplate.SLOW_BOOKS_SECONDS = 5;
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("reconciliation_id", r.id());
+        body.put("sha256", r.sha256());
+        body.put("sections", allSections(r));
+        body.put("name", "Fabricated Signer");
+        body.put("date", today(t).toString());
+        ResponseEntity<JsonNode> accepted =
+                send(t, admin, ADMIN, HttpMethod.POST, "/api/v1/imports/runs/" + run + "/sign-off", body);
+        assertThat(accepted.getStatusCode()).as("%s", accepted.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+        UUID token = TestDatabase.owner()
+                .sql("SELECT job_token FROM import_runs WHERE id = ?")
+                .param(run)
+                .query(UUID.class)
+                .single();
+        // As bms_app, the role of the claim's own connection: end the session that holds the job's lock while the job
+        // is still reading the slow books.
+        List<Boolean> ended = JdbcClient.create(TestDatabase.appDataSource())
+                .sql("""
+                        SELECT pg_terminate_backend(pid) FROM pg_locks
+                         WHERE locktype = 'advisory' AND granted AND objsubid = 1
+                           AND ((classid::bigint << 32) | objid::bigint) = hashtextextended(?, 0)
+                        """)
+                .param("core.imports.job:" + token)
+                .query(Boolean.class)
+                .list();
+        assertThat(ended).containsExactly(true);
+
+        // It reads interrupted from the moment its lock is gone; wait for the stamp that says why it stopped.
+        long end = System.nanoTime() + java.util.concurrent.TimeUnit.MINUTES.toNanos(1);
+        String stamp = "SELECT job_finished_at IS NOT NULL FROM import_runs WHERE id = ?";
+        while (!TestDatabase.owner().sql(stamp).param(run).query(Boolean.class).single() && System.nanoTime() < end) {
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError(e);
+            }
+        }
+        ResponseEntity<JsonNode> outcome = signOffOutcome(t, run);
+        assertThat(outcome.getBody().get("job").get("state").asString()).isEqualTo("failed");
+        assertThat(code(outcome)).isEqualTo("claim_connection_lost");
+        assertThat(signoffs(run)).isZero();
+        assertThat(status(run)).isEqualTo("committed");
+        assertThat(as(t, () -> reconciliation.latest(run)).orElseThrow().id())
+                .as("no next version stored by a job that lost its claim")
+                .isEqualTo(r.id());
+    }
+
     @Test
     void aRunTooBigToMeasureInTimeIsRefusedPlainlyAndSignsLater() throws IOException {
         UUID run = committedGoldenRun(null);
         Report r = as(t, () -> reconciliation.latest(run)).orElseThrow();
 
-        // The sign-off's own limit is shortened and the books take a second to read: refused, nothing signed.
+        // The job's own limit is shortened and the books take a second to read: refused, nothing signed.
         ReconciliationService.signOffTimeout = "200ms";
         FixtureShopTemplate.SLOW_BOOKS = true;
         ResponseEntity<JsonNode> refused = signOff(t, run, r, allSections(r), "Fabricated Signer", today(t));
-        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
         assertThat(code(refused)).isEqualTo("sign_off_too_big");
         assertThat(status(run)).isEqualTo("committed");
         assertThat(signoffs(run)).isZero();
 
         // Tried again when the books answer in time: signed.
         FixtureShopTemplate.SLOW_BOOKS = false;
-        ReconciliationService.signOffTimeout = "60s";
+        ReconciliationService.signOffTimeout = "10min";
         assertThat(signOff(t, run, r, allSections(r), "Fabricated Signer", today(t))
                         .getStatusCode())
                 .isEqualTo(HttpStatus.OK);

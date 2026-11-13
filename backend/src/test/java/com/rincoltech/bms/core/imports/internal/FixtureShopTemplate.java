@@ -283,6 +283,9 @@ class FixtureShopTemplate implements ImportTemplate {
     /** Whether reading the fixture's books takes a second, as a big book would; off by default. */
     static volatile boolean SLOW_BOOKS;
 
+    /** How long the slow books take, in seconds: past the request's old 60 second limit in the test of issue #874. */
+    static volatile int SLOW_BOOKS_SECONDS = 1;
+
     /** The test business's database, for the fixture's books; null when a unit test makes the template by hand. */
     @Autowired(required = false)
     JdbcClient jdbc;
@@ -306,7 +309,10 @@ class FixtureShopTemplate implements ImportTemplate {
             public List<ImportForecast.ProductStock> stock(Scope scope) {
                 if (SLOW_BOOKS) {
                     // A big book: one statement longer than a short limit (the sign-off's time limit test).
-                    db.sql("SELECT pg_sleep(1)").query().singleRow();
+                    db.sql("SELECT pg_sleep(?)")
+                            .param(SLOW_BOOKS_SECONDS)
+                            .query()
+                            .singleRow();
                 }
                 List<UUID> movements = scope.of("retail.stock_movement");
                 if (movements.isEmpty()) {

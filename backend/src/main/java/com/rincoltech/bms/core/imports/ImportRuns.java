@@ -239,14 +239,14 @@ public interface ImportRuns {
 
     // JUSTIFICATION-A3: issue #922 needs the background job's state on the run the screens poll; one new record.
     /**
-     * The run's last background check or dry run (issue #922, migration V154), null while none was started: {@code kind}
-     * {@code check} or {@code dry_run}; {@code state} {@code running}, {@code done} or {@code failed}; when it started and
+     * The run's last background check, dry run or sign-off (issues #922 and #874, migrations V154 and V155), null while
+     * none was started: {@code kind} {@code check}, {@code dry_run} or {@code sign_off}; {@code state} {@code running}, {@code done} or {@code failed}; when it started and
      * ended; and when it failed, the refusal's code, {@code failed} for any other error, or {@code interrupted} when the
      * process that ran it died. Its state is read from whether its claim of the business's loop is alive, so it is never
      * left running.
      */
     @io.swagger.v3.oas.annotations.media.Schema(
             name = "ImportRunJob",
-            description = "A check or dry run running in the background, or how it ended (issue #922)")
+            description = "A check, dry run or sign-off running in the background, or how it ended (issues #922, #874)")
     record Job(String kind, String state, Instant startedAt, Instant finishedAt, String failureCode) {}
 }

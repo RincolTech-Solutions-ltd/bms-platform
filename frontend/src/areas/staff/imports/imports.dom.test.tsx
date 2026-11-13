@@ -62,41 +62,75 @@ let runs: SignOffRun[] = [];
 let view: Reconciliation = recon(true);
 const sent: SignOffRequest[] = [];
 let remade = 0;
-// The code the next sign-off is refused with, after the figures moved to a version 2; null to sign.
+// The code the next sign-off's job refuses with (after the figures moved to a version 2 for reconciliation_changed); null
+// to sign.
 let refuse: string | null = null;
-// Whether that refusal leaves the same version stored, so the refetch brings back the one refused.
+// Whether that refusal leaves the same version stored, so the poll brings back the one refused.
 let refuseSame = false;
-// A refetch held open until the test lets it answer; null to answer at once.
+// A poll held open until the test lets it answer; null to answer at once.
 let hold: { promise: Promise<Reconciliation>; answer: () => void } | null = null;
-// The API's words for that refusal, which the screen keeps.
-const CHANGED = 'What the import brought in changed in the books since you opened it, so the reconciliation was made again as version 2. Read it and sign that.';
+// The sign-off the background job is running (issue #874): what it was sent and how it ends at the next poll.
+let job: { body: SignOffRequest; refuse: string | null; refuseSame: boolean } | null = null;
+// Whether the job has already ended when the POST answers (a small run): the 202 carries its outcome.
+let instant = false;
+// Whether the 202 carries the sign-off with the job read just before it ended (still running).
+let signedButRunning = false;
+// The screen's words for a refusal because the figures changed.
+const CHANGED =
+  'The figures changed since you opened them, so nothing was signed. The newest figures are shown now: check them, tick each section and sign again.';
+const STARTED = '2026-10-02T09:00:00Z';
+
+/** The job the background sign-off ends with at the next poll, as the API reads it after the job stamped its outcome. */
+function finish(): void {
+  if (!job) return;
+  const { body, refuse: code, refuseSame: same } = job;
+  job = null;
+  const ended = { kind: 'sign_off', started_at: STARTED, finished_at: '2026-10-02T09:01:00Z' };
+  if (code === null) {
+    view = {
+      ...view,
+      signed: { signed_at: '2026-10-02T09:01:00Z', signed_by: 'u-1', signed_name: body.name, signed_on: body.date, sections: body.sections },
+      job: { ...ended, state: 'done' },
+    };
+    return;
+  }
+  const failed = { ...ended, state: 'failed', failure_code: code };
+  view =
+    code === 'reconciliation_changed' && !same
+      ? { ...recon(true), id: 'rec-2', version: 2, sha256: 'b'.repeat(64), job: failed }
+      : { ...view, job: failed };
+}
 
 vi.mock('../../../api/imports', async (original) => {
   const real = await original<typeof import('../../../api/imports')>();
   return {
   ...real,
   signOffRuns: () => Promise.resolve(runs),
-  reconciliationOf: () => (hold ? hold.promise : Promise.resolve(view)),
-  reconcileAgain: () => {
-    remade += 1;
-    view = { ...recon(true), id: 'rec-2', version: 2 };
+  reconciliationOf: () => {
+    if (hold) return hold.promise;
+    finish();
     return Promise.resolve(view);
   },
+  reconcileAgain: () => {
+    remade += 1;
+    view = { ...recon(true), id: 'rec-2', version: 2, job: view.job };
+    return Promise.resolve(view);
+  },
+  // 202: the reconciliation as it stands with the sign-off running; the job ends at the next poll.
   signOff: (_run: string, body: SignOffRequest) => {
     sent.push(body);
-    if (refuse) {
-      if (!refuseSame) view = { ...recon(true), id: 'rec-2', version: 2, sha256: 'b'.repeat(64) };
-      const code = refuse;
-      refuse = null;
-      return Promise.reject(new real.ImportError(CHANGED, code));
-    }
-    view = { ...view, signed: { signed_at: '2026-10-02T09:00:00Z', signed_by: 'u-1', signed_name: body.name, signed_on: body.date, sections: body.sections } };
+    job = { body, refuse, refuseSame };
+    refuse = null;
+    view = { ...view, job: { kind: 'sign_off', state: 'running', started_at: STARTED } };
+    if (instant || signedButRunning) finish();
+    if (signedButRunning) return Promise.resolve({ ...view, job: { kind: 'sign_off', state: 'running', started_at: STARTED } });
     return Promise.resolve(view);
   },
   };
 });
 
 const { ImportsSignOff } = await import('./page');
+const { signOffPoll } = await import('./state');
 
 const pause = () => new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -123,7 +157,23 @@ beforeEach(() => {
   refuse = null;
   refuseSame = false;
   hold = null;
+  job = null;
+  instant = false;
+  signedButRunning = false;
+  signOffPoll.ms = 20;
 });
+
+/** Opens the import, ticks every section, types the name and today, and presses Sign. */
+async function signAll(today: string) {
+  fireEvent.click(await screen.findByRole('button', { name: /Imported on 1 Oct 2026/ }));
+  await screen.findByRole('heading', { name: 'Rows and records' });
+  fireEvent.click(screen.getByRole('checkbox', { name: /rows and records/ }));
+  fireEvent.click(screen.getByRole('checkbox', { name: /stock value per branch/ }));
+  fireEvent.change(screen.getByLabelText(/Your name/), { target: { value: 'Fabricated Signer' } });
+  fireEvent.change(screen.getByLabelText(/Today's date/), { target: { value: today } });
+  await pause();
+  fireEvent.click(screen.getByRole('button', { name: 'Sign the reconciliation' }));
+}
 
 afterEach(() => cleanup());
 
@@ -219,9 +269,8 @@ describe('imports to sign off', () => {
     expect(screen.getByRole('button', { name: 'Sign the reconciliation' })).toBeTruthy();
   });
 
-  // JUSTIFICATION-A3: ruling 1 of the Lead on the review of 5b32682, the refused version while the refetch is pending.
-  it('offers no form for the refused version while the refetch is still on its way', async () => {
-    refuse = 'reconciliation_changed';
+  // JUSTIFICATION-A3: issue #874, the sign-off pending while its background job runs, then signed.
+  it('shows the sign-off pending while the job runs, with nothing to tick or type, then signed', async () => {
     const today = businessToday(new Date(), 'Africa/Kampala');
     show(admin);
     fireEvent.click(await screen.findByRole('button', { name: /Imported on 1 Oct 2026/ }));
@@ -230,31 +279,124 @@ describe('imports to sign off', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: /stock value per branch/ }));
     fireEvent.change(screen.getByLabelText(/Your name/), { target: { value: 'Fabricated Signer' } });
     fireEvent.change(screen.getByLabelText(/Today's date/), { target: { value: today } });
-    // From here the refetch the refusal asks for waits until the test lets it answer.
+    // From here the poll waits until the test lets it answer: the job is still running.
     let answer: () => void = () => undefined;
     const promise = new Promise<Reconciliation>((resolve) => {
-      answer = () => resolve(view);
+      answer = () => {
+        finish();
+        resolve(view);
+      };
     });
     hold = { promise, answer: () => answer() };
     await pause();
     fireEvent.click(screen.getByRole('button', { name: 'Sign the reconciliation' }));
 
-    // Version 1 on screen, the refetch pending: no ticks, no name or date, no sign button, and no way out offered yet.
-    expect(await screen.findByText(CHANGED)).toBeTruthy();
-    expect(screen.getByText(/Version 1, as at 1 Oct 2026/)).toBeTruthy();
+    // Pending: said plainly, and no ticks, no name or date, no sign button, nothing signed yet.
+    expect(await screen.findByText(/Signing\. BMS checks the figures against the books once more/)).toBeTruthy();
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
     expect(screen.queryByLabelText(/Your name/)).toBeNull();
-    expect(screen.queryByLabelText(/Today's date/)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Sign the reconciliation' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Show the new figures' })).toBeNull();
+    expect(screen.queryByText(/Signed by/)).toBeNull();
+    expect(sent).toHaveLength(1);
 
-    // The refetch answers with version 2: the form is back for it.
+    // The job ends: the page, polling by itself, shows it signed.
     const pending = hold;
     hold = null;
     pending.answer();
-    expect(await screen.findByText(/Version 2, as at 1 Oct 2026/)).toBeTruthy();
-    expect(await screen.findByRole('button', { name: 'Sign the reconciliation' })).toBeTruthy();
+    expect(await screen.findByText(/Signed by Fabricated Signer/)).toBeTruthy();
+    expect(screen.queryByText(/Signing\. BMS checks/)).toBeNull();
+  });
+
+  // JUSTIFICATION-A3: must-fix 2 of the review of 03e9515: the POST answers with the job already done.
+  it('shows it signed when the POST answers with the job already done', async () => {
+    instant = true;
+    show(admin);
+    await signAll(businessToday(new Date(), 'Africa/Kampala'));
+    expect(await screen.findByText(/Signed by Fabricated Signer/)).toBeTruthy();
+    expect(screen.queryByText(/Signing\. BMS checks/)).toBeNull();
     expect(sent).toHaveLength(1);
+  });
+
+  // JUSTIFICATION-A3: must-fix 2 of the review of 03e9515: the POST answers already refused, with version 2.
+  it('clears the ticks when the POST answers already refused because the figures changed', async () => {
+    instant = true;
+    refuse = 'reconciliation_changed';
+    show(admin);
+    await signAll(businessToday(new Date(), 'Africa/Kampala'));
+    expect(await screen.findByText(CHANGED)).toBeTruthy();
+    expect(await screen.findByText(/Version 2, as at 1 Oct 2026/)).toBeTruthy();
+    await waitFor(() => expect((screen.getByRole('checkbox', { name: /rows and records/ }) as HTMLInputElement).checked).toBe(false));
+    expect((screen.getByRole('checkbox', { name: /stock value per branch/ }) as HTMLInputElement).checked).toBe(false);
+    // Signing again needs fresh ticks: nothing is sent until they are.
+    await pause();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign the reconciliation' }));
+    expect(await screen.findByText(/Still to tick: Rows and records, Stock value per branch/)).toBeTruthy();
+    expect(sent).toHaveLength(1);
+  });
+
+  // JUSTIFICATION-A3: point 6 of the review of 03e9515: signed beside a job read just before it ended.
+  it('never shows Signing beside a sign-off that is already there', async () => {
+    signedButRunning = true;
+    show(admin);
+    await signAll(businessToday(new Date(), 'Africa/Kampala'));
+    expect(await screen.findByText(/Signed by Fabricated Signer/)).toBeTruthy();
+    expect(screen.queryByText(/Signing\. BMS checks/)).toBeNull();
+  });
+
+  // JUSTIFICATION-A3: issue #874, the existing refusals still said plainly when the job refuses.
+  it('says nothing was signed when the job finds a difference not explained', async () => {
+    refuse = 'unitemised_difference';
+    refuseSame = true;
+    const today = businessToday(new Date(), 'Africa/Kampala');
+    show(admin);
+    fireEvent.click(await screen.findByRole('button', { name: /Imported on 1 Oct 2026/ }));
+    await screen.findByRole('heading', { name: 'Rows and records' });
+    fireEvent.click(screen.getByRole('checkbox', { name: /rows and records/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /stock value per branch/ }));
+    fireEvent.change(screen.getByLabelText(/Your name/), { target: { value: 'Fabricated Signer' } });
+    fireEvent.change(screen.getByLabelText(/Today's date/), { target: { value: today } });
+    await pause();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign the reconciliation' }));
+
+    expect(await screen.findByText(/A difference is not explained, so nothing was signed\. Ask Rincol Tech/)).toBeTruthy();
+    expect(screen.queryByText(/Signed by/)).toBeNull();
+    expect(sent).toHaveLength(1);
+  });
+
+  // JUSTIFICATION-A3: issue #874, a reload while the sign-off runs finds it pending and follows it to the end.
+  it('finds a sign-off still running after a reload and follows it until it is signed', async () => {
+    const today = businessToday(new Date(), 'Africa/Kampala');
+    const body = { reconciliation_id: 'rec-1', sha256: 'a'.repeat(64), sections: ['counts', 'stock_value'], name: 'Fabricated Signer', date: today };
+    job = { body, refuse: null, refuseSame: false };
+    view = { ...recon(true), job: { kind: 'sign_off', state: 'running', started_at: STARTED } };
+    runs = [{ ...runs[0], job: view.job }];
+    // The first read of the reopened page still finds it running.
+    let answer: () => void = () => undefined;
+    const promise = new Promise<Reconciliation>((resolve) => {
+      answer = () => resolve(view);
+    });
+    hold = { promise, answer: () => answer() };
+    show(admin);
+
+    expect(await screen.findByText('Being signed')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Imported on 1 Oct 2026/ }));
+    const pending = hold;
+    hold = null;
+    pending.answer();
+    expect(await screen.findByText(/Signing\. BMS checks the figures against the books once more/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Sign the reconciliation' })).toBeNull();
+    expect(await screen.findByText(/Signed by Fabricated Signer/)).toBeTruthy();
+    expect(sent).toHaveLength(0);
+  });
+
+  // JUSTIFICATION-A3: issue #874, a reload after the job stopped says why nothing was signed and lets them sign again.
+  it('after a reload says why the last sign-off signed nothing and offers to sign again', async () => {
+    view = { ...recon(true), job: { kind: 'sign_off', state: 'failed', started_at: STARTED, finished_at: STARTED, failure_code: 'interrupted' } };
+    show(admin);
+    fireEvent.click(await screen.findByRole('button', { name: /Imported on 1 Oct 2026/ }));
+    expect(await screen.findByText(/Signing stopped because the server restarted\. Nothing was signed\. Sign again\./)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Sign the reconciliation' })).toBeTruthy();
+    expect(screen.getAllByRole('checkbox')).toHaveLength(2);
   });
 
   it('offers a signer who cannot make it again only the new figures, never the refused version to sign', async () => {

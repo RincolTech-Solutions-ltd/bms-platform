@@ -4496,6 +4496,51 @@ class MigrationOrderIT {
         }
     }
 
+    /**
+     * V155 (issue #874) is expand only: a run whose job V154 stored keeps it; the kind {@code sign_off} is accepted and any
+     * other kind is still refused. JUSTIFICATION-A3: a new test case; no existing case covers V155.
+     */
+    @Test
+    void importSignOffJobMigrationKeepsEveryJob() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            String before = VERSIONS.get(VERSIONS.indexOf("155") - 1);
+            assertThat(flyway(postgres, before).migrate().targetSchemaVersion).isEqualTo(before);
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            UUID tenant = UUID.randomUUID();
+            owner.sql("INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v155', 'Test Tenant V155',"
+                            + " '00000000-0000-4000-8000-000000000001')")
+                    .param(tenant)
+                    .update();
+            UUID run = UUID.randomUUID();
+            owner.sql("INSERT INTO import_runs (id, tenant_id, created_by, status, job_kind, job_by, job_started_at,"
+                            + " job_finished_at, job_failure_code, job_token)"
+                            + " VALUES (?, ?, ?, 'in_review', 'dry_run', ?, now(), now(), 'import_busy',"
+                            + " gen_random_uuid())")
+                    .params(run, tenant, UUID.randomUUID(), UUID.randomUUID())
+                    .update();
+
+            assertThat(DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD)
+                            .success)
+                    .isTrue();
+
+            assertThat(owner.sql("SELECT job_kind || '/' || job_failure_code FROM import_runs WHERE id = ?")
+                            .param(run)
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("dry_run/import_busy");
+            assertThat(owner.sql("UPDATE import_runs SET job_kind = 'sign_off' WHERE id = ?")
+                            .param(run)
+                            .update())
+                    .isEqualTo(1);
+            assertThatThrownBy(() -> owner.sql("UPDATE import_runs SET job_kind = 'commit' WHERE id = ?")
+                            .param(run)
+                            .update())
+                    .hasMessageContaining("import_runs_job_kind_check");
+        }
+    }
+
     /** The blocks V147 adds to the guards (issue #139), whitespace collapsed. */
     private static final String PURGE_BLOCK =
             " IF bms_import_purging(TG_TABLE_NAME, to_jsonb(OLD), to_jsonb(NEW)) THEN RETURN NEW; END IF;";

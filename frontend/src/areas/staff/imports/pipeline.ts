@@ -169,7 +169,8 @@ const JOB_FAILED: Record<string, string> = {
  * why and what to do. Null when it is done or none was started: the cards show what it found.
  */
 export function jobLine(job: ImportJob | undefined | null): { failed: boolean; words: string } | null {
-  if (!job || job.state === 'done') return null;
+  // The sign-off (issue #874) is followed on the sign-off screen, in its own words.
+  if (!job || job.state === 'done' || job.kind === 'sign_off') return null;
   const what = job.kind === 'dry_run' ? 'trial run' : 'check';
   if (job.state === 'running') {
     const at = new Date(job.started_at ?? '');

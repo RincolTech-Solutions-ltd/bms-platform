@@ -4324,6 +4324,9 @@
             "format" : "uuid",
             "type" : "string"
           },
+          "job" : {
+            "$ref" : "#/components/schemas/ImportRunJob"
+          },
           "run_id" : {
             "format" : "uuid",
             "type" : "string"
@@ -4673,7 +4676,7 @@
         }
       },
       "ImportRunJob" : {
-        "description" : "A check or dry run running in the background, or how it ended (issue #922)",
+        "description" : "A check, dry run or sign-off running in the background, or how it ended (issues #922, #874)",
         "properties" : {
           "failure_code" : {
             "type" : "string"
@@ -4981,6 +4984,9 @@
           "committed_at" : {
             "format" : "date-time",
             "type" : "string"
+          },
+          "job" : {
+            "$ref" : "#/components/schemas/ImportRunJob"
           },
           "run_id" : {
             "format" : "uuid",
@@ -31699,7 +31705,7 @@
           "required" : true
         },
         "responses" : {
-          "200" : {
+          "202" : {
             "content" : {
               "application/json" : {
                 "schema" : {
@@ -31707,10 +31713,10 @@
                 }
               }
             },
-            "description" : "OK"
+            "description" : "Accepted"
           }
         },
-        "summary" : "Sign the reconciliation: every section ticked, the name and today's date typed; audited",
+        "summary" : "Start the sign-off of the reconciliation in the background (issue #874): every section ticked, the name and today's date typed. The answer is the reconciliation with its job running; poll the reconciliation until the job is done (signed) or failed (its refusal's code); audited",
         "tags" : [ "imports" ]
       }
     },

@@ -146,10 +146,7 @@ class ImportRunService implements ImportRuns {
             allow_trading_approved_by, pre_import_dump_file, committing_at, committed_at,
             pre_import_dump_verified_at, commit_requested_by, commit_approved_by, commit_approved_version, fabricated,
             job_kind, job_started_at, job_finished_at, job_failure_code,
-            EXISTS (SELECT 1 FROM pg_locks l
-                     WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
-                       AND ((l.classid::bigint << 32) | l.objid::bigint)
-                           = hashtextextended('core.imports.job:' || job_token::text, 0)) AS job_alive""";
+            """ + ImportJobs.ALIVE;
 
     /** The key of a background job's own lock, followed by its token (issue #922, V154). */
     private static final String JOB_KEY = "core.imports.job:";
@@ -870,33 +867,69 @@ class ImportRunService implements ImportRuns {
         if (dry) {
             requireKnownBuild();
         }
+        // A check or dry run whose claim was lost (an idle or network timeout ended its connection) writes nothing: a
+        // new one may already own the business, as the commit loop's probe decides before each batch (review of
+        // 3d86d31; the dry run's stored report, review of 761939f).
+        startJob(
+                runId,
+                by,
+                kind,
+                dry ? this::requireDryRunPossible : run -> ValidationService.requireOpen(run.status()),
+                Map.of("kind", kind),
+                claim -> dry ? () -> dryRunClaimed(runId, by, claim) : () -> check.accept(claim::requireHeld),
+                background);
+    }
+
+    // JUSTIFICATION-A3: issue #874 starts the sign-off in the background the way #922 starts the check, not a new way.
+    /**
+     * The customer's sign-off in the background (issue #874, {@link ImportJobs#startSignOff}): the same claim, token lock and
+     * stamped outcome as a check, for a run that is {@code committed}. {@code intent} is the audit row's detail of what the
+     * signer asked for, never the typed name; {@code work} is given the probe of the claim to call before it writes.
+     */
+    void startSignOffJob(
+            UUID runId, UUID by, Map<String, Object> intent, Consumer<Runnable> work, Consumer<Runnable> background) {
+        requireNoTransaction();
+        startJob(
+                runId,
+                by,
+                ImportJobs.SIGN_OFF,
+                run -> {
+                    if (!RunStates.COMMITTED.equals(run.status())) {
+                        throw ReconciliationService.notCommitted(run.status());
+                    }
+                },
+                intent,
+                claim -> () -> work.accept(claim::requireHeld),
+                background);
+    }
+
+    private void startJob(
+            UUID runId,
+            UUID by,
+            String kind,
+            Consumer<Run> require,
+            Map<String, Object> started,
+            java.util.function.Function<LoopClaim, Runnable> claimed,
+            Consumer<Runnable> background) {
         LoopClaim claim = claimLoop();
         UUID token = UUID.randomUUID();
         try {
             claim.holdJob(token);
             tx.executeWithoutResult(s -> {
-                Run run = find(runId, true);
-                if (dry) {
-                    requireDryRunPossible(run);
-                } else {
-                    ValidationService.requireOpen(run.status());
-                }
+                require.accept(find(runId, true));
                 jdbc.sql("""
                                 UPDATE import_runs SET job_kind = ?, job_by = ?, job_started_at = now(), job_finished_at = NULL,
                                        job_failure_code = NULL, job_token = ?
                                  WHERE id = ?
                                 """).params(kind, by, token, runId).update();
                 // Who started it, in the request: the work runs as the system on its own thread (#922).
-                audit(runId, "core.import_run.job_started", Map.of(), Map.of("kind", kind));
+                audit(runId, "core.import_run.job_started", Map.of(), started);
             });
         } catch (RuntimeException e) {
             claim.close();
             throw e;
         }
-        // A check or dry run whose claim was lost (an idle or network timeout ended its connection) writes nothing: a
-        // new one may already own the business, as the commit loop's probe decides before each batch (review of
-        // 3d86d31; the dry run's stored report, review of 761939f).
-        Runnable work = dry ? () -> dryRunClaimed(runId, by, claim) : () -> check.accept(claim::requireHeld);
+        Runnable work = claimed.apply(claim);
         boolean handed = false;
         try {
             background.accept(() -> {

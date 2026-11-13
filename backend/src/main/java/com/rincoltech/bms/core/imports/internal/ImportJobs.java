@@ -1,5 +1,6 @@
 package com.rincoltech.bms.core.imports.internal;
 
+import com.rincoltech.bms.core.imports.ImportReconciliation.SignOff;
 import com.rincoltech.bms.core.imports.ImportRuns;
 import com.rincoltech.bms.core.jobs.TenantJobs;
 import com.rincoltech.bms.kernel.ApiException;
@@ -8,6 +9,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -15,7 +20,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * The check and the dry run of a run in the background (issue #922, migration V154, SDD chapter 13 section 13.14.1). On
+ * The check and the dry run of a run in the background (issue #922, migration V154, SDD chapter 13 section 13.14.1), and
+ * since issue #874 (migration V155, section 13.11) the customer's sign-off of a committed run the same way. On
  * staging a request the API has not answered within 100 s is cut at Cloudflare's edge, and at the row limit of 100,000 the
  * validation and the dry run take minutes, so their routes answer 202 at once and the screen polls the run.
  *
@@ -33,6 +39,9 @@ class ImportJobs {
 
     static final String CHECK = "check";
     static final String DRY_RUN = "dry_run";
+    /** The customer's sign-off of a committed run (issue #874, migration V155). */
+    static final String SIGN_OFF = "sign_off";
+
     static final String RUNNING = "running";
 
     /** The code of a job whose process died before it ended: its claim of the business's loop is gone. */
@@ -41,6 +50,16 @@ class ImportJobs {
     /** The code of a job stopped by anything but a refusal of the API. */
     static final String FAILED = "failed";
 
+    /**
+     * The column {@code job_alive} of a read of {@code import_runs}: whether a session still holds the token lock of the
+     * run's job (#922). Shared by the run's read and the sign-off list's (#874, review of 03e9515, point 5).
+     */
+    static final String ALIVE = """
+            EXISTS (SELECT 1 FROM pg_locks l
+                     WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
+                       AND ((l.classid::bigint << 32) | l.objid::bigint)
+                           = hashtextextended('core.imports.job:' || job_token::text, 0)) AS job_alive""";
+
     /** The form of a stored code (the CHECK of V154). */
     private static final Pattern CODE = Pattern.compile("[A-Za-z][A-Za-z_]{0,63}");
 
@@ -48,11 +67,17 @@ class ImportJobs {
 
     private final ImportRunService runs;
     private final ValidationService validation;
+    private final ReconciliationService reconciliation;
     private final TenantJobs tenantJobs;
 
-    ImportJobs(ImportRunService runs, ValidationService validation, TenantJobs tenantJobs) {
+    ImportJobs(
+            ImportRunService runs,
+            ValidationService validation,
+            ReconciliationService reconciliation,
+            TenantJobs tenantJobs) {
         this.runs = runs;
         this.validation = validation;
+        this.reconciliation = reconciliation;
         this.tenantJobs = tenantJobs;
     }
 
@@ -66,6 +91,32 @@ class ImportJobs {
     /** Starts the dry run of a run in the background; answers the run as it stands. */
     ImportRuns.Run startDryRun(UUID runId, UUID by) {
         runs.startJob(runId, by, DRY_RUN, null, work -> background(runId, DRY_RUN, work));
+        return runs.get(runId);
+    }
+
+    // JUSTIFICATION-A3: issue #874 signs a run too big to measure inside a request; the check's start, one more kind.
+    /**
+     * Starts the customer's sign-off in the background (issue #874); answers the run as it stands. The request checks the
+     * typed name, the date and the run, and records the signer's intent in the job's audit row (the reconciliation, its
+     * SHA-256, the sections and the date, never the name); the job measures again under the run's lock with a batch's limit
+     * ({@link ReconciliationService#signOff(UUID, SignOff, Runnable)}) and signs, or stores the refusal's code. The typed
+     * name is held only by the job's thread until it is written to {@code import_signoffs}: a job that dies loses it and
+     * reads interrupted, and the signer signs again.
+     */
+    ImportRuns.Run startSignOff(UUID runId, SignOff signOff) {
+        reconciliation.requireTyped(runId, signOff);
+        Map<String, Object> intent = new LinkedHashMap<>();
+        intent.put("kind", SIGN_OFF);
+        intent.put("reconciliation_id", String.valueOf(signOff.reconciliationId()));
+        intent.put("sha256", signOff.sha256());
+        intent.put("sections", List.copyOf(new TreeSet<>(signOff.sections())));
+        intent.put("signed_on", String.valueOf(signOff.date()));
+        runs.startSignOffJob(
+                runId,
+                signOff.by(),
+                intent,
+                probe -> reconciliation.signOff(runId, signOff, probe),
+                work -> background(runId, SIGN_OFF, work));
         return runs.get(runId);
     }
 

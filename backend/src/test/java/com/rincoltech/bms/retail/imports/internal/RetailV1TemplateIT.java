@@ -271,7 +271,21 @@ class RetailV1TemplateIT extends IntegrationTest {
         assertThat(r.signable()).as(r.render()).isTrue();
         assertThat(r.render()).contains("negative balance of TP-007 listed separately");
         ResponseEntity<JsonNode> signed = signOff(t, run, r);
-        assertThat(signed.getStatusCode()).as("%s", signed.getBody()).isEqualTo(HttpStatus.OK);
+        // Signed in the background since issue #874: 202, then the run's job ends done.
+        assertThat(signed.getStatusCode()).as("%s", signed.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+        long end = System.nanoTime() + java.util.concurrent.TimeUnit.MINUTES.toNanos(2);
+        while ("running".equals(as(t, () -> runs.get(run)).job().state()) && System.nanoTime() < end) {
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError(e);
+            }
+        }
+        assertThat(as(t, () -> runs.get(run)).job()).as("the sign-off job").satisfies(job -> {
+            assertThat(job.kind()).isEqualTo("sign_off");
+            assertThat(job.state()).isEqualTo("done");
+        });
         assertThat(as(t, () -> runs.get(run)).status()).isEqualTo("signed_off");
     }
 

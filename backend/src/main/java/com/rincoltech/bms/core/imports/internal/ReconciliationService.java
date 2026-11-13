@@ -80,8 +80,11 @@ class ReconciliationService implements ImportReconciliation {
     static final String LEDGER = "ledger";
     static final String REVIEW = "review";
 
-    /** Each statement's limit while the sign-off measures again; a test shortens it to reach the refusal. */
-    static volatile String signOffTimeout = "60s";
+    /**
+     * Each statement's limit while the sign-off measures again: a batch's, as {@link #generate}, since the sign-off runs as
+     * a background job (issue #874), not inside a request; a test shortens it to reach the refusal.
+     */
+    static volatile String signOffTimeout = "10min";
 
     /** The sections in the order the signer reads them, with their titles. */
     private static final Map<String, String> TITLES = new LinkedHashMap<>();
@@ -163,7 +166,31 @@ class ReconciliationService implements ImportReconciliation {
     @Override
     public Report reconcile(UUID runId, UUID by) {
         TenantContext.require();
-        return tx.execute(s -> generate(runId, by));
+        return tx.execute(s -> {
+            // JUSTIFICATION-A3: nice-to-have 3 of the review of 03e9515: a sign-off job holds the run while it measures
+            // (#874), so the remake, in a request, waits 5 seconds at most for the run's lock and says so.
+            jdbc.sql("SELECT set_config('lock_timeout', '5s', true)").query().singleRow();
+            try {
+                run(runId, true);
+            } catch (RuntimeException e) {
+                // JUSTIFICATION-A3: CI on 0936b98 showed the lock timeout is not translated to a locking failure here;
+                // read its SQL state, as BusinessLock and JdbcIdempotency do.
+                boolean lockTimedOut = false;
+                for (Throwable c = e; c != null; c = c.getCause()) {
+                    lockTimedOut |= c instanceof java.sql.SQLException sql && "55P03".equals(sql.getSQLState());
+                }
+                if (!lockTimedOut) {
+                    throw e;
+                }
+                throw new ApiException(
+                        HttpStatus.CONFLICT,
+                        "IMPORT_IN_PROGRESS",
+                        "Import in progress",
+                        "This import is being signed; make the reconciliation again when that ends.");
+            }
+            jdbc.sql("SET LOCAL lock_timeout TO DEFAULT").update();
+            return generate(runId, by);
+        });
     }
 
     /**
@@ -196,7 +223,11 @@ class ReconciliationService implements ImportReconciliation {
     public List<RunSummary> forSignOff() {
         TenantContext.require();
         return tx.execute(s -> jdbc.sql("""
-                        SELECT r.id, r.status, r.committed_at, c.version, c.signable, r.signed_off_at
+                        SELECT r.id, r.status, r.committed_at, c.version, c.signable, r.signed_off_at,
+                               -- The run's job in the same read (#874, review of 03e9515, point 5).
+                               r.job_kind, r.job_started_at, r.job_finished_at, r.job_failure_code,
+                        """ + ImportJobs.ALIVE + """
+
                           FROM import_runs r
                           LEFT JOIN LATERAL (SELECT version, signable FROM import_reconciliations x
                                               WHERE x.run_id = r.id ORDER BY version DESC LIMIT 1) c ON true
@@ -216,14 +247,38 @@ class ReconciliationService implements ImportReconciliation {
                             committed == null ? null : committed.toInstant(),
                             (Integer) rs.getObject(4),
                             (Boolean) rs.getObject(5),
-                            signed == null ? null : signed.toInstant());
+                            signed == null ? null : signed.toInstant(),
+                            ImportJobs.read(rs));
                 })
                 .list());
     }
 
-    @Override
-    public Report signOff(UUID runId, SignOff signOff) {
+    // JUSTIFICATION-A3: issue #874's request checks what it can at once, without the run's lock or a measure.
+    /**
+     * What the sign-off's request checks before it starts the job (issue #874): the typed name and today's date, and that
+     * the run is one of the import screens' (404 otherwise) with a reconciliation to sign (409 {@code
+     * reconciliation_missing}). Everything else about the reconciliation is the job's, under the run's lock.
+     */
+    void requireTyped(UUID runId, SignOff signOff) {
         TenantContext.require();
+        typedName(signOff);
+        tx.executeWithoutResult(s -> {
+            run(runId, false);
+            if (newest(runId).isEmpty()) {
+                throw missing();
+            }
+        });
+    }
+
+    private static ApiException missing() {
+        return new ApiException(
+                HttpStatus.CONFLICT,
+                "reconciliation_missing",
+                "No reconciliation yet",
+                "This import has no reconciliation yet; make it first.");
+    }
+
+    private String typedName(SignOff signOff) {
         String name = signOff.name() == null ? "" : signOff.name().strip();
         if (name.isEmpty()) {
             throw ApiException.rule("name_required", "Type your name to sign.");
@@ -235,18 +290,23 @@ class ReconciliationService implements ImportReconciliation {
         if (signOff.date() == null || !signOff.date().equals(today)) {
             throw ApiException.rule("sign_off_date_not_today", "Type today's date, " + today + ", to sign.");
         }
+        return name;
+    }
+
+    /**
+     * The sign-off as the background job runs it (issue #874): {@code probe} is the job's claim of the business, called
+     * before anything is written, so a job that lost it writes nothing.
+     */
+    Report signOff(UUID runId, SignOff signOff, Runnable probe) {
+        TenantContext.require();
+        String name = typedName(signOff);
         Report[] remade = new Report[1];
         Report signed = tx.execute(s -> {
             RunRow run = run(runId, true);
             if (!RunStates.COMMITTED.equals(run.status())) {
                 throw notCommitted(run.status());
             }
-            Report newest = newest(runId)
-                    .orElseThrow(() -> new ApiException(
-                            HttpStatus.CONFLICT,
-                            "reconciliation_missing",
-                            "No reconciliation yet",
-                            "This import has no reconciliation yet; make it first."));
+            Report newest = newest(runId).orElseThrow(ReconciliationService::missing);
             if (!newest.id().equals(signOff.reconciliationId())
                     || !newest.sha256().equals(signOff.sha256())) {
                 throw new ApiException(
@@ -269,8 +329,8 @@ class ReconciliationService implements ImportReconciliation {
             }
             // The books as they are now, measured again in this transaction, which holds the run: a sign-off of figures
             // the books no longer hold is refused (review of #873). JUSTIFICATION-A3: must-fix 2 of that review.
-            // Inside a request and holding the run, so each statement gets 60 seconds, not a batch's 10 minutes (the
-            // Lead on the review of 391e1dc); a run too big for that is refused plainly, and nothing is signed.
+            // A background job since issue #874, so each statement gets a batch's 10 minutes; a run too big even for
+            // that is refused plainly, and nothing is signed.
             Set<String> wanted = new TreeSet<>();
             newest.sections().forEach(sec -> wanted.add(sec.key()));
             Set<String> ticked = new TreeSet<>(signOff.sections());
@@ -291,6 +351,7 @@ class ReconciliationService implements ImportReconciliation {
                         "This import is too big to sign here at once, and nothing was signed. Ask Rincol Tech to help"
                                 + " you sign it.");
             }
+            probe.run();
             String again = sha256(new Report(
                             newest.id(),
                             runId,
@@ -336,6 +397,8 @@ class ReconciliationService implements ImportReconciliation {
             after.put("reconciliation_version", newest.version());
             after.put("sha256", newest.sha256());
             after.put("sections", List.copyOf(ticked));
+            // The job writes this row as the system (issue #874), so who signed is named here.
+            after.put("signed_by", String.valueOf(signOff.by()));
             audit.record(new AuditLog.Entry(
                     "core.import_run.signed_off",
                     "import_run",
@@ -393,7 +456,7 @@ class ReconciliationService implements ImportReconciliation {
                 .orElseThrow(ApiException::notFound);
     }
 
-    private static ApiException notCommitted(String status) {
+    static ApiException notCommitted(String status) {
         return new ApiException(
                 HttpStatus.CONFLICT,
                 "run_not_committed",

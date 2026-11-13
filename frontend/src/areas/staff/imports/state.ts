@@ -1,4 +1,4 @@
-import type { Reconciliation, ReconciliationCheck, ReconciliationItem, SignOffRun } from '../../../api/imports';
+import type { ImportJob, Reconciliation, ReconciliationCheck, ReconciliationItem, SignOffRun } from '../../../api/imports';
 import { formatMinor } from '../../../components/money';
 import { showDate } from '../../../app/ui/PeriodPicker';
 
@@ -43,9 +43,35 @@ export function itemPlace(item: ReconciliationItem): string {
   return `${item.file ?? 'File'}, line ${item.line}`;
 }
 
+/** How often the screen reads a sign-off running in the background (issue #874); a test shortens it. */
+export const signOffPoll = { ms: 2000 };
+
+/** Whether the sign-off of the run or reconciliation is running in the background (issue #874). */
+export const signing = (r: { job?: ImportJob } | undefined) => r?.job?.kind === 'sign_off' && r.job.state === 'running';
+
+// JUSTIFICATION-A3: issue #874 asks the pending sign-off and its refusals shown in plain words; the job stores codes only.
+/** The words of a sign-off the job refused, by its code (issue #874): nothing was signed, and what to do. */
+const SIGN_OFF_REFUSED: Record<string, string> = {
+  reconciliation_changed:
+    'The figures changed since you opened them, so nothing was signed. The newest figures are shown now: check them, tick each section and sign again.',
+  unitemised_difference: 'A difference is not explained, so nothing was signed. Ask Rincol Tech to find and correct it.',
+  sections_not_ticked: 'Not every section was ticked, so nothing was signed. Tick each section and sign again.',
+  sign_off_date_not_today: "The day changed while signing, so nothing was signed. Type today's date and sign again.",
+  sign_off_too_big: 'This import is too big to sign here, and nothing was signed. Ask Rincol Tech to help you sign it.',
+  run_not_committed: 'This import can no longer be signed. Nothing was signed.',
+  interrupted: 'Signing stopped because the server restarted. Nothing was signed. Sign again.',
+};
+
+/** Why the last sign-off was not signed, in plain words, or null when it was not refused (issue #874). */
+export function signOffRefusal(job: ImportJob | undefined): string | null {
+  if (job?.kind !== 'sign_off' || job.state !== 'failed') return null;
+  return SIGN_OFF_REFUSED[job.failure_code ?? ''] ?? 'Signing stopped before it finished. Nothing was signed. Try again, or ask Rincol Tech.';
+}
+
 /** The state of an imported run in plain words, for its row on the screen. */
 export function runState(run: SignOffRun): string {
   if (run.status === 'signed_off') return run.signed_at ? `Signed on ${showDate(run.signed_at.slice(0, 10))}` : 'Signed';
+  if (signing(run)) return 'Being signed';
   if (run.version == null) return 'Being checked';
   return run.signable ? 'Ready to sign' : 'A difference is not explained';
 }
