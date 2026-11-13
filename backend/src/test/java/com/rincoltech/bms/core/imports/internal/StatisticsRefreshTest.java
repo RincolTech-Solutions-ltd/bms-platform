@@ -88,7 +88,9 @@ class StatisticsRefreshTest {
         answer = true;
         String saved = batches(5, 5_000, () -> {});
         assertThat(ImportRunService.StatisticsRefresh.registeredIn(saved)).isEqualTo(25_000);
-        assertThat(waits).as("at 5,250 and 10,500; the next at 21,000").containsExactly(2_000, 2_000);
+        assertThat(waits)
+                .as("at 5,250, 10,500 and 21,000, the transaction's doublings; not at each batch's first page")
+                .containsExactly(2_000, 2_000, 2_000);
     }
 
     @Test
@@ -101,7 +103,9 @@ class StatisticsRefreshTest {
     @Test
     void aRefusalCarriesAcrossBatches() {
         batches(5, 5_000, () -> {});
-        assertThat(waits).as("2 s once, then 100 ms at the next doubling").containsExactly(2_000, 100);
+        assertThat(waits)
+                .as("2 s once at 5,250, then 100 ms at the doublings 10,500 and 21,000")
+                .containsExactly(2_000, 100, 100);
     }
 
     @Test
@@ -113,8 +117,8 @@ class StatisticsRefreshTest {
             }
         });
         assertThat(waits)
-                .as("refused at 5,250; asked at 10,250, 30 s later; at the doubling at 10,500; then nothing")
-                .containsExactly(2_000, 100, 100);
+                .as("refused at 5,250; asked at 10,250, 30 s later; at the doublings 10,500 and 21,000")
+                .containsExactly(2_000, 100, 100, 100);
     }
 
     @Test
