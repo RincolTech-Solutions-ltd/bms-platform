@@ -164,6 +164,7 @@ class ImportReconciliationIT extends IntegrationTest {
         typed = null;
         CommitApproval.note = CommitApproval.NOTE;
         FixtureShopTemplate.SLOW_BOOKS = false;
+        FixtureShopTemplate.FAIL_SECOND_ROW = false;
         ReconciliationService.signOffTimeout = "60s";
     }
 
@@ -682,6 +683,42 @@ class ImportReconciliationIT extends IntegrationTest {
     // ---------------------------------------------------------------------------------------------
     // A broken balance blocks the sign-off.
     // ---------------------------------------------------------------------------------------------
+
+    // JUSTIFICATION-A3: the Lead on the review of 3d86afa asks the forecast's failure on a row tested at this level.
+    /**
+     * A forecast that fails on a row (here it changes the unmodifiable row it is given) leaves the reconciliation whole:
+     * the row counts as unmeasured only, not written, it is named {@code forecast:} and the error, and the sign-off is
+     * held.
+     */
+    @Test
+    void aForecastThatFailsOnARowCountsItUnmeasuredOnlyNamesItAndHoldsTheSignOff() throws IOException {
+        UUID run = committedGoldenRun(null);
+        Report before = as(t, () -> reconciliation.latest(run)).orElseThrow();
+        assertThat(before.signable()).as(before.render()).isTrue();
+
+        FixtureShopTemplate.FAIL_SECOND_ROW = true;
+        Report r = as(t, () -> reconciliation.reconcile(run, operator));
+
+        assertThat(r.signable()).as(r.render()).isFalse();
+        assertThat(section(r, "counts").checks())
+                .extracting(Check::label)
+                .anySatisfy(label -> assertThat(label).contains("forecast:UnsupportedOperationException"));
+        assertThat(sumOf(r, ": rows the template's rules could not measure")
+                        - sumOf(before, ": rows the template's rules could not measure"))
+                .as("unmeasured")
+                .isEqualTo(1);
+        assertThat(sumOf(before, ": rows written by this import") - sumOf(r, ": rows written by this import"))
+                .as("not written")
+                .isEqualTo(1);
+    }
+
+    /** The sum over the files of the counts whose label ends with {@code label}. */
+    private static long sumOf(Report r, String label) {
+        return section(r, "counts").facts().stream()
+                .filter(f -> f.label().endsWith(label))
+                .mapToLong(f -> Long.parseLong(f.value()))
+                .sum();
+    }
 
     @Test
     void aBrokenBalanceShowsADifferenceThatIsNotItemisedAndTheSignOffIsRefused() throws IOException {

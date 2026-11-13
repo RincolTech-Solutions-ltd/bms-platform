@@ -759,7 +759,8 @@ retail command. ADR-027 makes the framework the one pipeline for every tenant's 
 - **Quarantine.** Uploaded files are encrypted with a per-run key under a quarantine prefix. The
   `import_*` tables are the staging area; no vertical or ledger table is written before commit.
   Columns a mapping ignores are not stored in `import_rows.raw`. Limits: 25 MB per file, 100,000
-  rows per batch (25,000 until #900, section 13.14.1 11/16), 200 columns, streaming parsers.
+  rows per batch (proven on the staging heap by #900; configured at 25,000 until #922, section 13.14.1 11/16), 200
+  columns, streaming parsers.
 - **Canonical templates and mappings.** A template (`retail_v1`, `lending_loans_v1`, later savings
   and investments) is code in its vertical, registered with the core. A customer's sheet is a
   versioned mapping document in `import_mappings` (append-only), validated against the template:
@@ -876,7 +877,8 @@ tooling, as the commit is. Every call works on the bound business only: a run or
   keys the columns). The header is the first of the first 20 rows that holds every header the mapping requires, or the first
   row that is not blank (`HEADER_NOT_FOUND`). Every row below it becomes one `import_rows` row with its cells in `raw`, blank
   rows included and trailing blank rows not, and columns the mapping ignores are dropped. Rows are written 1,000 at a time in
-  one transaction, so the limits (`TOO_MANY_ROWS` over 100,000, 25,000 until #900, `TOO_MANY_COLUMNS` over 200) and a damaged file
+  one transaction, so the limits (`TOO_MANY_ROWS` over the configured row limit, 25,000 until #922 (section 13.14.1 11/16),
+  `TOO_MANY_COLUMNS` over 200) and a damaged file
   (`FILE_UNREADABLE`: an unclosed quote, a cell over 32,767 characters, a broken zip or XML) roll every row back: the batch
   is `failed` with its code and a reason that names a limit, a row or a column, never a value, and its file is deleted. A
   batch can be parsed again with other options before the run is ready; its rows are replaced. Since #129 the required
@@ -1588,18 +1590,94 @@ section 4.1; coordinated with #110, which builds no second framework).**
 - **The suite** is SDD chapter 15 section 15.7: the golden report of `retail_v1` over fabricated edge cases, the property
   tests on generated shop books, the fuzzed files, and the big file test at each limit of 13.14 on the staging heap, with
   its times.
-- **Open findings.** #900, what is left after #880 (PR #898: the loader of `retail_v1` streams the batch in pages of 250
-  rows and writes each page in statement batches, a batch plans each statement for its tables as they are, each key is
-  looked up by its index, the reconciliation reads a template's forecast inputs once, and the per-row keys of the
-  validation, the forecast and the loader are held compactly): the validation and preview of 100,000 rows fit the
-  staging heap, but in a database other businesses' imports already fill the batch's lookups of `import_refs` and of
-  the items of the same name still grow with its rows, and the commit of 100,000 items fills the old generation. The
-  test that shows it is disabled with that number. #881 (a restock's price change looked for within its batch only, so
-  splitting the restocks over two runs lost it) is fixed: see the restock price changes in section 13.13's table.
-- **The row limit is 25,000 per batch until #900** (`bms.imports.max-rows`, `BMS_IMPORTS_MAX_ROWS`): the big file test
-  dry runs it in 185 s and commits it in 246 s on the staging heap with the old generation at 60 percent; 50,000 stopped
-  at the 900 s dry run limit (chapter 15 section 15.7). It goes up to 100,000 with #900. The test profile keeps 100,000
-  for the readers' streaming proofs; `UploadServiceTest` pins production's.
+- **The big file findings, #880 and #900.** #880 (PR #898) streams the loader of `retail_v1` in pages of 250 rows,
+  writes each page in statement batches, plans each statement of a batch for its tables as they are, looks each key up
+  through `LATERAL ... OFFSET 0`, reads a template's forecast inputs once for the reconciliation, and holds the per-row
+  keys of the validation, the forecast and the loader compactly. #900 found what was left:
+  - *The statistics of a batch's own rows.* The planner estimates a business's rows from the table's statistics, which
+    ANALYZE gathers from committed rows only, so while a batch filled `import_refs` and `retail_products` the business
+    still looked nearly empty. Every index that leads with `tenant_id` then looked as cheap as the one holding the key,
+    and the planner took `import_refs_by_run` for the lookup of a key and `retail_products_category` for the lookup of a
+    product by its id and its name, filtering every row the batch had written: about 68,000 rows per key at 68,000 rows,
+    so the batch grew with the square of its rows. Twice the staging heap was never the cause: run first on a fresh
+    database the twice-heap dry run took 145 s, and the staging heap's stopped at 900 s once another business's 100,000
+    rows were in the tables. Since V153 a large transaction calls the definer function
+    `bms_import_refresh_statistics` once the rows its batches registered pass 5,000 (`ImportRunService.LARGE_BATCH_ROWS`),
+    and again each time they double (`ImportRunService.StatisticsRefresh`). The rows are counted over the transaction,
+    not one batch (the Lead on the review of 3d86afa): a dry run writes every batch in one outer transaction, and the
+    slow lookups filter every row of the business that transaction can see, so five files of 5,000 rows add up as one
+    of 25,000 (`ImportBigFileIT.fiveBatchesOf5000InOneDryRunRefreshTheStatisticsInsideTheEdgeBudget`); a commit's
+    transaction holds one batch. A batch is large as soon as the transaction's earlier batches push it over 5,000,
+    however small they were: in that test the categories and units files register a row each first, so the first item
+    file is large too (2 + 5,000 rows), takes the key before writing and refreshes on its last page; the dry run
+    refreshes three times, at 5,002, 10,252 and 20,752 rows. ANALYZE of those two tables in the batch's own
+    transaction counts its own rows, and the key is then found through `import_refs_by_key` (a page of 250 lookups in
+    0.4 ms instead of 1,449 ms, measured on a copy of the table with 30,000 rows of the batch). ANALYZE holds SHARE UPDATE
+    EXCLUSIVE on the two tables to the end of the batch, which blocks no read or write. The function waits for both
+    tables' locks under one deadline, the second waiting only what the first left (the Lead on the review of 668c0ec;
+    `MigrationOrderIT.importStatisticsMigrationAnalyzesOnlyInsideABatch`); a batch that finds a lock held waits at most
+    2 s, keeps the statistics it has, and asks again, waiting 100 ms, once its rows have doubled again or 30 s have
+    passed: at most 2 s a doubling, 10 s over 100,000 rows (five refreshes), and 100 ms each 30 s after a refusal. The
+    rows, the next doubling and a refusal are carried across a dry run's batches in the transaction-local
+    `app.import_registered`, so the doublings and the throttle are the transaction's, however many files it holds
+    (the review of 0c2705e; twenty files of 5,000 ask as one of 100,000 does; the exact waits in
+    `StatisticsRefreshTest`, end to end in `ImportPreviewIT.aRefusedStatisticsRefreshIsAskedAgainRarelyAndBriefly`). A
+    dry run rolls the new statistics
+    back, but not `pg_class.relpages` and `reltuples` nor the reset of the count of changed rows, which ANALYZE writes in
+    place (chapter 6, V153). Only a large transaction refreshes the statistics, so a small one never holds their lock
+    while a large one needs it (the Lead on the review of 668c0ec). A small one keeps the old plans, whose time grows
+    with the square of its rows: before V153 a dry run of 25,000 rows took 185 s (the big file test before #900, CI run
+    42824679713), so 5,000 rows, a twenty-fifth of that square, should take some 7 s (an estimate, not a measurement).
+    Without the statistics a large transaction is back on the slow path, so it takes a platform-wide advisory key, held
+    to its end. A batch takes it before writing when the rows the transaction registered so far and its own rows pass
+    the threshold; otherwise the key is taken as the running total passes it. While another large import holds the key
+    the batch is refused with `import_busy` ("Another large import is being written; try again in a few minutes.", of
+    any business, its own included); a dry run refused so stores nothing, and a commit refused so stays committing for a
+    resume (`ImportPreviewIT.aLargeBatchIsRefusedAtOnceWhileAnotherLargeBatchIsWritten` and
+    `aLargeCommitIsRefusedAtOnceAndResumedOnceTheKeyIsFree`; the running batch holds the key, and it is free again
+    after a large dry run that passes, is refused or fails, and after a large commit). The import screens show
+    `import_busy` as "Another large import is running, try again in a few minutes." on a dry run, and after a refused
+    start or resume as "Another large import is running. Wait a few minutes, then resume this import.", with Resume
+    offered (`frontend/src/api/imports.ts`, `frontend/src/areas/platform/import-run.tsx`).
+    Documented limits (the Lead on the reviews of 668c0ec and 3d86afa): the refusal is late when the threshold is
+    passed inside a batch, or by a later batch of a dry run: the rows written so far are rolled back with the rest, and
+    the refusal comes after them, not at once (`ImportPreviewIT.aBatchPassingTheThresholdMidwayIsRefusedThenAndStoresNothing`),
+    and a writer that wrapped the refusal in an error of its own would turn it into an ordinary failed batch; the 100 ms retry is shorter than the 1 s `deadlock_timeout`,
+    so it never cancels an autovacuum that started on either table after the refusal, and the batch keeps its statistics
+    until that vacuum ends; the 80 s edge budget below is measured on the CI runner, not on staging behind Cloudflare,
+    and the commit is not held to it; and ANALYZE samples about 30,000 rows of the whole table, so on a large shared
+    table a batch's rows may stay out of the most common values, and the gain is proven on the test databases only.
+  - *A forecast that fails on a row* in the reconciliation (one that changes the unmodifiable typed row it is given,
+    say) counts the row as unmeasured only, not written, named `forecast:` and the error, and holds the sign-off,
+    instead of failing the whole reconciliation (`ReconciliationService`, the Lead on the reviews of 668c0ec and
+    3d86afa; `ImportReconciliationIT.aForecastThatFailsOnARowCountsItUnmeasuredOnlyNamesItAndHoldsTheSignOff`).
+    Notes from the review of 0c2705e, left as they are: a forecast that fails partway through a row may keep part of
+    it in the run's whole forecast, so the totals shown beside the held sign-off may be skewed by that row; the
+    refresh IT counts `pg_stat_user_tables.analyze_count`, which is the database's, so it relies on the ITs running
+    one at a time (`MigrationOrderIT` calls the function too); and the screens give the Resume wording to any operator
+    action refused with `import_busy`, though only a start or a resume can be.
+  - *The reconciliation after the commit* read every item the batch had just written as product objects and a copied
+    map of costs (the dry run reads the catalogue before the batch, so it never did), and filled the staging heap's old
+    generation at 100,000 items. The forecast now reads the costs into compact keys sized at once
+    (`RetailV1Template.heldCosts`), the run's `import_refs` and the costs are read 1,000 rows at a time (a fetch size,
+    so pgjdbc never holds the whole result), each row is typed once for every forecast it is given, and `CompactKeys`
+    starts small, since the reconciliation makes a forecast for each row. The big file test's storage double keeps the
+    quarantined file on disk, as staging keeps it in R2, so the heap it judges is the API's (chapter 12 section 12.7).
+
+  #881 (a restock's price change looked for within its batch only, so splitting the restocks over two runs lost it) is
+  fixed: see the restock price changes in section 13.13's table.
+- **The row limit is 25,000 per batch until #922** (`bms.imports.max-rows`, `BMS_IMPORTS_MAX_ROWS`; the Lead's
+  decision on #921, reversible). A batch of the 100,000 of spec section 3.1 passes the big file test on the staging heap:
+  dry run, commit and old generation inside their limits, among other businesses' committed rows (chapter 15 section
+  15.7). But the check (the validation) and the dry run are requests the screen waits on, and on staging Cloudflare's
+  edge answers 524 to a request the API has not answered within 100 s. At 100,000 rows the validation took 32 to 410 s
+  over the runs of #900 and the dry run 97 to 146 s, so the screen would show that error while the API finishes the work.
+  The configured limit is therefore the largest measured size whose validation and dry run both finish within 80 s on
+  the staging heap. Over eleven runs of the job, 25,000 rows took 8.2 to 30.8 s to validate (median 14.7 s) and
+  22.8 to 45.4 s to dry run (median 27.4 s), the spread in chapter 15 section 15.7, and split into five files of 5,000
+  its dry run took 37 s; 50,000 took up to 102 s to
+  validate. `ImportBigFileIT` holds every case at or under the configured limit to that budget, and `UploadServiceTest`
+  pins it. #922 runs the two requests in the background (202 and poll) and then raises the limit to 100,000.
 
 **12/16, the rehearsal on last night's backup (#138, migration `V146`, ADR-027 decision 9, spec section 5.5).**
 

@@ -1017,6 +1017,227 @@ class ImportPreviewIT extends IntegrationTest {
         assertThat(as(t, () -> runs.commit(ready))).isEqualTo(CommitOutcome.COMMITTED);
     }
 
+    // JUSTIFICATION-A3: the Lead on the review of 887dc57 (#900) asks large batches never written together, with a
+    // test.
+    /**
+     * A batch over {@link ImportRunService#LARGE_BATCH_ROWS} rows takes the platform's large-batch key: while another
+     * business's large batch holds it, a dry run is refused at once with {@code import_busy} and stores nothing, and a
+     * batch at the threshold takes no key; once the key is free the large batch's dry run runs.
+     */
+    @Test
+    void aLargeBatchIsRefusedAtOnceWhileAnotherLargeBatchIsWritten() throws Exception {
+        UUID large = emptyRun(t);
+        UUID atThreshold = emptyRun(t);
+        String rows = "UPDATE import_batches SET row_count = ? WHERE run_id = ?";
+        TestDatabase.owner()
+                .sql(rows)
+                .params(ImportRunService.LARGE_BATCH_ROWS + 1, large)
+                .update();
+        TestDatabase.owner()
+                .sql(rows)
+                .params(ImportRunService.LARGE_BATCH_ROWS, atThreshold)
+                .update();
+        scripted(large, NOTHING);
+        whileAnotherBusinessHoldsTheLargeKey(() -> {
+            assertCode(() -> as(t, () -> runs.dryRun(large, operator)), ImportRunService.IMPORT_BUSY);
+            assertThat(as(t, () -> runs.dryRun(atThreshold, operator)).report().failure())
+                    .as("a batch at the threshold takes no key")
+                    .isNull();
+        });
+        assertThat(as(t, () -> runs.dryRunReport(large))).as("nothing stored").isEmpty();
+        assertThat(largeKeyFree()).as("free after a refused dry run").isTrue();
+        // The running batch holds the key in its transaction: another session cannot take it (the review of 668c0ec).
+        boolean[] heldInside = {false};
+        scripted(large, (runId, batchId, seq, checkpoint) -> {
+            heldInside[0] = !largeKeyFreeToAnotherSession();
+            return Map.of();
+        });
+        assertThat(as(t, () -> runs.dryRun(large, operator)).report().failure())
+                .as("once the key is free")
+                .isNull();
+        assertThat(heldInside[0]).as("held while the large batch runs").isTrue();
+        assertThat(largeKeyFree()).as("free after a large dry run").isTrue();
+        FixtureShopTemplate.SCRIPT = (runId, batchId, seq, checkpoint) -> {
+            throw new IllegalStateException("a fabricated failure of a large batch");
+        };
+        assertThat(as(t, () -> runs.dryRun(large, operator)).report().failure())
+                .as("a large dry run that fails")
+                .isNotNull();
+        assertThat(largeKeyFree()).as("free after a failed large dry run").isTrue();
+    }
+
+    // JUSTIFICATION-A3: the Lead on the review of e771a17 (#900) asks the commit's refusal proven: 409, committing,
+    // resume.
+    /**
+     * The commit of a large batch while another business's large batch is written is refused with {@code import_busy}
+     * (409), the run stays {@code committing}, and its resume commits it once the key is free.
+     */
+    @Test
+    void aLargeCommitIsRefusedAtOnceAndResumedOnceTheKeyIsFree() throws Exception {
+        UUID large = emptyRun(t);
+        TestDatabase.owner()
+                .sql("UPDATE import_batches SET row_count = ? WHERE run_id = ?")
+                .params(ImportRunService.LARGE_BATCH_ROWS + 1, large)
+                .update();
+        as(t, () -> runs.dryRun(scripted(large, NOTHING), operator));
+        as(t, () -> runs.transition(large, "ready"));
+        as(t, () -> runs.recordPreImportDump(large, "pre-import-fabricated.dump", Instant.now(), SHA));
+        CommitApproval.readyToCommit(http, t, runs, large, SHA);
+        whileAnotherBusinessHoldsTheLargeKey(() -> assertThatThrownBy(() -> as(t, () -> runs.commit(large)))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.code()).isEqualTo(ImportRunService.IMPORT_BUSY);
+                    assertThat(e.status()).isEqualTo(org.springframework.http.HttpStatus.CONFLICT);
+                }));
+        assertThat(as(t, () -> runs.get(large)).status()).isEqualTo("committing");
+        assertThat(largeKeyFree()).as("free after a refused commit").isTrue();
+        assertThat(as(t, () -> runs.resume(large))).isEqualTo(CommitOutcome.COMMITTED);
+        assertThat(as(t, () -> runs.get(large)).status()).isEqualTo("committed");
+        assertThat(largeKeyFree()).as("free after a large commit").isTrue();
+    }
+
+    // JUSTIFICATION-A3: the Lead on the review of e771a17 (#900) asks the refused refresh tested and its waits bounded.
+    /**
+     * A batch whose registered rows pass the threshold, and whose statistics refresh is refused while something else
+     * holds {@code import_refs}' statistics lock for the whole batch, still writes, and waits 2 s once and 100 ms at each
+     * later doubling: 21,000 rows registered a page at a time ask at 5,250, 10,500 and 21,000. Without the lock those
+     * are three ANALYZEs; with it, none, and at least 2.2 s of waits (the exact waits: {@link StatisticsRefreshTest}).
+     */
+    @Test
+    void aRefusedStatisticsRefreshIsAskedAgainRarelyAndBriefly() throws Exception {
+        UUID run = emptyRun(t);
+        scripted(run, registering(21_000));
+        // The refreshes counted directly (the review of 3d86afa): a manual ANALYZE of import_refs counts at once, even
+        // in a dry run that rolls back, and autovacuum counts apart. Times would measure the plans as well: a refused
+        // run keeps the slow ones, 17 s longer at 21,000 rows on CI.
+        long before = analyzeCount();
+        assertThat(as(t, () -> runs.dryRun(run, operator)).report().failure()).isNull();
+        assertThat(analyzeCount() - before)
+                .as("granted at 5,250, 10,500 and 21,000")
+                .isEqualTo(3);
+        try (java.sql.Connection held = TestDatabase.ownerDataSource().getConnection()) {
+            held.setAutoCommit(false);
+            try (java.sql.Statement s = held.createStatement()) {
+                s.execute("LOCK TABLE import_refs IN SHARE UPDATE EXCLUSIVE MODE");
+            }
+            before = analyzeCount();
+            long started = System.nanoTime();
+            assertThat(as(t, () -> runs.dryRun(run, operator)).report().failure())
+                    .as("a refused refresh never stops the batch")
+                    .isNull();
+            long refused = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+            assertThat(analyzeCount() - before).as("every refresh refused").isZero();
+            assertThat(refused).as("the waits are real: 2 s, then 100 ms twice").isGreaterThanOrEqualTo(2_200L);
+            assertThat(refused).as("never stuck on the lock").isLessThan(120_000L);
+            held.rollback();
+        }
+    }
+
+    // JUSTIFICATION-A3: the Lead on the review of 0c2705e takes the end-to-end late refusal; a writer shared with
+    // above.
+    /**
+     * A batch whose rows looked small (one) but whose registered rows pass the threshold midway, while another large
+     * import holds the key: refused with {@code import_busy} then, after the rows so far, which roll back; nothing is
+     * stored and the key is free again (the late refusal, SDD 13.14.1).
+     */
+    @Test
+    void aBatchPassingTheThresholdMidwayIsRefusedThenAndStoresNothing() throws Exception {
+        UUID run = emptyRun(t);
+        TestDatabase.owner()
+                .sql("UPDATE import_batches SET row_count = 1 WHERE run_id = ?")
+                .param(run)
+                .update();
+        scripted(run, registering(ImportRunService.LARGE_BATCH_ROWS + 250));
+        whileAnotherBusinessHoldsTheLargeKey(() ->
+                assertCode(() -> as(t, () -> runs.dryRun(run, operator)), ImportRunService.IMPORT_BUSY));
+        assertThat(as(t, () -> runs.dryRunReport(run))).as("nothing stored").isEmpty();
+        assertThat(largeKeyFree()).as("free after a late refusal").isTrue();
+    }
+
+    /** A writer that registers {@code rows} fabricated products, 250 a page, as the loaders do. */
+    private static BatchWriter registering(int rows) {
+        return (runId, batchId, seq, checkpoint) -> {
+            for (int page = 0; page < rows / 250; page++) {
+                List<BatchWriter.Registration> records = new ArrayList<>(250);
+                for (int line = page * 250 + 1; line <= page * 250 + 250; line++) {
+                    records.add(new BatchWriter.Registration(
+                            ImportRefs.sourceRef(
+                                    "fab-refresh.csv", "-", "line:" + line, ImportRefs.contentHash(Map.of("n", line))),
+                            "retail.product",
+                            UUID.randomUUID()));
+                }
+                checkpoint.registerAll(records);
+            }
+            return Map.of();
+        };
+    }
+
+    /** The times import_refs was analyzed by hand, as V153's function does. */
+    private static long analyzeCount() {
+        return TestDatabase.owner()
+                .sql("SELECT analyze_count FROM pg_stat_user_tables WHERE relname = 'import_refs'")
+                .query(Long.class)
+                .single();
+    }
+
+    /** Runs {@code work} while another business's large batch holds the platform's large-batch key in its transaction. */
+    private void whileAnotherBusinessHoldsTheLargeKey(Runnable work) throws Exception {
+        TestDatabase.Fixture other = TestDatabase.tenant("import-busy", false);
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            CountDownLatch holding = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            Future<?> holder = pool.submit(() -> as(
+                    other,
+                    () -> new TransactionTemplate(transactionManager).execute(s -> {
+                        jdbc.sql("SELECT pg_advisory_xact_lock(" + ImportRunService.LARGE_KEY + ")")
+                                .query()
+                                .singleRow();
+                        holding.countDown();
+                        try {
+                            release.await(20, TimeUnit.SECONDS);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                        return null;
+                    })));
+            assertThat(holding.await(20, TimeUnit.SECONDS)).isTrue();
+            long started = System.nanoTime();
+            try {
+                work.run();
+            } finally {
+                release.countDown();
+            }
+            assertThat(TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - started))
+                    .as("answered at once, never after a wait")
+                    .isLessThan(10);
+            holder.get(60, TimeUnit.SECONDS);
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    /** Whether a session of its own, outside the caller's transaction, takes the large-batch key at once. */
+    private static boolean largeKeyFreeToAnotherSession() {
+        try (java.sql.Connection c = TestDatabase.ownerDataSource().getConnection();
+                java.sql.Statement s = c.createStatement();
+                java.sql.ResultSet rs =
+                        s.executeQuery("SELECT pg_try_advisory_xact_lock(" + ImportRunService.LARGE_KEY + ")")) {
+            return rs.next() && rs.getBoolean(1);
+        } catch (java.sql.SQLException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** Whether another session takes the platform's large-batch key at once: no batch holds it. */
+    private boolean largeKeyFree() {
+        return Boolean.TRUE.equals(as(
+                t,
+                () -> new TransactionTemplate(transactionManager)
+                        .execute(s -> jdbc.sql("SELECT pg_try_advisory_xact_lock(" + ImportRunService.LARGE_KEY + ")")
+                                .query(Boolean.class)
+                                .single())));
+    }
+
     @Test
     void aFailedDryRunIsStoredLeavesNoTraceAndTheRunIsNotReady() throws IOException {
         Run run = validated(t);

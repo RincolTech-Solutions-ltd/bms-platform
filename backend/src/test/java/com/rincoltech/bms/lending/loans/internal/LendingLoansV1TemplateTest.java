@@ -449,7 +449,8 @@ class LendingLoansV1TemplateTest {
         ImportForecast f = new LendingLoansV1Template.LoanForecast(
                 Map.of(), Map.of("HQ", "HQ", "BR2", "BR2"), "HQ", AS_AT, Set.of(), Map.of());
         f.batch(1);
-        rows.forEach(v -> f.row("loans", v));
+        // Each row unmodifiable, as the reconciliation gives it (#900): the forecast only reads what it is given.
+        rows.forEach(v -> f.row("loans", java.util.Collections.unmodifiableMap(v)));
         ImportForecast.Balances b = f.balances();
 
         assertThat(b.journals())

@@ -16,31 +16,80 @@ import javax.crypto.spec.SecretKeySpec;
 /**
  * The recording fake of chapter 12 section 12.8, for the dev and test profiles only: objects live
  * in memory and its signed URLs point at {@link FakeStorageController}, carrying an expiry and an
- * HMAC over key and expiry, so expiry and tampering behave as they do with R2.
+ * HMAC over key and expiry, so expiry and tampering behave as they do with R2. Given a directory
+ * ({@code bms.storage.fake-dir}), it keeps each object's bytes in a file there instead, so a test that judges the heap
+ * holds no stored file in it, as R2 holds none in the API's (the big file test, issue #900).
  */
 class FakeObjectStorage implements ObjectStorage {
 
     static final String PATH = "/api/v1/storage/fake";
 
-    record StoredObject(byte[] bytes, String contentType, java.time.Instant at) {}
+    /** An object: its bytes, or the file that holds them when the fake has a directory. */
+    record StoredObject(byte[] bytes, String contentType, java.time.Instant at, java.nio.file.Path file) {
+
+        StoredObject(byte[] bytes, String contentType, java.time.Instant at) {
+            this(bytes, contentType, at, null);
+        }
+
+        @Override
+        public byte[] bytes() {
+            if (file == null) {
+                return bytes;
+            }
+            try {
+                return java.nio.file.Files.readAllBytes(file);
+            } catch (java.io.IOException e) {
+                throw new java.io.UncheckedIOException(e);
+            }
+        }
+    }
 
     private final Map<String, StoredObject> objects = new ConcurrentHashMap<>();
     private final byte[] secret;
     private final BusinessClock clock;
+    private final java.nio.file.Path dir;
 
     FakeObjectStorage(String secret, BusinessClock clock) {
+        this(secret, clock, null);
+    }
+
+    /** {@code dir}: where each object's bytes are kept; null keeps them in memory. */
+    FakeObjectStorage(String secret, BusinessClock clock, java.nio.file.Path dir) {
         this.secret = secret.getBytes(StandardCharsets.UTF_8);
         this.clock = clock;
+        this.dir = dir;
     }
 
     @Override
     public void put(String key, byte[] bytes, String contentType) {
-        objects.put(key, new StoredObject(bytes.clone(), contentType, clock.now()));
+        keep(key, bytes, contentType, clock.now());
     }
 
     /** For tests: an object as if storage had written it at {@code at}, so the sweep's age rule can be tested. */
     void putAt(String key, byte[] bytes, String contentType, java.time.Instant at) {
-        objects.put(key, new StoredObject(bytes.clone(), contentType, at));
+        keep(key, bytes, contentType, at);
+    }
+
+    private void keep(String key, byte[] bytes, String contentType, java.time.Instant at) {
+        if (dir == null) {
+            objects.put(key, new StoredObject(bytes.clone(), contentType, at));
+            return;
+        }
+        try {
+            java.nio.file.Path file = java.nio.file.Files.write(fileFor(), bytes);
+            objects.put(key, new StoredObject(null, contentType, at, file));
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+    }
+
+    /**
+     * A new file of the directory for each write, never one deleted while the fake runs, so a read of an object replaced
+     * or removed meanwhile still reads what it found (the review of 887dc57). The directory's owner deletes it.
+     */
+    private java.nio.file.Path fileFor() throws java.io.IOException {
+        java.nio.file.Files.createDirectories(dir);
+        return dir.resolve(java.util.UUID.randomUUID().toString());
     }
 
     /** For tests: keys that {@link #deleteAll} reports as failed and keeps, like an object store that refuses some. */
@@ -76,7 +125,12 @@ class FakeObjectStorage implements ObjectStorage {
     @Override
     public void putFile(String key, java.nio.file.Path file, String contentType) {
         try {
-            objects.put(key, new StoredObject(java.nio.file.Files.readAllBytes(file), contentType, clock.now()));
+            if (dir == null) {
+                objects.put(key, new StoredObject(java.nio.file.Files.readAllBytes(file), contentType, clock.now()));
+                return;
+            }
+            java.nio.file.Path copy = java.nio.file.Files.copy(file, fileFor());
+            objects.put(key, new StoredObject(null, contentType, clock.now(), copy));
         } catch (java.io.IOException e) {
             throw new java.io.UncheckedIOException(e);
         }

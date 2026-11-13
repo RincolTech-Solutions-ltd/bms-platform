@@ -90,8 +90,10 @@ An **import run** (`import_runs`, one per onboarding attempt of a tenant) owns o
   as data dictionary section 3 learned), JSON Lines (the retail export format). Anything else is
   refused with `FILE_TYPE_UNSUPPORTED`.
 - Limits, sized for the staging stack's 900 MB cap (ADR-018) and the same on production: at most
-  25 MB per file, 100,000 rows per batch and 200 columns (25,000 rows per batch until #900: the
-  size the big file test of #137 measured as safe on the staging heap); XLSX is read with a streaming reader;
+  25 MB per file, 100,000 rows per batch and 200 columns (the big file test of #137 commits a batch at
+  these limits on the staging heap, #900; the row limit is configured at 25,000 until the validation and the dry run
+  run in the background, #922, since on staging a request longer than 100 s is cut at the edge); XLSX is read with a
+  streaming reader;
   the API never holds more than one chunk of 1,000 rows in memory. A file over a limit is refused
   at upload with `FILE_TOO_LARGE` or `TOO_MANY_ROWS` and the operator splits it. These limits are
   configuration, raised only after the big file test (section 5.3) passes at the new size.
@@ -475,9 +477,10 @@ golden report of `retail_v1` over fabricated edge cases next to the existing gol
 template; the five properties of 5.2 with jqwik on `retail_v1`; the fuzzed files of 5.3 at the readers and through the
 upload, validation and preview; and the big file test on the staging heap, on request. The fuzzing found that a formula's
 error and a formula saved without its value were read as a value and as an empty field; both are now `TYPE_INVALID`.
-One finding is open: #900 (a `retail_v1` batch at the row limit validates and previews within the staging heap since
-#880, but does not yet dry run and commit within the staging heap and the time limits, so the row limit is 25,000 until
-it closes); its test is disabled with that number. #881 (a restock's price change was lost when the restocks are split
+#880 and #900 brought a `retail_v1` batch at the row limit of 100,000 through the validation, preview, dry run and
+commit within the staging heap and the time limits, among other businesses' committed rows (SDD chapter 13 section
+13.14.1 11/16); the configured limit stays 25,000 until #922 moves the validation and the dry run into the background.
+#881 (a restock's price change was lost when the restocks are split
 over two runs) is fixed: a restock's predecessor is looked for among the item's imported restocks in the books as well
 as the batch's rows, by date and then by `source_ref`. A later run that holds a restock dated before one an earlier run
 imported adds the change that later restock now calls for when the books lack it; where the books already hold a

@@ -57,6 +57,12 @@ public final class ImportBigFileMain {
                 JsonMapper.builder().build().readValue(Path.of(args[4]).toFile(), new TypeReference<>() {});
         boolean commit = "commit".equals(args[5]);
         SpringApplication app = new SpringApplication(BmsApplication.class);
+        // The quarantined file kept on disk, not in the heap judged: staging streams it to R2 (issue #900). The parent
+        // gives the directory and deletes it, however the child ends (-Dbigfile.storage).
+        String storage = System.getProperty("bigfile.storage");
+        if (storage == null) {
+            throw new IllegalArgumentException("-Dbigfile.storage: the directory the parent gives the fake storage");
+        }
         // Command line arguments win over application.yml; the switches are those of IntegrationTest.
         String[] settings = {
             "--spring.profiles.active=test",
@@ -65,9 +71,10 @@ public final class ImportBigFileMain {
             "--spring.datasource.password=" + args[1],
             "--server.port=0",
             "--management.server.port=0",
-            // Production's row limit, not the test profile's (application-test.yml keeps 100,000 for the readers),
-            // unless the case measures another size (-Dbigfile.maxRows, issue #880).
+            // Production's row limit, whatever the test profile holds, unless the case measures a size over it
+            // (-Dbigfile.maxRows: the 100,000-row proof of #900).
             "--bms.imports.max-rows=" + Integer.getInteger("bigfile.maxRows", UploadSettings.DEFAULT_MAX_ROWS),
+            "--bms.storage.fake-dir=" + storage,
             "--bms.reports.runner-enabled=false",
             "--bms.lending.arrears-job-enabled=false",
             "--bms.platform.billing-job-enabled=false",
@@ -153,10 +160,13 @@ public final class ImportBigFileMain {
         if (!commit) {
             return true;
         }
+        // The manual ANALYZEs of import_refs the dry run ran (V153): counted at once, even though it rolls back.
+        long analyzed = analyzeCount(ctx, tenant);
         started = System.nanoTime();
         ImportRuns.DryRun dry = as(tenant, () -> runs.dryRun(runId, operator));
         System.out.println("BIGFILE step=dry_run ms=" + millis(started) + " failure="
-                + dry.report().failure() + " previewMatches=" + dry.previewMatches() + heap());
+                + dry.report().failure() + " previewMatches=" + dry.previewMatches() + " analyzed="
+                + (analyzeCount(ctx, tenant) - analyzed) + heap());
         if (dry.report().failure() != null || !dry.previewMatches()) {
             return false;
         }
@@ -189,9 +199,12 @@ public final class ImportBigFileMain {
                 tenant,
                 () -> new TransactionTemplate(ctx.getBean(PlatformTransactionManager.class))
                         .execute(s -> ctx.getBean(JdbcClient.class)
-                                .sql("SELECT string_agg(seq || ':' || commit_ms, ',' ORDER BY seq) FROM import_batches"
-                                        + " WHERE run_id = ?")
-                                .param(runId)
+                                // And the reconciliation after the commit, which logs a failure and stores nothing:
+                                // its streamed reads join the tenant's transaction (the review of 887dc57, #900).
+                                .sql("SELECT string_agg(seq || ':' || commit_ms, ',' ORDER BY seq) || ' reconciled='"
+                                        + " || (SELECT count(*) FROM import_reconciliations WHERE run_id = ?)"
+                                        + " FROM import_batches WHERE run_id = ?")
+                                .params(runId, runId)
                                 .query(String.class)
                                 .single()));
         System.out.println("BIGFILE step=commit ms=" + commitMs + " outcome=" + outcome + " written=" + written
@@ -219,6 +232,16 @@ public final class ImportBigFileMain {
 
     private static <T> T as(UUID tenant, Supplier<T> work) {
         return TenantContext.callAs(tenant, work);
+    }
+
+    /** The times import_refs was analyzed by hand, as V153's function does (pg_stat_user_tables, outside a tx). */
+    private static long analyzeCount(ConfigurableApplicationContext ctx, UUID tenant) {
+        return as(
+                tenant,
+                () -> ctx.getBean(JdbcClient.class)
+                        .sql("SELECT analyze_count FROM pg_stat_user_tables WHERE relname = 'import_refs'")
+                        .query(Long.class)
+                        .single());
     }
 
     private static long millis(long started) {

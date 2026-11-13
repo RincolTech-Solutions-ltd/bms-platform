@@ -30,6 +30,8 @@ let release: (() => void) | null = null;
 /** When set, the server refuses every action with a 409 and these words. */
 let refusal: string | null = null;
 let refusalCode = 'IMPORT_IN_PROGRESS';
+/** What the server changed before it refused, if anything. */
+let onRefusal: (() => void) | null = null;
 
 vi.mock('../../api/imports', async (original) => {
   const real = await original<typeof import('../../api/imports')>();
@@ -38,7 +40,10 @@ vi.mock('../../api/imports', async (original) => {
     platformRun: () => Promise.resolve(state),
     platformAction: (_slug: string, _run: string, action: RunAction) => {
       sent.push(action);
-      if (refusal) return Promise.reject(new real.ImportError(refusal, refusalCode));
+      if (refusal) {
+        onRefusal?.();
+        return Promise.reject(new real.ImportError(refusal, refusalCode));
+      }
       return new Promise<PlatformRunState>((resolve) => {
         release = () => {
           state = { ...state, run: { ...state.run, halt_requested: action === 'stop' ? true : state.run?.halt_requested } };
@@ -74,6 +79,7 @@ beforeEach(() => {
   release = null;
   refusal = null;
   refusalCode = 'IMPORT_IN_PROGRESS';
+  onRefusal = null;
   permissions = ['platform.tenants.read', 'platform.tenants.manage'];
 });
 
@@ -150,6 +156,23 @@ describe('a run that stopped by itself (review of e3f95b2 on #895)', () => {
     await waitFor(() => expect(sent).toEqual(['resume']));
     release?.();
     expect(await screen.findByText('Resumed. It goes on from the first file not yet brought in.')).toBeTruthy();
+  });
+
+  it('after a start refused with import_busy, says to wait then resume and offers Resume (#900)', async () => {
+    state = { ...state, run: { ...base, status: 'ready', committing_at: undefined } };
+    refusal = 'Another large import is running. Wait a few minutes, then resume this import.';
+    refusalCode = 'import_busy';
+    onRefusal = () => {
+      // The server leaves the run being brought in, as it was just now.
+      state = { ...state, run: { ...base, committing_at: new Date().toISOString() } };
+    };
+    show();
+    fireEvent.click(await screen.findByRole('button', { name: 'Start the import' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, start the import' }));
+    expect(await screen.findByRole('heading', { name: 'Stopped by itself?' })).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toBe(refusal);
+    expect(screen.getByRole('button', { name: 'Resume the import' })).toBeTruthy();
+    expect(sent).toEqual(['start']);
   });
 
   it('offers no Resume once the stop was pressed, but the one main action', async () => {

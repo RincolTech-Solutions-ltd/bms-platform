@@ -14,7 +14,8 @@ class StorageConfigurationTest {
 
     private static ObjectStorage storageFor(StorageConfiguration.StorageProperties.R2 r2) {
         return new StorageConfiguration()
-                .objectStorage(new StorageConfiguration.StorageProperties("r2", r2, null), new MockEnvironment(), null);
+                .objectStorage(
+                        new StorageConfiguration.StorageProperties("r2", r2, null, null), new MockEnvironment(), null);
     }
 
     @Test

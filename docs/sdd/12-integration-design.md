@@ -304,7 +304,9 @@ outside the dev and test profiles. `r2` needs `R2_ENDPOINT`, `R2_DOCUMENTS_ACCES
 `R2_DOCUMENTS_SECRET_ACCESS_KEY` and `R2_DOCUMENTS_BUCKET`, a token scoped to the documents bucket
 only (never the backup token), and startup fails if any is empty. The fake keeps objects in
 memory and serves its own signed URLs at `/api/v1/storage/fake` (HMAC over key and expiry), so
-expiry and tampering behave as with R2 without a local bucket.
+expiry and tampering behave as with R2 without a local bucket. Given `bms.storage.fake-dir`, it keeps each object's bytes
+in a file there instead: the big file test of customer data onboarding sets it, so the heap it judges holds no quarantined
+file, as R2 holds none in the API's (issue #900, chapter 15 section 15.7).
 
 ## 12.8 Testing integrations
 

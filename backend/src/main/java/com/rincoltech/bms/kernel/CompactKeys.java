@@ -15,13 +15,40 @@ public final class CompactKeys {
     /** The bytes before each key's own: its length. */
     private static final int LENGTH = 4;
 
-    private byte[] bytes = new byte[1 << 12];
+    private byte[] bytes;
     private int used;
 
     /** Per slot, one more than where its key starts in {@link #bytes}; 0 for a free slot. */
-    private int[] slots = new int[1 << 8];
+    private int[] slots;
 
-    private long[] values = new long[1 << 8];
+    private long[] values;
+
+    /**
+     * Small to start (issue #900): the reconciliation makes a forecast, with its keys, for each row of a batch, and 7 KB
+     * each at 100,000 rows filled the staging heap's old generation. The tables double as keys are added.
+     */
+    public CompactKeys() {
+        this(0);
+    }
+
+    /**
+     * Sized for about {@code expected} keys of about 16 bytes, so tables filled at once are not copied as they grow (issue
+     * #900); more keys are taken as ever.
+     */
+    public CompactKeys(int expected) {
+        // At most about a million keys at once: a table of 2^21 slots (8 MB of int, 16 MB of long) and 16 MB of key
+        // bytes,
+        // 40 MB in all; more are taken as ever (the reviews of 668c0ec and 3d86afa).
+        int keys = Math.min(Math.max(expected, 0), (1 << 20) - 1);
+        int table = 1 << 3;
+        while (table < keys * 2 + 2) {
+            table <<= 1;
+        }
+        bytes = new byte[Math.max(1 << 6, keys * 16)];
+        slots = new int[table];
+        values = new long[table];
+    }
+
     private int size;
 
     /** The number of keys. */

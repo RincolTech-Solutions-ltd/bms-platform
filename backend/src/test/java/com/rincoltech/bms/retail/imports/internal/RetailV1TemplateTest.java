@@ -33,6 +33,13 @@ import org.junit.jupiter.api.Test;
  */
 class RetailV1TemplateTest {
 
+    /** The business's costs as the forecast holds them (issue #900): compact keys by item code. */
+    static CompactKeys costs(Map<String, Long> byCode) {
+        CompactKeys out = new CompactKeys();
+        byCode.forEach(out::putIfAbsent);
+        return out;
+    }
+
     @Test
     void theFieldsAreTheNormalisedExportsAndTheSetsAreInTheCommandsOrder() {
         List<String> files = RetailV1Template.ENTITY_SETS.stream()
@@ -92,9 +99,33 @@ class RetailV1TemplateTest {
                 .isEmpty();
     }
 
+    // JUSTIFICATION-A3: the Lead on the review of e771a17 (#900) asks a test that no forecast changes its input.
+    /**
+     * The reconciliation gives each forecast the row's typed values unmodifiable, once for all of them (#900, the review
+     * of e771a17): the forecast of products and balances only reads them; a history row is copied into the export's own
+     * form before anything reads it ({@code ExportFile.staged}).
+     */
+    @Test
+    void theForecastOnlyReadsTheRowsItIsGiven() {
+        ImportForecast f = new RetailV1Template.StockForecast(costs(Map.of()));
+        f.batch(1);
+        for (Map.Entry<String, Map<String, Object>> row : List.of(
+                Map.entry("products", Map.<String, Object>of("code", "TS-001", "cost_minor", 700L)),
+                Map.entry(
+                        "balances",
+                        Map.<String, Object>of(
+                                "branch", "KLA", "product_code", "TS-001", "qty", new BigDecimal("4"))))) {
+            Map<String, Object> values = new java.util.LinkedHashMap<>(row.getValue());
+            Map<String, Object> before = Map.copyOf(values);
+            f.row(row.getKey(), java.util.Collections.unmodifiableMap(values));
+            assertThat(values).as(row.getKey()).isEqualTo(before);
+        }
+        assertThat(f.balances().journals()).isNotNull();
+    }
+
     @Test
     void theForecastJournalsOnlyWhatIsAboveZeroAndListsTheRestForTheFirstStockTake() {
-        ImportForecast f = new RetailV1Template.StockForecast(Map.of("TS-009", 9_000L));
+        ImportForecast f = new RetailV1Template.StockForecast(costs(Map.of("TS-009", 9_000L)));
         f.batch(1);
         f.row("products", Map.of("code", "TS-001", "cost_minor", 700L));
         f.row("products", Map.of("code", "ts-001", "cost_minor", 999L));
@@ -119,7 +150,10 @@ class RetailV1TemplateTest {
     @Test
     void theForecastPredictsOneOpeningJournalPerBranchEver() {
         ImportForecast f = new RetailV1Template.StockForecast(
-                Map.of(), Set.of(RetailV1Template.compare("KLA")), Set.of(RetailV1Template.compare("JJA")), Map.of());
+                costs(Map.of()),
+                Set.of(RetailV1Template.compare("KLA")),
+                Set.of(RetailV1Template.compare("JJA")),
+                Map.of());
         f.batch(1);
         f.row("products", Map.of("code", "TS-001", "cost_minor", 700L));
         f.batch(2);
@@ -169,7 +203,7 @@ class RetailV1TemplateTest {
     void theForecastValuesALegacyHeldItemAfterThisRunsHistoryAsTheLoaderReadsIt() {
         Map<String, Map<String, RetailV1Template.Held>> books =
                 Map.of("HQ", Map.of("TS-001", new RetailV1Template.Held(BigDecimal.ZERO, true)));
-        ImportForecast f = new RetailV1Template.StockForecast(Map.of("TS-001", 100L), Set.of(), Set.of(), books);
+        ImportForecast f = new RetailV1Template.StockForecast(costs(Map.of("TS-001", 100L)), Set.of(), Set.of(), books);
         f.batch(1);
         f.row(
                 "purchases",
@@ -198,7 +232,7 @@ class RetailV1TemplateTest {
         CompactKeys earlier = new CompactKeys();
         earlier.putIfAbsent("sales|S-OLD", 0L);
         ImportForecast f = new RetailV1Template.StockForecast(
-                Map.of("TS-002", 200L, "TS-003", 300L),
+                costs(Map.of("TS-002", 200L, "TS-003", 300L)),
                 Set.of("HQ"),
                 Set.of(),
                 Map.of("HQ", Map.of("TS-002", new RetailV1Template.Held(new BigDecimal("2"), false))),
@@ -222,7 +256,7 @@ class RetailV1TemplateTest {
     @Test
     void aClosedBranchTakesNoJournalButItsStockIsCounted() {
         ImportForecast f =
-                new RetailV1Template.StockForecast(Map.of("TS-001", 100L), Set.of(), Set.of("KLA"), Map.of());
+                new RetailV1Template.StockForecast(costs(Map.of("TS-001", 100L)), Set.of(), Set.of("KLA"), Map.of());
         f.batch(1);
         f.row("balances", Map.of("branch", "KLA", "product_code", "TS-001", "qty", new BigDecimal("4")));
         f.batch(2);
@@ -321,6 +355,6 @@ class RetailV1TemplateTest {
     }
 
     private static RetailV1Template template() {
-        return new RetailV1Template(null, null, null, null, null);
+        return new RetailV1Template(null, null, null, null, null, null);
     }
 }

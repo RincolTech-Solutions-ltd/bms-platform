@@ -108,6 +108,16 @@ class ReconciliationService implements ImportReconciliation {
             .build();
 
     private final JdbcClient jdbc;
+
+    /**
+     * The application's own {@code JdbcTemplate}, on the data source the tenant-binding transaction manager binds, so a
+     * read joins the transaction and its {@code app.tenant_id} (the review of 887dc57, #900). Used for a read streamed
+     * {@link #FETCH} rows at a time: pgjdbc otherwise holds a whole result, and the run's {@code import_refs} at 100,000
+     * rows filled the staging heap's old generation after the commit.
+     */
+    private final org.springframework.jdbc.core.JdbcTemplate reads;
+
+    static final int FETCH = 1_000;
     private final TransactionTemplate tx;
     private final PreviewService preview;
     private final ImportTemplates templates;
@@ -121,6 +131,7 @@ class ReconciliationService implements ImportReconciliation {
 
     ReconciliationService(
             JdbcClient jdbc,
+            org.springframework.jdbc.core.JdbcTemplate reads,
             PlatformTransactionManager transactions,
             PreviewService preview,
             ImportTemplates templates,
@@ -132,6 +143,7 @@ class ReconciliationService implements ImportReconciliation {
             AuditLog audit,
             ObjectMapper mapper) {
         this.jdbc = jdbc;
+        this.reads = reads;
         this.tx = new TransactionTemplate(transactions);
         this.preview = preview;
         this.templates = templates;
@@ -548,18 +560,26 @@ class ReconciliationService implements ImportReconciliation {
         // What the books hold for the run: every record it registered, its journals and their kinds.
         Map<String, List<UUID>> targets = new TreeMap<>();
         Map<UUID, String> journalKinds = new LinkedHashMap<>();
-        jdbc.sql("SELECT target_type, target_id, source_key FROM import_refs WHERE run_id = ? ORDER BY created_at, id")
-                .param(runId)
-                .query((rs, n) -> {
+        // Streamed, and the key read only for a journal, which needs its kind (issue #900).
+        reads.query(
+                connection -> {
+                    java.sql.PreparedStatement read = connection.prepareStatement("""
+                            SELECT target_type, target_id, CASE WHEN target_type = ? THEN source_key END
+                              FROM import_refs WHERE run_id = ? ORDER BY created_at, id
+                            """);
+                    read.setFetchSize(FETCH);
+                    read.setString(1, JOURNAL);
+                    read.setObject(2, runId);
+                    return read;
+                },
+                (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
                     String type = rs.getString(1);
                     UUID id = rs.getObject(2, UUID.class);
                     targets.computeIfAbsent(type, k -> new ArrayList<>()).add(id);
                     if (JOURNAL.equals(type)) {
                         journalKinds.put(id, kindOf(rs.getString(3)));
                     }
-                    return null;
-                })
-                .list();
+                });
         ImportBooks.Scope scope = new ImportBooks.Scope(runId, targets);
 
         // The source: each row left out alone, with its own part, and the rows written netted together over the whole
@@ -820,9 +840,14 @@ class ReconciliationService implements ImportReconciliation {
                 // they need is missing) is counted and named, never dropped without a trace (review of #873).
                 Map<CheckId, BigDecimal> part = null;
                 String unmeasurable = null;
+                // Typed once for every forecast the row is given (issue #900), and unmodifiable, so no forecast can
+                // change what the next one is given (the review of 887dc57).
+                Map<String, Object> typed = null;
                 if (template != null && stored.containsKey(s.line())) {
                     try {
-                        part = part(openParts, b, stored.get(s.line()));
+                        typed = java.util.Collections.unmodifiableMap(
+                                PreviewService.typed(b.set(), stored.get(s.line())));
+                        part = part(openParts, b, typed);
                     } catch (RuntimeException e) {
                         unmeasured++;
                         unmeasurable = e.getClass().getSimpleName();
@@ -864,13 +889,23 @@ class ReconciliationService implements ImportReconciliation {
                     itemise(sheet, part, file, s.line(), "already imported by an earlier run");
                     continue;
                 }
+                // A row whose values could not be typed has no part and is counted below: only typed rows go on.
+                if (typed != null && part != null && whole != null) {
+                    try {
+                        whole.row(b.set().key(), typed);
+                    } catch (RuntimeException e) {
+                        // A forecast that fails on a row (one that changed the unmodifiable row, say) counts the row
+                        // as unmeasured only, not written, named like any row the rules cannot measure; the
+                        // difference it leaves holds the sign-off (the Lead on the reviews of 668c0ec and 3d86afa).
+                        unmeasured++;
+                        unmeasuredKinds.add("forecast:" + e.getClass().getSimpleName());
+                        continue;
+                    }
+                    part.forEach((id, v) -> writtenParts.merge(id, v, BigDecimal::add));
+                }
                 written++;
                 if (unmeasurable != null) {
                     unmeasuredKinds.add(unmeasurable);
-                }
-                if (part != null && whole != null) {
-                    whole.row(b.set().key(), PreviewService.typed(b.set(), stored.get(s.line())));
-                    part.forEach((id, v) -> writtenParts.merge(id, v, BigDecimal::add));
                 }
                 if (s.overridden() != null) {
                     sheet.item(
@@ -883,12 +918,12 @@ class ReconciliationService implements ImportReconciliation {
                                     "written as reviewed; warning overridden (" + s.overridden() + ")",
                                     "0"));
                 }
-                if (part != null && !sameDecision) {
+                if (typed != null && part != null && !sameDecision) {
                     // The same rules under the recorded decision. If they cannot measure the row, its decision is not
                     // itemised, so its difference stays unexplained and holds the sign-off.
                     Map<CheckId, BigDecimal> asDecided = null;
                     try {
-                        asDecided = part(decidedParts, b, stored.get(s.line()));
+                        asDecided = part(decidedParts, b, typed);
                     } catch (RuntimeException e) {
                         // Named like any other row the rules cannot measure (review of 391e1dc, point 3).
                         unmeasured++;
@@ -1022,13 +1057,14 @@ class ReconciliationService implements ImportReconciliation {
 
     /**
      * One row's part in every check, by the template's own rules: a fresh forecast given only that row. Throws when the
-     * rules cannot measure it (a row left out for a value they need); the caller counts and names that row.
+     * rules cannot measure it (a row left out for a value they need); the caller counts and names that row. The row's
+     * values are typed ({@link PreviewService#typed}) and only read.
      */
     private static Map<CheckId, BigDecimal> part(
-            Supplier<ImportForecast> forecasts, BatchInfo b, Map<String, Object> stored) {
+            Supplier<ImportForecast> forecasts, BatchInfo b, Map<String, Object> typed) {
         ImportForecast f = forecasts.get();
         f.batch(b.seq());
-        f.row(b.set().key(), PreviewService.typed(b.set(), stored));
+        f.row(b.set().key(), typed);
         return parts(f);
     }
 

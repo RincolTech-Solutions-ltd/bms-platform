@@ -41,8 +41,15 @@ export class ImportError extends Error {
   }
 }
 
-function fail(error: unknown, fallback: string): never {
+/** The words for import_busy: another business's large batch is being written (issue #900, SDD chapter 7). */
+export const IMPORT_BUSY_MESSAGE = 'Another large import is running, try again in a few minutes.';
+
+/** The words for import_busy on a start or a resume: the run stays being brought in, so the next step is Resume. */
+export const IMPORT_BUSY_RESUME_MESSAGE = 'Another large import is running. Wait a few minutes, then resume this import.';
+
+function fail(error: unknown, fallback: string, busy = IMPORT_BUSY_MESSAGE): never {
   const problem = problemOf(error);
+  if (problem.code === 'import_busy') throw new ImportError(busy, problem.code);
   const fields = problem.errors ?? [];
   throw new ImportError(fields.length > 0 ? fields.map((f) => f.message).join(' ') : (problem.detail ?? fallback), problem.code);
 }
@@ -278,7 +285,7 @@ export async function platformAction(slug: string, runId: string, action: RunAct
           ? await api.POST('/api/v1/platform/imports/businesses/{slug}/runs/{run_id}/resume', at(slug, runId))
           : await api.POST('/api/v1/platform/imports/businesses/{slug}/runs/{run_id}/trading-override/approve', at(slug, runId));
   const { data, error } = result as { data?: PlatformRunState; error?: unknown };
-  if (error || !data) fail(error, 'That did not go through. Nothing was changed.');
+  if (error || !data) fail(error, 'That did not go through. Nothing was changed.', IMPORT_BUSY_RESUME_MESSAGE);
   return data;
 }
 
