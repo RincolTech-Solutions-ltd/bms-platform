@@ -18,7 +18,7 @@ export type SignOffRequest = S['ImportSignOffRequest'];
 export type ImportRun = S['ImportRun'];
 export type ImportFile = S['ImportFile'];
 export type MappingChoice = S['ImportMappingChoice'];
-export type CheckResult = S['ImportCheckResult'];
+export type ImportJob = S['ImportRunJob'];
 export type ImportIssue = S['ImportIssue'];
 export type ImportPreview = S['ImportPreview'];
 export type DryRun = S['ImportDryRun'];
@@ -156,9 +156,10 @@ export async function removeFile(batchId: string): Promise<ImportFile> {
   return data;
 }
 
-export async function checkFiles(runId: string): Promise<CheckResult> {
+/** Starts the check in the background (202, issue #922): the answer is the run with its job; the screen polls the run. */
+export async function checkFiles(runId: string): Promise<ImportRun> {
   const { data, error } = await api.POST('/api/v1/imports/runs/{run_id}/check', run(runId));
-  if (error || !data) fail(error, 'Could not check the files. Try again.');
+  if (error || !data) fail(error, 'Could not start the check. Try again.');
   return data;
 }
 
@@ -232,9 +233,10 @@ export async function dryRunOf(runId: string): Promise<DryRun | null> {
   return data;
 }
 
-export async function tryImport(runId: string): Promise<DryRun> {
+/** Starts the trial run in the background (202, issue #922); its report is read with dryRunOf once the run's job is done. */
+export async function tryImport(runId: string): Promise<ImportRun> {
   const { data, error } = await api.POST('/api/v1/imports/runs/{run_id}/dry-run', run(runId));
-  if (error || !data) fail(error, 'The trial run did not finish. Nothing was written.');
+  if (error || !data) fail(error, 'Could not start the trial run. Nothing was written.');
   return data;
 }
 

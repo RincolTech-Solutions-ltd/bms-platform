@@ -889,7 +889,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Check every file of the run against its template; the run moves to in review; audited */
+        /** Start the check of every file of the run against its template, in the background (issue #922): the answer is the run with its job running; poll the run until the job is done or failed. The run moves to in review; audited */
         post: operations["checkImportRun"];
         delete?: never;
         options?: never;
@@ -942,7 +942,7 @@ export interface paths {
         /** The run's stored dry run; 404 while none ran */
         get: operations["getImportDryRun"];
         put?: never;
-        /** Run the commit inside one transaction that is rolled back, and store its report; audited */
+        /** Start the dry run in the background (issue #922): the commit inside one transaction that is rolled back, its report stored for GET .../dry-run. The answer is the run with its job running; poll the run until the job is done or failed */
         post: operations["dryRunImport"];
         delete?: never;
         options?: never;
@@ -11019,24 +11019,6 @@ export interface components {
             resolution: string;
             value?: string;
         };
-        /** @description The validation of a run: counts by severity and by code */
-        ImportCheckResult: {
-            /** Format: int32 */
-            blocking?: number;
-            files?: components["schemas"]["ImportFileCheck"][];
-            /** Format: int32 */
-            info?: number;
-            template_key?: string;
-            /** Format: int32 */
-            template_version?: number;
-            /** Format: int32 */
-            warning?: number;
-        };
-        ImportCodeCount: {
-            code?: string;
-            /** Format: int32 */
-            count?: number;
-        };
         /** @description The pending approval request of import_commit */
         ImportCommitRequest: {
             /** Format: uuid */
@@ -11163,22 +11145,6 @@ export interface components {
             /** Format: date-time */
             uploaded_at?: string;
             warnings?: string[];
-        };
-        /** @description What the check found in one file */
-        ImportFileCheck: {
-            /** Format: uuid */
-            batch_id?: string;
-            /** Format: int32 */
-            blocking?: number;
-            codes?: components["schemas"]["ImportCodeCount"][];
-            /** Format: int32 */
-            info?: number;
-            /** Format: int32 */
-            rows?: number;
-            /** Format: int32 */
-            seq?: number;
-            /** Format: int32 */
-            warning?: number;
         };
         ImportFileList: {
             items?: components["schemas"]["ImportFile"][];
@@ -11509,6 +11475,7 @@ export interface components {
             halt_requested?: boolean;
             /** Format: uuid */
             id?: string;
+            job?: components["schemas"]["ImportRunJob"];
             /** @description The file name of the pre-import dump recorded, or null */
             pre_import_dump_file?: string;
             pre_import_dump_verified?: boolean;
@@ -11520,6 +11487,16 @@ export interface components {
             trading_override_set?: boolean;
             /** Format: int32 */
             version?: number;
+        };
+        /** @description A check or dry run running in the background, or how it ended (issue #922) */
+        ImportRunJob: {
+            failure_code?: string;
+            /** Format: date-time */
+            finished_at?: string;
+            kind?: string;
+            /** Format: date-time */
+            started_at?: string;
+            state?: string;
         };
         ImportRunList: {
             items?: components["schemas"]["ImportRun"][];
@@ -25166,13 +25143,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description OK */
-            200: {
+            /** @description Accepted */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ImportCheckResult"];
+                    "application/json": components["schemas"]["ImportRun"];
                 };
             };
         };
@@ -25280,13 +25257,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description OK */
-            200: {
+            /** @description Accepted */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ImportDryRun"];
+                    "application/json": components["schemas"]["ImportRun"];
                 };
             };
         };

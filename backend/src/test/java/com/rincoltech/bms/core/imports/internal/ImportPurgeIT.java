@@ -469,6 +469,10 @@ class ImportPurgeIT extends IntegrationTest {
             "import_runs.dry_run_stamp",
             "import_runs.dry_run_writer",
             "import_runs.origin",
+            // V154 (#922): check or dry_run, and a refusal's code, interrupted or failed, each held to its form by a
+            // CHECK.
+            "import_runs.job_kind",
+            "import_runs.job_failure_code",
             "import_batches.status",
             "import_batches.counts",
             "import_batches.source_sha256",

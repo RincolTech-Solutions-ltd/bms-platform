@@ -50,10 +50,10 @@ import tools.jackson.databind.json.JsonMapper;
  * found the reconciliation after the commit reading every item the batch wrote as objects; it now reads their costs
  * compactly. A batch at the 100,000 of section 3.1 is proven here, judged, and its commits run last, after the other cases
  * have committed theirs, so their lookups run among other businesses' rows, as on staging. The configured row limit,
- * {@link UploadSettings#DEFAULT_MAX_ROWS}, is lower (the Lead's decision on the review of e771a17, SDD chapter 13 section
- * 13.14.1 11/16): the largest measured size whose validation and dry run, requests the screen waits on, both finish
- * within {@link #EDGE_BUDGET_MS}, under the 100 s after which Cloudflare's edge gives up on a request to staging. Every
- * case at or under it is held to that budget; a case over it runs the child at its own size.
+ * {@link UploadSettings#DEFAULT_MAX_ROWS}, is that 100,000 again since #922: the child starts the validation and the dry
+ * run in the background and polls the run, as the screen does, so no request waits on them and the 80 s budget #921 held
+ * them to under Cloudflare's 100 s is gone. Every dry run is held to its limit ({@link #DRY_RUN_LIMIT_MS}) and every
+ * commit to the batch timeout ({@link #BATCH_TIMEOUT_MS}).
  *
  * <p><b>Not part of {@code mvn verify}.</b> The commits and their dry runs take longer than
  * the backend job can spare, and on the shared runner a stalled machine would fail the job for a reason that is not a
@@ -93,11 +93,8 @@ class ImportBigFileIT extends IntegrationTest {
     /** The batch's statement timeout (spec section 3.7): the commit of one batch must finish inside it. */
     static final long BATCH_TIMEOUT_MS = 10 * 60 * 1000L;
 
-    /**
-     * What the validation and the dry run of a batch at the configured limit may each take: 80 s, under the 100 s after
-     * which Cloudflare's edge answers 524 to a request to staging (the Lead's decision on the review of e771a17, #900).
-     */
-    static final long EDGE_BUDGET_MS = 80_000L;
+    /** The dry run's limit, {@code bms.imports.dry-run-limit} (15 minutes): past it the dry run stops and says so. */
+    static final long DRY_RUN_LIMIT_MS = 15 * 60 * 1000L;
 
     @TempDir
     Path dir;
@@ -109,9 +106,7 @@ class ImportBigFileIT extends IntegrationTest {
         String output = child("commit", "items=" + limitsCsv(), STAGING_HEAP_MB, ROW_LIMIT);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "outcome=COMMITTED");
         assertThat(written(output)).as("every item written").isGreaterThanOrEqualTo(ROW_LIMIT);
-        assertThat(stepMillis(output, "commit"))
-                .as("the commit at the row limit")
-                .isLessThan(BATCH_TIMEOUT_MS);
+        insideTheTimeLimits(output);
     }
 
     /**
@@ -125,9 +120,7 @@ class ImportBigFileIT extends IntegrationTest {
         String output = child("commit", "items=" + limitsCsv(), 2 * STAGING_HEAP_MB, ROW_LIMIT);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "outcome=COMMITTED");
         assertThat(written(output)).as("every item written").isGreaterThanOrEqualTo(ROW_LIMIT);
-        assertThat(stepMillis(output, "commit"))
-                .as("the commit at the row limit")
-                .isLessThan(BATCH_TIMEOUT_MS);
+        insideTheTimeLimits(output);
     }
 
     @Test
@@ -136,6 +129,7 @@ class ImportBigFileIT extends IntegrationTest {
         TestFiles.writeXlsx(xlsx, ITEM_HEADER, items(ROW_LIMIT, 0));
         String output = child("preview", "items=" + xlsx, STAGING_HEAP_MB, ROW_LIMIT);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "step=preview");
+        assertThat(stepMillis(output, "validate")).as("the validation").isLessThan(DRY_RUN_LIMIT_MS);
     }
 
     @Test
@@ -143,8 +137,7 @@ class ImportBigFileIT extends IntegrationTest {
         String output = child("commit", "wide_items=" + columnLimitCsv(), STAGING_HEAP_MB);
         assertThat(output).contains("columns=" + COLUMN_LIMIT, "outcome=COMMITTED");
         assertThat(written(output)).isGreaterThanOrEqualTo(COLUMN_LIMIT_ROWS);
-        assertThat(stepMillis(output, "commit")).isLessThan(BATCH_TIMEOUT_MS);
-        insideTheEdgeBudget(output);
+        insideTheTimeLimits(output);
     }
 
     /** The upload, validation and preview at the row and size limits of spec section 3.1, on the staging heap, judged. */
@@ -152,37 +145,32 @@ class ImportBigFileIT extends IntegrationTest {
     void aCsvAtTheRowAndSizeLimitsIsUploadedValidatedAndPreviewedOnTheStagingHeap() throws Exception {
         String output = child("preview", "items=" + limitsCsv(), STAGING_HEAP_MB, ROW_LIMIT);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "step=preview");
+        assertThat(stepMillis(output, "validate")).as("the validation").isLessThan(DRY_RUN_LIMIT_MS);
     }
 
-    // JUSTIFICATION-A3: the Lead's decision on the review of e771a17 asks the limit held to its measured 80 s budget.
     /**
      * The whole path, commit included, for a product master of seven columns at each measured size below the row limit, on
-     * the staging heap and judged there (SDD chapter 15 section 15.7): how the times grow with the rows. A size at or under
-     * the configured limit is held to {@link #EDGE_BUDGET_MS}; one over it runs the child at its own size.
+     * the staging heap and judged there (SDD chapter 15 section 15.7): how the times grow with the rows, each inside the
+     * time limits.
      */
     @ParameterizedTest(name = "{0} rows")
     @MethodSource("measuredSizes")
     void aProductMasterIsCommittedOnTheStagingHeapInsideTheTimeLimits(int rows) throws Exception {
         Path csv = dir.resolve("fab-items-" + rows + ".csv");
         TestFiles.writeCsv(csv, ITEM_HEADER, items(rows, 0));
-        String output =
-                child("commit", "items=" + csv, STAGING_HEAP_MB, Math.max(rows, UploadSettings.DEFAULT_MAX_ROWS));
+        String output = child("commit", "items=" + csv, STAGING_HEAP_MB);
         assertThat(output).contains("rows=" + rows, "outcome=COMMITTED");
         assertThat(written(output)).isGreaterThanOrEqualTo(rows);
-        assertThat(stepMillis(output, "commit")).isLessThan(BATCH_TIMEOUT_MS);
-        if (rows <= UploadSettings.DEFAULT_MAX_ROWS) {
-            insideTheEdgeBudget(output);
-        }
+        insideTheTimeLimits(output);
     }
 
-    // JUSTIFICATION-A3: the Lead on the review of 3d86afa asks five batches of 5,000 in one dry run held to the budget.
+    // JUSTIFICATION-A3: the Lead on the review of 3d86afa asks five batches of 5,000 in one dry run; its counts stay.
     /**
-     * The configured limit split as the runbook says, five files of 5,000 items in one run: the dry run writes them in
-     * one transaction, so the rows its batches registered pass the threshold, and it refreshes the statistics (V153) at
-     * the transaction's doublings, not each batch's, and stays inside {@link #EDGE_BUDGET_MS}.
+     * Five files of 5,000 items in one run: the dry run writes them in one transaction, so the rows its batches registered
+     * pass the threshold, and it refreshes the statistics (V153) at the transaction's doublings, not each batch's.
      */
     @Test
-    void fiveBatchesOf5000InOneDryRunRefreshTheStatisticsInsideTheEdgeBudget() throws Exception {
+    void fiveBatchesOf5000InOneDryRunRefreshTheStatisticsAtTheTransactionsDoublings() throws Exception {
         String[] files = new String[5];
         for (int i = 0; i < files.length; i++) {
             Path csv = dir.resolve("fab-items-part-" + (i + 1) + ".csv");
@@ -192,7 +180,7 @@ class ImportBigFileIT extends IntegrationTest {
         String output = child("commit", STAGING_HEAP_MB, UploadSettings.DEFAULT_MAX_ROWS, files);
         assertThat(output).contains("outcome=COMMITTED");
         assertThat(written(output)).isGreaterThanOrEqualTo(25_000);
-        insideTheEdgeBudget(output);
+        insideTheTimeLimits(output);
         Matcher analyzed = Pattern.compile("step=dry_run\\b.*?analyzed=(\\d+)").matcher(output);
         assertThat(analyzed.find()).as(output).isTrue();
         // The categories and units batches register a row each first, so the first file is large too (2 + 5,000 rows)
@@ -208,10 +196,16 @@ class ImportBigFileIT extends IntegrationTest {
         return java.util.stream.Stream.of(10_000, 25_000, 50_000, 75_000);
     }
 
-    /** The validation and the dry run each finish within {@link #EDGE_BUDGET_MS} (#900). */
-    static void insideTheEdgeBudget(String output) {
-        assertThat(stepMillis(output, "validate")).as("the validation").isLessThan(EDGE_BUDGET_MS);
-        assertThat(stepMillis(output, "dry_run")).as("the dry run").isLessThan(EDGE_BUDGET_MS);
+    /**
+     * The dry run inside its limit and the commit inside the batch timeout. The validation and the dry run run in the
+     * background since #922, so no request waits on them and the 80 s edge budget of #921 no longer applies.
+     */
+    static void insideTheTimeLimits(String output) {
+        // The validation has no limit of its own, but holds the business's loop while it runs (#922), so a commit or
+        // resume of the business waits on it: a generous ceiling, the dry run's, holds it (review of 3d86d31).
+        assertThat(stepMillis(output, "validate")).as("the validation").isLessThan(DRY_RUN_LIMIT_MS);
+        assertThat(stepMillis(output, "dry_run")).as("the dry run").isLessThan(DRY_RUN_LIMIT_MS);
+        assertThat(stepMillis(output, "commit")).as("the commit").isLessThan(BATCH_TIMEOUT_MS);
     }
 
     /** One row over the configured limit is refused at the upload with TOO_MANY_ROWS, in the child at that limit. */

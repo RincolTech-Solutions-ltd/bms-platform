@@ -999,8 +999,8 @@ class ImportPreviewIT extends IntegrationTest {
                     assertThatThrownBy(call::run).isInstanceOfSatisfying(ApiException.class, e -> {
                         assertThat(e.code()).isEqualTo("IMPORT_IN_PROGRESS");
                         assertThat(e.getMessage())
-                                .isEqualTo("Another import of this business is being committed or dry run; try again"
-                                        + " when it ends.");
+                                .isEqualTo("Another import of this business is being checked, dry run or committed;"
+                                        + " try again when it ends.");
                     });
                 }
             } finally {

@@ -11,7 +11,6 @@ import com.rincoltech.bms.core.imports.ImportRunView;
 import com.rincoltech.bms.core.imports.ImportRuns;
 import com.rincoltech.bms.core.imports.ImportUploads;
 import com.rincoltech.bms.core.imports.ImportUploads.Batch;
-import com.rincoltech.bms.core.imports.ImportValidation;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.RequiresPermission;
@@ -55,7 +54,9 @@ class RunController {
     private final ImportRuns runs;
     private final ImportUploads uploads;
     private final ImportMappings mappings;
-    private final ImportValidation validation;
+    /** The check and the dry run in the background (issue #922). */
+    private final ImportJobs jobs;
+
     private final ImportPreview preview;
     private final ImportPurges purges;
     private final ImportReview review;
@@ -64,14 +65,14 @@ class RunController {
             ImportRuns runs,
             ImportUploads uploads,
             ImportMappings mappings,
-            ImportValidation validation,
+            ImportJobs jobs,
             ImportPreview preview,
             ImportPurges purges,
             ImportReview review) {
         this.runs = runs;
         this.uploads = uploads;
         this.mappings = mappings;
-        this.validation = validation;
+        this.jobs = jobs;
         this.preview = preview;
         this.purges = purges;
         this.review = review;
@@ -153,39 +154,6 @@ class RunController {
 
     @Schema(name = "ImportMappingChoiceList")
     record MappingList(List<MappingResponse> items) {}
-
-    @Schema(name = "ImportCodeCount")
-    record CodeCount(String code, int count) {}
-
-    @Schema(name = "ImportFileCheck", description = "What the check found in one file")
-    record FileCheck(UUID batchId, int seq, int rows, int blocking, int warning, int info, List<CodeCount> codes) {}
-
-    @Schema(name = "ImportCheckResult", description = "The validation of a run: counts by severity and by code")
-    record CheckResult(
-            String templateKey, int templateVersion, int blocking, int warning, int info, List<FileCheck> files) {
-
-        static CheckResult of(ImportValidation.RunReport r) {
-            return new CheckResult(
-                    r.templateKey(),
-                    r.templateVersion(),
-                    r.count("blocking"),
-                    r.count("warning"),
-                    r.count("info"),
-                    r.batches().stream()
-                            .map(b -> new FileCheck(
-                                    b.batchId(),
-                                    b.seq(),
-                                    b.rows(),
-                                    b.bySeverity().getOrDefault("blocking", 0),
-                                    b.bySeverity().getOrDefault("warning", 0),
-                                    b.bySeverity().getOrDefault("info", 0),
-                                    b.byCode().entrySet().stream()
-                                            .sorted(Map.Entry.comparingByKey())
-                                            .map(e -> new CodeCount(e.getKey(), e.getValue()))
-                                            .toList()))
-                            .toList());
-        }
-    }
 
     @Schema(name = "ImportStockFigure", description = "Stock of one branch: quantity and value at cost in minor units")
     record StockFigure(String branch, BigDecimal qty, long valueMinor) {}
@@ -437,12 +405,17 @@ class RunController {
     }
 
     @PostMapping("/runs/{run_id}/check")
+    @ResponseStatus(HttpStatus.ACCEPTED)
     @RequiresPermission("core.imports.manage")
     @Operation(
-            summary = "Check every file of the run against its template; the run moves to in review; audited",
+            summary =
+                    "Start the check of every file of the run against its template, in the background (issue #922): the"
+                            + " answer is the run with its job running; poll the run until the job is done or failed. The run"
+                            + " moves to in review; audited",
             operationId = "checkImportRun")
-    CheckResult check(@PathVariable("run_id") UUID runId) {
-        return CheckResult.of(validation.validate(runId));
+    ImportRunView check(@PathVariable("run_id") UUID runId) {
+        return ImportRunView.of(
+                jobs.startCheck(runId, CurrentPrincipal.require().userId()));
     }
 
     @GetMapping("/runs/{run_id}/preview")
@@ -455,12 +428,17 @@ class RunController {
     }
 
     @PostMapping("/runs/{run_id}/dry-run")
+    @ResponseStatus(HttpStatus.ACCEPTED)
     @RequiresPermission("core.imports.manage")
     @Operation(
-            summary = "Run the commit inside one transaction that is rolled back, and store its report; audited",
+            summary =
+                    "Start the dry run in the background (issue #922): the commit inside one transaction that is rolled"
+                            + " back, its report stored for GET .../dry-run. The answer is the run with its job running; poll the"
+                            + " run until the job is done or failed",
             operationId = "dryRunImport")
-    DryRunResponse dryRun(@PathVariable("run_id") UUID runId) {
-        return DryRunResponse.of(runs.dryRun(runId, CurrentPrincipal.require().userId()));
+    ImportRunView dryRun(@PathVariable("run_id") UUID runId) {
+        return ImportRunView.of(
+                jobs.startDryRun(runId, CurrentPrincipal.require().userId()));
     }
 
     @GetMapping("/runs/{run_id}/dry-run")

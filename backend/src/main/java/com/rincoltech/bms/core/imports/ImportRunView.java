@@ -39,7 +39,10 @@ public record ImportRunView(
 
         Instant committingAt,
         Instant committedAt,
-        boolean fabricated) {
+        boolean fabricated,
+
+        // The last background check or dry run (issue #922); null while none was started.
+        ImportRuns.Job job) {
 
     public static ImportRunView of(ImportRuns.Run r) {
         return new ImportRunView(
@@ -55,6 +58,7 @@ public record ImportRunView(
                 r.commitApproved(),
                 r.committingAt(),
                 r.committedAt(),
-                r.fabricated());
+                r.fabricated(),
+                r.job());
     }
 }

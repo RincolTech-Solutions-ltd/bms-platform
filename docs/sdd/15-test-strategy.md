@@ -409,10 +409,9 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
     dry run's transaction counts the rows of all five and refreshes the statistics at its own doublings (the Lead on the
     reviews of 3d86afa and 0c2705e). The categories and units files register a row each first, so the first item file
     is large too (2 + 5,000 rows) and refreshes on its last page; the dry run analyzes `import_refs` exactly three
-    times, at 5,002, 10,252 and 20,752 rows, which the job asserts. The job holds every case at or under the
-    configured limit to that budget
-    (`ImportBigFileIT.EDGE_BUDGET_MS`), and runs the larger sizes in a child at their own size. #922 moves the two
-    requests into the background (202 and poll) and then raises the limit to 100,000. Times on the runner of the
+    times, at 5,002, 10,252 and 20,752 rows, which the job asserts. Until #922 the job held every case at or under the
+    configured limit to that budget and ran the larger sizes in a child at their own size; #922 moved the two requests
+    into the background (202 and poll), raised the limit to 100,000 and dropped the budget (below). Times on the runner of the
     `import-big-file` job, 13 November 2026 (CI run 43372613340, head c45b785: the refresh's rows, doubling and refusal
     carried across a dry run's batches; 11 cases, 0 failures, each commit's reconciliation stored; `Report memory proof`
     passed in the same run; the backend job of that run failed on a unit test's expected waits, fixed in e9cbc48, which
@@ -437,6 +436,42 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
     MB over the last seven runs): it counts what young collections promoted before the first full one, so it moves with
     their timing. The validation's time varies most from run to run (32 to 410 s at 100,000 rows): it is not bounded by a
     limit of its own. A larger file is split (the cutover runbook, stage 2).
+
+    *Since #922 (migration V154, chapter 13 section 13.14.1)* the check and the dry run answer 202 and run in the
+    background, and the screen polls the run, so no request waits on them and Cloudflare's 100 s no longer bounds them.
+    The configured row limit is **100,000** again. The child (`ImportBigFileMain`) starts both through `ImportJobs`, the
+    path the routes take, and polls the run every half second, as the screen does: the validation and dry run times below
+    are from the start to the job's end as polled. The 80 s budget is gone (`ImportBigFileIT.insideTheTimeLimits`): every
+    dry run must finish inside its 15 minute limit and every commit inside the 10 minute batch timeout, every validation
+    inside the same 15 minutes as a ceiling (it has no limit of its own and holds the business's loop while it runs; the
+    review of 3d86d31), and the old generation is judged as before. Every case runs at the configured limit, the measured sizes included. Times of
+    the `import-big-file` job on the code that merges, 13 November 2026 (CI run 43411859225, head 409e48c; later commits
+    change only docs; 11 cases, 0 failures, each commit's reconciliation stored), the cases in one database, in the order
+    shown:
+
+    | File | Heap | Upload | Validation (background) | Preview | Dry run (background) | Commit (batch) | Old generation peak |
+    |---|---|---|---|---|---|---|---|
+    | CSV, 100,001 rows, 7 columns (one over the configured limit) | 224 MB | refused `TOO_MANY_ROWS` in 6.6 s | | | | | 68 of 149 MB |
+    | CSV, 10,000 rows, 7 columns, 2.6 MB | 224 MB | 0.9 s | 3.6 s | 0.4 s | 8.1 s | 7.4 s (6.8 s) | 70 of 149 MB |
+    | CSV, 25,000 rows, 7 columns, 6.5 MB | 224 MB | 1.8 s | 9.1 s | 1.4 s | 25 s | 22 s (21 s) | 77 of 149 MB |
+    | CSV, 50,000 rows, 7 columns, 12.9 MB | 224 MB | 3.6 s | 23 s | 0.8 s | 40 s | 40 s (39 s) | 85 of 149 MB |
+    | CSV, 75,000 rows, 7 columns, 19.4 MB | 224 MB | 5.2 s | 45 s | 1.0 s | 54 s | 50 s (48 s) | 128 of 149 MB |
+    | CSV, five files of 5,000 rows, 7 columns, 1.3 MB each, one run | 224 MB | 0.3 to 0.5 s each | 14.1 s | 0.6 s | 24 s (3 ANALYZEs) | 126 s (87 s over five batches) | 94 of 149 MB |
+    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits), up to the preview | 224 MB | 5.6 s | 203 s | 1.1 s | not run | not run | 77 of 149 MB |
+    | CSV, 20,000 rows, 200 columns (193 ignored), 20.6 MB (column limit) | 224 MB | 2.1 s | 6.6 s | 1.0 s | 20 s | 18 s (17 s) | 97 of 149 MB |
+    | XLSX, the 100,000 rows, 3.3 MB, up to the preview | 224 MB | 5.7 s | 33 s | 1.2 s | not run | not run | 113 of 149 MB |
+    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits) | 448 MB | 5.6 s | 77 s | 1.3 s | 75 s | 76 s (73 s) | 140 of 298 MB, not judged |
+    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits) | 224 MB | 5.8 s | 199 s | 8.1 s | 70 s | 76 s (74 s) | **117 of 149 MB** |
+
+    Every dry run fits its 15 minute limit, every commit the 10 minute batch timeout, every validation the 15 minute
+    ceiling, and every case on the staging heap keeps the old generation a tenth below its limit (134 MB); the 75,000 row
+    case is again the closest (128 MB). The same 11 cases passed through the same background path on the heads before
+    it: 16be37e (CI run 43386796894), 7246953 (CI run 43396818859) and 761939f (CI run 43397060617). At 100,000 rows on
+    the staging heap those three validated in 81, 79 and 136 s, dry ran in 74, 150 and 159 s and committed in 69, 158 and
+    153 s, the workbook validating in 40, 366 and 143 s. Hosted runners differ from run to run (the validation most), so
+    the tables are not compared step by step. Validations of 76 to 366 s at 100,000 rows would each have outlasted #921's
+    80 s budget, and most of them Cloudflare's 100 s; in the background they only make the screen wait longer, and a
+    commit or resume of that business waits on them.
 - **Normalisation tables.** Every table of examples in chapter 13 section 13.6 is a
   parametrised unit test.
 - **Loan servicing golden tests** (`ServicingTest`, #108). Fabricated schedules from worked

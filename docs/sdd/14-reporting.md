@@ -479,7 +479,7 @@ nothing was timed, and how long a row takes depends on the cache and the host. T
 proven, not assumed: `ImportMetricsIT.theReportsGrowingReadsUseTheirPartialIndexes` seeds 3,000 staged rows and 2,000
 resolutions of a fabricated run and reads the plans of the two statements with EXPLAIN. The order and limit read `import_runs`, one row
 per onboarding run of any business (thousands at most), with a top-N sort. After V151 every read of a run is linear in its
-own issues and resolutions, which its files bound (25,000 rows per file until #922, `UploadSettings.DEFAULT_MAX_ROWS`), and nothing is
+own issues and resolutions, which its files bound (100,000 rows per file since #922, `UploadSettings.DEFAULT_MAX_ROWS`), and nothing is
 multiplied by another table's size.
 
 Decision: add the two partial indexes in `V151__import_metrics_follow_ups.sql` (plain `CREATE INDEX IF NOT EXISTS` in

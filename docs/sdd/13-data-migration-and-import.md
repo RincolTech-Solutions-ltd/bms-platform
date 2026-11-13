@@ -759,7 +759,8 @@ retail command. ADR-027 makes the framework the one pipeline for every tenant's 
 - **Quarantine.** Uploaded files are encrypted with a per-run key under a quarantine prefix. The
   `import_*` tables are the staging area; no vertical or ledger table is written before commit.
   Columns a mapping ignores are not stored in `import_rows.raw`. Limits: 25 MB per file, 100,000
-  rows per batch (proven on the staging heap by #900; configured at 25,000 until #922, section 13.14.1 11/16), 200
+  rows per batch (proven on the staging heap by #900; configured at 25,000 by #921 and back at 100,000 since #922
+  moved the check and the dry run into the background, section 13.14.1), 200
   columns, streaming parsers.
 - **Canonical templates and mappings.** A template (`retail_v1`, `lending_loans_v1`, later savings
   and investments) is code in its vertical, registered with the core. A customer's sheet is a
@@ -877,7 +878,7 @@ tooling, as the commit is. Every call works on the bound business only: a run or
   keys the columns). The header is the first of the first 20 rows that holds every header the mapping requires, or the first
   row that is not blank (`HEADER_NOT_FOUND`). Every row below it becomes one `import_rows` row with its cells in `raw`, blank
   rows included and trailing blank rows not, and columns the mapping ignores are dropped. Rows are written 1,000 at a time in
-  one transaction, so the limits (`TOO_MANY_ROWS` over the configured row limit, 25,000 until #922 (section 13.14.1 11/16),
+  one transaction, so the limits (`TOO_MANY_ROWS` over the configured row limit, 100,000 since #922 (section 13.14.1, the entry of #922),
   `TOO_MANY_COLUMNS` over 200) and a damaged file
   (`FILE_UNREADABLE`: an unclosed quote, a cell over 32,767 characters, a broken zip or XML) roll every row back: the batch
   is `failed` with its code and a reason that names a limit, a row or a column, never a value, and its file is deleted. A
@@ -1201,7 +1202,8 @@ commit only through test-only templates (`FixtureShopTemplate`, `ScriptedTemplat
   (#779), and keeps it to the end, and every batch, of a dry run or a commit, takes the business's import key with
   `pg_try_advisory_xact_lock`, never a wait (Lead ruling 5 on #869): a commit or resume of the business while a dry run
   runs, a dry run while a commit runs, and a batch that finds the key taken are all answered at once with 409
-  `IMPORT_IN_PROGRESS` ("Another import of this business is being committed or dry run; try again when it ends." when
+  `IMPORT_IN_PROGRESS` ("Another import of this business is being checked, dry run or committed; try again when it
+  ends." since #922, when
   the loop is held, "Another import is being written for this business" when the key is), so a dry run never makes a
   commit fail at
   a statement timeout. A server that cannot tell its build apart (no `build-info.properties`, no commit SHA) refuses the
@@ -1606,7 +1608,7 @@ section 4.1; coordinated with #110, which builds no second framework).**
     and again each time they double (`ImportRunService.StatisticsRefresh`). The rows are counted over the transaction,
     not one batch (the Lead on the review of 3d86afa): a dry run writes every batch in one outer transaction, and the
     slow lookups filter every row of the business that transaction can see, so five files of 5,000 rows add up as one
-    of 25,000 (`ImportBigFileIT.fiveBatchesOf5000InOneDryRunRefreshTheStatisticsInsideTheEdgeBudget`); a commit's
+    of 25,000 (`ImportBigFileIT.fiveBatchesOf5000InOneDryRunRefreshTheStatisticsAtTheTransactionsDoublings`); a commit's
     transaction holds one batch. A batch is large as soon as the transaction's earlier batches push it over 5,000,
     however small they were: in that test the categories and units files register a row each first, so the first item
     file is large too (2 + 5,000 rows), takes the key before writing and refreshes on its last page; the dry run
@@ -1666,8 +1668,8 @@ section 4.1; coordinated with #110, which builds no second framework).**
 
   #881 (a restock's price change looked for within its batch only, so splitting the restocks over two runs lost it) is
   fixed: see the restock price changes in section 13.13's table.
-- **The row limit is 25,000 per batch until #922** (`bms.imports.max-rows`, `BMS_IMPORTS_MAX_ROWS`; the Lead's
-  decision on #921, reversible). A batch of the 100,000 of spec section 3.1 passes the big file test on the staging heap:
+- **The row limit was 25,000 per batch from #921 to #922** (`bms.imports.max-rows`, `BMS_IMPORTS_MAX_ROWS`; the Lead's
+  decision on #921, reversible, reversed by #922: the limit is 100,000 again, see the entry of #922 below). A batch of the 100,000 of spec section 3.1 passes the big file test on the staging heap:
   dry run, commit and old generation inside their limits, among other businesses' committed rows (chapter 15 section
   15.7). But the check (the validation) and the dry run are requests the screen waits on, and on staging Cloudflare's
   edge answers 524 to a request the API has not answered within 100 s. At 100,000 rows the validation took 32 to 410 s
@@ -1676,8 +1678,8 @@ section 4.1; coordinated with #110, which builds no second framework).**
   the staging heap. Over eleven runs of the job, 25,000 rows took 8.2 to 30.8 s to validate (median 14.7 s) and
   22.8 to 45.4 s to dry run (median 27.4 s), the spread in chapter 15 section 15.7, and split into five files of 5,000
   its dry run took 37 s; 50,000 took up to 102 s to
-  validate. `ImportBigFileIT` holds every case at or under the configured limit to that budget, and `UploadServiceTest`
-  pins it. #922 runs the two requests in the background (202 and poll) and then raises the limit to 100,000.
+  validate. #922 runs the two requests in the background (202 and poll) and raises the limit to 100,000;
+  `ImportBigFileIT` no longer holds any case to the 80 s budget.
 
 **12/16, the rehearsal on last night's backup (#138, migration `V146`, ADR-027 decision 9, spec section 5.5).**
 
@@ -1885,3 +1887,69 @@ section 4.1; coordinated with #110, which builds no second framework).**
   back); `MigrationOrderIT` covers V149. In the frontend: the stage progress (`pipeline.test.ts`,
   `stage-progress.dom.test.tsx`), the stop button and when Resume is offered (`import-run.dom.test.tsx`), the sign-off flow
   and the layout picker (`run.dom.test.tsx`) and the counts of large problem groups (`problems.dom.test.tsx`).
+
+**After 15/16: the check and the dry run in the background, and the row limit back at 100,000 (#922, migration
+`V154`).** On staging a request the API has not answered within 100 s is cut at Cloudflare's edge (524), and at the
+100,000 rows of spec section 3.1 the validation takes minutes (chapter 15 section 15.7), so #921 held the limit at 25,000.
+Now:
+
+- **202 and poll.** `POST /imports/runs/{run_id}/check` and `POST .../dry-run` answer 202 at once with the run, whose new
+  `job` says what runs (`check` or `dry_run`), its state (`running`, `done` or `failed`), when it started and ended, and
+  when it failed, a code. The screen polls `GET /imports/runs/{run_id}` every 2 s while the job runs; the dry run's report is
+  read as before with `GET .../dry-run`, and the check's findings from the run's metrics and issues.
+- **The pattern is the portal's commit start (15/16), not a new one.** In the request (`ImportRunService.startJob`) the
+  business's commit loop is claimed (`claimLoop`, the session lock of #779), the run's state is checked (the check's
+  `run_not_open`, the dry run's `run_not_open` and `batch_not_parsed`, the build), and the job is recorded on the run with
+  a token of its own, whose advisory lock the claim's session takes (V154: `job_kind`, `job_by`, `job_started_at`,
+  `job_finished_at`, `job_failure_code`, `job_token`). Only then does the work go on on a virtual thread (`ImportJobs`), bound to the business
+  through `core.jobs` (`TenantJobs.callAs`, as the report runner binds a run's business; only `core.jobs` and the
+  platform console may act as a tenant, `SecurityArchitectureTest`). No person is bound on that thread, so the work's
+  audit rows are the system's; the request audits `core.import_run.job_started` with the kind and the person. The work holds the claim until it ends and
+  stamps how it ended, in a `finally`: done, or failed with the refusal's code (`import_busy`, `IMPORT_IN_PROGRESS`,
+  `batch_changed`, `review_changed`, `run_changed`, `TENANT_TRADING`, ...) or `failed` for any other error, an `Error`
+  such as running out of memory included, never a message. The check probes its claim (`LoopClaim.lostReason`, as the
+  commit loop does before each batch) first inside the transaction that writes its results, so a check whose claim was
+  lost to an idle or network timeout writes nothing (`claim_connection_lost` or `claim_not_held`) while a second check
+  may already own the business. The check has no time limit of its own and holds the business's loop while it runs, so a
+  commit or resume of the business waits on it (refused with `IMPORT_IN_PROGRESS`); the big file test holds it to the dry
+  run's 15 minutes as a ceiling (at 100,000 rows it measured 76 to 203 s for a CSV and 33 to 366 s for a workbook on hosted runners, and up to 410 s on the self-hosted one), accepted
+  by the review of 3d86d31. The dry run
+  is the same code as before under that claim (`dryRunClaimed`), and probes the claim too before it stores its report
+  on the run (`LoopClaim.requireHeld`), so a dry run whose claim was lost never overwrites a newer dry run's report (review
+  of 761939f); its time limit, the batch timeout, the large-import key and its `import_busy`, and the one opening journal
+  per branch are unchanged. Only two host commands still run a step synchronously, never behind Cloudflare:
+  `RehearseImportCommand` (the dry run, through `RehearsalService`, claiming the loop as before) and
+  `StageImportRunCommand` (the check and the dry run of a fabricated staging run, `FabricatedRunStager`); no route of the
+  business or of the operator portal does.
+- **One per business, as before.** The loop claim is the business's: while a check, dry run, commit or resume of the
+  business is alive, a second check or dry run is refused in the request with 409 `IMPORT_IN_PROGRESS` ("Another import of
+  this business is being checked, dry run or committed; try again when it ends."), and so is a commit or resume. The
+  check now takes the loop too (before #922 it took none and relied on its `FOR UPDATE` of the run at its end).
+- **Never left running.** A job that has not ended is running only while some session holds its token's lock in
+  `pg_locks`. PostgreSQL drops the lock when the process or its connection dies, and the claim's close gives it back even
+  when the stamp could not be written, so after a restart, or a failed stamp, the run reads failed, `interrupted`. The
+  token is the job's own: a later claim of the business on the same pooled session holds the loop key but never the dead
+  job's token, so it never makes the dead job look alive, as a backend pid would (review of 3d86d31). It is read by `ImportJobs.read` from `ImportRunService.RUN_COLUMNS`,
+  with no sweep and no heartbeat. The
+  next check or dry run claims the loop and starts again; nothing a dead job did was kept (the dry run rolls back and
+  stores its report only while it holds its claim, the check writes in one transaction at its end, also only while it
+  holds it).
+- **The screen** (`run.tsx`) says in plain words what runs and since when ("Checking your files, since 09:05. A large file
+  takes a few minutes. You can leave this page; it carries on and this page updates by itself."), keeps the next step busy
+  meanwhile, reads the files, metrics and dry run again when the job ends, finds a running job again after a reload, and
+  words each failure: `interrupted` ("The check stopped because the server restarted. Nothing was written. Start it
+  again."), `import_busy` (the words of #900, "Another large import is running, try again in a few minutes."), a change
+  meanwhile, and any other.
+- **The limit.** `bms.imports.max-rows` and `UploadSettings.DEFAULT_MAX_ROWS` are 100,000 again (`UploadServiceTest`).
+  `ImportBigFileIT`'s child starts both steps through `ImportJobs` and polls the run, as the screen does; the 80 s edge
+  budget is gone, and every dry run is held to its 15 minute limit and every commit to the 10 minute batch timeout
+  (chapter 15 section 15.7).
+- **Tests.** `ImportJobsIT` (202 at once and the polled run done, the start audited with the person and the validation as the system; a run in no state to
+  check refused in the request; a dry run refused `import_busy` while another large import holds the key, stored on the
+  run with nothing else stored; one job of a business at a time, a second check, dry run or commit refused while one
+  runs; a job whose session died reads `interrupted`, a later claim of the business on another session never makes it look
+  alive, and a new one starts; a dead job still reads interrupted when its own session claims the business again, as a
+  pid would not; a work that throws an Error is stamped `failed`; a check whose claim connection is ended while it runs
+  stops at its probe with `claim_connection_lost` and writes nothing), `ImportPurgeIT` (the two code columns),
+  `MigrationOrderIT` (V154). In the frontend: `pipeline.test.ts` (the words) and `run.dom.test.tsx` (running, done,
+  failed, busy and a reload).

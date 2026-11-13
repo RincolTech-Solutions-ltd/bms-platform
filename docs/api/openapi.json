@@ -3667,47 +3667,6 @@
         },
         "required" : [ "code", "resolution" ]
       },
-      "ImportCheckResult" : {
-        "description" : "The validation of a run: counts by severity and by code",
-        "properties" : {
-          "blocking" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "files" : {
-            "items" : {
-              "$ref" : "#/components/schemas/ImportFileCheck"
-            },
-            "type" : "array"
-          },
-          "info" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "template_key" : {
-            "type" : "string"
-          },
-          "template_version" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "warning" : {
-            "format" : "int32",
-            "type" : "integer"
-          }
-        }
-      },
-      "ImportCodeCount" : {
-        "properties" : {
-          "code" : {
-            "type" : "string"
-          },
-          "count" : {
-            "format" : "int32",
-            "type" : "integer"
-          }
-        }
-      },
       "ImportCommitRequest" : {
         "description" : "The pending approval request of import_commit",
         "properties" : {
@@ -3979,41 +3938,6 @@
               "type" : "string"
             },
             "type" : "array"
-          }
-        }
-      },
-      "ImportFileCheck" : {
-        "description" : "What the check found in one file",
-        "properties" : {
-          "batch_id" : {
-            "format" : "uuid",
-            "type" : "string"
-          },
-          "blocking" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "codes" : {
-            "items" : {
-              "$ref" : "#/components/schemas/ImportCodeCount"
-            },
-            "type" : "array"
-          },
-          "info" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "rows" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "seq" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "warning" : {
-            "format" : "int32",
-            "type" : "integer"
           }
         }
       },
@@ -4720,6 +4644,9 @@
             "format" : "uuid",
             "type" : "string"
           },
+          "job" : {
+            "$ref" : "#/components/schemas/ImportRunJob"
+          },
           "pre_import_dump_file" : {
             "description" : "The file name of the pre-import dump recorded, or null",
             "type" : "string"
@@ -4742,6 +4669,28 @@
           "version" : {
             "format" : "int32",
             "type" : "integer"
+          }
+        }
+      },
+      "ImportRunJob" : {
+        "description" : "A check or dry run running in the background, or how it ended (issue #922)",
+        "properties" : {
+          "failure_code" : {
+            "type" : "string"
+          },
+          "finished_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "kind" : {
+            "type" : "string"
+          },
+          "started_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "state" : {
+            "type" : "string"
           }
         }
       },
@@ -31147,18 +31096,18 @@
           }
         } ],
         "responses" : {
-          "200" : {
+          "202" : {
             "content" : {
               "application/json" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/ImportCheckResult"
+                  "$ref" : "#/components/schemas/ImportRun"
                 }
               }
             },
-            "description" : "OK"
+            "description" : "Accepted"
           }
         },
-        "summary" : "Check every file of the run against its template; the run moves to in review; audited",
+        "summary" : "Start the check of every file of the run against its template, in the background (issue #922): the answer is the run with its job running; poll the run until the job is done or failed. The run moves to in review; audited",
         "tags" : [ "imports" ]
       }
     },
@@ -31293,18 +31242,18 @@
           }
         } ],
         "responses" : {
-          "200" : {
+          "202" : {
             "content" : {
               "application/json" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/ImportDryRun"
+                  "$ref" : "#/components/schemas/ImportRun"
                 }
               }
             },
-            "description" : "OK"
+            "description" : "Accepted"
           }
         },
-        "summary" : "Run the commit inside one transaction that is rolled back, and store its report; audited",
+        "summary" : "Start the dry run in the background (issue #922): the commit inside one transaction that is rolled back, its report stored for GET .../dry-run. The answer is the run with its job running; poll the run until the job is done or failed",
         "tags" : [ "imports" ]
       }
     },

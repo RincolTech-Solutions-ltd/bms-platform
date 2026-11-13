@@ -6,7 +6,6 @@ import com.rincoltech.bms.core.imports.ImportMappings;
 import com.rincoltech.bms.core.imports.ImportPreview;
 import com.rincoltech.bms.core.imports.ImportRuns;
 import com.rincoltech.bms.core.imports.ImportUploads;
-import com.rincoltech.bms.core.imports.ImportValidation;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.TenantContext;
@@ -110,7 +109,6 @@ public final class ImportBigFileMain {
         ImportRuns runs = ctx.getBean(ImportRuns.class);
         ImportMappings mappings = ctx.getBean(ImportMappings.class);
         ImportUploads uploads = ctx.getBean(ImportUploads.class);
-        ImportValidation validation = ctx.getBean(ImportValidation.class);
         ImportPreview preview = ctx.getBean(ImportPreview.class);
         UUID operator = UUID.randomUUID();
         UUID runId = as(tenant, () -> runs.open(operator).id());
@@ -145,12 +143,30 @@ public final class ImportBigFileMain {
         if ("refuse".equals(args[5])) {
             return false;
         }
+        // The check and the dry run as the screen runs them since #922: started in the background, the run polled.
+        ImportJobs jobs = ctx.getBean(ImportJobs.class);
         long started = System.nanoTime();
-        ImportValidation.RunReport report = as(tenant, () -> validation.validate(runId));
+        String checkFailure = awaitJob(runs, tenant, runId, () -> jobs.startCheck(runId, operator));
         Map<String, Integer> codes = new TreeMap<>();
-        report.batches().forEach(b -> b.byCode().forEach((code, n) -> codes.merge(code, n, Integer::sum)));
-        System.out.println("BIGFILE step=validate ms=" + millis(started) + " codes=" + codes + heap());
-        if (report.count("blocking") + report.count("warning") > 0) {
+        Map<String, Integer> severities = new TreeMap<>();
+        as(
+                tenant,
+                () -> new TransactionTemplate(ctx.getBean(PlatformTransactionManager.class))
+                        .execute(s -> ctx.getBean(JdbcClient.class)
+                                .sql("SELECT i.code, i.severity, count(*) AS n FROM import_issues i"
+                                        + " JOIN import_batches b ON b.id = i.batch_id WHERE b.run_id = ?"
+                                        + " GROUP BY i.code, i.severity")
+                                .param(runId)
+                                .query((rs, n) -> {
+                                    codes.merge(rs.getString("code"), rs.getInt("n"), Integer::sum);
+                                    severities.merge(rs.getString("severity"), rs.getInt("n"), Integer::sum);
+                                    return null;
+                                })
+                                .list()));
+        System.out.println("BIGFILE step=validate ms=" + millis(started) + " failure=" + checkFailure + " codes="
+                + codes + heap());
+        if (checkFailure != null
+                || severities.getOrDefault("blocking", 0) + severities.getOrDefault("warning", 0) > 0) {
             return false;
         }
         started = System.nanoTime();
@@ -163,11 +179,13 @@ public final class ImportBigFileMain {
         // The manual ANALYZEs of import_refs the dry run ran (V153): counted at once, even though it rolls back.
         long analyzed = analyzeCount(ctx, tenant);
         started = System.nanoTime();
-        ImportRuns.DryRun dry = as(tenant, () -> runs.dryRun(runId, operator));
-        System.out.println("BIGFILE step=dry_run ms=" + millis(started) + " failure="
-                + dry.report().failure() + " previewMatches=" + dry.previewMatches() + " analyzed="
-                + (analyzeCount(ctx, tenant) - analyzed) + heap());
-        if (dry.report().failure() != null || !dry.previewMatches()) {
+        String dryFailure = awaitJob(runs, tenant, runId, () -> jobs.startDryRun(runId, operator));
+        ImportRuns.DryRun dry = as(tenant, () -> runs.dryRunReport(runId)).orElse(null);
+        System.out.println("BIGFILE step=dry_run ms=" + millis(started) + " job=" + dryFailure + " failure="
+                + (dry == null ? "none stored" : dry.report().failure()) + " previewMatches="
+                + (dry != null && dry.previewMatches()) + " analyzed=" + (analyzeCount(ctx, tenant) - analyzed)
+                + heap());
+        if (dryFailure != null || dry == null || dry.report().failure() != null || !dry.previewMatches()) {
             return false;
         }
         String sha = "b".repeat(64);
@@ -228,6 +246,29 @@ public final class ImportBigFileMain {
                 HttpClient.newBuilder().proxy(HttpClient.Builder.NO_PROXY).build()) {
             return client.send(request, HttpResponse.BodyHandlers.ofString()).statusCode();
         }
+    }
+
+    /**
+     * Starts a background check or dry run (#922) and polls the run every half second until its job ends, as the screen
+     * does; answers the job's failure code, or null when it is done.
+     */
+    private static String awaitJob(ImportRuns runs, UUID tenant, UUID runId, Runnable start)
+            throws InterruptedException {
+        as(tenant, () -> {
+            start.run();
+            return null;
+        });
+        // A deadline above every limit the job holds (the 15 minute dry run and validation ceiling), so a job left
+        // running ends the child with a line that says so, not the child's outer timeout (review of 761939f).
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MINUTES.toNanos(20);
+        while (System.nanoTime() < deadline) {
+            ImportRuns.Job job = as(tenant, () -> runs.get(runId).job());
+            if (!ImportJobs.RUNNING.equals(job.state())) {
+                return job.failureCode();
+            }
+            Thread.sleep(500);
+        }
+        return "still_running_after_20_minutes";
     }
 
     private static <T> T as(UUID tenant, Supplier<T> work) {

@@ -1,5 +1,5 @@
 import type { Me } from '../../../api/client';
-import type { DryRun, ImportIssue, ImportRun, RunMetrics } from '../../../api/imports';
+import { IMPORT_BUSY_MESSAGE, type DryRun, type ImportIssue, type ImportJob, type ImportRun, type RunMetrics } from '../../../api/imports';
 
 // The import screens (issue #141, spec sections 2, 3 and 11): the steps of a run in plain words, what to do next, the plain name
 // of each issue code and the permission each route declares. Kept apart from the pages so it is tested without one.
@@ -147,6 +147,38 @@ export function nextStep(run: Pick<ImportRun, 'status' | 'commit_approved'>, fil
     default:
       return { kind: 'wait', words: 'This import was stopped for good. Start a new one if you need to.' };
   }
+}
+
+/** Whether the run's check or trial run is still running in the background (issue #922). */
+export const jobRunning = (run: Pick<ImportRun, 'job'> | undefined) => run?.job?.state === 'running';
+
+// JUSTIFICATION-A3: issue #922 asks the background job's progress and failures shown in plain words; no words existed.
+/** The words of a failed background job by its code (issue #922); `{what}` is the check or the trial run. */
+const JOB_FAILED: Record<string, string> = {
+  interrupted: 'The {what} stopped because the server restarted. Nothing was written. Start it again.',
+  import_busy: IMPORT_BUSY_MESSAGE,
+  IMPORT_IN_PROGRESS: 'Another step of this import was running. Try again when it ends.',
+  batch_changed: 'A file or a fix changed while the {what} ran. Start it again.',
+  review_changed: 'A file or a fix changed while the {what} ran. Start it again.',
+  run_changed: 'A file or a fix changed while the {what} ran. Start it again.',
+  TENANT_TRADING: 'Your business already has records of its own, so the trial run needs Rincol Tech to allow it first.',
+};
+
+/**
+ * The background check or trial run in plain words (issue #922): while it runs, what it does and since when; when it failed,
+ * why and what to do. Null when it is done or none was started: the cards show what it found.
+ */
+export function jobLine(job: ImportJob | undefined | null): { failed: boolean; words: string } | null {
+  if (!job || job.state === 'done') return null;
+  const what = job.kind === 'dry_run' ? 'trial run' : 'check';
+  if (job.state === 'running') {
+    const at = new Date(job.started_at ?? '');
+    const since = Number.isNaN(at.getTime()) ? '' : `, since ${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+    const doing = job.kind === 'dry_run' ? 'Trying the import, nothing is written' : 'Checking your files';
+    return { failed: false, words: `${doing}${since}. A large file takes a few minutes. You can leave this page; it carries on and this page updates by itself.` };
+  }
+  const words = JOB_FAILED[job.failure_code ?? ''] ?? 'The {what} stopped before it finished. Nothing was written. Try again, or ask Rincol Tech.';
+  return { failed: true, words: words.replace('{what}', what) };
 }
 
 /** Open problems that hold the run: blocking ones and warnings. An info note never holds it. */
