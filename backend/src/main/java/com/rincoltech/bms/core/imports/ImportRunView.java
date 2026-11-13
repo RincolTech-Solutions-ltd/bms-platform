@@ -42,7 +42,10 @@ public record ImportRunView(
         boolean fabricated,
 
         // The last background check or dry run (issue #922); null while none was started.
-        ImportRuns.Job job) {
+        ImportRuns.Job job,
+
+        // Set while the run is committing and its commit or resume stopped by itself (issue #896); else null.
+        ImportRuns.LoopStopped loopStopped) {
 
     public static ImportRunView of(ImportRuns.Run r) {
         return new ImportRunView(
@@ -59,6 +62,7 @@ public record ImportRunView(
                 r.committingAt(),
                 r.committedAt(),
                 r.fabricated(),
-                r.job());
+                r.job(),
+                r.loopStopped());
     }
 }

@@ -256,14 +256,17 @@ class PlatformImportRunsController {
     /**
      * Runs a commit or a resume for one business on its own thread; a failure is logged by run id and kind only. The work is
      * closed in the try-with-resources, so its loop claim is given back even if the tenant binding fails and the work never
-     * runs (issue #897).
+     * runs (issue #897). The work itself stamps on the run how it stopped and tells the operators (issue #896).
      */
     private static void background(UUID tenant, UUID runId, String what, ImportRuns.Work work) {
         Thread.ofVirtual().name("import-" + what + "-" + runId).start(() -> {
             try (work) {
                 ImportRuns.CommitOutcome outcome = TenantContext.callAs(tenant, work);
                 log.info("import {} of run {} ended {}", what, runId, outcome);
-            } catch (RuntimeException e) {
+            } catch (Throwable e) {
+                // An Error too, or the thread's default handler would log its message, which may quote a row, as the
+                // background check does (ImportJobs.background); the run is stamped stopped already, or reads
+                // interrupted.
                 log.warn(
                         "import {} of run {} stopped: {}",
                         what,

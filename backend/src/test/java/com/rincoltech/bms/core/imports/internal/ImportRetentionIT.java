@@ -210,10 +210,12 @@ class ImportRetentionIT extends IntegrationTest {
                         run))
                 .isEqualTo(1);
         // The params the rows store, not only the ones a template renders (review of #907): ids, the business, the
-        // Owner's account name, a day and a fixed reason, never a text typed on the run.
+        // Owner's account name, a day, a time (the stop of a commit loop, #896) and a fixed reason, never a text typed
+        // on
+        // the run.
         String otherParams = "SELECT count(*) FROM notification_outbox WHERE template_key LIKE 'imports.%'"
                 + " AND EXISTS (SELECT 1 FROM jsonb_object_keys(params) k WHERE k NOT IN"
-                + " ('run', 'business', 'business_name', 'owner_name', 'day', 'reason'))";
+                + " ('run', 'business', 'business_name', 'owner_name', 'day', 'time', 'reason'))";
         assertThat(count(otherParams)).isZero();
     }
 

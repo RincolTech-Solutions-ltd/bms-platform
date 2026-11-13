@@ -130,7 +130,10 @@ public interface ImportRuns {
      * business on its own thread; the work holds the loop claim until it ends, so a second start, or a resume while it
      * writes, is refused at once with {@code IMPORT_IN_PROGRESS}. The work gives the claim back however it ends; a
      * {@code background} that throws gives it back at once, and the background closes the work in a finally, so the claim
-     * is given back too when anything before the work fails and it never runs (issue #897).
+     * is given back too when anything before the work fails and it never runs (issue #897). Since issue #896 (V156) the
+     * loop holds a token of its own, as a background check does: when it stops by itself (a batch fails or is refused, an
+     * Error, its claim is lost) it stamps {@link Run#loopStopped()} and tells the operators' chat through the outbox in one
+     * transaction, and a loop whose process died reads stopped, {@code interrupted}, from its token's lock alone.
      */
     void startCommit(UUID runId, UUID platformUserId, Consumer<Work> background);
 
@@ -224,7 +227,8 @@ public interface ImportRuns {
             UUID commitApprovedBy,
             Integer commitApprovedVersion,
             boolean fabricated,
-            Job job) {
+            Job job,
+            LoopStopped loopStopped) {
 
         /** Whether {@code import_commit} is approved for the run as it is now: the run has not changed since. */
         public boolean commitApproved() {
@@ -249,4 +253,18 @@ public interface ImportRuns {
             name = "ImportRunJob",
             description = "A check, dry run or sign-off running in the background, or how it ended (issues #922, #874)")
     record Job(String kind, String state, Instant startedAt, Instant finishedAt, String failureCode) {}
+
+    // JUSTIFICATION-A3: issue #896 needs the stop of a portal commit loop on the run the portal polls; one new record.
+    /**
+     * A {@code committing} run whose portal commit or resume loop stopped by itself (issue #896, migration V156), null
+     * otherwise: when, and the code. Stamped by the loop as it ends: a refusal's code ({@code import_busy} and the rest),
+     * {@code failed} for any other error, or {@code claim_not_held} or {@code claim_connection_lost} when it lost its claim
+     * of the business's loop. A loop whose process died stamps nothing; its token's lock is gone, so it reads
+     * {@code interrupted} at its last sign of life (its start or its last committed batch), as a dead {@link Job} does. A
+     * resume clears it.
+     */
+    @io.swagger.v3.oas.annotations.media.Schema(
+            name = "ImportRunLoopStopped",
+            description = "A commit or resume that stopped by itself, with the time and a code, never a message (#896)")
+    record LoopStopped(Instant at, String code) {}
 }

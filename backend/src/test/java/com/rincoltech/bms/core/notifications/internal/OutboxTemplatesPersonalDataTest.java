@@ -20,10 +20,11 @@ class OutboxTemplatesPersonalDataTest {
     /**
      * The parameters an import or approval message may take, each never typed on a run: the run's id, the business's slug
      * and name, the Owner's account name (from {@code users}, the recipient, never a text of the run), a day, the
-     * application's fixed reason, and an approval action's label (from its code).
+     * application's fixed reason, an approval action's label (from its code), and a time of day the application stamped
+     * (issue #896, the stop of a commit loop).
      */
     static final Set<String> ALLOWED =
-            Set.of("run", "business", "business_name", "owner_name", "day", "reason", "action_label");
+            Set.of("run", "business", "business_name", "owner_name", "day", "time", "reason", "action_label");
 
     @Test
     void noImportOrApprovalTemplateTakesATypedNoteOrName() {
@@ -41,6 +42,7 @@ class OutboxTemplatesPersonalDataTest {
                 .containsExactlyInAnyOrder(
                         "email:imports.purged_without_warning",
                         "telegram:imports.purged_without_warning",
+                        "telegram:imports.commit_stopped",
                         "telegram:imports.purge_warning",
                         "push:core.approval_policy_weakened",
                         "push:core.approval_waiting");

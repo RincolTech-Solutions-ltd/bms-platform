@@ -249,5 +249,9 @@ public interface ImportMetrics {
     record CodeCount(String code, long count) {}
 
     @Schema(name = "PlatformImportRun", description = "One run on the platform report; the business by its slug only")
-    record PlatformRun(String tenantSlug, Metrics metrics) {}
+    record PlatformRun(
+            String tenantSlug,
+            Metrics metrics,
+            // Set while the run is committing and its commit or resume stopped by itself (issue #896); else null.
+            ImportRuns.LoopStopped loopStopped) {}
 }

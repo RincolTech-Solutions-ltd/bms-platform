@@ -3,6 +3,7 @@ package com.rincoltech.bms.core.imports.internal;
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.audit.PlatformAuditLog;
 import com.rincoltech.bms.core.imports.ImportMetrics;
+import com.rincoltech.bms.core.imports.ImportRuns;
 import com.rincoltech.bms.core.imports.ImportTemplate;
 import com.rincoltech.bms.core.imports.ImportTemplates;
 import com.rincoltech.bms.kernel.ApiException;
@@ -149,9 +150,17 @@ class MetricsService implements ImportMetrics {
         return jdbc.sql("SELECT tenant_slug, CAST(metrics AS text) AS metrics"
                         + " FROM platform_import_runs_report(CAST(? AS timestamptz), ?)")
                 .params(since == null ? null : Timestamp.from(since), limit)
-                .query((rs, n) -> new PlatformRun(
-                        rs.getString("tenant_slug"), metricsOf(mapper.readTree(rs.getString("metrics")), true)))
+                .query((rs, n) -> {
+                    JsonNode m = mapper.readTree(rs.getString("metrics"));
+                    return new PlatformRun(rs.getString("tenant_slug"), metricsOf(m, true), loopStopped(m));
+                })
                 .list();
+    }
+
+    /** V156's {@code loop_stopped} of the report (issue #896, {@code import_run_loop_stopped}): null, or when and the code. */
+    static ImportRuns.LoopStopped loopStopped(JsonNode m) {
+        JsonNode s = m.path("loop_stopped");
+        return s.isObject() ? new ImportRuns.LoopStopped(at(s, "at"), str(s, "code")) : null;
     }
 
     private static void requireUnbound() {

@@ -26,6 +26,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -69,6 +71,10 @@ class ImportRunsIT extends IntegrationTest {
 
     @Autowired
     TestRestTemplate http;
+
+    /** The platform report, which carries a stopped loop too (issue #896). */
+    @Autowired
+    ImportMetrics metrics;
 
     TestDatabase.Fixture t;
     UUID operator = UUID.randomUUID();
@@ -449,6 +455,184 @@ class ImportRunsIT extends IntegrationTest {
                 }))
                 .isSameAs(noMemory);
         assertThat(as(t, () -> runs.resume(run.id()))).isEqualTo(CommitOutcome.COMMITTED);
+    }
+
+    // JUSTIFICATION-A3: issue #896 asks for these three cases (a failing batch, a lost loop, a resume). Tests only.
+    /**
+     * The portal's background as {@code PlatformImportRunsController.background} runs it, in this thread: the work in a
+     * try-with-resources, how it ended (its outcome, or what it threw) kept for the test.
+     */
+    static Consumer<ImportRuns.Work> inline(List<Object> ended) {
+        return work -> {
+            try (work) {
+                ended.add(work.get());
+            } catch (RuntimeException e) {
+                ended.add(e);
+            }
+        };
+    }
+
+    /** The operators' notices of a run's stopped loop (issue #896). */
+    static long stopNotices(UUID runId) {
+        return TestDatabase.owner()
+                .sql("""
+                        SELECT count(*) FROM notification_outbox
+                         WHERE template_key = 'imports.commit_stopped' AND params ->> 'run' = ?
+                        """)
+                .param(runId.toString())
+                .query(Long.class)
+                .single();
+    }
+
+    /** Ends the session that holds the business's loop key, as a redeploy ends the process that held it. */
+    void killTheLoopSession() {
+        List<Boolean> ended = JdbcClient.create(TestDatabase.appDataSource())
+                .sql("""
+                        SELECT pg_terminate_backend(pid) FROM pg_locks
+                         WHERE locktype = 'advisory' AND granted AND objsubid = 1
+                           AND ((classid::bigint << 32) | objid::bigint)
+                               = hashtextextended('core.imports.loop:' || ?, 0)
+                        """)
+                .param(t.tenantId().toString())
+                .query(Boolean.class)
+                .list();
+        assertThat(ended).containsExactly(true);
+    }
+
+    /**
+     * Issue #896: a portal commit whose second batch fails stamps on the run that its loop stopped by itself (the time and
+     * the code {@code failed}, never the message), and the operators' chat is told by exactly one outbox row in that
+     * transaction, which holds ids, the slug, a day, a time and a fixed sentence only. The run stays committing with its
+     * first batch in, and goes on from the second.
+     */
+    @Test
+    void aPortalCommitWhoseBatchFailsIsStampedStoppedTellsTheOperatorsOnceAndStaysResumable() {
+        Run run = readyRun(2);
+        UUID operatorId = Api.platformUser(Api.email("loop-stopped-batch"));
+        AtomicBoolean failed = new AtomicBoolean();
+        BatchWriter writer = (runId, batchId, seq, checkpoint) -> {
+            postJournal(batchId, checkpoint);
+            if (seq == 2 && failed.compareAndSet(false, true)) {
+                throw new IllegalStateException("fabricated row of Fab Buyer, 0700 000 001, refused");
+            }
+            return Map.of();
+        };
+        List<Object> ended = new CopyOnWriteArrayList<>();
+        as(t, () -> {
+            runs.startCommit(script(run.id(), writer), operatorId, inline(ended));
+            return null;
+        });
+        assertThat(ended).singleElement().isInstanceOf(IllegalStateException.class);
+
+        Run stopped = as(t, () -> runs.get(run.id()));
+        assertThat(stopped.status()).isEqualTo("committing");
+        assertThat(stopped.loopStopped()).isNotNull();
+        assertThat(stopped.loopStopped().code()).isEqualTo("failed");
+        assertThat(stopped.loopStopped().at()).isNotNull();
+        assertThat(batchStatus(run.id(), 1)).isEqualTo("committed");
+        assertThat(batchStatus(run.id(), 2)).isEqualTo("pending");
+
+        assertThat(stopNotices(run.id())).isEqualTo(1);
+        Map<String, Object> row =
+                TestDatabase.owner().sql("""
+                        SELECT channel, recipient, params::text AS params,
+                               (SELECT array_agg(k ORDER BY k)::text FROM jsonb_object_keys(params) k) AS keys
+                          FROM notification_outbox
+                         WHERE template_key = 'imports.commit_stopped' AND params ->> 'run' = ?
+                        """).param(run.id().toString()).query().singleRow();
+        assertThat(row.get("channel")).isEqualTo("telegram");
+        assertThat(row.get("recipient")).isEqualTo("operator");
+        assertThat(row.get("keys")).isEqualTo("{business,day,reason,run,time}");
+        assertThat((String) row.get("params"))
+                .contains("a file failed with an unexpected error")
+                .doesNotContain("Fab Buyer")
+                .doesNotContain("0700")
+                .doesNotContain("IllegalStateException");
+
+        assertThat(as(t, () -> runs.resume(script(run.id(), writer)))).isEqualTo(CommitOutcome.COMMITTED);
+        assertThat(journals()).isEqualTo(2);
+        assertThat(as(t, () -> runs.get(run.id())).loopStopped()).isNull();
+        assertThat(stopNotices(run.id())).as("one notice per stopped loop").isEqualTo(1);
+    }
+
+    /**
+     * Issue #896: a portal loop whose process dies (a redeploy) stamps nothing, but its token's lock went with its session,
+     * so the run's read, the business's list and the platform report all say it stopped by itself, {@code interrupted},
+     * at its last sign of life. A live loop is never read stopped.
+     */
+    @Test
+    void aPortalLoopWhoseSessionDiesReadsStoppedInTheRunTheListAndThePlatformReport() {
+        Instant since = Instant.now().minusSeconds(300);
+        Run run = readyRun(1);
+        UUID operatorId = Api.platformUser(Api.email("loop-stopped-lost"));
+        AtomicReference<ImportRuns.Work> held = new AtomicReference<>();
+        as(t, () -> {
+            runs.startCommit(script(run.id(), NOTHING), operatorId, held::set);
+            return null;
+        });
+        assertThat(as(t, () -> runs.get(run.id())).loopStopped())
+                .as("alive while its token's lock is held")
+                .isNull();
+
+        killTheLoopSession();
+        held.get().close();
+
+        Run lost = as(t, () -> runs.get(run.id()));
+        assertThat(lost.status()).isEqualTo("committing");
+        assertThat(lost.loopStopped()).isNotNull();
+        assertThat(lost.loopStopped().code()).isEqualTo("interrupted");
+        assertThat(lost.loopStopped().at()).isNotNull();
+        assertThat(as(t, () -> runs.list()))
+                .filteredOn(r -> r.id().equals(run.id()))
+                .singleElement()
+                .extracting(Run::loopStopped)
+                .isEqualTo(lost.loopStopped());
+        assertThat(metrics.platformReport(since, 500, operatorId))
+                .filteredOn(r -> run.id().equals(r.metrics().runId()))
+                .singleElement()
+                .extracting(ImportMetrics.PlatformRun::loopStopped)
+                .isEqualTo(lost.loopStopped());
+        assertThat(stopNotices(run.id())).as("a dead process sends nothing").isZero();
+    }
+
+    /**
+     * Issue #896: a resume clears the stop, and its own live loop is not read stopped; once it ends the run is committed
+     * with no stop and no notice. The stop here is a start whose work was closed unrun, as the portal's thread does when
+     * it fails before the work.
+     */
+    @Test
+    void aResumeClearsTheStopAndItsLiveLoopIsNotReadStopped() {
+        Run run = readyRun(1);
+        UUID operatorId = Api.platformUser(Api.email("loop-stopped-resume"));
+        as(t, () -> {
+            runs.startCommit(script(run.id(), NOTHING), operatorId, ImportRuns.Work::close);
+            return null;
+        });
+        assertThat(as(t, () -> runs.get(run.id())).loopStopped().code()).isEqualTo("interrupted");
+
+        AtomicReference<ImportRuns.Work> held = new AtomicReference<>();
+        as(t, () -> {
+            runs.startResume(run.id(), operatorId, held::set);
+            return null;
+        });
+        Run resumed = as(t, () -> runs.get(run.id()));
+        assertThat(resumed.status()).isEqualTo("committing");
+        assertThat(resumed.loopStopped()).as("cleared by the resume").isNull();
+
+        try (ImportRuns.Work work = held.get()) {
+            assertThat(as(t, work)).isEqualTo(CommitOutcome.COMMITTED);
+        }
+        Run done = as(t, () -> runs.get(run.id()));
+        assertThat(done.status()).isEqualTo("committed");
+        assertThat(done.loopStopped()).isNull();
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT loop_token IS NULL AND loop_stopped_at IS NULL FROM import_runs WHERE id = ?")
+                        .param(run.id())
+                        .query(Boolean.class)
+                        .single())
+                .as("a loop that ended as asked leaves no token and no stop")
+                .isTrue();
+        assertThat(stopNotices(run.id())).isZero();
     }
 
     @Test

@@ -473,6 +473,8 @@ class ImportPurgeIT extends IntegrationTest {
             // CHECK.
             "import_runs.job_kind",
             "import_runs.job_failure_code",
+            // V156 (#896): the stop of a portal commit loop, a refusal's code, failed or a claim's, held by a CHECK.
+            "import_runs.loop_stopped_code",
             "import_batches.status",
             "import_batches.counts",
             "import_batches.source_sha256",
