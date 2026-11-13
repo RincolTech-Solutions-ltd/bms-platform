@@ -1131,7 +1131,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Sign the reconciliation: every section ticked, the name and today's date typed; audited */
+        /** Start the sign-off of the reconciliation in the background (issue #874): every section ticked, the name and today's date typed. The answer is the reconciliation with its job running; poll the reconciliation until the job is done (signed) or failed (its refusal's code); audited */
         post: operations["signOffImport"];
         delete?: never;
         options?: never;
@@ -11320,6 +11320,7 @@ export interface components {
             generated_at?: string;
             /** Format: uuid */
             id?: string;
+            job?: components["schemas"]["ImportRunJob"];
             /** Format: uuid */
             run_id?: string;
             sections?: components["schemas"]["ImportReconciliationSection"][];
@@ -11488,7 +11489,7 @@ export interface components {
             /** Format: int32 */
             version?: number;
         };
-        /** @description A check or dry run running in the background, or how it ended (issue #922) */
+        /** @description A check, dry run or sign-off running in the background, or how it ended (issues #922, #874) */
         ImportRunJob: {
             failure_code?: string;
             /** Format: date-time */
@@ -11627,6 +11628,7 @@ export interface components {
         ImportSignOffRun: {
             /** Format: date-time */
             committed_at?: string;
+            job?: components["schemas"]["ImportRunJob"];
             /** Format: uuid */
             run_id?: string;
             /** @description Whether every difference is explained, or null while none was made */
@@ -25566,8 +25568,8 @@ export interface operations {
             };
         };
         responses: {
-            /** @description OK */
-            200: {
+            /** @description Accepted */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };

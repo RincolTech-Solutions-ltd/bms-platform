@@ -1,10 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute, useRouterState } from '@tanstack/react-router';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { businessToday } from '../../../api/retail';
 import {
   downloadReconciliation,
-  ImportError,
   reconcileAgain,
   reconciliationOf,
   signOff,
@@ -21,7 +20,18 @@ import { ListRow, RowList } from '../../../app/ui/ListRow';
 import { showDate } from '../../../app/ui/PeriodPicker';
 import { Skeleton } from '../../../app/ui/Skeleton';
 import { useStaff } from '../context';
-import { figure, itemPlace, notTied, reasonWords, runState, runTitle, signOffProblem } from './state';
+import {
+  figure,
+  itemPlace,
+  notTied,
+  reasonWords,
+  runState,
+  runTitle,
+  signOffPoll,
+  signOffProblem,
+  signOffRefusal,
+  signing as signOffRunning,
+} from './state';
 
 // Business set-up > Imports to sign off (issue #134, spec sections 3.9 and 3.10, FR-IMP-08). After Rincol Tech imports a
 // business's own sheets, the tenant admin reads the reconciliation: per check what their sheet says, what BMS now holds and
@@ -31,9 +41,6 @@ import { figure, itemPlace, notTied, reasonWords, runState, runTitle, signOffPro
 
 const RUNS = ['imports-sign-off'] as const;
 const reconciliationKey = (run: string) => ['imports-reconciliation', run] as const;
-
-/** The sign-off was refused because the figures changed since they were read. */
-const changed = (error: unknown) => error instanceof ImportError && error.code === 'reconciliation_changed';
 
 export function ImportsSignOff() {
   const { me } = useStaff();
@@ -79,32 +86,44 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
   const currency = me.tenant_currency ?? 'UGX';
   const today = businessToday(new Date(), me.tenant_timezone ?? 'Africa/Kampala');
   const queryClient = useQueryClient();
-  const reconciliation = useQuery({ queryKey: reconciliationKey(runId), queryFn: () => reconciliationOf(runId) });
+  const reconciliation = useQuery({
+    queryKey: reconciliationKey(runId),
+    queryFn: () => reconciliationOf(runId),
+    // While the sign-off runs in the background (issue #874) the screen follows it by itself; a reload finds it the same.
+    refetchInterval: (q) => (signOffRunning(q.state.data) ? signOffPoll.ms : false),
+  });
   const [ticked, setTicked] = useState<Set<string>>(new Set());
   const [name, setName] = useState('');
   const [date, setDate] = useState('');
   const [tried, setTried] = useState(false);
-  const [refused, setRefused] = useState<string | null>(null);
+  // The version sent to be signed: should a refusal because the figures changed ever come back with that same version on
+  // screen, it is never offered for signing again (review of 1ea73e5).
+  const [submitted, setSubmitted] = useState<string | null>(null);
+  // The refusal put away by making the reconciliation again, by when its job started.
+  const [dismissed, setDismissed] = useState<string | null>(null);
 
-  // success-screen: the signed reconciliation replaces the form, with who signed and when
+  // success-screen: the sign-off answers at once and runs in the background (issue #874); the screen shows it pending, then
+  // the signed reconciliation replaces the form, with who signed and when, or the refusal says why nothing was signed
   const sign = useMutation({
-    meta: { success: 'Import signed off' },
+    meta: { success: 'Signing started' },
     mutationFn: (r: Reconciliation) =>
       signOff(runId, { reconciliation_id: r.id ?? '', sha256: r.sha256 ?? '', sections: [...ticked], name: name.trim(), date }),
-    onSuccess: async (signed) => {
-      queryClient.setQueryData(reconciliationKey(runId), signed);
+    onSuccess: async (answer, sent) => {
+      setSubmitted(sent.id ?? null);
+      queryClient.setQueryData(reconciliationKey(runId), answer);
       await queryClient.invalidateQueries({ queryKey: RUNS });
     },
-    // The figures changed since they were read: the API stores what it measured as the next version, so show the newest,
-    // to be checked and ticked again (Lead on the review of 391e1dc, point 5). The one refused is remembered, so a refetch
-    // that brings it back is never called the newest (review of 1ea73e5).
-    onError: (error, refusedOne) => {
-      if (!changed(error)) return;
-      setRefused(refusedOne.id ?? null);
+  });
+  // When the job ends, the list is read again; a refusal because the figures changed leaves nothing ticked, so the newest
+  // figures, which the same read brought, are checked again (Lead on the review of 391e1dc, point 5).
+  const running = signOffRunning(reconciliation.data);
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    if (wasRunning.current && !running) {
       setTicked(new Set());
-      // Not awaited: the refusal shows at once and hides the form while the newest figures are on their way.
-      void queryClient.invalidateQueries({ queryKey: reconciliationKey(runId) });
-    },
+      void queryClient.invalidateQueries({ queryKey: RUNS });
+    }
+    wasRunning.current = running;
   });
   // busy-exempt: the download button says Downloading the report itself and is disabled meanwhile
   // toast-exempt: saves nothing: a download changes nothing, and the device shows the saved file
@@ -119,6 +138,7 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
     onSuccess: async (made) => {
       queryClient.setQueryData(reconciliationKey(runId), made);
       setTicked(new Set());
+      setDismissed(made.job?.started_at ?? null);
       sign.reset();
       await queryClient.invalidateQueries({ queryKey: RUNS });
     },
@@ -158,13 +178,14 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
   }
   const problem = signOffProblem(r, ticked, name, date, today);
   const signed = r.signed;
-  // Refused because the figures changed: the API's own words, which name the new version. Should the one on screen still be
-  // the one refused, offer to make it again rather than sign it once more.
-  const moved = !signed && changed(sign.error);
-  // The refused version is never offered for signing again: no ticks and no form while it is on screen, the refetch done
-  // or not (Lead on the review of 5b32682).
-  const stale = moved && refused !== null && refused === r.id;
-  const signing = !signed && r.signable === true && !stale;
+  // Why the last sign-off signed nothing, in plain words, unless making it again put that away (issue #874).
+  const refusal = !signed && r.job?.started_at !== dismissed ? signOffRefusal(r.job) : null;
+  // Refused because the figures changed: should the one on screen still be the one sent, offer to make it again rather
+  // than sign it once more. The refused version is never offered for signing again: no ticks and no form while it is on
+  // screen (Lead on the review of 5b32682).
+  const stale = refusal !== null && r.job?.failure_code === 'reconciliation_changed' && submitted !== null && submitted === r.id;
+  // Nothing to tick or type while the sign-off runs: it is pending and the page follows it.
+  const signing = !signed && r.signable === true && !stale && !running;
   // The ways out wait for the refetch, so the normal path never flashes them (review of 4105c2a).
   const settled = stale && !reconciliation.isFetching;
 
@@ -202,12 +223,18 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
           </p>
         )
       )}
-      {moved && sign.error instanceof Error && (
-        <p role="alert" className="alert alert-danger">
-          {sign.error.message}
+      {running && (
+        <p role="status" className="alert alert-info">
+          Signing. BMS checks the figures against the books once more before it signs; a large import takes a few minutes. You can
+          leave this page: the signing carries on and this page updates by itself.
         </p>
       )}
-      {!signed && (stale ? settled : !r.signable) && remakeButton}
+      {refusal && (
+        <p role="alert" className="alert alert-danger">
+          {refusal}
+        </p>
+      )}
+      {!signed && !running && (stale ? settled : !r.signable) && remakeButton}
       {settled && !canRemake && (
         <BusyButton type="button" className="btn" busy={reconciliation.isFetching} onClick={() => void reconciliation.refetch()}>
           Show the new figures
@@ -256,7 +283,7 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
             showError={tried}
           />
           {tried && problem && <p role="alert" className="field-error">{problem}</p>}
-          {sign.isError && !moved && (
+          {sign.isError && (
             <p role="alert" className="alert alert-danger">
               {sign.error instanceof Error ? sign.error.message : 'Could not sign. Nothing was signed.'}
             </p>

@@ -73,6 +73,10 @@ export async function reconcileAgain(runId: string): Promise<Reconciliation> {
   return data;
 }
 
+/**
+ * Starts the sign-off in the background (202, issue #874): the answer is the reconciliation with its job running; the screen
+ * polls the reconciliation until the job is done (signed) or failed (the refusal's code).
+ */
 export async function signOff(runId: string, body: SignOffRequest): Promise<Reconciliation> {
   const { data, error } = await api.POST('/api/v1/imports/runs/{run_id}/sign-off', { params: { path: { run_id: runId } }, body });
   if (error || !data) fail(error, 'Could not sign. Nothing was signed.');
