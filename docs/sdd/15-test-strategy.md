@@ -443,7 +443,30 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
     path the routes take, and polls the run every half second, as the screen does: the validation and dry run times below
     are from the start to the job's end as polled. The 80 s budget is gone (`ImportBigFileIT.insideTheTimeLimits`): every
     dry run must finish inside its 15 minute limit and every commit inside the 10 minute batch timeout, and the old
-    generation is judged as before. Every case runs at the configured limit, the measured sizes included. TIMES-922
+    generation is judged as before. Every case runs at the configured limit, the measured sizes included. Times of
+    the `import-big-file` job, 13 November 2026 (CI run 43386796894, head 16be37e; 11 cases, 0 failures, each commit's
+    reconciliation stored; the commit after it, 981dfe7, binds the job's thread to the business through `core.jobs`
+    instead of directly and changes nothing the job runs), the cases in one database, in the order shown:
+
+    | File | Heap | Upload | Validation (background) | Preview | Dry run (background) | Commit (batch) | Old generation peak |
+    |---|---|---|---|---|---|---|---|
+    | CSV, 100,001 rows, 7 columns (one over the configured limit) | 224 MB | refused `TOO_MANY_ROWS` in 6.9 s | | | | | 68 of 149 MB |
+    | CSV, 10,000 rows, 7 columns, 2.6 MB | 224 MB | 0.9 s | 3.6 s | 0.4 s | 9.1 s | 8.3 s (7.6 s) | 70 of 149 MB |
+    | CSV, 25,000 rows, 7 columns, 6.5 MB | 224 MB | 2.0 s | 9.6 s | 1.8 s | 25 s | 21 s (20 s) | 76 of 149 MB |
+    | CSV, 50,000 rows, 7 columns, 12.9 MB | 224 MB | 3.6 s | 24.7 s | 0.7 s | 40 s | 38 s (37 s) | 85 of 149 MB |
+    | CSV, 75,000 rows, 7 columns, 19.4 MB | 224 MB | 5.7 s | 27.2 s | 1.1 s | 64 s | 58 s (56 s) | 128 of 149 MB |
+    | CSV, five files of 5,000 rows, 7 columns, 1.3 MB each, one run | 224 MB | 0.4 to 0.6 s each | 7.1 s | 0.6 s | 25 s (3 ANALYZEs) | 71 s (70 s over five batches) | 94 of 149 MB |
+    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits), up to the preview | 224 MB | 6.3 s | 49 s | 1.4 s | not run | not run | 77 of 149 MB |
+    | CSV, 20,000 rows, 200 columns (193 ignored), 20.6 MB (column limit) | 224 MB | 2.4 s | 13.1 s | 1.1 s | 23 s | 21 s (20 s) | 97 of 149 MB |
+    | XLSX, the 100,000 rows, 3.3 MB, up to the preview | 224 MB | 6.0 s | 40 s | 1.3 s | not run | not run | 112 of 149 MB |
+    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits) | 448 MB | 6.2 s | 46 s | 1.4 s | 75 s | 70 s (68 s) | 141 of 298 MB, not judged |
+    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits) | 224 MB | 6.3 s | 81 s | 1.3 s | 74 s | 69 s (66 s) | **116 of 149 MB** |
+
+    This run used GitHub's hosted runner, faster than the self-hosted one of the #921 table above, so the two tables are
+    not compared step by step. Every dry run fits its 15 minute limit, every commit the 10 minute batch timeout, and
+    every case on the staging heap keeps the old generation a tenth below its limit (134 MB); the 75,000 row case is
+    again the closest (128 MB). The 81 s validation of the last case would have outlasted the 80 s budget of #921 and,
+    on the slower runner, Cloudflare's 100 s; in the background it only makes the screen wait longer.
 - **Normalisation tables.** Every table of examples in chapter 13 section 13.6 is a
   parametrised unit test.
 - **Loan servicing golden tests** (`ServicingTest`, #108). Fabricated schedules from worked
