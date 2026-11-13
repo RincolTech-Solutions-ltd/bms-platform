@@ -1658,11 +1658,12 @@ section 4.1; coordinated with #110, which builds no second framework).**
   decision on #921, reversible). A batch of the 100,000 of spec section 3.1 passes the big file test on the staging heap:
   dry run, commit and old generation inside their limits, among other businesses' committed rows (chapter 15 section
   15.7). But the check (the validation) and the dry run are requests the screen waits on, and on staging Cloudflare's
-  edge answers 524 to a request the API has not answered within 100 s. At 100,000 rows the validation took 32 to 376 s
-  over the runs of #900 and the dry run 97 to 141 s, so the screen would show that error while the API finishes the work.
+  edge answers 524 to a request the API has not answered within 100 s. At 100,000 rows the validation took 32 to 410 s
+  over the runs of #900 and the dry run 97 to 146 s, so the screen would show that error while the API finishes the work.
   The configured limit is therefore the largest measured size whose validation and dry run both finish within 80 s on
-  the staging heap. Over nine runs of the job, 25,000 rows took 8.2 to 30.7 s to validate (median 12.2 s) and
-  22.8 to 40.4 s to dry run (median 26.5 s), the spread in chapter 15 section 15.7; 50,000 took up to 102 s to
+  the staging heap. Over ten runs of the job, 25,000 rows took 8.2 to 30.7 s to validate (median 13.4 s) and
+  22.8 to 45.4 s to dry run (median 27 s), the spread in chapter 15 section 15.7, and split into five files of 5,000
+  its dry run took 37 s; 50,000 took up to 102 s to
   validate. `ImportBigFileIT` holds every case at or under the configured limit to that budget, and `UploadServiceTest`
   pins it. #922 runs the two requests in the background (202 and poll) and then raises the limit to 100,000.
 

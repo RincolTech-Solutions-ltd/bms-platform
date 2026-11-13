@@ -1099,10 +1099,9 @@ class ImportPreviewIT extends IntegrationTest {
     /**
      * A batch whose registered rows pass the threshold, and whose statistics refresh is refused while something else
      * holds {@code import_refs}' statistics lock for the whole batch, still writes, and waits 2 s once and 100 ms at each
-     * later doubling: 21,000 rows registered a page at a time ask at 5,250, 10,500 and 21,000, about 2.2 s longer than
-     * without the lock, at most 4.5 s (the exact waits: {@link StatisticsRefreshTest}), where 2 s at each would take 6 s
-     * longer. The run without the lock does up to three ANALYZEs the refused one does not, so the lower bound is wide
-     * (the review of 3d86afa).
+     * later doubling: 21,000 rows registered a page at a time ask at 5,250, 10,500 and 21,000, so the refused run waits
+     * at least 2.2 s and takes at most 4.5 s longer than without the lock (the exact waits:
+     * {@link StatisticsRefreshTest}), where 2 s at each would take 6 s longer.
      */
     @Test
     void aRefusedStatisticsRefreshIsAskedAgainRarelyAndBriefly() throws Exception {
@@ -1132,9 +1131,16 @@ class ImportPreviewIT extends IntegrationTest {
             long started = System.nanoTime();
             assertThat(as(t, () -> runs.dryRun(run, operator)).report().failure())
                     .isNull();
-            assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started - baseline))
-                    .as("2 s once and 100 ms a doubling: about 2.2 s more than without the lock")
-                    .isBetween(500L, 4_500L);
+            long refused = System.nanoTime() - started;
+            // The waits are real: 2 s, 100 ms and 100 ms at least. The run without the lock does up to three ANALYZEs
+            // the refused one does not (1.8 s on CI's shared database), so the lower bound is on the refused run alone
+            // and the upper one on its difference (the review of 3d86afa).
+            assertThat(TimeUnit.NANOSECONDS.toMillis(refused))
+                    .as("waited 2 s once and 100 ms at two doublings")
+                    .isGreaterThanOrEqualTo(2_200L);
+            assertThat(TimeUnit.NANOSECONDS.toMillis(refused - baseline))
+                    .as("never 2 s at each doubling: at most 4.5 s more than without the lock")
+                    .isLessThan(4_500L);
             held.rollback();
         }
     }
