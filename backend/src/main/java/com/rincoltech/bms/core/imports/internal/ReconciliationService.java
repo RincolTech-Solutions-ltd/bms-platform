@@ -172,7 +172,16 @@ class ReconciliationService implements ImportReconciliation {
             jdbc.sql("SELECT set_config('lock_timeout', '5s', true)").query().singleRow();
             try {
                 run(runId, true);
-            } catch (org.springframework.dao.PessimisticLockingFailureException e) {
+            } catch (RuntimeException e) {
+                // JUSTIFICATION-A3: CI on 0936b98 showed the lock timeout is not translated to a locking failure here;
+                // read its SQL state, as BusinessLock and JdbcIdempotency do.
+                boolean lockTimedOut = false;
+                for (Throwable c = e; c != null; c = c.getCause()) {
+                    lockTimedOut |= c instanceof java.sql.SQLException sql && "55P03".equals(sql.getSQLState());
+                }
+                if (!lockTimedOut) {
+                    throw e;
+                }
                 throw new ApiException(
                         HttpStatus.CONFLICT,
                         "IMPORT_IN_PROGRESS",
