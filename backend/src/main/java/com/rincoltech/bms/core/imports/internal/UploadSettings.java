@@ -27,13 +27,12 @@ import org.springframework.util.unit.DataSize;
 class UploadSettings {
 
     /**
-     * The rows a batch may hold: 25,000, the largest size the big file test measured whose validation and dry run, requests
-     * the screen waits on, both finish within 80 s on the staging heap, under the 100 s after which Cloudflare's edge gives
-     * up on a request to staging (the Lead's decision on #921, SDD chapter 13 section 13.14.1 11/16). The 100,000 of spec
-     * section 3.1 is proven on the staging heap (#900, SDD chapter 15 section 15.7) and waits for those two requests to run
-     * in the background (#922).
+     * The rows a batch may hold: the 100,000 of spec section 3.1, proven on the staging heap by the big file test (#900, SDD
+     * chapter 15 section 15.7). Since #922 the validation and the dry run, which take minutes at this size, run in the
+     * background and the screen polls the run, so no request outlasts the 100 s after which Cloudflare's edge gives up on a
+     * request to staging (#921 held the limit at 25,000 until then).
      */
-    static final int DEFAULT_MAX_ROWS = 25_000;
+    static final int DEFAULT_MAX_ROWS = 100_000;
 
     @ConfigurationProperties("bms.imports")
     record Properties(

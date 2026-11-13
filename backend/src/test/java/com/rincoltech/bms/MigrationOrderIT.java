@@ -4425,6 +4425,76 @@ class MigrationOrderIT {
                 .replaceAll("\\s+", " ");
     }
 
+    /**
+     * V154 (issue #922) is expand only: a run stored before it keeps its state and holds no job; the database refuses a job
+     * that is not whole, a kind that is not check or dry_run and a failure code that is not a code. JUSTIFICATION-A3: a new
+     * test case; no existing case covers V154.
+     */
+    @Test
+    void importBackgroundJobsMigrationKeepsEveryRun() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            String before = VERSIONS.get(VERSIONS.indexOf("154") - 1);
+            assertThat(flyway(postgres, before).migrate().targetSchemaVersion).isEqualTo(before);
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            UUID tenant = UUID.randomUUID();
+            owner.sql("INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v154', 'Test Tenant V154',"
+                            + " '00000000-0000-4000-8000-000000000001')")
+                    .param(tenant)
+                    .update();
+            UUID run = UUID.randomUUID();
+            owner.sql("INSERT INTO import_runs (id, tenant_id, created_by, status) VALUES (?, ?, ?, 'in_review')")
+                    .params(run, tenant, UUID.randomUUID())
+                    .update();
+
+            assertThat(DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD)
+                            .success)
+                    .isTrue();
+
+            assertThat(owner.sql("SELECT status = 'in_review' AND job_kind IS NULL AND job_by IS NULL"
+                                    + " AND job_started_at IS NULL AND job_finished_at IS NULL"
+                                    + " AND job_failure_code IS NULL AND job_pid IS NULL FROM import_runs WHERE id = ?")
+                            .param(run)
+                            .query(Boolean.class)
+                            .single())
+                    .isTrue();
+            assertThatThrownBy(() -> owner.sql("UPDATE import_runs SET job_kind = 'check' WHERE id = ?")
+                            .param(run)
+                            .update())
+                    .hasMessageContaining("import_runs_job_whole");
+            String start = "UPDATE import_runs SET job_kind = ?, job_by = ?, job_started_at = now(), job_pid = 4242,"
+                    + " job_finished_at = ?, job_failure_code = ? WHERE id = ?";
+            assertThatThrownBy(() -> owner.sql(start)
+                            .params("commit", UUID.randomUUID(), null, null, run)
+                            .update())
+                    .hasMessageContaining("job_kind");
+            assertThatThrownBy(() -> owner.sql(start)
+                            .params("check", UUID.randomUUID(), null, "import_busy", run)
+                            .update())
+                    .as("a failure code only once the job ended")
+                    .hasMessageContaining("import_runs_job_whole");
+            assertThatThrownBy(() -> owner.sql(start)
+                            .params(
+                                    "check",
+                                    UUID.randomUUID(),
+                                    java.sql.Timestamp.from(java.time.Instant.now()),
+                                    "Fab Buyer quoted from a row",
+                                    run)
+                            .update())
+                    .hasMessageContaining("job_failure_code");
+            assertThat(owner.sql(start)
+                            .params(
+                                    "dry_run",
+                                    UUID.randomUUID(),
+                                    java.sql.Timestamp.from(java.time.Instant.now()),
+                                    "import_busy",
+                                    run)
+                            .update())
+                    .isEqualTo(1);
+        }
+    }
+
     /** The blocks V147 adds to the guards (issue #139), whitespace collapsed. */
     private static final String PURGE_BLOCK =
             " IF bms_import_purging(TG_TABLE_NAME, to_jsonb(OLD), to_jsonb(NEW)) THEN RETURN NEW; END IF;";

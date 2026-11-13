@@ -144,7 +144,12 @@ class ImportRunService implements ImportRuns {
     private static final String RUN_COLUMNS = """
             id, status, version, cutover_at, halt_requested, allow_trading_tenant, allow_trading_set_by,
             allow_trading_approved_by, pre_import_dump_file, committing_at, committed_at,
-            pre_import_dump_verified_at, commit_requested_by, commit_approved_by, commit_approved_version, fabricated""";
+            pre_import_dump_verified_at, commit_requested_by, commit_approved_by, commit_approved_version, fabricated,
+            job_kind, job_started_at, job_finished_at, job_failure_code,
+            EXISTS (SELECT 1 FROM pg_locks l
+                     WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1 AND l.pid = job_pid
+                       AND ((l.classid::bigint << 32) | l.objid::bigint)
+                           = hashtextextended('core.imports.loop:' || tenant_id::text, 0)) AS job_alive""";
 
     private final JdbcClient jdbc;
     private final DataSource dataSource;
@@ -845,6 +850,63 @@ class ImportRunService implements ImportRuns {
         }
     }
 
+    // JUSTIFICATION-A3: issue #922 starts the check and the dry run as startCommit starts a commit: claimed, then
+    // handed on.
+    /**
+     * A background check or dry run (issue #922, {@link ImportJobs}): in the caller's thread the business's loop is claimed
+     * (409 {@code IMPORT_IN_PROGRESS} at once while any check, dry run, commit or resume of it is alive), the run's state
+     * checked for the kind and the job recorded on the run with the claim's backend pid; then the work (the check, or the dry
+     * run under this claim when {@code check} is null) goes to {@code background}. It holds the claim until it ends and
+     * records how it ended; a background that throws gives the claim back here, and the run reads interrupted.
+     */
+    void startJob(UUID runId, UUID by, String kind, Runnable check, Consumer<Runnable> background) {
+        requireNoTransaction();
+        boolean dry = check == null;
+        if (dry) {
+            requireKnownBuild();
+        }
+        LoopClaim claim = claimLoop();
+        int pid;
+        try {
+            pid = claim.pid();
+            tx.executeWithoutResult(s -> {
+                Run run = find(runId, true);
+                if (dry) {
+                    requireDryRunPossible(run);
+                } else {
+                    ValidationService.requireOpen(run.status());
+                }
+                jdbc.sql("""
+                                UPDATE import_runs SET job_kind = ?, job_by = ?, job_started_at = now(), job_finished_at = NULL,
+                                       job_failure_code = NULL, job_pid = ?
+                                 WHERE id = ?
+                                """).params(kind, by, pid, runId).update();
+            });
+        } catch (RuntimeException e) {
+            claim.close();
+            throw e;
+        }
+        Runnable work = dry ? () -> dryRunClaimed(runId, by) : check;
+        boolean handed = false;
+        try {
+            background.accept(() -> {
+                try (claim) {
+                    String code = ImportJobs.outcome(runId, kind, work);
+                    tx.executeWithoutResult(
+                            s -> jdbc.sql("""
+                                    UPDATE import_runs SET job_finished_at = now(), job_failure_code = ?
+                                     WHERE id = ? AND job_kind = ? AND job_pid = ? AND job_finished_at IS NULL
+                                    """).params(code, runId, kind, pid).update());
+                }
+            });
+            handed = true;
+        } finally {
+            if (!handed) {
+                claim.close();
+            }
+        }
+    }
+
     /**
      * The guards and the move to {@code committing}, in one transaction. Returns the areas that trade when the guard
      * refuses, so the refusal's audit row commits before the caller throws; empty when the run moved on.
@@ -1037,13 +1099,20 @@ class ImportRunService implements ImportRuns {
 
     @Override
     public DryRun dryRun(UUID runId, UUID by) {
-        // The dry run's time is stored with its report for the run's metrics (issue #140).
-        long started = System.nanoTime();
         requireNoTransaction();
         if (by == null) {
             throw new IllegalArgumentException("a dry run needs who runs it");
         }
         requireKnownBuild();
+        try (LoopClaim claim = claimLoop()) {
+            return dryRunClaimed(runId, by);
+        }
+    }
+
+    /** The dry run under the business's loop claim its caller holds: the request's, or a background job's (#922). */
+    private DryRun dryRunClaimed(UUID runId, UUID by) {
+        // The dry run's time is stored with its report for the run's metrics (issue #140).
+        long started = System.nanoTime();
         String[] inputs = new String[2];
         List<CommitReport> parts = new ArrayList<>();
         String[] failure = new String[1];
@@ -1051,7 +1120,7 @@ class ImportRunService implements ImportRuns {
         // business's import key with pg_try_advisory_xact_lock (Lead ruling 5 on #869). A commit or resume of the
         // business meanwhile is answered at once with IMPORT_IN_PROGRESS, and so is this dry run while one runs:
         // neither ever waits on the other until a statement timeout.
-        try (LoopClaim claim = claimLoop()) {
+        {
             // The trading guard of the commit, asked before the dry run holds any row (review of d8d1e5b on #869): the
             // writers' postings lock the business's ledger and stock rows until the outer rollback, so a business that
             // trades is dry run only under the approved override, and then within a time limit, past which every
@@ -1378,12 +1447,13 @@ class ImportRunService implements ImportRuns {
         }
         if (!claimed) {
             DataSourceUtils.releaseConnection(connection, dataSource);
-            // A commit, a resume or a dry run of the business holds the loop: said plainly (Lead on #869).
+            // A commit, a resume, a dry run or a check (#922) of the business holds the loop: said plainly (Lead on
+            // #869).
             throw new ApiException(
                     HttpStatus.CONFLICT,
                     "IMPORT_IN_PROGRESS",
                     "Import in progress",
-                    "Another import of this business is being committed or dry run; try again when it ends.");
+                    "Another import of this business is being checked, dry run or committed; try again when it ends.");
         }
         return new LoopClaim(connection, key);
     }
@@ -1407,6 +1477,17 @@ class ImportRunService implements ImportRuns {
          */
         String lostReason() {
             return probeClaim(connection, key, CLAIM_PROBE_TIMEOUT_MILLIS);
+        }
+
+        /** The backend pid of the claim's session: a background job records it to be seen alive (issue #922). */
+        int pid() {
+            try (PreparedStatement s = connection.prepareStatement("SELECT pg_backend_pid()");
+                    ResultSet rs = s.executeQuery()) {
+                rs.next();
+                return rs.getInt(1);
+            } catch (SQLException e) {
+                throw new DataAccessResourceFailureException("The import's loop claim could not be read", e);
+            }
         }
 
         @Override
@@ -2119,7 +2200,8 @@ class ImportRunService implements ImportRuns {
                 rs.getObject("commit_requested_by", UUID.class),
                 rs.getObject("commit_approved_by", UUID.class),
                 (Integer) rs.getObject("commit_approved_version"),
-                rs.getBoolean("fabricated"));
+                rs.getBoolean("fabricated"),
+                ImportJobs.read(rs));
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {

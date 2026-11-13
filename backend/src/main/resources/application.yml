@@ -162,11 +162,10 @@ bms:
   # files no batch names once older than orphan-age, and the files and staged rows of cancelled runs.
   imports:
     max-file-size: ${BMS_IMPORTS_MAX_FILE_SIZE:25MB}
-    # 25,000 rows per batch: the largest size the big file test (#137) measured whose validation and dry run both finish
-    # within 80 s on the staging heap, under Cloudflare's 100 s for a request (the Lead's decision on #921). The 100,000
-    # of spec section 3.1 is proven (#900, SDD chapter 15 section 15.7) and waits for those requests to run in the
-    # background (#922).
-    max-rows: ${BMS_IMPORTS_MAX_ROWS:25000}
+    # 100,000 rows per batch (spec section 3.1), proven on the staging heap by the big file test (#900, SDD chapter 15
+    # section 15.7). The check and the dry run take minutes at this size, so they run in the background and the screen
+    # polls the run (#922); no request outlasts Cloudflare's 100 s.
+    max-rows: ${BMS_IMPORTS_MAX_ROWS:100000}
     max-columns: ${BMS_IMPORTS_MAX_COLUMNS:200}
     key: ${BMS_IMPORT_KEY:}
     work-dir: ${BMS_IMPORTS_WORK_DIR:}

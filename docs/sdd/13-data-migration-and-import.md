@@ -1201,7 +1201,8 @@ commit only through test-only templates (`FixtureShopTemplate`, `ScriptedTemplat
   (#779), and keeps it to the end, and every batch, of a dry run or a commit, takes the business's import key with
   `pg_try_advisory_xact_lock`, never a wait (Lead ruling 5 on #869): a commit or resume of the business while a dry run
   runs, a dry run while a commit runs, and a batch that finds the key taken are all answered at once with 409
-  `IMPORT_IN_PROGRESS` ("Another import of this business is being committed or dry run; try again when it ends." when
+  `IMPORT_IN_PROGRESS` ("Another import of this business is being checked, dry run or committed; try again when it
+  ends." since #922, when
   the loop is held, "Another import is being written for this business" when the key is), so a dry run never makes a
   commit fail at
   a statement timeout. A server that cannot tell its build apart (no `build-info.properties`, no commit SHA) refuses the

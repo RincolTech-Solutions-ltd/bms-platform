@@ -223,7 +223,8 @@ public interface ImportRuns {
             UUID commitRequestedBy,
             UUID commitApprovedBy,
             Integer commitApprovedVersion,
-            boolean fabricated) {
+            boolean fabricated,
+            Job job) {
 
         /** Whether {@code import_commit} is approved for the run as it is now: the run has not changed since. */
         public boolean commitApproved() {
@@ -235,4 +236,17 @@ public interface ImportRuns {
             return allowTradingTenant && allowTradingApprovedBy != null;
         }
     }
+
+    // JUSTIFICATION-A3: issue #922 needs the background job's state on the run the screens poll; one new record.
+    /**
+     * The run's last background check or dry run (issue #922, migration V154), null while none was started: {@code kind}
+     * {@code check} or {@code dry_run}; {@code state} {@code running}, {@code done} or {@code failed}; when it started and
+     * ended; and when it failed, the refusal's code, {@code failed} for any other error, or {@code interrupted} when the
+     * process that ran it died. Its state is read from whether its claim of the business's loop is alive, so it is never
+     * left running.
+     */
+    @io.swagger.v3.oas.annotations.media.Schema(
+            name = "ImportRunJob",
+            description = "A check or dry run running in the background, or how it ended (issue #922)")
+    record Job(String kind, String state, Instant startedAt, Instant finishedAt, String failureCode) {}
 }
