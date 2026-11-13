@@ -84,9 +84,11 @@ class ImportJobs {
                     work.run();
                     return null;
                 });
-            } catch (RuntimeException e) {
+            } catch (Throwable e) {
+                // An Error too, or the thread's default handler would log its message, which may quote a row (review
+                // of 761939f); the job is stamped failed already, or reads interrupted.
                 log.warn(
-                        "import {} of run {} not recorded: {}",
+                        "import {} of run {} stopped: {}",
                         kind,
                         runId,
                         e.getClass().getSimpleName());

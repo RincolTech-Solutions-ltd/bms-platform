@@ -1914,8 +1914,13 @@ Now:
   commit or resume of the business waits on it (refused with `IMPORT_IN_PROGRESS`); the big file test holds it to the dry
   run's 15 minutes as a ceiling (at 100,000 rows it measured 76 to 136 s for a CSV and up to 366 s for a workbook on hosted runners, and up to 410 s on the self-hosted one), accepted
   by the review of 3d86d31. The dry run
-  is the same code as before under that claim (`dryRunClaimed`); its time limit, the batch timeout, the large-import key
-  and its `import_busy`, and the one opening journal per branch are unchanged.
+  is the same code as before under that claim (`dryRunClaimed`), and probes the claim too before it stores its report
+  on the run (`LoopClaim.requireHeld`), so a dry run whose claim was lost never overwrites a newer dry run's report (review
+  of 761939f); its time limit, the batch timeout, the large-import key and its `import_busy`, and the one opening journal
+  per branch are unchanged. Only two host commands still run a step synchronously, never behind Cloudflare:
+  `RehearseImportCommand` (the dry run, through `RehearsalService`, claiming the loop as before) and
+  `StageImportRunCommand` (the check and the dry run of a fabricated staging run, `FabricatedRunStager`); no route of the
+  business or of the operator portal does.
 - **One per business, as before.** The loop claim is the business's: while a check, dry run, commit or resume of the
   business is alive, a second check or dry run is refused in the request with 409 `IMPORT_IN_PROGRESS` ("Another import of
   this business is being checked, dry run or committed; try again when it ends."), and so is a commit or resume. The
@@ -1926,8 +1931,9 @@ Now:
   token is the job's own: a later claim of the business on the same pooled session holds the loop key but never the dead
   job's token, so it never makes the dead job look alive, as a backend pid would (review of 3d86d31). It is read by `ImportJobs.read` from `ImportRunService.RUN_COLUMNS`,
   with no sweep and no heartbeat. The
-  next check or dry run claims the loop and starts again; nothing a dead job did was kept (the dry run rolls back, the
-  check writes in one transaction at its end).
+  next check or dry run claims the loop and starts again; nothing a dead job did was kept (the dry run rolls back and
+  stores its report only while it holds its claim, the check writes in one transaction at its end, also only while it
+  holds it).
 - **The screen** (`run.tsx`) says in plain words what runs and since when ("Checking your files, since 09:05. A large file
   takes a few minutes. You can leave this page; it carries on and this page updates by itself."), keeps the next step busy
   meanwhile, reads the files, metrics and dry run again when the job ends, finds a running job again after a reload, and
@@ -1942,6 +1948,8 @@ Now:
   check refused in the request; a dry run refused `import_busy` while another large import holds the key, stored on the
   run with nothing else stored; one job of a business at a time, a second check, dry run or commit refused while one
   runs; a job whose session died reads `interrupted`, a later claim of the business on another session never makes it look
-  alive, and a new one starts; a check whose claim was lost writes nothing), `ImportPurgeIT` (the two code columns),
+  alive, and a new one starts; a dead job still reads interrupted when its own session claims the business again, as a
+  pid would not; a work that throws an Error is stamped `failed`; a check whose claim connection is ended while it runs
+  stops at its probe with `claim_connection_lost` and writes nothing), `ImportPurgeIT` (the two code columns),
   `MigrationOrderIT` (V154). In the frontend: `pipeline.test.ts` (the words) and `run.dom.test.tsx` (running, done,
   failed, busy and a reload).

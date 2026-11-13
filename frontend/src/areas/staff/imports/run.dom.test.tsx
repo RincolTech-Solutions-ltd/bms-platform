@@ -23,8 +23,11 @@ const uploads: string[] = [];
 const layout = (n: number): MappingChoice => ({ id: `m-${n}`, name: `test-shop-${n}`, version: 1, sources: [{ key: 'items', file: 'items.csv', entity_set: 'retail_items' }] });
 let layouts: MappingChoice[] = [];
 let metricsReads = 0;
-/** The run as the server answers a POST of the check or the trial run (202, issue #922): its job running. */
-const started = (kind: string): ImportRun => ({ ...run, job: { kind, state: 'running', started_at: '2026-11-13T09:05:00Z' } });
+let postState = 'running';
+let dryRunReads = 0;
+let dryRunCurrent = true;
+/** The run as the server answers a POST of the check or the trial run (202, issue #922): its job running, or already ended. */
+const started = (kind: string): ImportRun => ({ ...run, job: { kind, state: postState, started_at: '2026-11-13T09:05:00Z' } });
 
 vi.mock('../../../api/imports', async (original) => {
   const real = await original<typeof import('../../../api/imports')>();
@@ -38,7 +41,10 @@ vi.mock('../../../api/imports', async (original) => {
     },
     checkFiles: () => Promise.resolve(started('check')),
     tryImport: () => Promise.resolve(started('dry_run')),
-    dryRunOf: () => Promise.resolve({ at: '2026-11-08T08:00:00Z', current: true, preview_matches: true, sources: [] }),
+    dryRunOf: () => {
+      dryRunReads += 1;
+      return Promise.resolve({ at: '2026-11-08T08:00:00Z', current: dryRunCurrent, preview_matches: true, sources: [] });
+    },
     certificateOf: () => Promise.resolve(certificate),
     askApproval: () => {
       approvals += 1;
@@ -88,6 +94,9 @@ beforeEach(() => {
   uploads.length = 0;
   layouts = [layout(1), layout(2)];
   metricsReads = 0;
+  dryRunReads = 0;
+  dryRunCurrent = true;
+  postState = 'running';
 });
 
 // JUSTIFICATION-A3: issue #922 asks the polling states tested: running, done, failed, busy and a reload.
@@ -130,6 +139,24 @@ describe('the check and the trial run in the background', () => {
     metrics = { ...metrics, status: 'in_review' };
     show(importer);
     expect((await screen.findByRole('alert')).textContent).toBe(IMPORT_BUSY_MESSAGE);
+  });
+
+  // JUSTIFICATION-A3: the review of 761939f asks a case where the POST answers the job already done.
+  it.each([
+    ['check', 'uploaded', 'Check the files', () => metricsReads],
+    ['trial run', 'in_review', 'Try the import', () => dryRunReads],
+  ] as const)('reads what a short %s found at once when the POST answers it already done', async (_kind, status, label, reads) => {
+    run = { id: 'run-3', status, version: 2 };
+    metrics = { ...metrics, status };
+    dryRunCurrent = false;
+    postState = 'done';
+    show(importer);
+    const button = await screen.findByRole('button', { name: label });
+    await waitFor(() => expect(reads()).toBeGreaterThan(0));
+    const before = reads();
+    fireEvent.click(button);
+    // At once: no poll comes for a job that is not running.
+    await waitFor(() => expect(reads()).toBeGreaterThan(before), { timeout: 1000 });
   });
 });
 

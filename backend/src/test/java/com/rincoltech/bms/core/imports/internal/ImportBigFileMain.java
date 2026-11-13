@@ -258,13 +258,17 @@ public final class ImportBigFileMain {
             start.run();
             return null;
         });
-        while (true) {
+        // A deadline above every limit the job holds (the 15 minute dry run and validation ceiling), so a job left
+        // running ends the child with a line that says so, not the child's outer timeout (review of 761939f).
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MINUTES.toNanos(20);
+        while (System.nanoTime() < deadline) {
             ImportRuns.Job job = as(tenant, () -> runs.get(runId).job());
             if (!ImportJobs.RUNNING.equals(job.state())) {
                 return job.failureCode();
             }
             Thread.sleep(500);
         }
+        return "still_running_after_20_minutes";
     }
 
     private static <T> T as(UUID tenant, Supplier<T> work) {

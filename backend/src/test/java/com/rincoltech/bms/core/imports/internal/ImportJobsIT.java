@@ -16,6 +16,7 @@ import java.nio.file.Files;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.Statement;
 import java.sql.Timestamp;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +35,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import tools.jackson.databind.JsonNode;
 
 /**
@@ -269,10 +271,6 @@ class ImportJobsIT extends IntegrationTest {
     }
 
     /**
-     * A job whose server died (its connection, and with it the loop key, gone) is never left running: the run reads failed,
-     * {@code interrupted}, and a new check or dry run starts at once.
-     */
-    /**
      * A job whose work throws an {@link Error} (running out of memory, say) is stamped {@code failed} before its claim is
      * given back, never {@code interrupted}, which says the server restarted (the Lead on the review of 3d86d31, NH1).
      */
@@ -343,6 +341,10 @@ class ImportJobsIT extends IntegrationTest {
         return c;
     }
 
+    /**
+     * A job whose server died (its connection, and with it the job's lock, gone) is never left running: the run reads
+     * failed, {@code interrupted}, and a new check or dry run starts at once.
+     */
     @Test
     void aJobWhoseServerDiedReadsInterruptedAndANewOneStarts() throws Exception {
         UUID runId = emptyRun();
@@ -376,5 +378,106 @@ class ImportJobsIT extends IntegrationTest {
         ImportRuns.Job again = ended(runId);
         assertThat(again.state()).as("a new one starts and ends").isEqualTo("done");
         assertThat(again.startedAt()).isAfter(dead.startedAt());
+    }
+
+    // JUSTIFICATION-A3: the review of 761939f (3) asks a same-session case the old pid scheme would fail.
+    /**
+     * A job whose claim was given back without its stamp, then the business claimed again on the very same session (a
+     * pool of one: same backend pid, the loop key held again), still reads {@code interrupted}: liveness is the job's own
+     * token, which that later claim never holds. Matched on the pid, it would read running.
+     */
+    @Test
+    void aDeadJobNeverReadsRunningWhenItsOwnSessionClaimsTheBusinessAgain() throws Exception {
+        UUID runId = emptyRun();
+        UUID token = UUID.randomUUID();
+        String loop = "core.imports.loop:" + t.tenantId();
+        try (Connection pooled = claimAs(token)) {
+            TestDatabase.owner()
+                    .sql("UPDATE import_runs SET job_kind = 'check', job_by = ?, job_started_at = now(), job_token = ?"
+                            + " WHERE id = ?")
+                    .params(staff, token, runId)
+                    .update();
+            assertThat(as(() -> runs.get(runId).job().state())).isEqualTo("running");
+            // The claim given back as LoopClaim.close gives it back, with no stamp written: the session goes back to
+            // the pool alive.
+            try (PreparedStatement release = pooled.prepareStatement(
+                    "SELECT pg_advisory_unlock(hashtextextended(?, 0)), pg_advisory_unlock(hashtextextended(?, 0))")) {
+                release.setString(1, loop);
+                release.setString(2, "core.imports.job:" + token);
+                release.execute();
+            }
+            // The business's next claim, a commit say, draws the same session.
+            try (PreparedStatement again =
+                    pooled.prepareStatement("SELECT pg_try_advisory_lock(hashtextextended(?, 0))")) {
+                again.setString(1, loop);
+                try (ResultSet rs = again.executeQuery()) {
+                    assertThat(rs.next() && rs.getBoolean(1)).isTrue();
+                }
+            }
+            assertThat(as(() -> runs.get(runId).job().failureCode()))
+                    .as("same pid, same loop key, still not alive")
+                    .isEqualTo(ImportJobs.INTERRUPTED);
+            assertCode(() -> as(() -> jobs.startDryRun(runId, staff)), "IMPORT_IN_PROGRESS");
+        }
+    }
+
+    // JUSTIFICATION-A3: the review of 761939f (4) asks the probe proven through startJob, its connection killed.
+    /**
+     * A background check whose claim connection is ended while it runs (as an idle timeout or a dropped connection would)
+     * stops at its probe before it writes: the job is stamped {@code claim_connection_lost}, the run stays uploaded with no
+     * issue and no validation audited.
+     */
+    @Test
+    void aCheckWhoseClaimConnectionIsKilledStopsAtItsProbeAndWritesNothing() throws Exception {
+        UUID runId = uploaded();
+        try (Connection held = TestDatabase.ownerDataSource().getConnection()) {
+            held.setAutoCommit(false);
+            try (Statement s = held.createStatement()) {
+                // The check's first pass reads the staged rows, so it waits here, before it can write anything.
+                s.execute("LOCK TABLE import_rows IN ACCESS EXCLUSIVE MODE");
+            }
+            as(() -> jobs.startCheck(runId, staff));
+            UUID token = TestDatabase.owner()
+                    .sql("SELECT job_token FROM import_runs WHERE id = ?")
+                    .param(runId)
+                    .query(UUID.class)
+                    .single();
+            // As bms_app, the role of the claim's own connection: end the session that holds the job's lock.
+            List<Boolean> ended = JdbcClient.create(TestDatabase.appDataSource())
+                    .sql("""
+                            SELECT pg_terminate_backend(pid) FROM pg_locks
+                             WHERE locktype = 'advisory' AND granted AND objsubid = 1
+                               AND ((classid::bigint << 32) | objid::bigint) = hashtextextended(?, 0)
+                            """)
+                    .param("core.imports.job:" + token)
+                    .query(Boolean.class)
+                    .list();
+            assertThat(ended).containsExactly(true);
+            held.commit();
+        }
+        // It reads interrupted from the moment its lock is gone, then its stamp says why it stopped.
+        long end = System.nanoTime() + TimeUnit.MINUTES.toNanos(1);
+        ImportRuns.Job job = as(() -> runs.get(runId).job());
+        while (job.finishedAt() == null && System.nanoTime() < end) {
+            Thread.sleep(50);
+            job = as(() -> runs.get(runId).job());
+        }
+        assertThat(job.state()).isEqualTo("failed");
+        assertThat(job.failureCode()).isEqualTo("claim_connection_lost");
+        assertThat(as(() -> runs.get(runId).status())).isEqualTo("uploaded");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM import_issues i JOIN import_batches b ON b.id = i.batch_id"
+                                + " WHERE b.run_id = ?")
+                        .param(runId)
+                        .query(Long.class)
+                        .single())
+                .isZero();
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM audit_log WHERE entity_id = ? AND action = 'core.import_run.validated'")
+                        .param(runId)
+                        .query(Long.class)
+                        .single())
+                .isZero();
     }
 }

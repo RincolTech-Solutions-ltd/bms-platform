@@ -893,20 +893,10 @@ class ImportRunService implements ImportRuns {
             claim.close();
             throw e;
         }
-        // A check whose claim was lost (an idle or network timeout ended its connection) writes nothing: a new check
-        // may
-        // already own the business, as the commit loop's probe decides before each batch (review of 3d86d31).
-        Runnable probe = () -> {
-            String lost = claim.lostReason();
-            if (lost != null) {
-                throw new ApiException(
-                        HttpStatus.CONFLICT,
-                        lost,
-                        "Claim lost",
-                        "The check lost its hold on the import; start it again.");
-            }
-        };
-        Runnable work = dry ? () -> dryRunClaimed(runId, by) : () -> check.accept(probe);
+        // A check or dry run whose claim was lost (an idle or network timeout ended its connection) writes nothing: a
+        // new one may already own the business, as the commit loop's probe decides before each batch (review of
+        // 3d86d31; the dry run's stored report, review of 761939f).
+        Runnable work = dry ? () -> dryRunClaimed(runId, by, claim) : () -> check.accept(claim::requireHeld);
         boolean handed = false;
         try {
             background.accept(() -> {
@@ -1130,12 +1120,15 @@ class ImportRunService implements ImportRuns {
         }
         requireKnownBuild();
         try (LoopClaim claim = claimLoop()) {
-            return dryRunClaimed(runId, by);
+            return dryRunClaimed(runId, by, claim);
         }
     }
 
-    /** The dry run under the business's loop claim its caller holds: the request's, or a background job's (#922). */
-    private DryRun dryRunClaimed(UUID runId, UUID by) {
+    /**
+     * The dry run under the business's loop claim its caller holds: the request's, or a background job's (#922). The
+     * claim is probed before the report is stored, so a dry run whose claim was lost never overwrites a newer one's.
+     */
+    private DryRun dryRunClaimed(UUID runId, UUID by, LoopClaim claim) {
         // The dry run's time is stored with its report for the run's metrics (issue #140).
         long started = System.nanoTime();
         String[] inputs = new String[2];
@@ -1218,6 +1211,7 @@ class ImportRunService implements ImportRuns {
         CommitReport report = whole.build(CommitReport.DRY_RUN);
         boolean matches = sameBalances(preview.preview(runId).balances(), report.balances());
         DryRun stored = tx.execute(s -> {
+            claim.requireHeld();
             requireDryRunPossible(find(runId, true));
             if (!inputs[0].equals(stamp(runId))) {
                 throw new ApiException(
@@ -1505,6 +1499,18 @@ class ImportRunService implements ImportRuns {
          */
         String lostReason() {
             return probeClaim(connection, key, CLAIM_PROBE_TIMEOUT_MILLIS);
+        }
+
+        /** Refuses with the reason of {@link #lostReason()} when the claim is lost: a background job writes nothing then. */
+        void requireHeld() {
+            String lost = lostReason();
+            if (lost != null) {
+                throw new ApiException(
+                        HttpStatus.CONFLICT,
+                        lost,
+                        "Claim lost",
+                        "This import lost its hold on the business; start it again.");
+            }
         }
 
         /**

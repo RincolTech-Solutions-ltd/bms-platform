@@ -88,7 +88,11 @@ export function ImportRunScreen({ runId }: { runId: string }) {
     wasRunning.current = running;
   });
   // The check and the trial run answer at once with the run and its job (202, issue #922); the page then follows the job.
-  const started = (r: ImportRun) => queryClient.setQueryData(runKey(runId), r);
+  // A short job may have ended before the answer was sent: then what it found is read at once (review of 761939f).
+  const started = async (r: ImportRun) => {
+    queryClient.setQueryData(runKey(runId), r);
+    if (!jobRunning(r)) await refresh();
+  };
   const check = useMutation({
     meta: { success: 'Check started' },
     mutationFn: () => checkFiles(runId),
