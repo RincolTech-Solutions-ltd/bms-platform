@@ -71,15 +71,20 @@ done by hand as the notes say.
       `BRANCH_IN_TWO_FILES` and the run is not ready until its rows are left out, so merge the files
       first); a later run that adds loans to a branch already opened posts no journal and its report
       lists them for a correcting entry.
-- [ ] Rows per file: until #922 a batch holds at most 25,000 rows (`TOO_MANY_ROWS` above it), the largest
-      size whose check and dry run both finish within 80 s on the staging heap; a longer request is cut at
-      Cloudflare's edge after 100 s (SDD chapter 13 section 13.14.1 11/16, chapter 15 section 15.7). Plan the
-      window from the dry run of the largest file, on the host the import runs on, and rehearse that dry run
-      first. Split a larger product master into files of at most 25,000 rows, each its own batch. One large
+- [ ] Rows per file: a batch holds at most 100,000 rows (`TOO_MANY_ROWS` above it), the size the big file
+      test proves on the staging heap (SDD chapter 15 section 15.7). At that size the check takes minutes and the
+      dry run about two and a half, so since #922 both run in the background: Check the files and Try the import
+      answer at once, the import's page says "Checking your files, since 09:05." or "Trying the import, nothing is
+      written, since 09:05." and updates by itself, and the page may be closed or reloaded meanwhile. Only one
+      check, trial run or commit of the business runs at a time; a second is refused at once ("Another import of
+      this business is being checked, dry run or committed"). If the host restarts while one runs, the page says
+      "The check stopped because the server restarted. Nothing was written. Start it again.": start it again.
+      Plan the window from the dry run of the largest file, on the host the import runs on, and rehearse that dry
+      run first. Split a file over 100,000 rows into files of at most that, each its own batch. One large
       import is written at a time on the platform: a commit's batch over 5,000 rows, or a dry run whose files
       add up to over 5,000 rows. While another large import is being written, a dry run or commit of yours
-      answers `import_busy` and writes nothing: the dry run says "Another large import is running, try again
-      in a few minutes.", and a refused start says "Another large import is running. Wait a few minutes, then
+      answers `import_busy` and writes nothing: the trial run's page says "Another large import is running, try
+      again in a few minutes.", and a refused start says "Another large import is running. Wait a few minutes, then
       resume this import." and offers Resume. Wait for the other import, then run the dry run again, or resume the
       commit. A large batch written beside the other's could not see its own rows in the database's statistics
       and could reach the dry run limit or the batch timeout (SDD chapter 13 section 13.14.1 11/16, V153).
@@ -170,6 +175,7 @@ itemised and accepted by the customer. Otherwise go to section 5.
 |---|---|---|---|
 | A batch fails during commit | Fix and resume, or stop | Operator, dev lead if unsure | The failed batch rolled back alone. Fix the cause (mapping or source answer), dry run again, resume. Never edit tables by hand |
 | The kill switch was used or the host restarted mid commit | Resume or restore | Dev lead | Resume continues from the first uncommitted batch (spec section 10.2) |
+| The host restarted while a check or trial run ran | Start it again | Operator | The import's page says it stopped because the server restarted (`job.failure_code` `interrupted`, #922). Nothing it did was kept: the trial run rolls back and the check writes only at its end. Press Check the files or Try the import again |
 | Resume answers `IMPORT_IN_PROGRESS` | Wait | Operator | A commit loop of this business is still alive (a batch, or the gap between two). Wait for it to stop or finish; pressing stop again is safe. The refusal never clears the stop. The lock ends with the loop's connection, so after a host restart resume works at once |
 | The commit stopped with `core.import_run.claim_lost` in the audit | Resume | Operator | The loop lost its connection to the database (or its lock) between two batches and stopped before writing more; a probe that gets no answer counts as lost after about 10 seconds. Committed batches stay; resume continues from the first pending one. If it repeats, ask the dev lead to check the database's idle timeout and the network path |
 | The same batch fails on every resume | Restore | Dev lead | The run stays `committing` and keeps the business's one committing slot, so no other import of the business can start. There is no abandon button yet (follow-up with #141): restore the pre-import dump (`docs/runbooks/import-retail.md`, "If the real run was wrong"), which also takes the run back to before its commit, then fix the cause, dry run again and commit again |

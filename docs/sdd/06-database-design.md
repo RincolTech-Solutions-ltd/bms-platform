@@ -1549,6 +1549,15 @@ of every business's rows in each table is seen earlier than autovacuum would sho
 shows `bms_app` nothing of a table under row-level security, and `bms_app` is NOBYPASSRLS and owns no table. No table,
 column, index or row changes.
 
+Changed by `V154__import_background_jobs.sql` (issue #922, chapter 13 section 13.14.1), expand only: **`import_runs`**
+gains the run's last background check or dry run: `job_kind text` (`check` or `dry_run`), `job_by uuid` (the staff user or
+operator who started it), `job_started_at`, `job_finished_at timestamptz`, `job_failure_code varchar(64)` (a code only,
+`CHECK (~ '^[A-Za-z][A-Za-z_]{0,63}$')`: a refusal's code, `failed` or `interrupted`, never a message) and `job_pid
+integer` (the backend pid of the session that claimed the business's loop for it). The CHECK `import_runs_job_whole`
+keeps kind, starter, start and pid all set or all NULL, an end only after a start and a failure code only after an end.
+A job not ended is running only while session `job_pid` holds the business's loop key in `pg_locks`; otherwise it reads
+`failed`, `interrupted`. No index, function, trigger or grant changes; the purge leaves the columns (codes, `ImportPurgeIT`).
+
 ## 6.6 General ledger (RLS)
 
 ### 6.6.1 Tables

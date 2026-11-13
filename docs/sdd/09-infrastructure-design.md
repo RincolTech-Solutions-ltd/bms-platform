@@ -263,8 +263,9 @@ migration) with status only, no details.
 - Customer data onboarding uploads (issue #128, spec section 3.1), optional: `BMS_IMPORT_KEY` (32 bytes in base64, the
   platform import key of chapter 8 section 8.7; both compose files pass it; unset, uploads answer 503 and the rest runs). Read
   by the API with defaults and not passed by the compose files: `BMS_IMPORTS_MAX_FILE_SIZE` (25MB), `BMS_IMPORTS_MAX_ROWS`
-  (25000 until #922, then 100000: #900 proved 100,000 on the staging heap, but its check and dry run outlast the 100 s
-  Cloudflare's edge allows a request; chapter 13 section 13.14.1 11/16, chapter 15 section 15.7),
+  (100000: #900 proved it on the staging heap; #921 held it at 25000 until #922 moved the check and the dry run, which
+  outlast the 100 s Cloudflare's edge allows a request, into the background; chapter 13 section 13.14.1, chapter 15
+  section 15.7),
   `BMS_IMPORTS_MAX_COLUMNS` (200), raised only after the big file test passes at the new size;
   `BMS_IMPORTS_WORK_DIR` (empty: the temp folder; holds encrypted copies for the length of one call, mode 600; an upload is
   refused with `UPLOAD_DISK_LOW` when its free space is under twice the file); `BMS_IMPORTS_ORPHAN_AGE` (24h) and

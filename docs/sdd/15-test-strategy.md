@@ -409,10 +409,9 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
     dry run's transaction counts the rows of all five and refreshes the statistics at its own doublings (the Lead on the
     reviews of 3d86afa and 0c2705e). The categories and units files register a row each first, so the first item file
     is large too (2 + 5,000 rows) and refreshes on its last page; the dry run analyzes `import_refs` exactly three
-    times, at 5,002, 10,252 and 20,752 rows, which the job asserts. The job holds every case at or under the
-    configured limit to that budget
-    (`ImportBigFileIT.EDGE_BUDGET_MS`), and runs the larger sizes in a child at their own size. #922 moves the two
-    requests into the background (202 and poll) and then raises the limit to 100,000. Times on the runner of the
+    times, at 5,002, 10,252 and 20,752 rows, which the job asserts. Until #922 the job held every case at or under the
+    configured limit to that budget and ran the larger sizes in a child at their own size; #922 moved the two requests
+    into the background (202 and poll), raised the limit to 100,000 and dropped the budget (below). Times on the runner of the
     `import-big-file` job, 13 November 2026 (CI run 43372613340, head c45b785: the refresh's rows, doubling and refusal
     carried across a dry run's batches; 11 cases, 0 failures, each commit's reconciliation stored; `Report memory proof`
     passed in the same run; the backend job of that run failed on a unit test's expected waits, fixed in e9cbc48, which
@@ -437,6 +436,14 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
     MB over the last seven runs): it counts what young collections promoted before the first full one, so it moves with
     their timing. The validation's time varies most from run to run (32 to 410 s at 100,000 rows): it is not bounded by a
     limit of its own. A larger file is split (the cutover runbook, stage 2).
+
+    *Since #922 (migration V154, chapter 13 section 13.14.1)* the check and the dry run answer 202 and run in the
+    background, and the screen polls the run, so no request waits on them and Cloudflare's 100 s no longer bounds them.
+    The configured row limit is **100,000** again. The child (`ImportBigFileMain`) starts both through `ImportJobs`, the
+    path the routes take, and polls the run every half second, as the screen does: the validation and dry run times below
+    are from the start to the job's end as polled. The 80 s budget is gone (`ImportBigFileIT.insideTheTimeLimits`): every
+    dry run must finish inside its 15 minute limit and every commit inside the 10 minute batch timeout, and the old
+    generation is judged as before. Every case runs at the configured limit, the measured sizes included. TIMES-922
 - **Normalisation tables.** Every table of examples in chapter 13 section 13.6 is a
   parametrised unit test.
 - **Loan servicing golden tests** (`ServicingTest`, #108). Fabricated schedules from worked
