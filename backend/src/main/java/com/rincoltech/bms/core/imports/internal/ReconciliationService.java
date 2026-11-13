@@ -80,8 +80,11 @@ class ReconciliationService implements ImportReconciliation {
     static final String LEDGER = "ledger";
     static final String REVIEW = "review";
 
-    /** Each statement's limit while the sign-off measures again; a test shortens it to reach the refusal. */
-    static volatile String signOffTimeout = "60s";
+    /**
+     * Each statement's limit while the sign-off measures again: a batch's, as {@link #generate}, since the sign-off runs as
+     * a background job (issue #874), not inside a request; a test shortens it to reach the refusal.
+     */
+    static volatile String signOffTimeout = "10min";
 
     /** The sections in the order the signer reads them, with their titles. */
     private static final Map<String, String> TITLES = new LinkedHashMap<>();
@@ -223,7 +226,35 @@ class ReconciliationService implements ImportReconciliation {
 
     @Override
     public Report signOff(UUID runId, SignOff signOff) {
+        return signOff(runId, signOff, () -> {});
+    }
+
+    // JUSTIFICATION-A3: issue #874's request checks what it can at once, without the run's lock or a measure.
+    /**
+     * What the sign-off's request checks before it starts the job (issue #874): the typed name and today's date, and that
+     * the run is one of the import screens' (404 otherwise) with a reconciliation to sign (409 {@code
+     * reconciliation_missing}). Everything else about the reconciliation is the job's, under the run's lock.
+     */
+    void requireTyped(UUID runId, SignOff signOff) {
         TenantContext.require();
+        typedName(signOff);
+        tx.executeWithoutResult(s -> {
+            run(runId, false);
+            if (newest(runId).isEmpty()) {
+                throw missing();
+            }
+        });
+    }
+
+    private static ApiException missing() {
+        return new ApiException(
+                HttpStatus.CONFLICT,
+                "reconciliation_missing",
+                "No reconciliation yet",
+                "This import has no reconciliation yet; make it first.");
+    }
+
+    private String typedName(SignOff signOff) {
         String name = signOff.name() == null ? "" : signOff.name().strip();
         if (name.isEmpty()) {
             throw ApiException.rule("name_required", "Type your name to sign.");
@@ -235,18 +266,23 @@ class ReconciliationService implements ImportReconciliation {
         if (signOff.date() == null || !signOff.date().equals(today)) {
             throw ApiException.rule("sign_off_date_not_today", "Type today's date, " + today + ", to sign.");
         }
+        return name;
+    }
+
+    /**
+     * The sign-off as the background job runs it (issue #874): {@code probe} is the job's claim of the business, called
+     * before anything is written, so a job that lost it writes nothing.
+     */
+    Report signOff(UUID runId, SignOff signOff, Runnable probe) {
+        TenantContext.require();
+        String name = typedName(signOff);
         Report[] remade = new Report[1];
         Report signed = tx.execute(s -> {
             RunRow run = run(runId, true);
             if (!RunStates.COMMITTED.equals(run.status())) {
                 throw notCommitted(run.status());
             }
-            Report newest = newest(runId)
-                    .orElseThrow(() -> new ApiException(
-                            HttpStatus.CONFLICT,
-                            "reconciliation_missing",
-                            "No reconciliation yet",
-                            "This import has no reconciliation yet; make it first."));
+            Report newest = newest(runId).orElseThrow(ReconciliationService::missing);
             if (!newest.id().equals(signOff.reconciliationId())
                     || !newest.sha256().equals(signOff.sha256())) {
                 throw new ApiException(
@@ -269,8 +305,8 @@ class ReconciliationService implements ImportReconciliation {
             }
             // The books as they are now, measured again in this transaction, which holds the run: a sign-off of figures
             // the books no longer hold is refused (review of #873). JUSTIFICATION-A3: must-fix 2 of that review.
-            // Inside a request and holding the run, so each statement gets 60 seconds, not a batch's 10 minutes (the
-            // Lead on the review of 391e1dc); a run too big for that is refused plainly, and nothing is signed.
+            // A background job since issue #874, so each statement gets a batch's 10 minutes; a run too big even for
+            // that is refused plainly, and nothing is signed.
             Set<String> wanted = new TreeSet<>();
             newest.sections().forEach(sec -> wanted.add(sec.key()));
             Set<String> ticked = new TreeSet<>(signOff.sections());
@@ -291,6 +327,7 @@ class ReconciliationService implements ImportReconciliation {
                         "This import is too big to sign here at once, and nothing was signed. Ask Rincol Tech to help"
                                 + " you sign it.");
             }
+            probe.run();
             String again = sha256(new Report(
                             newest.id(),
                             runId,
@@ -336,6 +373,8 @@ class ReconciliationService implements ImportReconciliation {
             after.put("reconciliation_version", newest.version());
             after.put("sha256", newest.sha256());
             after.put("sections", List.copyOf(ticked));
+            // The job writes this row as the system (issue #874), so who signed is named here.
+            after.put("signed_by", String.valueOf(signOff.by()));
             audit.record(new AuditLog.Entry(
                     "core.import_run.signed_off",
                     "import_run",
@@ -393,7 +432,7 @@ class ReconciliationService implements ImportReconciliation {
                 .orElseThrow(ApiException::notFound);
     }
 
-    private static ApiException notCommitted(String status) {
+    static ApiException notCommitted(String status) {
         return new ApiException(
                 HttpStatus.CONFLICT,
                 "run_not_committed",

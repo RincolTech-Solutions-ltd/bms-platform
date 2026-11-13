@@ -63,6 +63,7 @@ public interface ImportReconciliation {
      * business clock (422 {@code sign_off_date_not_today}). A reconciliation with a difference that is not itemised is
      * refused (409 {@code unitemised_difference}). The signed report is stored, never to change again; the run becomes
      * {@code signed_off}; audited without the name. The caller holds {@code core.imports.sign_off} (the route checks it).
+     * The books are measured again in the caller's thread, so the route runs this as a background job (issue #874).
      */
     Report signOff(UUID runId, SignOff signOff);
 

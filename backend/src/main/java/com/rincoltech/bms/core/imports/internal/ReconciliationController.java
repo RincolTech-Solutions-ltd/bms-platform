@@ -3,6 +3,7 @@ package com.rincoltech.bms.core.imports.internal;
 import com.rincoltech.bms.core.imports.ImportReconciliation;
 import com.rincoltech.bms.core.imports.ImportReconciliation.Report;
 import com.rincoltech.bms.core.imports.ImportReconciliation.SignOff;
+import com.rincoltech.bms.core.imports.ImportRuns;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.RequiresPermission;
@@ -18,6 +19,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,6 +27,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -40,9 +43,21 @@ import org.springframework.web.bind.annotation.RestController;
 class ReconciliationController {
 
     private final ImportReconciliation reconciliation;
+    private final ImportRuns runs;
 
-    ReconciliationController(ImportReconciliation reconciliation) {
+    /** The sign-off in the background (issue #874). */
+    private final ImportJobs jobs;
+
+    ReconciliationController(ImportReconciliation reconciliation, ImportRuns runs, ImportJobs jobs) {
         this.reconciliation = reconciliation;
+        this.runs = runs;
+        this.jobs = jobs;
+    }
+
+    /** The run's sign-off job (issue #874): the run's last job when it is a sign-off, else null. */
+    private ImportRuns.Job signOffJob(UUID runId) {
+        ImportRuns.Job job = runs.get(runId).job();
+        return job != null && ImportJobs.SIGN_OFF.equals(job.kind()) ? job : null;
     }
 
     @Schema(name = "ImportSignOffRun", description = "An imported run on the sign-off screen")
@@ -57,7 +72,11 @@ class ReconciliationController {
             @Schema(description = "Whether every difference is explained, or null while none was made")
             Boolean signable,
 
-            Instant signedAt) {}
+            Instant signedAt,
+
+            // The sign-off running in the background, or how the last one ended (issue #874); null while none was
+            // started.
+            ImportRuns.Job job) {}
 
     @Schema(name = "ImportSignOffRunList")
     record RunList(List<RunResponse> items) {}
@@ -136,9 +155,13 @@ class ReconciliationController {
             List<SectionResponse> sections,
 
             @Schema(description = "The sign-off, or null before it")
-            SignedResponse signed) {
+            SignedResponse signed,
 
-        static ReconciliationResponse of(Report r) {
+            // The sign-off running in the background, or how the last one ended (issue #874); null while none was
+            // started.
+            ImportRuns.Job job) {
+
+        static ReconciliationResponse of(Report r, ImportRuns.Job job) {
             return new ReconciliationResponse(
                     r.id(),
                     r.runId(),
@@ -178,7 +201,8 @@ class ReconciliationController {
                                     r.signed().signedBy(),
                                     r.signed().signedName(),
                                     r.signed().signedOn(),
-                                    r.signed().sections()));
+                                    r.signed().sections()),
+                    job);
         }
     }
 
@@ -207,7 +231,13 @@ class ReconciliationController {
     RunList forSignOff() {
         return new RunList(reconciliation.forSignOff().stream()
                 .map(r -> new RunResponse(
-                        r.runId(), r.status(), r.committedAt(), r.version(), r.signable(), r.signedAt()))
+                        r.runId(),
+                        r.status(),
+                        r.committedAt(),
+                        r.version(),
+                        r.signable(),
+                        r.signedAt(),
+                        signOffJob(r.runId())))
                 .toList());
     }
 
@@ -217,7 +247,10 @@ class ReconciliationController {
             summary = "The newest reconciliation of an imported run, with its sign-off once signed (FR-IMP-08)",
             operationId = "getImportReconciliation")
     ReconciliationResponse latest(@PathVariable("run_id") UUID runId) {
-        return ReconciliationResponse.of(reconciliation.latest(runId).orElseThrow(ApiException::notFound));
+        // The job first: a sign-off refused because the books moved stores the next version before its outcome is
+        // stamped, so a job read as ended is never shown with the version it refused (issue #874).
+        ImportRuns.Job job = signOffJob(runId);
+        return ReconciliationResponse.of(reconciliation.latest(runId).orElseThrow(ApiException::notFound), job);
     }
 
     @GetMapping(path = "/runs/{run_id}/reconciliation.txt", produces = "text/plain")
@@ -254,17 +287,21 @@ class ReconciliationController {
             summary = "Make the reconciliation of an imported run again from the source and the books; audited",
             operationId = "reconcileImport")
     ReconciliationResponse reconcile(@PathVariable("run_id") UUID runId) {
-        return ReconciliationResponse.of(
-                reconciliation.reconcile(runId, CurrentPrincipal.require().userId()));
+        Report made = reconciliation.reconcile(runId, CurrentPrincipal.require().userId());
+        return ReconciliationResponse.of(made, signOffJob(runId));
     }
 
     @PostMapping("/runs/{run_id}/sign-off")
+    @ResponseStatus(HttpStatus.ACCEPTED)
     @RequiresPermission("core.imports.sign_off")
     @Operation(
-            summary = "Sign the reconciliation: every section ticked, the name and today's date typed; audited",
+            summary =
+                    "Start the sign-off of the reconciliation in the background (issue #874): every section ticked, the"
+                            + " name and today's date typed. The answer is the reconciliation with its job running; poll"
+                            + " the reconciliation until the job is done (signed) or failed (its refusal's code); audited",
             operationId = "signOffImport")
     ReconciliationResponse signOff(@PathVariable("run_id") UUID runId, @Valid @RequestBody SignOffRequest request) {
-        return ReconciliationResponse.of(reconciliation.signOff(
+        ImportRuns.Run run = jobs.startSignOff(
                 runId,
                 new SignOff(
                         request.reconciliationId(),
@@ -272,6 +309,9 @@ class ReconciliationController {
                         request.sections(),
                         request.name(),
                         request.date(),
-                        CurrentPrincipal.require().userId())));
+                        CurrentPrincipal.require().userId()));
+        ImportRuns.Job job =
+                run.job() != null && ImportJobs.SIGN_OFF.equals(run.job().kind()) ? run.job() : null;
+        return ReconciliationResponse.of(reconciliation.latest(runId).orElseThrow(ApiException::notFound), job);
     }
 }
