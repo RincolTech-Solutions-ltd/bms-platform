@@ -1673,8 +1673,8 @@ section 4.1; coordinated with #110, which builds no second framework).**
   edge answers 524 to a request the API has not answered within 100 s. At 100,000 rows the validation took 32 to 410 s
   over the runs of #900 and the dry run 97 to 146 s, so the screen would show that error while the API finishes the work.
   The configured limit is therefore the largest measured size whose validation and dry run both finish within 80 s on
-  the staging heap. Over ten runs of the job, 25,000 rows took 8.2 to 30.7 s to validate (median 13.4 s) and
-  22.8 to 45.4 s to dry run (median 27 s), the spread in chapter 15 section 15.7, and split into five files of 5,000
+  the staging heap. Over eleven runs of the job, 25,000 rows took 8.2 to 30.8 s to validate (median 14.7 s) and
+  22.8 to 45.4 s to dry run (median 27.4 s), the spread in chapter 15 section 15.7, and split into five files of 5,000
   its dry run took 37 s; 50,000 took up to 102 s to
   validate. `ImportBigFileIT` holds every case at or under the configured limit to that budget, and `UploadServiceTest`
   pins it. #922 runs the two requests in the background (202 and poll) and then raises the limit to 100,000.

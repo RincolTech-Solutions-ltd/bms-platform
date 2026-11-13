@@ -401,37 +401,40 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
     within 100 s (Caddy and the API set no response timeout). At 100,000 rows the validation took 32 to 410 s over the runs
     of #900 and the dry run 97 to 146 s, so the screen would show that error while the API finished the work. By the
     Lead's decision on #921 (reversible) the configured row limit per batch is therefore **25,000**
-    (`bms.imports.max-rows`): the largest measured size whose validation and dry run both finish within 80 s. Over ten
-    runs of the job 25,000 rows took 8.2, 9.9, 11.4, 12.1, 12.2, 14.7, 15.7, 30.4, 30.6 and 30.7 s to validate
-    (median 13.4 s) and 22.8, 22.9, 24.2, 25.6, 26.5, 27.4, 38.1, 40.1, 40.4 and 45.4 s to dry run (median 27 s): four
-    runs at 30 to 46 s, the other six under 16 s and 28 s. 50,000 took up to 102 s to validate (CI run 43297629214).
-    The same 25,000 rows split as the runbook says, five files of 5,000 in one run, dry run in 37 s: no batch is
-    large, but the dry run's transaction counts the rows of all five, refreshes the statistics once they pass 5,000 and
-    analyzes `import_refs` five times (the Lead on the review of 3d86afa). The job holds every case at or under the
+    (`bms.imports.max-rows`): the largest measured size whose validation and dry run both finish within 80 s. Over eleven
+    runs of the job 25,000 rows took 8.2, 9.9, 11.4, 12.1, 12.2, 14.7, 15.7, 30.4, 30.6, 30.7 and 30.8 s to validate
+    (median 14.7 s) and 22.8, 22.9, 24.2, 25.6, 26.5, 27.4, 38.1, 40.1, 40.4, 44.2 and 45.4 s to dry run (median
+    27.4 s): five runs at 30 to 46 s, the other six under 16 s and 28 s. 50,000 took up to 102 s to validate (CI run
+    43297629214). The same 25,000 rows split as the runbook says, five files of 5,000 in one run, dry run in 37 s: the
+    dry run's transaction counts the rows of all five and refreshes the statistics at its own doublings (the Lead on the
+    reviews of 3d86afa and 0c2705e). The categories and units files register a row each first, so the first item file
+    is large too (2 + 5,000 rows) and refreshes on its last page; the dry run analyzes `import_refs` exactly three
+    times, at 5,002, 10,252 and 20,752 rows, which the job asserts. The job holds every case at or under the
     configured limit to that budget
     (`ImportBigFileIT.EDGE_BUDGET_MS`), and runs the larger sizes in a child at their own size. #922 moves the two
     requests into the background (202 and poll) and then raises the limit to 100,000. Times on the runner of the
-    `import-big-file` job, 13 November 2026 (CI run 43356445493, head ba97821: large counted over the transaction's
-    batches; 11 cases, 0 failures, each commit's reconciliation stored; `Report memory proof` passed in the same run, a
-    slower runner than the run before on every case), the cases in one database, in the order shown:
+    `import-big-file` job, 13 November 2026 (CI run 43372613340, head c45b785: the refresh's rows, doubling and refusal
+    carried across a dry run's batches; 11 cases, 0 failures, each commit's reconciliation stored; `Report memory proof`
+    passed in the same run; the backend job of that run failed on a unit test's expected waits, fixed in e9cbc48, which
+    changes that test only), the cases in one database, in the order shown:
 
     | File | Heap | Upload | Validation | Preview | Dry run | Commit (batch) | Old generation peak |
     |---|---|---|---|---|---|---|---|
-    | CSV, 25,001 rows, 7 columns (one over the configured limit) | 224 MB | refused `TOO_MANY_ROWS` in 3.6 s | | | | | 68 of 149 MB |
-    | CSV, five files of 5,000 rows, 7 columns, 1.3 MB each, one run | 224 MB | 0.7 to 1.0 s each | 11.5 s | 0.8 s | **37 s** (5 ANALYZEs) | 34 s (33 s over five batches) | 95 of 149 MB |
-    | CSV, 10,000 rows, 7 columns, 2.6 MB | 224 MB | 1.7 s | 5.3 s | 0.4 s | 23 s | 24 s (23 s) | 69 of 149 MB |
-    | CSV, 25,000 rows, 7 columns, 6.5 MB (configured limit) | 224 MB | 3.9 s | **14.7 s** | 1.6 s | **45 s** | 45 s (43 s) | 77 of 149 MB |
-    | CSV, 50,000 rows, 7 columns, 12.9 MB | 224 MB | 7.5 s | 40 s | 6.7 s | 80 s | 82 s (80 s) | 86 of 149 MB |
-    | CSV, 75,000 rows, 7 columns, 19.4 MB | 224 MB | 9.0 s | 42 s | 1.5 s | 109 s | 117 s (113 s) | 128 of 149 MB |
-    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits), up to the preview | 224 MB | 11.7 s | 63 s | 1.8 s | not run | not run | 76 of 149 MB |
-    | CSV, 20,000 rows, 200 columns (193 ignored), 20.6 MB (column limit) | 224 MB | 3.7 s | 11.6 s | 1.0 s | 40 s | 41 s (39 s) | 95 of 149 MB |
-    | XLSX, the 100,000 rows, 3.3 MB, up to the preview | 224 MB | 11.9 s | 44 s | 1.9 s | not run | not run | 107 of 149 MB |
-    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits) | 448 MB | 11.9 s | 41 s | 2.0 s | 142 s | 153 s (148 s) | 140 of 298 MB, not judged |
-    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits) | 224 MB | 12.3 s | 410 s | 2.2 s | 146 s | 158 s (152 s) | **116 of 149 MB** |
+    | CSV, 25,001 rows, 7 columns (one over the configured limit) | 224 MB | refused `TOO_MANY_ROWS` in 3.9 s | | | | | 68 of 149 MB |
+    | CSV, five files of 5,000 rows, 7 columns, 1.3 MB each, one run | 224 MB | 0.7 to 1.1 s each | 11.7 s | 0.8 s | **37 s** (3 ANALYZEs) | 34 s (33 s over five batches) | 95 of 149 MB |
+    | CSV, 10,000 rows, 7 columns, 2.6 MB | 224 MB | 1.8 s | 5.7 s | 0.5 s | 24 s | 25 s (24 s) | 70 of 149 MB |
+    | CSV, 25,000 rows, 7 columns, 6.5 MB (configured limit) | 224 MB | 3.9 s | **30.8 s** | 1.7 s | **44 s** | 46 s (45 s) | 76 of 149 MB |
+    | CSV, 50,000 rows, 7 columns, 12.9 MB | 224 MB | 7.4 s | 42 s | 1.4 s | 79 s | 83 s (80 s) | 85 of 149 MB |
+    | CSV, 75,000 rows, 7 columns, 19.4 MB | 224 MB | 9.5 s | 78 s | 1.6 s | 110 s | 120 s (115 s) | 128 of 149 MB |
+    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits), up to the preview | 224 MB | 12.1 s | 63 s | 2.0 s | not run | not run | 76 of 149 MB |
+    | CSV, 20,000 rows, 200 columns (193 ignored), 20.6 MB (column limit) | 224 MB | 4.1 s | 11.7 s | 1.1 s | 40 s | 41 s (39 s) | 96 of 149 MB |
+    | XLSX, the 100,000 rows, 3.3 MB, up to the preview | 224 MB | 12.5 s | 377 s | 1.9 s | not run | not run | 107 of 149 MB |
+    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits) | 448 MB | 12.4 s | 61 s | 2.1 s | 145 s | 156 s (150 s) | 110 of 298 MB, not judged |
+    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits) | 224 MB | 12.4 s | 384 s | 2.0 s | 146 s | 155 s (149 s) | **116 of 149 MB** |
 
     Every commit fits the batch's 10 minute statement timeout, every dry run its 900 s limit, and every case on the staging
     heap keeps the old generation a tenth below its limit (134 MB). The peak at 75,000 rows sits closest to it (125 to 128
-    MB over the last six runs): it counts what young collections promoted before the first full one, so it moves with
+    MB over the last seven runs): it counts what young collections promoted before the first full one, so it moves with
     their timing. The validation's time varies most from run to run (32 to 410 s at 100,000 rows): it is not bounded by a
     limit of its own. A larger file is split (the cutover runbook, stage 2).
 - **Normalisation tables.** Every table of examples in chapter 13 section 13.6 is a
