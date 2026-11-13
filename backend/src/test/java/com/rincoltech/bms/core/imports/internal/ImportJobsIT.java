@@ -258,7 +258,7 @@ class ImportJobsIT extends IntegrationTest {
             release.countDown();
         }
         assertThat(ended(runId).state()).isEqualTo("done");
-        as(() -> jobs.startCheck(second, staff));
+        as(() -> jobs.startDryRun(second, staff));
         assertThat(ended(second).state())
                 .as("the next one starts once it ended")
                 .isEqualTo("done");
