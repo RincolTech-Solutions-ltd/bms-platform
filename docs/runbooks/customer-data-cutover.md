@@ -72,7 +72,7 @@ done by hand as the notes say.
       first); a later run that adds loans to a branch already opened posts no journal and its report
       lists them for a correcting entry.
 - [ ] Rows per file: a batch holds at most 100,000 rows (`TOO_MANY_ROWS` above it), the size the big file
-      test proves on the staging heap (SDD chapter 15 section 15.7). At that size the check took about 1 to 2.5
+      test proves on the staging heap (SDD chapter 15 section 15.7). At that size the check took about 1 to 3.5
       minutes on CI's hosted runners (up to 6 minutes for a workbook) and up to about 7 minutes on the slower
       self-hosted one, and the dry run about 75 s to 2.5 minutes on the hosted runners and about 2.5 minutes on the
       self-hosted one (SDD chapter 15 section 15.7), so since #922 both run in the background: Check the files and Try the import
