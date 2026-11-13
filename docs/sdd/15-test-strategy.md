@@ -442,8 +442,9 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
     The configured row limit is **100,000** again. The child (`ImportBigFileMain`) starts both through `ImportJobs`, the
     path the routes take, and polls the run every half second, as the screen does: the validation and dry run times below
     are from the start to the job's end as polled. The 80 s budget is gone (`ImportBigFileIT.insideTheTimeLimits`): every
-    dry run must finish inside its 15 minute limit and every commit inside the 10 minute batch timeout, and the old
-    generation is judged as before. Every case runs at the configured limit, the measured sizes included. Times of
+    dry run must finish inside its 15 minute limit and every commit inside the 10 minute batch timeout, every validation
+    inside the same 15 minutes as a ceiling (it has no limit of its own and holds the business's loop while it runs; the
+    review of 3d86d31), and the old generation is judged as before. Every case runs at the configured limit, the measured sizes included. Times of
     the `import-big-file` job, 13 November 2026 (CI run 43386796894, head 16be37e; 11 cases, 0 failures, each commit's
     reconciliation stored; the commit after it, 981dfe7, binds the job's thread to the business through `core.jobs`
     instead of directly and changes nothing the job runs), the cases in one database, in the order shown:

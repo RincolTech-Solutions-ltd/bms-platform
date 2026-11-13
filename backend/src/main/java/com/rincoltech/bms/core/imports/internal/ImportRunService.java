@@ -147,9 +147,12 @@ class ImportRunService implements ImportRuns {
             pre_import_dump_verified_at, commit_requested_by, commit_approved_by, commit_approved_version, fabricated,
             job_kind, job_started_at, job_finished_at, job_failure_code,
             EXISTS (SELECT 1 FROM pg_locks l
-                     WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1 AND l.pid = job_pid
+                     WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
                        AND ((l.classid::bigint << 32) | l.objid::bigint)
-                           = hashtextextended('core.imports.loop:' || tenant_id::text, 0)) AS job_alive""";
+                           = hashtextextended('core.imports.job:' || job_token::text, 0)) AS job_alive""";
+
+    /** The key of a background job's own lock, followed by its token (issue #922, V154). */
+    private static final String JOB_KEY = "core.imports.job:";
 
     private final JdbcClient jdbc;
     private final DataSource dataSource;
@@ -855,20 +858,22 @@ class ImportRunService implements ImportRuns {
     /**
      * A background check or dry run (issue #922, {@link ImportJobs}): in the caller's thread the business's loop is claimed
      * (409 {@code IMPORT_IN_PROGRESS} at once while any check, dry run, commit or resume of it is alive), the run's state
-     * checked for the kind and the job recorded on the run with the claim's backend pid; then the work (the check, or the dry
-     * run under this claim when {@code check} is null) goes to {@code background}. It holds the claim until it ends and
-     * records how it ended; a background that throws gives the claim back here, and the run reads interrupted.
+     * checked for the kind and the job recorded on the run with a token of its own, whose lock the claim's session takes;
+     * then the work (the check, given a probe of the claim to call before it writes, or the dry run under this claim when
+     * {@code check} is null) goes to {@code background}. It holds the claim until it ends and always stamps how it ended,
+     * {@code failed} for an {@link Error} too; a background that throws gives the claim back here, and the run reads
+     * interrupted, as one whose stamp could not be written.
      */
-    void startJob(UUID runId, UUID by, String kind, Runnable check, Consumer<Runnable> background) {
+    void startJob(UUID runId, UUID by, String kind, Consumer<Runnable> check, Consumer<Runnable> background) {
         requireNoTransaction();
         boolean dry = check == null;
         if (dry) {
             requireKnownBuild();
         }
         LoopClaim claim = claimLoop();
-        int pid;
+        UUID token = UUID.randomUUID();
         try {
-            pid = claim.pid();
+            claim.holdJob(token);
             tx.executeWithoutResult(s -> {
                 Run run = find(runId, true);
                 if (dry) {
@@ -878,9 +883,9 @@ class ImportRunService implements ImportRuns {
                 }
                 jdbc.sql("""
                                 UPDATE import_runs SET job_kind = ?, job_by = ?, job_started_at = now(), job_finished_at = NULL,
-                                       job_failure_code = NULL, job_pid = ?
+                                       job_failure_code = NULL, job_token = ?
                                  WHERE id = ?
-                                """).params(kind, by, pid, runId).update();
+                                """).params(kind, by, token, runId).update();
                 // Who started it, in the request: the work runs as the system on its own thread (#922).
                 audit(runId, "core.import_run.job_started", Map.of(), Map.of("kind", kind));
             });
@@ -888,17 +893,35 @@ class ImportRunService implements ImportRuns {
             claim.close();
             throw e;
         }
-        Runnable work = dry ? () -> dryRunClaimed(runId, by) : check;
+        // A check whose claim was lost (an idle or network timeout ended its connection) writes nothing: a new check
+        // may
+        // already own the business, as the commit loop's probe decides before each batch (review of 3d86d31).
+        Runnable probe = () -> {
+            String lost = claim.lostReason();
+            if (lost != null) {
+                throw new ApiException(
+                        HttpStatus.CONFLICT,
+                        lost,
+                        "Claim lost",
+                        "The check lost its hold on the import; start it again.");
+            }
+        };
+        Runnable work = dry ? () -> dryRunClaimed(runId, by) : () -> check.accept(probe);
         boolean handed = false;
         try {
             background.accept(() -> {
                 try (claim) {
-                    String code = ImportJobs.outcome(runId, kind, work);
-                    tx.executeWithoutResult(
-                            s -> jdbc.sql("""
-                                    UPDATE import_runs SET job_finished_at = now(), job_failure_code = ?
-                                     WHERE id = ? AND job_kind = ? AND job_pid = ? AND job_finished_at IS NULL
-                                    """).params(code, runId, kind, pid).update());
+                    String[] code = {ImportJobs.FAILED};
+                    try {
+                        code[0] = ImportJobs.outcome(runId, kind, work);
+                    } finally {
+                        // Written for an Error too, so it never reads interrupted while this process lives.
+                        tx.executeWithoutResult(
+                                s -> jdbc.sql("""
+                                        UPDATE import_runs SET job_finished_at = now(), job_failure_code = ?
+                                         WHERE id = ? AND job_token = ? AND job_finished_at IS NULL
+                                        """).params(code[0], runId, token).update());
+                    }
                 }
             });
             handed = true;
@@ -1468,6 +1491,9 @@ class ImportRunService implements ImportRuns {
         /** Closed once only: a background that throws after its thread took the work must not give the connection twice. */
         private final AtomicBoolean closed = new AtomicBoolean();
 
+        /** The key of the background job this claim holds (issue #922), or null. */
+        private String jobKey;
+
         LoopClaim(Connection connection, String key) {
             this.connection = connection;
             this.key = key;
@@ -1481,14 +1507,18 @@ class ImportRunService implements ImportRuns {
             return probeClaim(connection, key, CLAIM_PROBE_TIMEOUT_MILLIS);
         }
 
-        /** The backend pid of the claim's session: a background job records it to be seen alive (issue #922). */
-        int pid() {
-            try (PreparedStatement s = connection.prepareStatement("SELECT pg_backend_pid()");
-                    ResultSet rs = s.executeQuery()) {
-                rs.next();
-                return rs.getInt(1);
+        /**
+         * Takes, on the claim's session, the lock of a background job's own token (issue #922): the job reads running only
+         * while it is held, and {@link #close} gives it back with the loop key (review of 3d86d31: a backend pid is reused
+         * by the pooled session's next claim, a token never is).
+         */
+        void holdJob(UUID token) {
+            try (PreparedStatement s = connection.prepareStatement("SELECT pg_advisory_lock(hashtextextended(?, 0))")) {
+                s.setString(1, JOB_KEY + token);
+                s.execute();
+                jobKey = JOB_KEY + token;
             } catch (SQLException e) {
-                throw new DataAccessResourceFailureException("The import's loop claim could not be read", e);
+                throw new DataAccessResourceFailureException("The import job's lock could not be taken", e);
             }
         }
 
@@ -1498,8 +1528,12 @@ class ImportRunService implements ImportRuns {
                 return;
             }
             try (PreparedStatement unlock =
-                    connection.prepareStatement("SELECT pg_advisory_unlock(hashtextextended(?, 0))")) {
+                    connection.prepareStatement("SELECT pg_advisory_unlock(hashtextextended(?, 0))"
+                            + (jobKey == null ? "" : ", pg_advisory_unlock(hashtextextended(?, 0))"))) {
                 unlock.setString(1, key);
+                if (jobKey != null) {
+                    unlock.setString(2, jobKey);
+                }
                 unlock.execute();
             } catch (SQLException e) {
                 // A session that could not unlock must not go back to the pool still holding the loop: end it.

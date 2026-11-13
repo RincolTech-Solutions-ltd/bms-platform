@@ -207,13 +207,22 @@ class ValidationService implements ImportValidation {
 
     @Override
     public RunReport validate(UUID runId) {
+        return validate(runId, () -> {});
+    }
+
+    /**
+     * {@link #validate(UUID)}, calling {@code beforeWrite} first inside the transaction that writes the results: a
+     * background check (issue #922) probes there that it still holds the business's loop, and throws if not, so a check
+     * whose claim was lost writes nothing.
+     */
+    RunReport validate(UUID runId, Runnable beforeWrite) {
         TenantContext.require();
         if (TransactionSynchronizationManager.isActualTransactionActive()) {
             throw new IllegalStateException("validation takes its own transactions");
         }
         long started = System.nanoTime();
         Prepared p = prepare(runId, false);
-        List<BatchReport> reports = finish(runId, p, started);
+        List<BatchReport> reports = finish(runId, p, started, beforeWrite);
         return p.template() == null
                 ? new RunReport(runId, null, 0, List.of())
                 : new RunReport(runId, p.template().key(), p.template().version(), reports);
@@ -376,8 +385,9 @@ class ValidationService implements ImportValidation {
      * values are replaced, an {@code uploaded} run moves to {@code in_review} (the run's own transition joins this
      * transaction, so a second validation that finishes later finds it in review), and the validation is audited.
      */
-    private List<BatchReport> finish(UUID runId, Prepared p, long started) {
+    private List<BatchReport> finish(UUID runId, Prepared p, long started, Runnable beforeWrite) {
         List<BatchReport> reports = tx.execute(s -> {
+            beforeWrite.run();
             String status = jdbc.sql("SELECT status FROM import_runs WHERE id = ? FOR UPDATE")
                     .param(runId)
                     .query(String.class)

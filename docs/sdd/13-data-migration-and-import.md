@@ -878,7 +878,7 @@ tooling, as the commit is. Every call works on the bound business only: a run or
   keys the columns). The header is the first of the first 20 rows that holds every header the mapping requires, or the first
   row that is not blank (`HEADER_NOT_FOUND`). Every row below it becomes one `import_rows` row with its cells in `raw`, blank
   rows included and trailing blank rows not, and columns the mapping ignores are dropped. Rows are written 1,000 at a time in
-  one transaction, so the limits (`TOO_MANY_ROWS` over the configured row limit, 100,000 since #922 (section 13.14.1 11/16),
+  one transaction, so the limits (`TOO_MANY_ROWS` over the configured row limit, 100,000 since #922 (section 13.14.1, the entry of #922),
   `TOO_MANY_COLUMNS` over 200) and a damaged file
   (`FILE_UNREADABLE`: an unclosed quote, a cell over 32,767 characters, a broken zip or XML) roll every row back: the batch
   is `failed` with its code and a reason that names a limit, a row or a column, never a value, and its file is deleted. A
@@ -1900,22 +1900,32 @@ Now:
 - **The pattern is the portal's commit start (15/16), not a new one.** In the request (`ImportRunService.startJob`) the
   business's commit loop is claimed (`claimLoop`, the session lock of #779), the run's state is checked (the check's
   `run_not_open`, the dry run's `run_not_open` and `batch_not_parsed`, the build), and the job is recorded on the run with
-  the backend pid of the claim's session (V154: `job_kind`, `job_by`, `job_started_at`, `job_finished_at`,
-  `job_failure_code`, `job_pid`). Only then does the work go on on a virtual thread (`ImportJobs`), bound to the business
+  a token of its own, whose advisory lock the claim's session takes (V154: `job_kind`, `job_by`, `job_started_at`,
+  `job_finished_at`, `job_failure_code`, `job_token`). Only then does the work go on on a virtual thread (`ImportJobs`), bound to the business
   through `core.jobs` (`TenantJobs.callAs`, as the report runner binds a run's business; only `core.jobs` and the
   platform console may act as a tenant, `SecurityArchitectureTest`). No person is bound on that thread, so the work's
   audit rows are the system's; the request audits `core.import_run.job_started` with the kind and the person. The work holds the claim until it ends and
-  stamps how it ended: done, or failed with the refusal's code (`import_busy`, `IMPORT_IN_PROGRESS`, `batch_changed`,
-  `review_changed`, `run_changed`, `TENANT_TRADING`, ...) or `failed` for any other error, never a message. The dry run
+  stamps how it ended, in a `finally`: done, or failed with the refusal's code (`import_busy`, `IMPORT_IN_PROGRESS`,
+  `batch_changed`, `review_changed`, `run_changed`, `TENANT_TRADING`, ...) or `failed` for any other error, an `Error`
+  such as running out of memory included, never a message. The check probes its claim (`LoopClaim.lostReason`, as the
+  commit loop does before each batch) first inside the transaction that writes its results, so a check whose claim was
+  lost to an idle or network timeout writes nothing (`claim_connection_lost` or `claim_not_held`) while a second check
+  may already own the business. The check has no time limit of its own and holds the business's loop while it runs, so a
+  commit or resume of the business waits on it (refused with `IMPORT_IN_PROGRESS`); the big file test holds it to the dry
+  run's 15 minutes as a ceiling (it measured up to 81 s on the hosted runner and 410 s on the self-hosted one), accepted
+  by the review of 3d86d31. The dry run
   is the same code as before under that claim (`dryRunClaimed`); its time limit, the batch timeout, the large-import key
   and its `import_busy`, and the one opening journal per branch are unchanged.
 - **One per business, as before.** The loop claim is the business's: while a check, dry run, commit or resume of the
   business is alive, a second check or dry run is refused in the request with 409 `IMPORT_IN_PROGRESS` ("Another import of
   this business is being checked, dry run or committed; try again when it ends."), and so is a commit or resume. The
   check now takes the loop too (before #922 it took none and relied on its `FOR UPDATE` of the run at its end).
-- **Never left running.** A job that has not ended is running only while the session `job_pid` still holds the business's
-  loop key in `pg_locks`; PostgreSQL drops the lock when the process or its connection dies, so after a restart the run
-  reads failed, `interrupted` (`ImportJobs.read`, from `ImportRunService.RUN_COLUMNS`), with no sweep and no heartbeat. The
+- **Never left running.** A job that has not ended is running only while some session holds its token's lock in
+  `pg_locks`. PostgreSQL drops the lock when the process or its connection dies, and the claim's close gives it back even
+  when the stamp could not be written, so after a restart, or a failed stamp, the run reads failed, `interrupted`. The
+  token is the job's own: a later claim of the business on the same pooled session holds the loop key but never the dead
+  job's token, so it never makes the dead job look alive, as a backend pid would (review of 3d86d31). It is read by `ImportJobs.read` from `ImportRunService.RUN_COLUMNS`,
+  with no sweep and no heartbeat. The
   next check or dry run claims the loop and starts again; nothing a dead job did was kept (the dry run rolls back, the
   check writes in one transaction at its end).
 - **The screen** (`run.tsx`) says in plain words what runs and since when ("Checking your files, since 09:05. A large file
@@ -1931,6 +1941,7 @@ Now:
 - **Tests.** `ImportJobsIT` (202 at once and the polled run done, the start audited with the person and the validation as the system; a run in no state to
   check refused in the request; a dry run refused `import_busy` while another large import holds the key, stored on the
   run with nothing else stored; one job of a business at a time, a second check, dry run or commit refused while one
-  runs; a job whose session died reads `interrupted` and a new one starts), `ImportPurgeIT` (the two code columns),
+  runs; a job whose session died reads `interrupted`, a later claim of the business on another session never makes it look
+  alive, and a new one starts; a check whose claim was lost writes nothing), `ImportPurgeIT` (the two code columns),
   `MigrationOrderIT` (V154). In the frontend: `pipeline.test.ts` (the words) and `run.dom.test.tsx` (running, done,
   failed, busy and a reload).

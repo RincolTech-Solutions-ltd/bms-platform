@@ -6,14 +6,18 @@
 -- POST /api/v1/imports/runs/{run_id}/check and POST .../dry-run answer 202 at once. In the request the business's commit
 -- loop is claimed (pg_try_advisory_lock on the loop key, issue #779, on a connection of its own) and these columns record
 -- the job: what it is (`job_kind`), who started it (`job_by`, a staff user or platform operator as import_runs.created_by),
--- when (`job_started_at`) and the backend pid of the claim's session (`job_pid`). The work then runs on its own thread and
--- holds that claim until it ends; when it ends it stamps `job_finished_at` and, if it stopped, `job_failure_code`. A run
--- holds one job at a time: the next one overwrites these columns, and only while no loop of the business is alive.
+-- when (`job_started_at`) and its token (`job_token`, a random uuid of this job alone). The claim's session also takes the
+-- advisory lock of that token (the key hashtextextended('core.imports.job:' || job_token, 0)). The work then runs on its
+-- own thread and holds both until it ends; when it ends it stamps `job_finished_at` and, if it stopped, `job_failure_code`,
+-- and the claim's close gives both locks back. A run holds one job at a time: the next one overwrites these columns, and
+-- only while no loop of the business is alive.
 --
--- A job never stays running for ever. While `job_finished_at` is NULL the job is running only if the session `job_pid`
--- still holds the business's loop key in pg_locks (readable by every role); PostgreSQL drops that lock when the process or
--- its connection dies, so after a restart the run reads as failed with the code `interrupted`
--- (ImportRunService.RUN_COLUMNS). Nothing has to sweep it, and the next check or dry run claims the loop and starts again.
+-- A job never stays running for ever. While `job_finished_at` is NULL the job is running only while some session holds its
+-- token's lock in pg_locks (readable by every role). PostgreSQL drops that lock when the process or its connection dies,
+-- and the claim's close gives it back even when the stamp could not be written, so a job whose process died or whose stamp
+-- failed reads as failed with the code `interrupted` (ImportRunService.RUN_COLUMNS). The token is the job's own, so a later
+-- claim of the business on the same pooled session never makes a dead job look alive (review of 3d86d31, unlike a backend
+-- pid). Nothing has to sweep it, and the next check or dry run claims the loop and starts again.
 --
 -- Personal data: none. `job_kind` and `job_failure_code` are codes (an API refusal code such as `import_busy`, or
 -- `interrupted` or `failed`), held to that form by the CHECKs below, never a message, which may quote a row; the purge
@@ -31,10 +35,10 @@ ALTER TABLE import_runs
     ADD COLUMN job_started_at   timestamptz,
     ADD COLUMN job_finished_at  timestamptz,
     ADD COLUMN job_failure_code varchar(64)  CHECK (job_failure_code ~ '^[A-Za-z][A-Za-z_]{0,63}$'),
-    ADD COLUMN job_pid          integer      CHECK (job_pid > 0),
+    ADD COLUMN job_token        uuid,
     ADD CONSTRAINT import_runs_job_whole
         CHECK ((job_kind IS NULL) = (job_by IS NULL)
                AND (job_kind IS NULL) = (job_started_at IS NULL)
-               AND (job_kind IS NULL) = (job_pid IS NULL)
+               AND (job_kind IS NULL) = (job_token IS NULL)
                AND (job_finished_at IS NULL OR job_started_at IS NOT NULL)
                AND (job_failure_code IS NULL OR job_finished_at IS NOT NULL));

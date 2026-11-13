@@ -21,8 +21,8 @@ import org.springframework.stereotype.Component;
  *
  * <p>This is the operator portal's commit start (issue #141, {@link ImportRuns#startCommit}) applied to two more steps: in
  * the request the business's commit loop is claimed, so a second check, dry run, commit or resume of the business is
- * refused at once with {@code IMPORT_IN_PROGRESS}, the run's state is checked and the job is recorded on the run with the
- * backend pid of the claim's session ({@link ImportRunService#startJob}); only then does the work go on on its own virtual
+ * refused at once with {@code IMPORT_IN_PROGRESS}, the run's state is checked and the job is recorded on the run with a
+ * token of its own whose lock the claim's session takes ({@link ImportRunService#startJob}); only then does the work go on on its own virtual
  * thread, bound to the business, holding the claim until it ends. It records how it ended:
  * done, or failed with the refusal's code ({@code import_busy} and the rest), or {@code failed} for any other error, never a
  * message. A process that dies leaves the job unfinished and its claim gone, which every read of the run shows as failed,
@@ -58,7 +58,8 @@ class ImportJobs {
 
     /** Starts the check of a run (the validation of every file) in the background; answers the run as it stands. */
     ImportRuns.Run startCheck(UUID runId, UUID by) {
-        runs.startJob(runId, by, CHECK, () -> validation.validate(runId), work -> background(runId, CHECK, work));
+        runs.startJob(
+                runId, by, CHECK, probe -> validation.validate(runId, probe), work -> background(runId, CHECK, work));
         return runs.get(runId);
     }
 

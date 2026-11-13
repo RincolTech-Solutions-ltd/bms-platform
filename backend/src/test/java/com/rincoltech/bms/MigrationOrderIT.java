@@ -4452,9 +4452,10 @@ class MigrationOrderIT {
                             .success)
                     .isTrue();
 
-            assertThat(owner.sql("SELECT status = 'in_review' AND job_kind IS NULL AND job_by IS NULL"
-                                    + " AND job_started_at IS NULL AND job_finished_at IS NULL"
-                                    + " AND job_failure_code IS NULL AND job_pid IS NULL FROM import_runs WHERE id = ?")
+            assertThat(owner.sql(
+                                    "SELECT status = 'in_review' AND job_kind IS NULL AND job_by IS NULL"
+                                            + " AND job_started_at IS NULL AND job_finished_at IS NULL"
+                                            + " AND job_failure_code IS NULL AND job_token IS NULL FROM import_runs WHERE id = ?")
                             .param(run)
                             .query(Boolean.class)
                             .single())
@@ -4463,8 +4464,8 @@ class MigrationOrderIT {
                             .param(run)
                             .update())
                     .hasMessageContaining("import_runs_job_whole");
-            String start = "UPDATE import_runs SET job_kind = ?, job_by = ?, job_started_at = now(), job_pid = 4242,"
-                    + " job_finished_at = ?, job_failure_code = ? WHERE id = ?";
+            String start = "UPDATE import_runs SET job_kind = ?, job_by = ?, job_started_at = now(),"
+                    + " job_token = gen_random_uuid(), job_finished_at = ?, job_failure_code = ? WHERE id = ?";
             assertThatThrownBy(() -> owner.sql(start)
                             .params("commit", UUID.randomUUID(), null, null, run)
                             .update())

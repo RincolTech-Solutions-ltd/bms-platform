@@ -55,6 +55,9 @@ class ImportJobsIT extends IntegrationTest {
     ImportRuns runs;
 
     @Autowired
+    ValidationService validation;
+
+    @Autowired
     ImportMappings mappings;
 
     @Autowired
@@ -269,28 +272,70 @@ class ImportJobsIT extends IntegrationTest {
      * A job whose server died (its connection, and with it the loop key, gone) is never left running: the run reads failed,
      * {@code interrupted}, and a new check or dry run starts at once.
      */
+    // JUSTIFICATION-A3: the review of 3d86d31 (nice-to-have 2) asks the lost claim's probe proven; a new case.
+    /**
+     * A check whose claim was lost before it writes (the probe of the review of 3d86d31) writes nothing: the run stays
+     * uploaded with no issue and no audit row of a validation, so a second check started meanwhile owns the run alone.
+     */
+    @Test
+    void aCheckWhoseClaimWasLostWritesNothing() throws Exception {
+        UUID runId = uploaded();
+        assertCode(
+                () -> as(() -> validation.validate(runId, () -> {
+                    throw new com.rincoltech.bms.kernel.ApiException(
+                            HttpStatus.CONFLICT, "claim_not_held", "Claim lost", "fabricated loss");
+                })),
+                "claim_not_held");
+        assertThat(as(() -> runs.get(runId).status())).isEqualTo("uploaded");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM import_issues i JOIN import_batches b ON b.id = i.batch_id"
+                                + " WHERE b.run_id = ?")
+                        .param(runId)
+                        .query(Long.class)
+                        .single())
+                .isZero();
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM audit_log WHERE entity_id = ? AND action = 'core.import_run.validated'")
+                        .param(runId)
+                        .query(Long.class)
+                        .single())
+                .isZero();
+    }
+
+    /** A session of its own that claims the business's loop, as a server does, and the lock of a job's token if given. */
+    Connection claimAs(UUID token) throws Exception {
+        Connection c = TestDatabase.ownerDataSource().getConnection();
+        try (PreparedStatement claim = c.prepareStatement("SELECT pg_try_advisory_lock(hashtextextended(?, 0))")) {
+            claim.setString(1, "core.imports.loop:" + t.tenantId());
+            try (ResultSet rs = claim.executeQuery()) {
+                assertThat(rs.next() && rs.getBoolean(1))
+                        .as("the loop was free")
+                        .isTrue();
+            }
+        }
+        if (token != null) {
+            try (PreparedStatement job = c.prepareStatement("SELECT pg_advisory_lock(hashtextextended(?, 0))")) {
+                job.setString(1, "core.imports.job:" + token);
+                job.execute();
+            }
+        }
+        return c;
+    }
+
     @Test
     void aJobWhoseServerDiedReadsInterruptedAndANewOneStarts() throws Exception {
         UUID runId = emptyRun();
         FixtureShopTemplate.SCRIPT = (r, b, s, c) -> Map.of();
-        Connection server = TestDatabase.ownerDataSource().getConnection();
-        int pid;
-        try (PreparedStatement claim =
-                server.prepareStatement("SELECT pg_try_advisory_lock(hashtextextended(?, 0)), pg_backend_pid()")) {
-            claim.setString(1, "core.imports.loop:" + t.tenantId());
-            try (ResultSet rs = claim.executeQuery()) {
-                assertThat(rs.next()).isTrue();
-                assertThat(rs.getBoolean(1)).isTrue();
-                pid = rs.getInt(2);
-            }
-        }
+        UUID token = UUID.randomUUID();
+        Connection server = claimAs(token);
         TestDatabase.owner()
-                .sql("UPDATE import_runs SET job_kind = 'dry_run', job_by = ?, job_started_at = now(), job_pid = ?"
+                .sql("UPDATE import_runs SET job_kind = 'dry_run', job_by = ?, job_started_at = now(), job_token = ?"
                         + " WHERE id = ?")
-                .params(staff, pid, runId)
+                .params(staff, token, runId)
                 .update();
         assertThat(as(() -> runs.get(runId).job().state()))
-                .as("alive while its session holds the loop")
+                .as("alive while its session holds the job's lock")
                 .isEqualTo("running");
         assertCode(() -> as(() -> jobs.startCheck(runId, staff)), "IMPORT_IN_PROGRESS");
 
@@ -299,6 +344,13 @@ class ImportJobsIT extends IntegrationTest {
         assertThat(dead.state()).isEqualTo("failed");
         assertThat(dead.failureCode()).isEqualTo(ImportJobs.INTERRUPTED);
         assertThat(dead.finishedAt()).isNull();
+
+        // A later claim of the business, a commit say, on any session, never makes the dead job look alive: it holds
+        // the loop key but not the dead job's token (review of 3d86d31: a pooled session keeps its backend pid).
+        try (Connection commit = claimAs(null)) {
+            assertThat(as(() -> runs.get(runId).job().failureCode())).isEqualTo(ImportJobs.INTERRUPTED);
+            assertCode(() -> as(() -> jobs.startDryRun(runId, staff)), "IMPORT_IN_PROGRESS");
+        }
 
         as(() -> jobs.startDryRun(runId, staff));
         ImportRuns.Job again = ended(runId);

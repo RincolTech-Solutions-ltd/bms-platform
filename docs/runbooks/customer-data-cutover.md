@@ -72,8 +72,9 @@ done by hand as the notes say.
       first); a later run that adds loans to a branch already opened posts no journal and its report
       lists them for a correcting entry.
 - [ ] Rows per file: a batch holds at most 100,000 rows (`TOO_MANY_ROWS` above it), the size the big file
-      test proves on the staging heap (SDD chapter 15 section 15.7). At that size the check takes minutes and the
-      dry run about two and a half, so since #922 both run in the background: Check the files and Try the import
+      test proves on the staging heap (SDD chapter 15 section 15.7). At that size the check took 46 s to 81 s on
+      CI's hosted runner and up to 410 s (about 7 minutes) on the slower self-hosted one, and the dry run 74 s to
+      146 s (SDD chapter 15 section 15.7), so since #922 both run in the background: Check the files and Try the import
       answer at once, the import's page says "Checking your files, since 09:05." or "Trying the import, nothing is
       written, since 09:05." and updates by itself, and the page may be closed or reloaded meanwhile. Only one
       check, trial run or commit of the business runs at a time; a second is refused at once ("Another import of

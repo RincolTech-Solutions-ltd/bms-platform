@@ -129,6 +129,7 @@ class ImportBigFileIT extends IntegrationTest {
         TestFiles.writeXlsx(xlsx, ITEM_HEADER, items(ROW_LIMIT, 0));
         String output = child("preview", "items=" + xlsx, STAGING_HEAP_MB, ROW_LIMIT);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "step=preview");
+        assertThat(stepMillis(output, "validate")).as("the validation").isLessThan(DRY_RUN_LIMIT_MS);
     }
 
     @Test
@@ -144,6 +145,7 @@ class ImportBigFileIT extends IntegrationTest {
     void aCsvAtTheRowAndSizeLimitsIsUploadedValidatedAndPreviewedOnTheStagingHeap() throws Exception {
         String output = child("preview", "items=" + limitsCsv(), STAGING_HEAP_MB, ROW_LIMIT);
         assertThat(output).contains("step=upload source=items", "rows=" + ROW_LIMIT, "step=preview");
+        assertThat(stepMillis(output, "validate")).as("the validation").isLessThan(DRY_RUN_LIMIT_MS);
     }
 
     /**
@@ -199,6 +201,9 @@ class ImportBigFileIT extends IntegrationTest {
      * background since #922, so no request waits on them and the 80 s edge budget of #921 no longer applies.
      */
     static void insideTheTimeLimits(String output) {
+        // The validation has no limit of its own, but holds the business's loop while it runs (#922), so a commit or
+        // resume of the business waits on it: a generous ceiling, the dry run's, holds it (review of 3d86d31).
+        assertThat(stepMillis(output, "validate")).as("the validation").isLessThan(DRY_RUN_LIMIT_MS);
         assertThat(stepMillis(output, "dry_run")).as("the dry run").isLessThan(DRY_RUN_LIMIT_MS);
         assertThat(stepMillis(output, "commit")).as("the commit").isLessThan(BATCH_TIMEOUT_MS);
     }
