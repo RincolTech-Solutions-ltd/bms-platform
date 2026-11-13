@@ -866,7 +866,8 @@ class ImportReconciliationIT extends IntegrationTest {
                 if ("done".equals(job.get("state").asString())) {
                     return ResponseEntity.ok(read);
                 }
-                tools.jackson.databind.node.ObjectNode refused = read.deepCopy();
+                tools.jackson.databind.node.ObjectNode refused =
+                        (tools.jackson.databind.node.ObjectNode) read.deepCopy();
                 refused.put("code", job.get("failure_code").asString());
                 return ResponseEntity.status(HttpStatus.CONFLICT).body(refused);
             }
