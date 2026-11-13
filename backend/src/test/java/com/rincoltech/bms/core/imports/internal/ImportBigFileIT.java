@@ -177,9 +177,9 @@ class ImportBigFileIT extends IntegrationTest {
 
     // JUSTIFICATION-A3: the Lead on the review of 3d86afa asks five batches of 5,000 in one dry run held to the budget.
     /**
-     * The configured limit split as the runbook says, five files of 5,000 items in one run: no batch is large, but the
-     * dry run writes them in one transaction, so the rows its batches registered pass the threshold and it refreshes
-     * the statistics (V153) and stays inside {@link #EDGE_BUDGET_MS}.
+     * The configured limit split as the runbook says, five files of 5,000 items in one run: the dry run writes them in
+     * one transaction, so the rows its batches registered pass the threshold, and it refreshes the statistics (V153) at
+     * the transaction's doublings, not each batch's, and stays inside {@link #EDGE_BUDGET_MS}.
      */
     @Test
     void fiveBatchesOf5000InOneDryRunRefreshTheStatisticsInsideTheEdgeBudget() throws Exception {
@@ -195,9 +195,12 @@ class ImportBigFileIT extends IntegrationTest {
         insideTheEdgeBudget(output);
         Matcher analyzed = Pattern.compile("step=dry_run\\b.*?analyzed=(\\d+)").matcher(output);
         assertThat(analyzed.find()).as(output).isTrue();
+        // The categories and units batches register a row each first, so the first file is large too (2 + 5,000 rows)
+        // and refreshes on its last page, at 5,002; then at the transaction's doublings, 10,252 and 20,752, its pages
+        // being 250 rows (the review of 0c2705e).
         assertThat(Long.parseLong(analyzed.group(1)))
-                .as("the dry run refreshed the statistics")
-                .isPositive();
+                .as("the dry run refreshed the statistics at 5,002, 10,252 and 20,752 rows")
+                .isEqualTo(3);
     }
 
     /** The sizes measured for #880 and #900. */

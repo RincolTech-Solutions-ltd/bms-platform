@@ -1607,14 +1607,20 @@ section 4.1; coordinated with #110, which builds no second framework).**
     not one batch (the Lead on the review of 3d86afa): a dry run writes every batch in one outer transaction, and the
     slow lookups filter every row of the business that transaction can see, so five files of 5,000 rows add up as one
     of 25,000 (`ImportBigFileIT.fiveBatchesOf5000InOneDryRunRefreshTheStatisticsInsideTheEdgeBudget`); a commit's
-    transaction holds one batch. ANALYZE of those two tables in the batch's own
+    transaction holds one batch. A batch is large as soon as the transaction's earlier batches push it over 5,000,
+    however small they were: in that test the categories and units files register a row each first, so the first item
+    file is large too (2 + 5,000 rows), takes the key before writing and refreshes on its last page; the dry run
+    refreshes three times, at 5,002, 10,252 and 20,752 rows. ANALYZE of those two tables in the batch's own
     transaction counts its own rows, and the key is then found through `import_refs_by_key` (a page of 250 lookups in
     0.4 ms instead of 1,449 ms, measured on a copy of the table with 30,000 rows of the batch). ANALYZE holds SHARE UPDATE
     EXCLUSIVE on the two tables to the end of the batch, which blocks no read or write. The function waits for both
     tables' locks under one deadline, the second waiting only what the first left (the Lead on the review of 668c0ec;
     `MigrationOrderIT.importStatisticsMigrationAnalyzesOnlyInsideABatch`); a batch that finds a lock held waits at most
     2 s, keeps the statistics it has, and asks again, waiting 100 ms, once its rows have doubled again or 30 s have
-    passed: at most 2 s a doubling, 14 s over 100,000 rows, and 100 ms each 30 s after a refusal (the exact waits in
+    passed: at most 2 s a doubling, 10 s over 100,000 rows (five refreshes), and 100 ms each 30 s after a refusal. The
+    rows, the next doubling and a refusal are carried across a dry run's batches in the transaction-local
+    `app.import_registered`, so the doublings and the throttle are the transaction's, however many files it holds
+    (the review of 0c2705e; twenty files of 5,000 ask as one of 100,000 does; the exact waits in
     `StatisticsRefreshTest`, end to end in `ImportPreviewIT.aRefusedStatisticsRefreshIsAskedAgainRarelyAndBriefly`). A
     dry run rolls the new statistics
     back, but not `pg_class.relpages` and `reltuples` nor the reset of the count of changed rows, which ANALYZE writes in
@@ -1635,7 +1641,8 @@ section 4.1; coordinated with #110, which builds no second framework).**
     offered (`frontend/src/api/imports.ts`, `frontend/src/areas/platform/import-run.tsx`).
     Documented limits (the Lead on the reviews of 668c0ec and 3d86afa): the refusal is late when the threshold is
     passed inside a batch, or by a later batch of a dry run: the rows written so far are rolled back with the rest, and
-    the refusal comes after them, not at once; the 100 ms retry is shorter than the 1 s `deadlock_timeout`,
+    the refusal comes after them, not at once (`ImportPreviewIT.aBatchPassingTheThresholdMidwayIsRefusedThenAndStoresNothing`),
+    and a writer that wrapped the refusal in an error of its own would turn it into an ordinary failed batch; the 100 ms retry is shorter than the 1 s `deadlock_timeout`,
     so it never cancels an autovacuum that started on either table after the refusal, and the batch keeps its statistics
     until that vacuum ends; the 80 s edge budget below is measured on the CI runner, not on staging behind Cloudflare,
     and the commit is not held to it; and ANALYZE samples about 30,000 rows of the whole table, so on a large shared
@@ -1644,6 +1651,11 @@ section 4.1; coordinated with #110, which builds no second framework).**
     say) counts the row as unmeasured only, not written, named `forecast:` and the error, and holds the sign-off,
     instead of failing the whole reconciliation (`ReconciliationService`, the Lead on the reviews of 668c0ec and
     3d86afa; `ImportReconciliationIT.aForecastThatFailsOnARowCountsItUnmeasuredOnlyNamesItAndHoldsTheSignOff`).
+    Notes from the review of 0c2705e, left as they are: a forecast that fails partway through a row may keep part of
+    it in the run's whole forecast, so the totals shown beside the held sign-off may be skewed by that row; the
+    refresh IT counts `pg_stat_user_tables.analyze_count`, which is the database's, so it relies on the ITs running
+    one at a time (`MigrationOrderIT` calls the function too); and the screens give the Resume wording to any operator
+    action refused with `import_busy`, though only a start or a resume can be.
   - *The reconciliation after the commit* read every item the batch had just written as product objects and a copied
     map of costs (the dry run reads the catalogue before the batch, so it never did), and filled the staging heap's old
     generation at 100,000 items. The forecast now reads the costs into compact keys sized at once

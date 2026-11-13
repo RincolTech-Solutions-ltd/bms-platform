@@ -106,7 +106,10 @@ class ImportRunService implements ImportRuns {
      */
     static final int LARGE_BATCH_ROWS = 5_000;
 
-    /** The rows the transaction's batches registered so far: a setting local to the transaction (the review of 3d86afa). */
+    /**
+     * The rows the transaction's batches registered so far, the next doubling and a refusal: a setting local to the
+     * transaction (the reviews of 3d86afa and 0c2705e), {@link StatisticsRefresh#saved()}.
+     */
     static final String REGISTERED = "app.import_registered";
 
     /** The platform's large-batch key: one large batch is written at a time, of any business. */
@@ -1585,7 +1588,7 @@ class ImportRunService implements ImportRuns {
         String earlier = jdbc.sql("SELECT coalesce(current_setting('" + REGISTERED + "', true), '')")
                 .query(String.class)
                 .single();
-        long prior = earlier.isEmpty() ? 0 : Long.parseLong(earlier);
+        long prior = StatisticsRefresh.registeredIn(earlier);
         boolean large = row.get("row_count") instanceof Integer rows && prior + rows > LARGE_BATCH_ROWS;
         if (large) {
             takeLargeKey();
@@ -1613,11 +1616,11 @@ class ImportRunService implements ImportRuns {
         String file = row.get("source_filename") == null
                 ? "batch " + batch.seq()
                 : RowValidator.shortName((String) row.get("source_filename"));
-        RowCheckpoint checkpoint =
-                new RowCheckpoint(runId, batch.id(), writers.source(batch.id()), !dryRun, file, privacy, prior, large);
+        RowCheckpoint checkpoint = new RowCheckpoint(
+                runId, batch.id(), writers.source(batch.id()), !dryRun, file, privacy, earlier, large);
         Map<String, Object> counts = writer.write(runId, batch.id(), batch.seq(), checkpoint);
         jdbc.sql("SELECT set_config('" + REGISTERED + "', ?, true)")
-                .param(Long.toString(checkpoint.statistics.registered()))
+                .param(checkpoint.statistics.saved())
                 .query()
                 .singleRow();
         // No journal but the registered opening journals (Lead ruling 6 on #872): checked at the batch's end, in both.
@@ -1717,21 +1720,38 @@ class ImportRunService implements ImportRuns {
         private long refusedAt;
 
         /**
-         * {@code prior}: the rows the transaction's earlier batches registered; {@code keyed}: whether it holds the key
-         * already. {@code refresh} takes the wait in ms and answers whether it refreshed; {@code clock} gives
-         * nanoseconds.
+         * {@code saved}: what the transaction's earlier batches left ({@link #saved()}, empty for its first), so the
+         * rows, the next doubling and a refusal carry across a dry run's batches (the review of 0c2705e);
+         * {@code keyed}: whether it holds the key already. {@code refresh} takes the wait in ms and answers whether it
+         * refreshed; {@code clock} gives nanoseconds, of this JVM, which runs the whole transaction.
          */
         StatisticsRefresh(
-                long prior,
+                String saved,
                 boolean keyed,
                 Runnable takeKey,
                 java.util.function.IntPredicate refresh,
                 java.util.function.LongSupplier clock) {
-            this.registered = prior;
+            if (!saved.isEmpty()) {
+                String[] s = saved.split(" ");
+                registered = Long.parseLong(s[0]);
+                refreshAt = Long.parseLong(s[1]);
+                refused = Boolean.parseBoolean(s[2]);
+                refusedAt = Long.parseLong(s[3]);
+            }
             this.keyed = keyed;
             this.takeKey = takeKey;
             this.refresh = refresh;
             this.clock = clock;
+        }
+
+        /** The rows the transaction's batches registered, from what they left. */
+        static long registeredIn(String saved) {
+            return saved.isEmpty() ? 0 : Long.parseLong(saved.substring(0, saved.indexOf(' ')));
+        }
+
+        /** What the next batch of the transaction starts from. */
+        String saved() {
+            return registered + " " + refreshAt + " " + refused + " " + refusedAt;
         }
 
         long registered() {
@@ -1789,7 +1809,7 @@ class ImportRunService implements ImportRuns {
                 boolean stops,
                 String file,
                 PreviewService.RunPrivacy privacy,
-                long prior,
+                String saved,
                 boolean keyed) {
             this.runId = runId;
             this.batchId = batchId;
@@ -1799,7 +1819,7 @@ class ImportRunService implements ImportRuns {
             this.privacy = privacy;
             this.part = new CommitReport.Builder(file);
             this.statistics = new StatisticsRefresh(
-                    prior, keyed, ImportRunService.this::takeLargeKey, refs::refreshStatistics, System::nanoTime);
+                    saved, keyed, ImportRunService.this::takeLargeKey, refs::refreshStatistics, System::nanoTime);
         }
 
         @Override

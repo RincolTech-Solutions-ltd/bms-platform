@@ -18,7 +18,7 @@
 -- (longer than the 1 s deadlock_timeout after which an autovacuum in the way is cancelled): one deadline, the second
 -- table waiting only what the first left (the Lead on the review of 668c0ec). A batch that finds a lock held gets false
 -- back, keeps the statistics it has and asks again, waiting 100 ms, once its registered rows have doubled again or 30 s
--- have passed: it is never stopped, and it waits at most 2 s a doubling (14 s over 100,000 rows) and 100 ms each 30 s
+-- have passed: it is never stopped, and it waits at most 2 s a doubling of the transaction's rows (10 s over 100,000 rows, however many batches) and 100 ms each 30 s
 -- after that (ImportRunService.StatisticsRefresh, the Lead on the review of e771a17). Autovacuum skips the table
 -- meanwhile. The 100 ms is shorter than deadlock_timeout, so a retry does not cancel an autovacuum that started after
 -- the refusal: the batch keeps its statistics until that vacuum ends (a documented limit, SDD 13.14.1).

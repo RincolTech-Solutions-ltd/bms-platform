@@ -1105,20 +1105,7 @@ class ImportPreviewIT extends IntegrationTest {
     @Test
     void aRefusedStatisticsRefreshIsAskedAgainRarelyAndBriefly() throws Exception {
         UUID run = emptyRun(t);
-        scripted(run, (runId, batchId, seq, checkpoint) -> {
-            for (int page = 0; page < 84; page++) {
-                List<BatchWriter.Registration> records = new ArrayList<>(250);
-                for (int line = page * 250 + 1; line <= page * 250 + 250; line++) {
-                    records.add(new BatchWriter.Registration(
-                            ImportRefs.sourceRef(
-                                    "fab-refresh.csv", "-", "line:" + line, ImportRefs.contentHash(Map.of("n", line))),
-                            "retail.product",
-                            UUID.randomUUID()));
-                }
-                checkpoint.registerAll(records);
-            }
-            return Map.of();
-        });
+        scripted(run, registering(21_000));
         // The refreshes counted directly (the review of 3d86afa): a manual ANALYZE of import_refs counts at once, even
         // in a dry run that rolls back, and autovacuum counts apart. Times would measure the plans as well: a refused
         // run keeps the slow ones, 17 s longer at 21,000 rows on CI.
@@ -1143,6 +1130,45 @@ class ImportPreviewIT extends IntegrationTest {
             assertThat(refused).as("never stuck on the lock").isLessThan(120_000L);
             held.rollback();
         }
+    }
+
+    // JUSTIFICATION-A3: the Lead on the review of 0c2705e takes the end-to-end late refusal; a writer shared with
+    // above.
+    /**
+     * A batch whose rows looked small (one) but whose registered rows pass the threshold midway, while another large
+     * import holds the key: refused with {@code import_busy} then, after the rows so far, which roll back; nothing is
+     * stored and the key is free again (the late refusal, SDD 13.14.1).
+     */
+    @Test
+    void aBatchPassingTheThresholdMidwayIsRefusedThenAndStoresNothing() throws Exception {
+        UUID run = emptyRun(t);
+        TestDatabase.owner()
+                .sql("UPDATE import_batches SET row_count = 1 WHERE run_id = ?")
+                .param(run)
+                .update();
+        scripted(run, registering(ImportRunService.LARGE_BATCH_ROWS + 250));
+        whileAnotherBusinessHoldsTheLargeKey(() ->
+                assertCode(() -> as(t, () -> runs.dryRun(run, operator)), ImportRunService.IMPORT_BUSY));
+        assertThat(as(t, () -> runs.dryRunReport(run))).as("nothing stored").isEmpty();
+        assertThat(largeKeyFree()).as("free after a late refusal").isTrue();
+    }
+
+    /** A writer that registers {@code rows} fabricated products, 250 a page, as the loaders do. */
+    private static BatchWriter registering(int rows) {
+        return (runId, batchId, seq, checkpoint) -> {
+            for (int page = 0; page < rows / 250; page++) {
+                List<BatchWriter.Registration> records = new ArrayList<>(250);
+                for (int line = page * 250 + 1; line <= page * 250 + 250; line++) {
+                    records.add(new BatchWriter.Registration(
+                            ImportRefs.sourceRef(
+                                    "fab-refresh.csv", "-", "line:" + line, ImportRefs.contentHash(Map.of("n", line))),
+                            "retail.product",
+                            UUID.randomUUID()));
+                }
+                checkpoint.registerAll(records);
+            }
+            return Map.of();
+        };
     }
 
     /** The times import_refs was analyzed by hand, as V153's function does. */

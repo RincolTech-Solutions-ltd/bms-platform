@@ -22,8 +22,13 @@ class StatisticsRefreshTest {
     private boolean answer;
 
     private ImportRunService.StatisticsRefresh refresh(long prior, boolean keyed) {
+        return refresh(prior == 0 ? "" : prior + " " + 1_000 + " false 0", keyed);
+    }
+
+    /** A batch that starts from what the transaction's earlier batches left. */
+    private ImportRunService.StatisticsRefresh refresh(String saved, boolean keyed) {
         return new ImportRunService.StatisticsRefresh(
-                prior,
+                saved,
                 keyed,
                 () -> keys++,
                 wait -> {
@@ -59,23 +64,57 @@ class StatisticsRefreshTest {
         assertThat(refresh.registered()).isEqualTo(100_000);
     }
 
-    @Test
-    void fiveBatchesOf5000InOneTransactionRefreshFromTheSecond() {
-        answer = true;
-        long registered = 0;
-        for (int batch = 0; batch < 5; batch++) {
-            ImportRunService.StatisticsRefresh refresh = refresh(registered, false);
-            pages(refresh, 5_000);
-            registered = refresh.registered();
+    /**
+     * {@code files} batches of {@code rows} in one transaction, each starting from what the one before left, and keyed
+     * before writing as writeBatch keys it; {@code between} runs before each batch after the first.
+     */
+    private String batches(int files, int rows, Runnable between) {
+        String saved = "";
+        for (int batch = 0; batch < files; batch++) {
+            if (batch > 0) {
+                between.run();
+            }
+            long prior = ImportRunService.StatisticsRefresh.registeredIn(saved);
+            ImportRunService.StatisticsRefresh refresh =
+                    refresh(saved, prior + rows > ImportRunService.LARGE_BATCH_ROWS);
+            pages(refresh, rows);
+            saved = refresh.saved();
         }
-        assertThat(registered).isEqualTo(25_000);
-        assertThat(keys)
-                .as("each batch past the threshold takes the (reentrant) key")
-                .isEqualTo(4);
+        return saved;
+    }
+
+    @Test
+    void fiveBatchesOf5000InOneTransactionRefreshAtTheTransactionsDoublingsOnly() {
+        answer = true;
+        String saved = batches(5, 5_000, () -> {});
+        assertThat(ImportRunService.StatisticsRefresh.registeredIn(saved)).isEqualTo(25_000);
+        assertThat(waits).as("at 5,250 and 10,500; the next at 21,000").containsExactly(2_000, 2_000);
+    }
+
+    @Test
+    void twentyBatchesOf5000AskAsOneBatchOf100000Does() {
+        answer = true;
+        batches(20, 5_000, () -> {});
+        assertThat(waits).containsExactly(2_000, 2_000, 2_000, 2_000, 2_000);
+    }
+
+    @Test
+    void aRefusalCarriesAcrossBatches() {
+        batches(5, 5_000, () -> {});
+        assertThat(waits).as("2 s once, then 100 ms at the next doubling").containsExactly(2_000, 100);
+    }
+
+    @Test
+    void theThirtySecondRetryCarriesAcrossBatches() {
+        int[] batch = {1};
+        batches(5, 5_000, () -> {
+            if (++batch[0] == 3) {
+                now = TimeUnit.SECONDS.toNanos(30);
+            }
+        });
         assertThat(waits)
-                .as("at the first row of each later batch, and at its doubling")
-                .isNotEmpty()
-                .allMatch(w -> w == 2_000);
+                .as("refused at 5,250; asked at 10,250, 30 s later; at the doubling at 10,500; then nothing")
+                .containsExactly(2_000, 100, 100);
     }
 
     @Test
@@ -89,7 +128,7 @@ class StatisticsRefreshTest {
     @Test
     void aRefusedKeyStopsTheBatchBeforeAnyRefresh() {
         ImportRunService.StatisticsRefresh refresh = new ImportRunService.StatisticsRefresh(
-                0,
+                "",
                 false,
                 () -> {
                     throw new IllegalStateException("import_busy");
