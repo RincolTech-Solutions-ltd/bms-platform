@@ -619,7 +619,10 @@ and polls the reconciliation every 2 seconds while the job runs; a reload finds 
 list says "Being signed". When the job ends the ticks are cleared, and a refusal is said in plain words by its code
 (nothing was signed, and what to do); should the version on screen still be the one sent after `reconciliation_changed`,
 it offers "Make the reconciliation again" to whoever holds `core.imports.manage` rather than sign it once more. The
-signed-off audit row is written by the job as the system, so it names the signer in `signed_by`. It is stored in
+signed-off audit row is written by the job as the system, so it names the signer in `signed_by`. The job holds the run's
+row lock for as long as it measures, so a remake (`POST .../reconciliation`, in a request) waits for that lock 5 seconds at
+most (`lock_timeout`) and then answers 409 `IMPORT_IN_PROGRESS` ("this import is being signed") instead of hanging until
+the edge cuts it; the wait for the run's lock behind a sign-off is bounded, not removed. It is stored in
 `import_signoffs` (append-only, one per run), moves the run to `signed_off` and is audited `core.import_run.signed_off`
 without the name. The run reaches `signed_off` no other way. After it, no new reconciliation of the run is stored (the
 trigger takes the run `FOR UPDATE` in both cases, so a reconciliation and a sign-off never pass each other), so the signed

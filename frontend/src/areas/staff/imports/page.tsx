@@ -110,13 +110,17 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
       signOff(runId, { reconciliation_id: r.id ?? '', sha256: r.sha256 ?? '', sections: [...ticked], name: name.trim(), date }),
     onSuccess: async (answer, sent) => {
       setSubmitted(sent.id ?? null);
+      // A job that already ended before the answer was sent (a small run, or a refusal at once) is never seen running,
+      // so its ticks are cleared here: refused, the newest figures are ticked afresh (review of 03e9515, must-fix 2).
+      if (!signOffRunning(answer)) setTicked(new Set());
       queryClient.setQueryData(reconciliationKey(runId), answer);
       await queryClient.invalidateQueries({ queryKey: RUNS });
     },
   });
   // When the job ends, the list is read again; a refusal because the figures changed leaves nothing ticked, so the newest
   // figures, which the same read brought, are checked again (Lead on the review of 391e1dc, point 5).
-  const running = signOffRunning(reconciliation.data);
+  // Never Signing once signed: a read can carry the sign-off with a job read just before it ended (review of 03e9515, 6).
+  const running = signOffRunning(reconciliation.data) && !reconciliation.data?.signed;
   const wasRunning = useRef(false);
   useEffect(() => {
     if (wasRunning.current && !running) {

@@ -56,7 +56,10 @@ class ReconciliationController {
 
     /** The run's sign-off job (issue #874): the run's last job when it is a sign-off, else null. */
     private ImportRuns.Job signOffJob(UUID runId) {
-        ImportRuns.Job job = runs.get(runId).job();
+        return signOffOnly(runs.get(runId).job());
+    }
+
+    private static ImportRuns.Job signOffOnly(ImportRuns.Job job) {
         return job != null && ImportJobs.SIGN_OFF.equals(job.kind()) ? job : null;
     }
 
@@ -74,8 +77,10 @@ class ReconciliationController {
 
             Instant signedAt,
 
-            // The sign-off running in the background, or how the last one ended (issue #874); null while none was
-            // started.
+            @Schema(
+                    description =
+                            "The sign-off running in the background, or how the last one ended (issue #874); null while"
+                                    + " none was started")
             ImportRuns.Job job) {}
 
     @Schema(name = "ImportSignOffRunList")
@@ -157,8 +162,10 @@ class ReconciliationController {
             @Schema(description = "The sign-off, or null before it")
             SignedResponse signed,
 
-            // The sign-off running in the background, or how the last one ended (issue #874); null while none was
-            // started.
+            @Schema(
+                    description =
+                            "The sign-off running in the background, or how the last one ended (issue #874); null while"
+                                    + " none was started; poll while its state is running")
             ImportRuns.Job job) {
 
         static ReconciliationResponse of(Report r, ImportRuns.Job job) {
@@ -237,7 +244,7 @@ class ReconciliationController {
                         r.version(),
                         r.signable(),
                         r.signedAt(),
-                        signOffJob(r.runId())))
+                        signOffOnly(r.job())))
                 .toList());
     }
 
@@ -301,7 +308,7 @@ class ReconciliationController {
                             + " the reconciliation until the job is done (signed) or failed (its refusal's code); audited",
             operationId = "signOffImport")
     ReconciliationResponse signOff(@PathVariable("run_id") UUID runId, @Valid @RequestBody SignOffRequest request) {
-        ImportRuns.Run run = jobs.startSignOff(
+        jobs.startSignOff(
                 runId,
                 new SignOff(
                         request.reconciliationId(),
@@ -310,8 +317,10 @@ class ReconciliationController {
                         request.name(),
                         request.date(),
                         CurrentPrincipal.require().userId()));
-        ImportRuns.Job job =
-                run.job() != null && ImportJobs.SIGN_OFF.equals(run.job().kind()) ? run.job() : null;
+        // As the GET reads it: the job, then the reconciliation (a job that ends in between shows signed beside a
+        // running
+        // job until the next poll; the screen never shows Signing once signed, review of 03e9515, point 6).
+        ImportRuns.Job job = signOffJob(runId);
         return ReconciliationResponse.of(reconciliation.latest(runId).orElseThrow(ApiException::notFound), job);
     }
 }

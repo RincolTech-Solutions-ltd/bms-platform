@@ -52,22 +52,27 @@ public interface ImportReconciliation {
      */
     List<RunSummary> forSignOff();
 
-    /** One import on the sign-off screen. {@code version} and {@code signable} are null while no reconciliation was made. */
+    /**
+     * One import on the sign-off screen. {@code version} and {@code signable} are null while no reconciliation was made;
+     * {@code job} is the run's last background job, read in the same query (issue #874, review of 03e9515, point 5).
+     */
     record RunSummary(
-            UUID runId, String status, Instant committedAt, Integer version, Boolean signable, Instant signedAt) {}
+            UUID runId,
+            String status,
+            Instant committedAt,
+            Integer version,
+            Boolean signable,
+            Instant signedAt,
+            ImportRuns.Job job) {}
 
     /**
-     * The customer's sign-off (spec section 3.10): the newest reconciliation of a {@code committed} run, as the signer saw
-     * it (its id and sha256: 409 {@code reconciliation_changed} otherwise), with every section ticked (422
-     * {@code sections_not_ticked}), the signer's typed name (422 {@code name_required}) and the date, which is today on the
-     * business clock (422 {@code sign_off_date_not_today}). A reconciliation with a difference that is not itemised is
-     * refused (409 {@code unitemised_difference}). The signed report is stored, never to change again; the run becomes
-     * {@code signed_off}; audited without the name. The caller holds {@code core.imports.sign_off} (the route checks it).
-     * The books are measured again in the caller's thread, so the route runs this as a background job (issue #874).
+     * What the signer sends: the reconciliation they read, the sections they ticked, their typed name and the date. The
+     * customer's sign-off (spec section 3.10) of the newest reconciliation of a {@code committed} run, as the signer saw it
+     * (its id and sha256: {@code reconciliation_changed} otherwise), with every section ticked ({@code sections_not_ticked}),
+     * the typed name ({@code name_required}) and today on the business clock ({@code sign_off_date_not_today}); a difference
+     * not itemised is refused ({@code unitemised_difference}). It runs only as the background job of the sign-off route
+     * (issue #874), never inside a request, so no synchronous sign-off is on this port (review of 03e9515, point 4).
      */
-    Report signOff(UUID runId, SignOff signOff);
-
-    /** What the signer sends: the reconciliation they read, the sections they ticked, their typed name and the date. */
     record SignOff(UUID reconciliationId, String sha256, List<String> sections, String name, LocalDate date, UUID by) {
 
         public SignOff {

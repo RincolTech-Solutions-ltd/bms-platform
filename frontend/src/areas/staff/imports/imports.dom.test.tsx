@@ -71,6 +71,10 @@ let refuseSame = false;
 let hold: { promise: Promise<Reconciliation>; answer: () => void } | null = null;
 // The sign-off the background job is running (issue #874): what it was sent and how it ends at the next poll.
 let job: { body: SignOffRequest; refuse: string | null; refuseSame: boolean } | null = null;
+// Whether the job has already ended when the POST answers (a small run): the 202 carries its outcome.
+let instant = false;
+// Whether the 202 carries the sign-off with the job read just before it ended (still running).
+let signedButRunning = false;
 // The screen's words for a refusal because the figures changed.
 const CHANGED =
   'The figures changed since you opened them, so nothing was signed. The newest figures are shown now: check them, tick each section and sign again.';
@@ -118,6 +122,8 @@ vi.mock('../../../api/imports', async (original) => {
     job = { body, refuse, refuseSame };
     refuse = null;
     view = { ...view, job: { kind: 'sign_off', state: 'running', started_at: STARTED } };
+    if (instant || signedButRunning) finish();
+    if (signedButRunning) return Promise.resolve({ ...view, job: { kind: 'sign_off', state: 'running', started_at: STARTED } });
     return Promise.resolve(view);
   },
   };
@@ -152,8 +158,22 @@ beforeEach(() => {
   refuseSame = false;
   hold = null;
   job = null;
+  instant = false;
+  signedButRunning = false;
   signOffPoll.ms = 20;
 });
+
+/** Opens the import, ticks every section, types the name and today, and presses Sign. */
+async function signAll(today: string) {
+  fireEvent.click(await screen.findByRole('button', { name: /Imported on 1 Oct 2026/ }));
+  await screen.findByRole('heading', { name: 'Rows and records' });
+  fireEvent.click(screen.getByRole('checkbox', { name: /rows and records/ }));
+  fireEvent.click(screen.getByRole('checkbox', { name: /stock value per branch/ }));
+  fireEvent.change(screen.getByLabelText(/Your name/), { target: { value: 'Fabricated Signer' } });
+  fireEvent.change(screen.getByLabelText(/Today's date/), { target: { value: today } });
+  await pause();
+  fireEvent.click(screen.getByRole('button', { name: 'Sign the reconciliation' }));
+}
 
 afterEach(() => cleanup());
 
@@ -283,6 +303,42 @@ describe('imports to sign off', () => {
     const pending = hold;
     hold = null;
     pending.answer();
+    expect(await screen.findByText(/Signed by Fabricated Signer/)).toBeTruthy();
+    expect(screen.queryByText(/Signing\. BMS checks/)).toBeNull();
+  });
+
+  // JUSTIFICATION-A3: must-fix 2 of the review of 03e9515: the POST answers with the job already done.
+  it('shows it signed when the POST answers with the job already done', async () => {
+    instant = true;
+    show(admin);
+    await signAll(businessToday(new Date(), 'Africa/Kampala'));
+    expect(await screen.findByText(/Signed by Fabricated Signer/)).toBeTruthy();
+    expect(screen.queryByText(/Signing\. BMS checks/)).toBeNull();
+    expect(sent).toHaveLength(1);
+  });
+
+  // JUSTIFICATION-A3: must-fix 2 of the review of 03e9515: the POST answers already refused, with version 2.
+  it('clears the ticks when the POST answers already refused because the figures changed', async () => {
+    instant = true;
+    refuse = 'reconciliation_changed';
+    show(admin);
+    await signAll(businessToday(new Date(), 'Africa/Kampala'));
+    expect(await screen.findByText(CHANGED)).toBeTruthy();
+    expect(await screen.findByText(/Version 2, as at 1 Oct 2026/)).toBeTruthy();
+    await waitFor(() => expect((screen.getByRole('checkbox', { name: /rows and records/ }) as HTMLInputElement).checked).toBe(false));
+    expect((screen.getByRole('checkbox', { name: /stock value per branch/ }) as HTMLInputElement).checked).toBe(false);
+    // Signing again needs fresh ticks: nothing is sent until they are.
+    await pause();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign the reconciliation' }));
+    expect(await screen.findByText(/Still to tick: Rows and records, Stock value per branch/)).toBeTruthy();
+    expect(sent).toHaveLength(1);
+  });
+
+  // JUSTIFICATION-A3: point 6 of the review of 03e9515: signed beside a job read just before it ended.
+  it('never shows Signing beside a sign-off that is already there', async () => {
+    signedButRunning = true;
+    show(admin);
+    await signAll(businessToday(new Date(), 'Africa/Kampala'));
     expect(await screen.findByText(/Signed by Fabricated Signer/)).toBeTruthy();
     expect(screen.queryByText(/Signing\. BMS checks/)).toBeNull();
   });

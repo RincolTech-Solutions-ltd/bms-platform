@@ -146,10 +146,7 @@ class ImportRunService implements ImportRuns {
             allow_trading_approved_by, pre_import_dump_file, committing_at, committed_at,
             pre_import_dump_verified_at, commit_requested_by, commit_approved_by, commit_approved_version, fabricated,
             job_kind, job_started_at, job_finished_at, job_failure_code,
-            EXISTS (SELECT 1 FROM pg_locks l
-                     WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
-                       AND ((l.classid::bigint << 32) | l.objid::bigint)
-                           = hashtextextended('core.imports.job:' || job_token::text, 0)) AS job_alive""";
+            """ + ImportJobs.ALIVE;
 
     /** The key of a background job's own lock, followed by its token (issue #922, V154). */
     private static final String JOB_KEY = "core.imports.job:";

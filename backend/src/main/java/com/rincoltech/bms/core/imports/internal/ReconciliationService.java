@@ -166,7 +166,22 @@ class ReconciliationService implements ImportReconciliation {
     @Override
     public Report reconcile(UUID runId, UUID by) {
         TenantContext.require();
-        return tx.execute(s -> generate(runId, by));
+        return tx.execute(s -> {
+            // JUSTIFICATION-A3: nice-to-have 3 of the review of 03e9515: a sign-off job holds the run while it measures
+            // (#874), so the remake, in a request, waits 5 seconds at most for the run's lock and says so.
+            jdbc.sql("SELECT set_config('lock_timeout', '5s', true)").query().singleRow();
+            try {
+                run(runId, true);
+            } catch (org.springframework.dao.PessimisticLockingFailureException e) {
+                throw new ApiException(
+                        HttpStatus.CONFLICT,
+                        "IMPORT_IN_PROGRESS",
+                        "Import in progress",
+                        "This import is being signed; make the reconciliation again when that ends.");
+            }
+            jdbc.sql("SET LOCAL lock_timeout TO DEFAULT").update();
+            return generate(runId, by);
+        });
     }
 
     /**
@@ -199,7 +214,11 @@ class ReconciliationService implements ImportReconciliation {
     public List<RunSummary> forSignOff() {
         TenantContext.require();
         return tx.execute(s -> jdbc.sql("""
-                        SELECT r.id, r.status, r.committed_at, c.version, c.signable, r.signed_off_at
+                        SELECT r.id, r.status, r.committed_at, c.version, c.signable, r.signed_off_at,
+                               -- The run's job in the same read (#874, review of 03e9515, point 5).
+                               r.job_kind, r.job_started_at, r.job_finished_at, r.job_failure_code,
+                        """ + ImportJobs.ALIVE + """
+
                           FROM import_runs r
                           LEFT JOIN LATERAL (SELECT version, signable FROM import_reconciliations x
                                               WHERE x.run_id = r.id ORDER BY version DESC LIMIT 1) c ON true
@@ -219,14 +238,10 @@ class ReconciliationService implements ImportReconciliation {
                             committed == null ? null : committed.toInstant(),
                             (Integer) rs.getObject(4),
                             (Boolean) rs.getObject(5),
-                            signed == null ? null : signed.toInstant());
+                            signed == null ? null : signed.toInstant(),
+                            ImportJobs.read(rs));
                 })
                 .list());
-    }
-
-    @Override
-    public Report signOff(UUID runId, SignOff signOff) {
-        return signOff(runId, signOff, () -> {});
     }
 
     // JUSTIFICATION-A3: issue #874's request checks what it can at once, without the run's lock or a measure.

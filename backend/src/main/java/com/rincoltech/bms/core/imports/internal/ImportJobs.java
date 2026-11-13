@@ -50,6 +50,16 @@ class ImportJobs {
     /** The code of a job stopped by anything but a refusal of the API. */
     static final String FAILED = "failed";
 
+    /**
+     * The column {@code job_alive} of a read of {@code import_runs}: whether a session still holds the token lock of the
+     * run's job (#922). Shared by the run's read and the sign-off list's (#874, review of 03e9515, point 5).
+     */
+    static final String ALIVE = """
+            EXISTS (SELECT 1 FROM pg_locks l
+                     WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
+                       AND ((l.classid::bigint << 32) | l.objid::bigint)
+                           = hashtextextended('core.imports.job:' || job_token::text, 0)) AS job_alive""";
+
     /** The form of a stored code (the CHECK of V154). */
     private static final Pattern CODE = Pattern.compile("[A-Za-z][A-Za-z_]{0,63}");
 
