@@ -445,29 +445,31 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
     dry run must finish inside its 15 minute limit and every commit inside the 10 minute batch timeout, every validation
     inside the same 15 minutes as a ceiling (it has no limit of its own and holds the business's loop while it runs; the
     review of 3d86d31), and the old generation is judged as before. Every case runs at the configured limit, the measured sizes included. Times of
-    the `import-big-file` job, 13 November 2026 (CI run 43386796894, head 16be37e; 11 cases, 0 failures, each commit's
-    reconciliation stored; the commit after it, 981dfe7, binds the job's thread to the business through `core.jobs`
-    instead of directly and changes nothing the job runs), the cases in one database, in the order shown:
+    the `import-big-file` job on the head that merges, 13 November 2026 (CI run 43397060617, head 761939f; 11 cases, 0
+    failures, each commit's reconciliation stored), the cases in one database, in the order shown:
 
     | File | Heap | Upload | Validation (background) | Preview | Dry run (background) | Commit (batch) | Old generation peak |
     |---|---|---|---|---|---|---|---|
-    | CSV, 100,001 rows, 7 columns (one over the configured limit) | 224 MB | refused `TOO_MANY_ROWS` in 6.9 s | | | | | 68 of 149 MB |
-    | CSV, 10,000 rows, 7 columns, 2.6 MB | 224 MB | 0.9 s | 3.6 s | 0.4 s | 9.1 s | 8.3 s (7.6 s) | 70 of 149 MB |
-    | CSV, 25,000 rows, 7 columns, 6.5 MB | 224 MB | 2.0 s | 9.6 s | 1.8 s | 25 s | 21 s (20 s) | 76 of 149 MB |
-    | CSV, 50,000 rows, 7 columns, 12.9 MB | 224 MB | 3.6 s | 24.7 s | 0.7 s | 40 s | 38 s (37 s) | 85 of 149 MB |
-    | CSV, 75,000 rows, 7 columns, 19.4 MB | 224 MB | 5.7 s | 27.2 s | 1.1 s | 64 s | 58 s (56 s) | 128 of 149 MB |
-    | CSV, five files of 5,000 rows, 7 columns, 1.3 MB each, one run | 224 MB | 0.4 to 0.6 s each | 7.1 s | 0.6 s | 25 s (3 ANALYZEs) | 71 s (70 s over five batches) | 94 of 149 MB |
-    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits), up to the preview | 224 MB | 6.3 s | 49 s | 1.4 s | not run | not run | 77 of 149 MB |
-    | CSV, 20,000 rows, 200 columns (193 ignored), 20.6 MB (column limit) | 224 MB | 2.4 s | 13.1 s | 1.1 s | 23 s | 21 s (20 s) | 97 of 149 MB |
-    | XLSX, the 100,000 rows, 3.3 MB, up to the preview | 224 MB | 6.0 s | 40 s | 1.3 s | not run | not run | 112 of 149 MB |
-    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits) | 448 MB | 6.2 s | 46 s | 1.4 s | 75 s | 70 s (68 s) | 141 of 298 MB, not judged |
-    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits) | 224 MB | 6.3 s | 81 s | 1.3 s | 74 s | 69 s (66 s) | **116 of 149 MB** |
+    | CSV, 100,001 rows, 7 columns (one over the configured limit) | 224 MB | refused `TOO_MANY_ROWS` in 14.1 s | | | | | 68 of 149 MB |
+    | CSV, 10,000 rows, 7 columns, 2.6 MB | 224 MB | 2.0 s | 6.6 s | 0.6 s | 17 s | 20 s (20 s) | 70 of 149 MB |
+    | CSV, 25,000 rows, 7 columns, 6.5 MB | 224 MB | 4.0 s | 33 s | 0.8 s | 46 s | 45 s (44 s) | 77 of 149 MB |
+    | CSV, 50,000 rows, 7 columns, 12.9 MB | 224 MB | 7.3 s | 31 s | 1.2 s | 86 s | 83 s (81 s) | 84 of 149 MB |
+    | CSV, 75,000 rows, 7 columns, 19.4 MB | 224 MB | 11.1 s | 57 s | 1.5 s | 117 s | 110 s (106 s) | 129 of 149 MB |
+    | CSV, five files of 5,000 rows, 7 columns, 1.3 MB each, one run | 224 MB | 0.7 to 1.0 s each | 13.6 s | 0.9 s | 46 s (3 ANALYZEs) | 146 s (144 s over five batches) | 94 of 149 MB |
+    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits), up to the preview | 224 MB | 12.5 s | 76 s | 2.1 s | not run | not run | 82 of 149 MB |
+    | CSV, 20,000 rows, 200 columns (193 ignored), 20.6 MB (column limit) | 224 MB | 3.9 s | 13.6 s | 1.0 s | 40 s | 39 s (37 s) | 97 of 149 MB |
+    | XLSX, the 100,000 rows, 3.3 MB, up to the preview | 224 MB | 12.7 s | 143 s | 2.1 s | not run | not run | 112 of 149 MB |
+    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits) | 448 MB | 12.3 s | 62 s | 2.2 s | 152 s | 159 s (154 s) | 111 of 298 MB, not judged |
+    | CSV, 100,000 rows, 7 columns, 25.8 MB (row and size limits) | 224 MB | 12.5 s | 136 s | 2.2 s | 159 s | 153 s (148 s) | **116 of 149 MB** |
 
-    This run used GitHub's hosted runner, faster than the self-hosted one of the #921 table above, so the two tables are
-    not compared step by step. Every dry run fits its 15 minute limit, every commit the 10 minute batch timeout, and
-    every case on the staging heap keeps the old generation a tenth below its limit (134 MB); the 75,000 row case is
-    again the closest (128 MB). The 81 s validation of the last case would have outlasted the 80 s budget of #921 and,
-    on the slower runner, Cloudflare's 100 s; in the background it only makes the screen wait longer.
+    Every dry run fits its 15 minute limit, every commit the 10 minute batch timeout, every validation the 15 minute
+    ceiling, and every case on the staging heap keeps the old generation a tenth below its limit (134 MB); the 75,000 row
+    case is again the closest (129 MB). The same 11 cases passed on the two heads before it, through the same background
+    path: 16be37e (CI run 43386796894, a faster hosted runner: 100,000 rows validated in 81 s, dry run 74 s, commit 69 s)
+    and 7246953 (CI run 43396818859: validated in 79 s, dry run 150 s, commit 158 s, the workbook validated in 366 s).
+    Hosted runners differ from run to run, so the tables are not compared step by step. The validations of 76 to 366 s at
+    100,000 rows would each have outlasted #921's 80 s budget, and most of them Cloudflare's 100 s; in the background
+    they only make the screen wait longer, and a commit or resume of that business waits on them.
 - **Normalisation tables.** Every table of examples in chapter 13 section 13.6 is a
   parametrised unit test.
 - **Loan servicing golden tests** (`ServicingTest`, #108). Fabricated schedules from worked

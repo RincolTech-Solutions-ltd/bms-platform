@@ -1912,7 +1912,7 @@ Now:
   lost to an idle or network timeout writes nothing (`claim_connection_lost` or `claim_not_held`) while a second check
   may already own the business. The check has no time limit of its own and holds the business's loop while it runs, so a
   commit or resume of the business waits on it (refused with `IMPORT_IN_PROGRESS`); the big file test holds it to the dry
-  run's 15 minutes as a ceiling (it measured up to 81 s on the hosted runner and 410 s on the self-hosted one), accepted
+  run's 15 minutes as a ceiling (at 100,000 rows it measured 76 to 136 s for a CSV and up to 366 s for a workbook on hosted runners, and up to 410 s on the self-hosted one), accepted
   by the review of 3d86d31. The dry run
   is the same code as before under that claim (`dryRunClaimed`); its time limit, the batch timeout, the large-import key
   and its `import_busy`, and the one opening journal per branch are unchanged.
