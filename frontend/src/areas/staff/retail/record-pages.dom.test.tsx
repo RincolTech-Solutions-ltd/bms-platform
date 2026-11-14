@@ -61,13 +61,13 @@ describe('the sale page (#336)', () => {
     const onClose = vi.fn();
     show(<SalePageView saleId={SALE_2} onClose={onClose} />, `/staff/retail/sales/${SALE_2}`);
     expect(await screen.findByRole('heading', { name: /Sale S-900002/ })).toBeTruthy();
-    const branch = screen.getAllByRole('link').find((a) => a.getAttribute('href')?.startsWith('/staff/retail/branches/'));
-    expect(branch).toBeTruthy();
+    const sale = await retail.getSale(SALE_2);
+    const branches = screen.getAllByRole('link').map((a) => a.getAttribute('href')).filter((h) => h?.startsWith('/staff/retail/branches/'));
+    expect(branches).toEqual([`/staff/retail/branches/${sale.branch_id}`]);
     fireEvent.click(screen.getByRole('button', { name: 'See all sales' }));
     expect(onClose).toHaveBeenCalled();
   });
 
-  // JUSTIFICATION-A3: new test cases the review of #931 asks for (sale lines, points 3 and 7); no existing test covers them.
   it('links each line of the sale to its item page, at the sale\'s branch', async () => {
     const sale = await retail.getSale(SALE_2);
     const first = (sale.lines ?? [])[0];

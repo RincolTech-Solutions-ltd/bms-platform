@@ -1,11 +1,13 @@
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { router } from '../app/router';
 
 // The UX audit (docs/ui/ux-audit.md, issue #336) has one row per staff route, so a route added or removed without its row fails
 // here, as route-coverage.test.ts does for the page tours. A row's first cell is the route in backticks.
 
-const audit = readFileSync(`${process.cwd()}/../docs/ui/ux-audit.md`, 'utf8');
+// Found from this file, so the test runs from the repository root or from frontend alike.
+const audit = readFileSync(fileURLToPath(new URL('../../../docs/ui/ux-audit.md', import.meta.url)), 'utf8');
 const section = audit.slice(audit.indexOf('## The audit'), audit.indexOf('## Screen tickets'));
 const rows = [...section.matchAll(/^\| `(\/staff[^`]*)` \|/gm)].map((m) => m[1] as string);
 const routes = Object.keys(router.routesByPath).filter((p) => p === '/staff' || p.startsWith('/staff/'));

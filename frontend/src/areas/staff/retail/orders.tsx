@@ -18,7 +18,7 @@ import { UNITS, capabilityOn, holdsAt } from './permissions';
 import { newLine, withUnit } from './sale-state';
 import { SaleLineCard } from './sale';
 import { CustomerPicker } from './customer-picker';
-import { BranchLink, SaleLink, ScreenLink } from './screen-link';
+import { BranchLink, ItemLink, SaleLink, ScreenLink } from './screen-link';
 import { Gate, Note, Problem, ProductPicker, money, useBranchName, useBranchView, useSingleBranch } from './ui';
 import { Hint } from '../../../app/ui/Hint';
 import { ContactLinks } from './contact-links';
@@ -100,7 +100,6 @@ export function DeliverPanel({ order, onDone }: { order: Order; onDone: (d: Deli
   );
 }
 
-/** The buttons of an open order: packed, out for delivery (with who takes it), delivered, cancel (with why). */
 /** What a delivery made: the sale, which opens it (issue #336), and what was paid now and left on credit. */
 export function DeliveredNote({ done }: { done: Delivered }) {
   return (
@@ -110,6 +109,7 @@ export function DeliveredNote({ done }: { done: Delivered }) {
   );
 }
 
+/** The buttons of an open order: packed, out for delivery (with who takes it), delivered, cancel (with why). */
 export function OrderActions({ order, onDelivered }: { order: Order; onDelivered?: (d: Delivered) => void }) {
   const { me } = useStaff();
   const client = useQueryClient();
@@ -181,7 +181,7 @@ export function OrderSummary({ order, branchName }: { order: Order; branchName?:
       </p>
       <ul style={{ listStyle: 'none', padding: 0 }}>
         {(order.lines ?? []).map((l) => (
-          <li key={l.line_no} className="hint">{l.qty} {l.unit} {l.description} at {money(l.unit_price_minor ?? 0)} = {money(l.line_total_minor ?? 0)}</li>
+          <li key={l.line_no} className="hint">{l.qty} {l.unit} <ItemLink productId={l.product_id}>{l.description}</ItemLink> at {money(l.unit_price_minor ?? 0)} = {money(l.line_total_minor ?? 0)}</li>
         ))}
       </ul>
       <p className="hint">Items {money(order.items_total_minor ?? 0)}, delivery {money(order.delivery_fee_minor ?? 0)}, <strong>total {money(order.total_minor ?? 0)}</strong></p>

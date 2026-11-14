@@ -32,7 +32,7 @@ export function PaymentRow({ row, branchName }: { row: SupplierPayment; branchNa
         {row.supplier_name}, {showDate(row.paid_on)}, <strong><Money minor={row.amount_minor ?? 0} /></strong>
       </p>
       <p className="hint">
-        By {methodWords(row.method).toLowerCase()}{row.reference ? `, reference ${row.reference}` : ''}{branchName ? `, from ${branchName}` : ''}.
+        By {methodWords(row.method).toLowerCase()}{row.reference ? `, reference ${row.reference}` : ''}{branchName ? <>, from <BranchLink branchId={row.branch_id}>{branchName}</BranchLink></> : ''}.
       </p>
       <p>
         <Link className="btn-sm" to="/staff/retail/supplier-payments/$paymentId" params={{ paymentId: row.id ?? '' }} aria-label={`Open supplier payment ${row.payment_no}`}>Open</Link>

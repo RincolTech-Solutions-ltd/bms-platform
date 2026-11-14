@@ -53,8 +53,12 @@ routes took no id (triage of 2 Nov 2026). Now:
   page tells an unknown address from a branch the person does not work at when it can (someone who works at every branch).
 - The sale page says "This sale was not found" in plain words for an unknown sale and for one at a branch the person may not
   read; the server answers 404 for both (`SalesService.get`, proven for another branch in `RetailOwnerDecisionsIT`).
-- `figure-link` has a 48px tap area (`--tap`) centred on the text, so a name in a table head or a hint line is a full target
-  without changing the line height.
+- `figure-link` is at least `--tap` (48px) tall, so a name in a table head or a hint line takes the room of a full target in
+  the layout and never overlaps the button or link beside it (`layout/record-links.layout.test.ts` at 412px).
+- After the second review: the lines of a customer order, a credit note and a quotation open their item, and the branch on
+  a quotation, a delivery row, a credit note row, a supplier payment row and a document row opens the branch page. A sale's
+  lines keep one link each (the name); the separate Open the item button there is gone. Documents show no item lines, so
+  there is nothing there to link.
 - Tested in `retail/record-pages.dom.test.tsx`, `retail/record-names.dom.test.tsx`, `retail/record-links.dom.test.tsx`,
   `retail/links-retail-reports.dom.test.tsx` and the page tour test `tour/tours-retail-reports.test.tsx`;
   `tour/ux-audit-coverage.test.ts` fails when a staff route has no row here, or a row names a route that is gone.
@@ -138,7 +142,7 @@ No backend change: every record already had its id endpoint (`GET /retail/sales/
 | `/staff/retail/credit-sales` | Credit sales | `page-credit-sales` v3 | meets: grouped by year, month, day (#328) | meets: `?sale=` opens a sale | meets |
 | `/staff/retail/customer-ageing` | Customer ageing | `page-customer-ageing` v2 | meets: grouped by age | meets: buyer opens the account | meets |
 | `/staff/retail/customer-groups` | Customer groups | `page-customer-groups` v2 | meets: short list | meets: Credit buyers and Price lists links | meets |
-| `/staff/retail/documents` | Documents | `page-documents` v1 | meets: paged | gap: the buyer name is plain text | meets |
+| `/staff/retail/documents` | Documents | `page-documents` v1 | meets: paged | gap: the buyer name is plain text (each document's branch opens, this change; no item lines are shown) | meets |
 | `/staff/retail/evaluation` | Business evaluation | `page-evaluation` v1 | meets: one section per branch, top lists | meets: each branch heading opens the branch page (this change); items and categories open | meets |
 | `/staff/retail/expense-lists` | Expense lists | `page-expense-lists` v2 | meets: closed until tapped (#798) | meets: link to Expenses | meets |
 | `/staff/retail/expenses` | Expenses | `page-expenses` v2 | meets: grouped | meets: the saved summary's branch opens the branch page (this change) | meets |
@@ -152,9 +156,9 @@ No backend change: every record already had its id endpoint (`GET /retail/sales/
 | `/staff/retail/landed-costs/$landedCostId` | Landed cost | `page-landed-cost` v1 | meets: one record | meets: supplier, delivery and each item open (this change) | meets |
 | `/staff/retail/landed-costs/new` | New landed cost | `page-landed-cost-new` v1 | meets: one form | meets | meets |
 | `/staff/retail/margins` | Margins | `page-margins` v1 | meets: top lists | meets: sales total opens All sales; items open the item page | meets |
-| `/staff/retail/orders` | Orders | `page-orders` v1 | meets: by step, Show more | meets: the shop opens the branch; a delivered order's sale opens it (this change) | gap: while Delivered is open, New order and Save: delivered and paid are both brand buttons |
+| `/staff/retail/orders` | Orders | `page-orders` v1 | meets: by step, Show more | meets: the shop opens the branch, each line its item, a delivered order's sale opens it (this change) | gap: while Delivered is open, New order and Save: delivered and paid are both brand buttons |
 | `/staff/retail/orders-report` | Delivery fees and cancellations | `page-orders-report` v1 | meets: bounded by dates, grouped | meets: each order opens | gap: "No orders delivered on these days." names no next step |
-| `/staff/retail/orders/$orderId` | Order | `page-order` v2 | meets: one record | meets: Open sale; the shop opens the branch (this change) | meets |
+| `/staff/retail/orders/$orderId` | Order | `page-order` v2 | meets: one record | meets: Open sale; the shop opens the branch and each line its item (this change) | meets |
 | `/staff/retail/price-lists` | Price lists | `page-price-lists` v1 | meets: one list at a time | meets: each item opens the item page (this change) | meets |
 | `/staff/retail/profit` | Daily profit | `page-profit` v2 | meets: bounded by dates, grouped | meets: branches open the branch page; See the sales behind it | meets |
 | `/staff/retail/purchase-orders` | Purchase orders | `page-purchase-orders` v1 | meets: paged | meets: each order opens | meets |
@@ -163,12 +167,12 @@ No backend change: every record already had its id endpoint (`GET /retail/sales/
 | `/staff/retail/purchase-orders/$orderId/receive` | Receive goods | `page-order-receive` v1 | meets: one form | meets | meets |
 | `/staff/retail/purchase-orders/new` | New purchase order | `page-purchase-order-new` v1 | meets: one form | meets | meets |
 | `/staff/retail/quick-add` | Quick add | `page-quick-add` v3 | meets: one form | meets: next steps open the item | meets |
-| `/staff/retail/quotations` | Quotations | `page-quotations` v1 | meets: paged | gap: the buyer name is plain text (a converted quotation's sale opens) | meets |
+| `/staff/retail/quotations` | Quotations | `page-quotations` v1 | meets: paged | gap: the buyer name is plain text (each line's item, the branch and a converted quotation's sale open, this change) | meets |
 | `/staff/retail/restock` | Buy stock | `page-restock` v6 | meets: one form | meets | meets |
 | `/staff/retail/restocks` | Past purchases | `page-restocks` v3 | meets: grouped by a chain (#350) | meets: each item opens the item page (this change) | meets |
 | `/staff/retail/restocks/$purchaseId` | Purchase | `page-purchase` v1 | meets: one record | meets: each item opens the item page (this change) | meets |
 | `/staff/retail/returns` | Customer returns | `page-returns` v1 | meets: paged | meets: sale opens the sale | meets |
-| `/staff/retail/returns/$returnId` | Credit note | `page-credit-note` v1 | meets: one record | meets: buyer and sale open | meets |
+| `/staff/retail/returns/$returnId` | Credit note | `page-credit-note` v1 | meets: one record | meets: buyer, sale and each line's item open (this change) | meets |
 | `/staff/retail/returns/new/$saleId` | Take goods back | `page-return-new` v1 | meets: one form | meets: buyer opens the account | meets |
 | `/staff/retail/sale` | Record a sale | `page-sale` v4 | meets: one form | meets | meets |
 | `/staff/retail/sales` | All sales | `page-sales` v3 | meets: grouped by year, month, day (#328, #341) | gap: a sale opens in place (`?sale=`), not at its own address `/sales/$saleId` | meets |

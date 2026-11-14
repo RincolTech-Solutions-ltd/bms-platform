@@ -17,7 +17,7 @@ import { CustomerPicker } from './customer-picker';
 import { Gate, Note, Problem, ProductPicker, money, useBranchName, useBranchView, useSingleBranch } from './ui';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { Hint } from '../../../app/ui/Hint';
-import { SaleLink } from './screen-link';
+import { BranchLink, ItemLink, SaleLink } from './screen-link';
 import { ContactLinks } from './contact-links';
 
 // Quotations (documents capability, ADR-033, issue #197): prices offered to a buyer until a date. A quotation reserves no stock and
@@ -115,12 +115,12 @@ export function QuotationCard({ q, branchName }: { q: Quotation; branchName?: st
       <p>{q.buyer_name}{q.buyer_contact ? `, ${q.buyer_contact}` : ''}</p>
       <ContactLinks contact={q.buyer_contact} name={q.buyer_name} />
       <p className="hint">
-        {showDate(q.quote_date)}, valid until <strong>{showDate(q.valid_until)}</strong>, <strong>{money(q.total_minor ?? 0)}</strong>{branchName ? `, ${branchName}` : ''}
+        {showDate(q.quote_date)}, valid until <strong>{showDate(q.valid_until)}</strong>, <strong>{money(q.total_minor ?? 0)}</strong>{branchName ? <>, <BranchLink branchId={q.branch_id}>{branchName}</BranchLink></> : ''}
         {q.price_list ? `, price list ${q.price_list}` : ''}
       </p>
       <ul style={{ listStyle: 'none', padding: 0 }}>
         {(q.lines ?? []).map((l) => (
-          <li key={l.line_no} className="hint">{l.qty} {l.unit} {l.description} at {money(l.unit_price_minor ?? 0)} = {money(l.line_total_minor ?? 0)}</li>
+          <li key={l.line_no} className="hint">{l.qty} {l.unit} <ItemLink productId={l.product_id}>{l.description}</ItemLink> at {money(l.unit_price_minor ?? 0)} = {money(l.line_total_minor ?? 0)}</li>
         ))}
       </ul>
       {q.notes && <p className="hint">{q.notes}</p>}
