@@ -150,7 +150,7 @@ class ImportRunService implements ImportRuns {
             pre_import_dump_verified_at, commit_requested_by, commit_approved_by, commit_approved_version, fabricated,
             job_kind, job_started_at, job_finished_at, job_failure_code,
             (SELECT ARRAY[ls ->> 'at', ls ->> 'code'] FROM import_run_loop_stopped(id) AS ls) AS loop_stopped,
-            """ + ImportJobs.ALIVE;
+            """ + ImportJobs.ALIVE + ",\n" + ImportJobs.LOOP_ALIVE;
 
     /** The key of a background job's own lock, followed by its token (issue #922, V154). */
     private static final String JOB_KEY = "core.imports.job:";
@@ -317,10 +317,14 @@ class ImportRunService implements ImportRuns {
 
     @Override
     public List<Run> list() {
-        return tx.execute(s -> jdbc.sql("SELECT " + RUN_COLUMNS
-                        + " FROM import_runs WHERE origin = 'framework' ORDER BY created_at DESC, id LIMIT 50")
-                .query(ImportRunService::run)
-                .list());
+        return tx.execute(s -> {
+            ImportJobs.Held held = ImportJobs.held(jdbc);
+            return jdbc.sql("SELECT " + RUN_COLUMNS
+                            + " FROM import_runs WHERE origin = 'framework' ORDER BY created_at DESC, id LIMIT 50")
+                    .params(held.keys(), held.at(), held.keys(), held.at())
+                    .query(ImportRunService::run)
+                    .list();
+        });
     }
 
     @Override
@@ -1049,7 +1053,8 @@ class ImportRunService implements ImportRuns {
                     try {
                         code[0] = ImportJobs.outcome(runId, kind, work);
                     } finally {
-                        // Written for an Error too, so it never reads interrupted while this process lives.
+                        // Written for an Error too, so it never reads interrupted while this process lives; committed
+                        // before the claim's close gives the token's lock back, the order a read relies on (#927).
                         tx.executeWithoutResult(
                                 s -> jdbc.sql("""
                                         UPDATE import_runs SET job_finished_at = now(), job_failure_code = ?
@@ -2298,9 +2303,11 @@ class ImportRunService implements ImportRuns {
     // Helpers.
     // ---------------------------------------------------------------------------------------------
 
+    /** The run; the locks are looked at first, in a statement of their own (issue #927, {@link ImportJobs#HELD}). */
     private Run find(UUID runId, boolean forUpdate) {
+        ImportJobs.Held held = ImportJobs.held(jdbc);
         return jdbc.sql("SELECT " + RUN_COLUMNS + " FROM import_runs WHERE id = ?" + (forUpdate ? " FOR UPDATE" : ""))
-                .param(runId)
+                .params(held.keys(), held.at(), held.keys(), held.at(), runId)
                 .query(ImportRunService::run)
                 .optional()
                 .orElseThrow(ApiException::notFound);
@@ -2397,13 +2404,21 @@ class ImportRunService implements ImportRuns {
                 rs.getBoolean("fabricated"),
                 ImportJobs.read(rs),
                 // V156 (#896): the same rule as the platform report's, one SQL function for both, called once per row
-                // so the time and the code come from one reading of pg_locks (review of 09d09be).
-                loopStopped(rs.getArray("loop_stopped")));
+                // so the time and the code come from one reading of pg_locks (review of 09d09be); its interrupted is
+                // set aside for a loop whose lock was held at the read's earlier look (#927).
+                loopStopped(rs.getArray("loop_stopped"), rs.getBoolean("loop_alive")));
     }
 
-    private static LoopStopped loopStopped(java.sql.Array value) throws SQLException {
+    /**
+     * The row's {@code import_run_loop_stopped}, except {@code interrupted} for a loop that was alive when the read looked at
+     * the locks (issue #927): the function looks at pg_locks after the row's snapshot was taken, so a loop that stamped
+     * its end and gave its lock back in between reads interrupted there. The next read holds its stamp.
+     */
+    private static LoopStopped loopStopped(java.sql.Array value, boolean aliveAtTheLook) throws SQLException {
         String[] atAndCode = value == null ? null : (String[]) value.getArray();
-        return atAndCode == null || atAndCode[1] == null
+        return atAndCode == null
+                        || atAndCode[1] == null
+                        || (aliveAtTheLook && ImportJobs.INTERRUPTED.equals(atAndCode[1]))
                 ? null
                 : new LoopStopped(atAndCode[0] == null ? null : Instant.parse(atAndCode[0]), atAndCode[1]);
     }

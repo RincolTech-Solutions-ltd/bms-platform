@@ -14,9 +14,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 
 /**
@@ -32,7 +34,9 @@ import org.springframework.stereotype.Component;
  * thread, bound to the business, holding the claim until it ends. It records how it ended:
  * done, or failed with the refusal's code ({@code import_busy} and the rest), or {@code failed} for any other error, never a
  * message. A process that dies leaves the job unfinished and its claim gone, which every read of the run shows as failed,
- * {@code interrupted} ({@link #read}); the next check or dry run starts again.
+ * {@code interrupted} ({@link #read}); the next check or dry run starts again. A job that ends stamps how it ended and
+ * commits before its claim gives the token's lock back, and every read looks at the locks before it reads the rows
+ * ({@link #HELD}, issue #927), so a job is never read interrupted while it ends.
  */
 @Component
 class ImportJobs {
@@ -51,14 +55,43 @@ class ImportJobs {
     static final String FAILED = "failed";
 
     /**
-     * The column {@code job_alive} of a read of {@code import_runs}: whether a session still holds the token lock of the
-     * run's job (#922). Shared by the run's read and the sign-off list's (#874, review of 03e9515, point 5).
+     * Step one of every read of a run's job or commit loop (issue #927): when this statement started, and the keys of the
+     * advisory locks held as it ran, read in a statement of its own before the rows ({@link #held}). A job or loop stamps
+     * how it ended and commits, then its claim's close gives its token's lock back (startJob, handOff), so a row read after
+     * this look holds every stamp written before a lock this look found gone. Read in the rows' own statement, as up to
+     * #927, the lock was looked at after the statement's snapshot was taken: a job that stamped and gave its lock back in
+     * between read with neither, failed {@code interrupted}.
+     */
+    static final String HELD = """
+            SELECT CAST(statement_timestamp() AS text),
+                   CAST(coalesce(array_agg((l.classid::bigint << 32) | l.objid::bigint), '{}') AS text)
+              FROM pg_locks l
+             WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1""";
+
+    /**
+     * The column {@code job_alive} of a read of {@code import_runs}, with the two parameters of {@link Held#params}: the
+     * token lock of the run's job was held at the look of {@link #HELD}, or the job started after that look (it takes its
+     * lock before its start is written, so one not held then is that new). Shared by the run's read and the sign-off
+     * list's (#874, review of 03e9515, point 5).
      */
     static final String ALIVE = """
-            EXISTS (SELECT 1 FROM pg_locks l
-                     WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
-                       AND ((l.classid::bigint << 32) | l.objid::bigint)
-                           = hashtextextended('core.imports.job:' || job_token::text, 0)) AS job_alive""";
+            (hashtextextended('core.imports.job:' || job_token::text, 0) = ANY(CAST(? AS bigint[]))
+             OR job_started_at > CAST(? AS timestamptz)) AS job_alive""";
+
+    /** {@link #ALIVE} for the portal's commit loop (V156, issue #896): {@code loop_alive}, two parameters as well. */
+    static final String LOOP_ALIVE = """
+            (loop_token IS NOT NULL
+             AND (hashtextextended('core.imports.job:' || loop_token::text, 0) = ANY(CAST(? AS bigint[]))
+                  OR loop_started_at > CAST(? AS timestamptz))) AS loop_alive""";
+
+    /** The step of a read between its look at the locks and its rows (#927), where a test pauses it. */
+    static final String LOCKS_READ = "locks_read";
+
+    /** The step of the platform report between its reading and the one that confirms a loop read interrupted (#927). */
+    static final String REPORT_READ = "report_read";
+
+    /** A test seam (issue #927): run at each step above by the reading thread; null outside the tests. */
+    static volatile Consumer<String> pause;
 
     /** The form of a stored code (the CHECKs of V154 and V156; ImportJobsIT holds them to it). */
     static final Pattern CODE = Pattern.compile("[A-Za-z][A-Za-z_]{0,63}");
@@ -174,7 +207,8 @@ class ImportJobs {
 
     /**
      * The run's job from a row of {@code ImportRunService.RUN_COLUMNS}, or null while none was started. One that has not
-     * ended is running only while the session that claimed the business's loop for it still holds the loop key.
+     * ended is running only while the session that claimed the business's loop for it held its token's lock when the read
+     * looked at the locks, or started after that look ({@link #ALIVE}).
      */
     static ImportRuns.Job read(ResultSet rs) throws SQLException {
         String kind = rs.getString("job_kind");
@@ -186,6 +220,33 @@ class ImportJobs {
                 finished != null ? rs.getString("job_failure_code") : rs.getBoolean("job_alive") ? null : INTERRUPTED;
         String state = code != null ? "failed" : finished == null ? RUNNING : "done";
         return new ImportRuns.Job(kind, state, instant(rs.getTimestamp("job_started_at")), finished, code);
+    }
+
+    // JUSTIFICATION-A3: issue #927 reads the locks before the rows; one shared step for the three reads of a job or
+    // loop.
+    /** When {@link #HELD} looked at the locks, and the keys it found held, as the text of a {@code bigint[]}. */
+    record Held(String at, String keys) {
+
+        /** The two parameters of one {@link #ALIVE} or {@link #LOOP_ALIVE}. */
+        Object[] params() {
+            return new Object[] {keys, at};
+        }
+    }
+
+    /** Step one of a read of a run's job or loop (#927): the look at the locks, before the rows are read. */
+    static Held held(JdbcClient jdbc) {
+        Held held = jdbc.sql(HELD)
+                .query((rs, n) -> new Held(rs.getString(1), rs.getString(2)))
+                .single();
+        pauseAt(LOCKS_READ);
+        return held;
+    }
+
+    static void pauseAt(String step) {
+        Consumer<String> seam = pause;
+        if (seam != null) {
+            seam.accept(step);
+        }
     }
 
     private static Instant instant(Timestamp t) {

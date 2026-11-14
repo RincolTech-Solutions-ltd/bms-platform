@@ -328,7 +328,8 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
   jobs (upload, check, review, dry run, the commit refused before approval and to its maker,
   approved by a checker and started from the operator portal, reconciliation, sign-off) and
   asserts 13.12 from the tables and the reconciliation; the mapping, the cutover and the
-  disbursed decision have no route and are set through the service or the owner role (13.12);
+  disbursed decision have no route and are set through the service or by direct SQL as the
+  database owner (13.12);
   `LendingLoansV1TemplateIT` runs it beside a second branch and as a workbook.
 - **Retail import golden test** (`RetailImportIT`, FR-RET-12). Runs the `import-retail` command's
   importer as `bms_app` over `fixtures/retail/import-sample/` and asserts the balances, the

@@ -145,8 +145,39 @@ class MetricsService implements ImportMetrics {
         });
     }
 
-    /** The report's runs; {@code limit} is already clamped to 1 to {@link #PLATFORM_LIMIT} by the caller. */
+    // JUSTIFICATION-A3: issue #927 confirms a loop read interrupted by a second reading of the same report, no new
+    // query.
+    /**
+     * The report's runs; {@code limit} is already clamped to 1 to {@link #PLATFORM_LIMIT} by the caller. A loop the report
+     * reads {@code interrupted} is read again (issue #927): {@code import_run_loop_stopped} looks at pg_locks after the
+     * row's snapshot was taken, so a loop that stamped its end and gave its lock back in between reads interrupted, and
+     * the second reading, whose snapshot is taken after that look, holds the stamp. Interrupted stands only when both
+     * readings say so; a loop the first read alive keeps that answer until the next report.
+     */
     private List<PlatformRun> platformRuns(Instant since, int limit) {
+        List<PlatformRun> first = reportRows(since, limit);
+        if (first.stream().noneMatch(MetricsService::interrupted)) {
+            return first;
+        }
+        ImportJobs.pauseAt(ImportJobs.REPORT_READ);
+        Map<UUID, PlatformRun> before = new java.util.HashMap<>();
+        first.forEach(r -> before.put(r.metrics().runId(), r));
+        return reportRows(since, limit).stream()
+                .map(r -> {
+                    PlatformRun was = before.get(r.metrics().runId());
+                    return interrupted(r) && was != null && !interrupted(was)
+                            ? new PlatformRun(r.tenantSlug(), r.metrics(), was.loopStopped())
+                            : r;
+                })
+                .toList();
+    }
+
+    private static boolean interrupted(PlatformRun r) {
+        return r.loopStopped() != null
+                && ImportJobs.INTERRUPTED.equals(r.loopStopped().code());
+    }
+
+    private List<PlatformRun> reportRows(Instant since, int limit) {
         return jdbc.sql("SELECT tenant_slug, CAST(metrics AS text) AS metrics"
                         + " FROM platform_import_runs_report(CAST(? AS timestamptz), ?)")
                 .params(since == null ? null : Timestamp.from(since), limit)

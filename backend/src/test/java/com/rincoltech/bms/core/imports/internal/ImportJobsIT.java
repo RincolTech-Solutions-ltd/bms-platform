@@ -7,6 +7,7 @@ import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.core.imports.ImportMappings;
 import com.rincoltech.bms.core.imports.ImportMappings.Mapping;
+import com.rincoltech.bms.core.imports.ImportReconciliation;
 import com.rincoltech.bms.core.imports.ImportRuns;
 import com.rincoltech.bms.core.imports.ImportUploads;
 import com.rincoltech.bms.core.imports.ImportUploads.Upload;
@@ -435,6 +436,125 @@ class ImportJobsIT extends IntegrationTest {
                     .as("same pid, same loop key, still not alive")
                     .isEqualTo(ImportJobs.INTERRUPTED);
             assertCode(() -> as(() -> jobs.startDryRun(runId, staff)), "IMPORT_IN_PROGRESS");
+        }
+    }
+
+    /** Waits until the run's job is stamped and its token's lock is gone, as a job's end leaves it (issue #927). */
+    static void awaitStampedAndUnlocked(UUID runId) throws InterruptedException {
+        long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        while (!Boolean.TRUE.equals(
+                TestDatabase.owner().sql("""
+                        SELECT r.job_finished_at IS NOT NULL
+                               AND NOT EXISTS (SELECT 1 FROM pg_locks l
+                                                WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
+                                                  AND ((l.classid::bigint << 32) | l.objid::bigint)
+                                                      = hashtextextended('core.imports.job:' || r.job_token::text, 0))
+                          FROM import_runs r WHERE r.id = ?
+                        """).param(runId).query(Boolean.class).single())) {
+            assertThat(System.nanoTime()).as("the job ended within 30 seconds").isLessThan(end);
+            Thread.sleep(20);
+        }
+    }
+
+    // JUSTIFICATION-A3: issue #927 asks an IT that forces a read into the window where a job ends. Tests only.
+    /**
+     * Issue #927 (the flaky line 191 above): a read held after its look at the locks, which found the job's lock held,
+     * while the job ends, stamps done and its claim gives the lock back, reads done, never failed {@code interrupted}.
+     * Before #927 the lock was looked at after the row's snapshot was taken, in one statement, and a read that straddled
+     * the end saw neither the stamp nor the lock.
+     */
+    @Test
+    void aReadThatStraddlesTheEndOfAJobReadsItDoneNeverInterrupted() throws Exception {
+        UUID runId = emptyRun();
+        CountDownLatch writing = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        FixtureShopTemplate.SCRIPT = (r, b, s, c) -> {
+            writing.countDown();
+            try {
+                release.await(30, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return Map.of();
+        };
+        try (ReadWindow window = new ReadWindow(ReadWindow.LOCKS_READ)) {
+            as(() -> jobs.startDryRun(runId, staff));
+            assertThat(writing.await(30, TimeUnit.SECONDS)).isTrue();
+            var read = window.enter(() -> as(() -> runs.get(runId).job()));
+            release.countDown();
+            awaitStampedAndUnlocked(runId);
+            ImportRuns.Job job = window.leave(read);
+            assertThat(job.state()).as("%s", job).isEqualTo("done");
+            assertThat(job.failureCode()).isNull();
+        } finally {
+            release.countDown();
+        }
+    }
+
+    /**
+     * Issue #927, the other side of the look: a job that starts after a read looked at the locks (its lock was not held
+     * yet) and before the read takes its rows reads running, never {@code interrupted}.
+     */
+    @Test
+    void aJobThatStartsInsideTheReadsWindowReadsRunningNeverInterrupted() throws Exception {
+        UUID runId = emptyRun();
+        CountDownLatch writing = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        FixtureShopTemplate.SCRIPT = (r, b, s, c) -> {
+            writing.countDown();
+            try {
+                release.await(30, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return Map.of();
+        };
+        try (ReadWindow window = new ReadWindow(ReadWindow.LOCKS_READ)) {
+            var read = window.enter(() -> as(() -> runs.get(runId).job()));
+            as(() -> jobs.startDryRun(runId, staff));
+            assertThat(writing.await(30, TimeUnit.SECONDS)).isTrue();
+            ImportRuns.Job job = window.leave(read);
+            assertThat(job.state()).as("%s", job).isEqualTo("running");
+        } finally {
+            release.countDown();
+        }
+        assertThat(ended(runId).state()).isEqualTo("done");
+    }
+
+    @Autowired
+    ReconciliationService reconciliation;
+
+    /**
+     * Issue #927 for the sign-off (#874): its job ends the way a check's does (startJob), and the sign-off screen's list
+     * reads it with the same look at the locks. A list held after that look while the job stamps done and gives its lock
+     * back, in that order, reads it done, never {@code interrupted}. The job is the fabricated server's, as above.
+     */
+    @Test
+    void theSignOffListReadAcrossTheEndOfASignOffJobReadsItDone() throws Exception {
+        UUID runId = as(() -> runs.open(staff).id());
+        UUID token = UUID.randomUUID();
+        try (Connection server = claimAs(token)) {
+            TestDatabase.owner().sql("""
+                            UPDATE import_runs SET status = 'committed', committed_at = now(), job_kind = 'sign_off',
+                                   job_by = ?, job_started_at = now(), job_token = ?
+                             WHERE id = ?
+                            """).params(staff, token, runId).update();
+            try (ReadWindow window = new ReadWindow(ReadWindow.LOCKS_READ)) {
+                var read = window.enter(() -> as(() -> reconciliation.forSignOff()));
+                TestDatabase.owner()
+                        .sql("UPDATE import_runs SET job_finished_at = now() WHERE id = ?")
+                        .param(runId)
+                        .update();
+                try (Statement unlock = server.createStatement()) {
+                    unlock.execute("SELECT pg_advisory_unlock_all()");
+                }
+                List<ImportReconciliation.RunSummary> list = window.leave(read);
+                assertThat(list)
+                        .filteredOn(r -> r.runId().equals(runId))
+                        .singleElement()
+                        .satisfies(r ->
+                                assertThat(r.job().state()).as("%s", r.job()).isEqualTo("done"));
+            }
         }
     }
 
