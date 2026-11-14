@@ -672,6 +672,32 @@ rows 7, 9 and 13), commit must create:
 - days past due as at 30 June 2026 of 75 (row 3), 86 (row 4), 88 (row 5), 67 (row 6),
   16 (row 10) and 54 (row 11).
 
+As built (issue #110): the pilot register is the first mapping of `lending_loans_v1`
+(`fixtures/imports/lending_loans_v1.pilot_register.mapping.json`, source `register`), not a
+template of its own. The table above is held without a database by `LendingLoansV1TemplateTest`
+and, on PostgreSQL as `bms_app`, by `PilotRegisterGoldenIT`: the register alone, through the
+routes (the run opened and the file uploaded through the quarantine, the check in the
+background, the standard resolutions through the review's route, the dry run in the background
+leaving every row of the lending and ledger tables as it was and matching the preview, ready,
+the dump recorded and checked from the operator portal, the portal's start refused
+`commit_not_approved` before any approval and again while only the maker has tried,
+`import_commit` asked for by the maker, refused to the maker and approved by a second person,
+the commit started from the portal, the reconciliation signable with 6 members, 6 next of kin,
+7 collateral items and 7 loans created and a loan principal of 2,810,000 that ties, and the
+sign-off in the background to `signed_off`). Three steps have no route on `main` and are
+shortcuts in the test: the mapping is saved through `ImportMappings`, the cutover moment of
+30 June 2026 (21:00 in Kampala, the batch business date above) is set on the run by the owner
+role, and the decision that the requested principal was disbursed (13.8 row 15) is recorded
+through `ImportRuns.recordPolicy`, dated the business's today. Besides the counts above it
+asserts, from the tables: the codes of every line as the check stored them, the two infos the
+table leaves out present as infos; that row 4's next of kin is linked by NIN to the borrower of row 3 and
+row 11's to that of row 5; each loan's principal, rate (row 6 at the accepted 1,000 bp),
+disbursement day, due day and interest due of its one bullet item; row 12's loan closed on
+2026-05-18; row 4's collateral a `vehicle` with the plate `UXX001X`; row 10's 400,000 allocated
+160,000 to interest and 240,000 to principal; one journal entry in all, each debit line naming
+its loan at that loan's principal outstanding. `LendingLoansV1TemplateIT` runs the same register
+beside a second branch's register through the services, and as a workbook.
+
 ## 13.13 Retail pilot import (FR-RET-12; ADR-020 decision 9; #55)
 
 The retail pilot moves from a spreadsheet with a form app on top
@@ -1598,7 +1624,8 @@ section 4.1; coordinated with #110, which builds no second framework).**
   `import_refs`; the reconciliation ties; the same register as a workbook gives the books the CSV gives; a re-run and a
   resume after a kill post no second journal and write nothing twice; a business with a member and a loan keeps them,
   has its borrowers linked to that member and journals only the imported loans; a run without the decision is not
-  ready), with `ImportCatalogueTest` (the two shared codes and the lending catalogue pinned).
+  ready), with `ImportCatalogueTest` (the two shared codes and the lending catalogue pinned), and, since issue #110,
+  `PilotRegisterGoldenIT` (the register on its own through the routes and the background jobs, section 13.12).
 
 **11/16, the error-proofing suite (#137, no migration, spec section 5).** Tests, and one fix the fuzzing found:
 

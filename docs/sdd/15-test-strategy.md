@@ -316,12 +316,20 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
 
 ## 15.7 Golden tests
 
-- **Import golden test.** Runs the `pilot_loan_register_v1` pipeline over
+- **Import golden test** (issue #110). Runs `lending_loans_v1` with the pilot register mapping
+  (planned as the template `pilot_loan_register_v1`, built as a mapping in #136) over
   `fixtures/pilot_loan_register_sample.csv`, and over an XLSX built from it, with the
-  business date fixed at 30 June 2026, and asserts exactly the classes, issue codes and
-  normalised values in chapter 13 section 13.12. Then applies the standard resolutions,
-  commits, and asserts the created records, the opening journal and the DPD values listed
-  there.
+  batch business date of 30 June 2026 fixed as the run's cutover moment (`cutover_at`
+  2026-06-30 21:00 in Kampala, which the days past due are aged to), and asserts exactly the
+  classes, issue codes and normalised values in chapter 13 section 13.12. Then applies the
+  standard resolutions, commits, and asserts the created records, the opening journal and the
+  DPD values listed there. `LendingLoansV1TemplateTest` holds the table without a database;
+  `PilotRegisterGoldenIT` takes the register alone through the routes and the background
+  jobs (upload, check, review, dry run, the commit refused before approval and to its maker,
+  approved by a checker and started from the operator portal, reconciliation, sign-off) and
+  asserts 13.12 from the tables and the reconciliation; the mapping, the cutover and the
+  disbursed decision have no route and are set through the service or the owner role (13.12);
+  `LendingLoansV1TemplateIT` runs it beside a second branch and as a workbook.
 - **Retail import golden test** (`RetailImportIT`, FR-RET-12). Runs the `import-retail` command's
   importer as `bms_app` over `fixtures/retail/import-sample/` and asserts the balances, the
   valuation and one day's profit, the three opening journals, the absence of any other journal, a
