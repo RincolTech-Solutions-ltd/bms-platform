@@ -60,7 +60,9 @@ class ImportJobs {
      * how it ended and commits, then its claim's close gives its token's lock back (startJob, handOff), so a row read after
      * this look holds every stamp written before a lock this look found gone. Read in the rows' own statement, as up to
      * #927, the lock was looked at after the statement's snapshot was taken: a job that stamped and gave its lock back in
-     * between read with neither, failed {@code interrupted}.
+     * between read with neither, failed {@code interrupted}. It assumes READ COMMITTED, as every caller runs it: the rows'
+     * statement then takes a snapshot of its own after this look. In a REPEATABLE READ transaction whose snapshot predates
+     * the look, a job that ended between the two would read interrupted again.
      */
     static final String HELD = """
             SELECT CAST(statement_timestamp() AS text),
@@ -70,8 +72,9 @@ class ImportJobs {
 
     /**
      * The column {@code job_alive} of a read of {@code import_runs}, with the two parameters of {@link Held#params}: the
-     * token lock of the run's job was held at the look of {@link #HELD}, or the job started after that look (it takes its
-     * lock before its start is written, so one not held then is that new). Shared by the run's read and the sign-off
+     * token lock of the run's job was held at the look of {@link #HELD}, or the job started after that look: startJob
+     * writes {@code job_started_at} with {@code clock_timestamp()} after it took the lock, so a start the look missed
+     * carries a later time (review of e8b96ed, point 2). Shared by the run's read and the sign-off
      * list's (#874, review of 03e9515, point 5).
      */
     static final String ALIVE = """

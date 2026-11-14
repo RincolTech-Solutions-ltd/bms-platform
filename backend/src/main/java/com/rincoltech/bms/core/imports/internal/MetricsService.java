@@ -152,7 +152,9 @@ class MetricsService implements ImportMetrics {
      * reads {@code interrupted} is read again (issue #927): {@code import_run_loop_stopped} looks at pg_locks after the
      * row's snapshot was taken, so a loop that stamped its end and gave its lock back in between reads interrupted, and
      * the second reading, whose snapshot is taken after that look, holds the stamp. Interrupted stands only when both
-     * readings say so; a loop the first read alive keeps that answer until the next report.
+     * readings say so; a loop the first read alive keeps that answer until the next report. A run the first reading did
+     * not list (new, or moved in by the limit) keeps the second reading's answer, which can fall in that reading's own
+     * window: narrow, and the next report heals it (review of e8b96ed, point 7).
      */
     private List<PlatformRun> platformRuns(Instant since, int limit) {
         List<PlatformRun> first = reportRows(since, limit);

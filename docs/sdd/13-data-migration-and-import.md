@@ -2004,13 +2004,14 @@ Now:
   #926). Every read of a job (the run, the business's list, the sign-off list) therefore looks at the locks first, in a
   statement of its own (`ImportJobs.HELD`: the keys held and the statement's start time), and takes the rows in the next
   statement, whose snapshot holds every stamp written before a lock that look found gone. A job is alive when its token's
-  lock was held at that look, or when it started after it (a job takes its lock before its start is written). The
+  lock was held at that look, or when it started after it: `job_started_at` and `loop_started_at` are written with
+  `clock_timestamp()` after the token's lock is taken, so a start not held at the look carries a later time. The
   run's `loop_stopped` sets aside the `interrupted` of `import_run_loop_stopped` for a loop alive at that look, and the
   platform report, which reads the function alone, reads a run again when it finds a loop `interrupted` and keeps that
-  answer only when both readings give it. The
-  next check or dry run claims the loop and starts again; nothing a dead job did was kept (the dry run rolls back and
-  stores its report only while it holds its claim, the check writes in one transaction at its end, also only while it
-  holds it).
+  answer only when both readings give it (a run the first reading did not list, new or moved by the limit, keeps the
+  second reading's answer: a narrow window that the next report heals). The reads assume READ COMMITTED, as every
+  caller runs them: in a REPEATABLE READ transaction whose snapshot predates the look, a job that ended between the
+  two would read interrupted again. The
   next check or dry run claims the loop and starts again; nothing a dead job did was kept (the dry run rolls back and
   stores its report only while it holds its claim, the check writes in one transaction at its end, also only while it
   holds it).
@@ -2032,8 +2033,11 @@ Now:
   pid would not; a work that throws an Error is stamped `failed`; a check whose claim connection is ended while it runs
   stops at its probe with `claim_connection_lost` and writes nothing; since #927, a read held by the test seam
   `ImportJobs.pause` between its look at the locks and its rows while a dry run ends reads it done, one held while a dry
-  run starts reads it running, and the sign-off list held while a sign-off job ends reads it done), `ImportRunsIT`
-  (#927: a run read held the same way while a portal loop's batch fails reads its stamp `failed`; the platform report
+  run starts reads it running, and the sign-off list held while a sign-off job ends reads it done; a second read held
+  with a REPEATABLE READ snapshot taken before the end puts the window itself on record: there the old one-statement
+  read says `interrupted` and the read since #927 says running), `ImportRunsIT`
+  (#927: a run read held the same way while a portal loop's batch fails reads its stamp `failed`, and on a snapshot
+  taken before the end the function alone says `interrupted` while the run's read shows no stop; the platform report
   held between its two readings answers the stamp a loop wrote meanwhile), `ImportPurgeIT` (the two code columns),
   `MigrationOrderIT` (V154). In the frontend: `pipeline.test.ts` (the words) and `run.dom.test.tsx` (running, done,
   failed, busy and a reload).

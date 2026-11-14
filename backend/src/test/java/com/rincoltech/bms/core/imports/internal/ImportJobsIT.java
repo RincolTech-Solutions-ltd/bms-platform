@@ -37,6 +37,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
 import tools.jackson.databind.JsonNode;
 
 /**
@@ -456,12 +457,47 @@ class ImportJobsIT extends IntegrationTest {
         }
     }
 
+    @Autowired
+    PlatformTransactionManager transactions;
+
+    @Autowired
+    JdbcClient appJdbc;
+
+    /**
+     * The read of a run's job up to #927, in one statement: the row from the statement's snapshot, the lock looked at in
+     * {@code pg_locks} as the statement runs. True when it read the job failed {@code interrupted}.
+     */
+    static final String OLD_READ_SAYS_INTERRUPTED = """
+            SELECT job_finished_at IS NULL
+                   AND NOT EXISTS (SELECT 1 FROM pg_locks l
+                                    WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
+                                      AND ((l.classid::bigint << 32) | l.objid::bigint)
+                                          = hashtextextended('core.imports.job:' || job_token::text, 0))
+              FROM import_runs WHERE id = ?
+            """;
+
+    /** What a read in a REPEATABLE READ transaction answered, and what the old read answered on the same snapshot. */
+    record SnapshotRead<T>(T read, boolean oldReadSaysInterrupted) {}
+
+    /** {@code read}, then the old read of the run's job, in one REPEATABLE READ transaction, as the business. */
+    <T> SnapshotRead<T> onOneSnapshot(UUID runId, Supplier<T> read) {
+        return as(() -> ReadWindow.repeatableRead(transactions)
+                .execute(s -> new SnapshotRead<>(
+                        read.get(),
+                        appJdbc.sql(OLD_READ_SAYS_INTERRUPTED)
+                                .param(runId)
+                                .query(Boolean.class)
+                                .single())));
+    }
+
     // JUSTIFICATION-A3: issue #927 asks an IT that forces a read into the window where a job ends. Tests only.
     /**
-     * Issue #927 (the flaky line 191 above): a read held after its look at the locks, which found the job's lock held,
-     * while the job ends, stamps done and its claim gives the lock back, reads done, never failed {@code interrupted}.
-     * Before #927 the lock was looked at after the row's snapshot was taken, in one statement, and a read that straddled
-     * the end saw neither the stamp nor the lock.
+     * Issue #927 (the flaky line 191 above), forced: two reads are held after their look at the locks, which found the
+     * dry run's lock held, while the job ends, stamps done and its claim gives the lock back. The one in READ COMMITTED
+     * then reads its rows on a new snapshot: done. The other holds a REPEATABLE READ snapshot taken before the end, so its
+     * rows still show the job unfinished while its lock is gone: the window of #927. There the old one-statement read
+     * answers {@code interrupted} (asserted on the same snapshot), and the look taken before the end answers running.
+     * With the old read put back, this test fails (review of e8b96ed, point 1).
      */
     @Test
     void aReadThatStraddlesTheEndOfAJobReadsItDoneNeverInterrupted() throws Exception {
@@ -481,11 +517,20 @@ class ImportJobsIT extends IntegrationTest {
             as(() -> jobs.startDryRun(runId, staff));
             assertThat(writing.await(30, TimeUnit.SECONDS)).isTrue();
             var read = window.enter(() -> as(() -> runs.get(runId).job()));
+            var onOldSnapshot = window.enter(
+                    () -> onOneSnapshot(runId, () -> runs.get(runId).job()));
             release.countDown();
             awaitStampedAndUnlocked(runId);
             ImportRuns.Job job = window.leave(read);
             assertThat(job.state()).as("%s", job).isEqualTo("done");
             assertThat(job.failureCode()).isNull();
+            SnapshotRead<ImportRuns.Job> held = window.leave(onOldSnapshot);
+            assertThat(held.oldReadSaysInterrupted())
+                    .as("the old read inside the window")
+                    .isTrue();
+            assertThat(held.read().state())
+                    .as("the read since #927 on the same snapshot: %s", held.read())
+                    .isEqualTo("running");
         } finally {
             release.countDown();
         }
@@ -527,7 +572,9 @@ class ImportJobsIT extends IntegrationTest {
     /**
      * Issue #927 for the sign-off (#874): its job ends the way a check's does (startJob), and the sign-off screen's list
      * reads it with the same look at the locks. A list held after that look while the job stamps done and gives its lock
-     * back, in that order, reads it done, never {@code interrupted}. The job is the fabricated server's, as above.
+     * back, in that order, reads it done, never {@code interrupted}; one holding a REPEATABLE READ snapshot taken before
+     * the end reads it running, where the old read on that snapshot says interrupted. The job is the fabricated
+     * server's, as above.
      */
     @Test
     void theSignOffListReadAcrossTheEndOfASignOffJobReadsItDone() throws Exception {
@@ -541,6 +588,7 @@ class ImportJobsIT extends IntegrationTest {
                             """).params(staff, token, runId).update();
             try (ReadWindow window = new ReadWindow(ReadWindow.LOCKS_READ)) {
                 var read = window.enter(() -> as(() -> reconciliation.forSignOff()));
+                var onOldSnapshot = window.enter(() -> onOneSnapshot(runId, () -> reconciliation.forSignOff()));
                 TestDatabase.owner()
                         .sql("UPDATE import_runs SET job_finished_at = now() WHERE id = ?")
                         .param(runId)
@@ -554,6 +602,16 @@ class ImportJobsIT extends IntegrationTest {
                         .singleElement()
                         .satisfies(r ->
                                 assertThat(r.job().state()).as("%s", r.job()).isEqualTo("done"));
+                SnapshotRead<List<ImportReconciliation.RunSummary>> held = window.leave(onOldSnapshot);
+                assertThat(held.oldReadSaysInterrupted())
+                        .as("the old read inside the window")
+                        .isTrue();
+                assertThat(held.read())
+                        .filteredOn(r -> r.runId().equals(runId))
+                        .singleElement()
+                        .satisfies(r -> assertThat(r.job().state())
+                                .as("on the same snapshot: %s", r.job())
+                                .isEqualTo("running"));
             }
         }
     }

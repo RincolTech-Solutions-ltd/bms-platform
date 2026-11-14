@@ -851,8 +851,10 @@ class ImportRunService implements ImportRuns {
         UUID token = UUID.randomUUID();
         try {
             claim.holdJob(token);
+            // clock_timestamp(), read after the lock was taken, never the transaction's start: a read's look at the
+            // locks that missed this lock is earlier than this time (#927, ImportJobs.LOOP_ALIVE).
             tx.executeWithoutResult(s -> jdbc.sql("""
-                            UPDATE import_runs SET loop_token = ?, loop_started_at = now(), loop_stopped_at = NULL,
+                            UPDATE import_runs SET loop_token = ?, loop_started_at = clock_timestamp(), loop_stopped_at = NULL,
                                    loop_stopped_code = NULL
                              WHERE id = ?
                             """).params(token, runId).update());
@@ -1032,8 +1034,9 @@ class ImportRunService implements ImportRuns {
             claim.holdJob(token);
             tx.executeWithoutResult(s -> {
                 require.accept(find(runId, true));
+                // clock_timestamp() after the lock, as handOff's loop_started_at (#927, ImportJobs.ALIVE).
                 jdbc.sql("""
-                                UPDATE import_runs SET job_kind = ?, job_by = ?, job_started_at = now(), job_finished_at = NULL,
+                                UPDATE import_runs SET job_kind = ?, job_by = ?, job_started_at = clock_timestamp(), job_finished_at = NULL,
                                        job_failure_code = NULL, job_token = ?
                                  WHERE id = ?
                                 """).params(kind, by, token, runId).update();

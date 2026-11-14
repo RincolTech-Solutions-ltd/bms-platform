@@ -627,6 +627,17 @@ class ImportRunsIT extends IntegrationTest {
         });
         try (ReadWindow window = new ReadWindow(ReadWindow.LOCKS_READ)) {
             Future<Run> read = window.enter(() -> as(t, () -> runs.get(run.id())));
+            // A second read holding a REPEATABLE READ snapshot taken before the end: the window of #927 itself. On it
+            // the function alone, the old read of the loop, says interrupted (review of e8b96ed, point 1).
+            Future<Object[]> onOldSnapshot = window.enter(() -> as(
+                    t,
+                    () -> ReadWindow.repeatableRead(transactionManager).execute(s -> new Object[] {
+                        runs.get(run.id()),
+                        jdbc.sql("SELECT import_run_loop_stopped(?) ->> 'code'")
+                                .param(run.id())
+                                .query(String.class)
+                                .single()
+                    })));
             List<Object> ended = new CopyOnWriteArrayList<>();
             as(t, () -> {
                 inline(ended).accept(held.get());
@@ -637,6 +648,11 @@ class ImportRunsIT extends IntegrationTest {
             assertThat(straddled.status()).isEqualTo("committing");
             assertThat(straddled.loopStopped()).isNotNull();
             assertThat(straddled.loopStopped().code()).isEqualTo("failed");
+            Object[] snapshot = window.leave(onOldSnapshot);
+            assertThat(snapshot[1]).as("the old read inside the window").isEqualTo("interrupted");
+            assertThat(((Run) snapshot[0]).loopStopped())
+                    .as("the read since #927 on the same snapshot: the loop was alive at its look")
+                    .isNull();
         }
     }
 
