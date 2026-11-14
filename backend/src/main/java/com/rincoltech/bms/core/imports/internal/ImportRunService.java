@@ -2306,7 +2306,11 @@ class ImportRunService implements ImportRuns {
     // Helpers.
     // ---------------------------------------------------------------------------------------------
 
-    /** The run; the locks are looked at first, in a statement of their own (issue #927, {@link ImportJobs#HELD}). */
+    /**
+     * The run; the locks are looked at first, in a statement of their own (issue #927, {@link ImportJobs#HELD}). Assumes
+     * READ COMMITTED, the isolation of every caller here, so the rows' statement takes its snapshot after that look; in
+     * a REPEATABLE READ transaction whose snapshot predates the look, a job that ended between the two reads interrupted.
+     */
     private Run find(UUID runId, boolean forUpdate) {
         ImportJobs.Held held = ImportJobs.held(jdbc);
         return jdbc.sql("SELECT " + RUN_COLUMNS + " FROM import_runs WHERE id = ?" + (forUpdate ? " FOR UPDATE" : ""))

@@ -201,15 +201,21 @@ class PilotRegisterGoldenIT extends IntegrationTest {
 
         // The commit, started from the operator portal and run on in the background: waited for while the run is ready
         // (not yet moved on) or committing and its loop has not stopped; a stop or a failure ends the wait. An approval
-        // is no status of a run (commit_approved_by), so a run awaiting it reads ready.
+        // is no status of a run (commit_approved_by), so a run awaiting it reads ready. The start moves the run to
+        // committing before it answers 202, so a run still ready 10 seconds after an accepted start fails at once
+        // (the Lead on the review of e8b96ed, point 8).
         ResponseEntity<JsonNode> start = platform.post(portal + "/start", null, token);
         assertThat(start.getStatusCode()).as("%s", start.getBody()).isEqualTo(HttpStatus.ACCEPTED);
         long until = System.nanoTime() + TimeUnit.MINUTES.toNanos(2);
+        long readyUntil = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         JsonNode state = send(maker, MANAGE, HttpMethod.GET, base, null).getBody();
         while (List.of("ready", "committing").contains(state.path("status").asString())
                 && (state.path("loop_stopped").isMissingNode()
                         || state.path("loop_stopped").isNull())
                 && System.nanoTime() < until) {
+            assertThat("ready".equals(state.path("status").asString()) && System.nanoTime() > readyUntil)
+                    .as("an accepted start left the run ready for 10 seconds: %s", state)
+                    .isFalse();
             Thread.sleep(100);
             state = send(maker, MANAGE, HttpMethod.GET, base, null).getBody();
         }

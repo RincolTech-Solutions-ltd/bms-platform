@@ -2035,7 +2035,9 @@ Now:
   `ImportJobs.pause` between its look at the locks and its rows while a dry run ends reads it done, one held while a dry
   run starts reads it running, and the sign-off list held while a sign-off job ends reads it done; a second read held
   with a REPEATABLE READ snapshot taken before the end puts the window itself on record: there the old one-statement
-  read says `interrupted` and the read since #927 says running), `ImportRunsIT`
+  read says `interrupted` and the read since #927 says running; a start whose transaction began before the look and
+  which took its lock after it reads running with `clock_timestamp()` as its start time and would read interrupted
+  with `now()`), `ImportRunsIT`
   (#927: a run read held the same way while a portal loop's batch fails reads its stamp `failed`, and on a snapshot
   taken before the end the function alone says `interrupted` while the run's read shows no stop; the platform report
   held between its two readings answers the stamp a loop wrote meanwhile), `ImportPurgeIT` (the two code columns),

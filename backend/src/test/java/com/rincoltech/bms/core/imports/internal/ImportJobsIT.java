@@ -566,6 +566,61 @@ class ImportJobsIT extends IntegrationTest {
         assertThat(ended(runId).state()).isEqualTo("done");
     }
 
+    // JUSTIFICATION-A3: the Lead on the review of e8b96ed (point 2) asks a test of the start-side window. Tests only.
+    /**
+     * Issue #927, the start-side window of the review of e8b96ed (point 2), on a fabricated server: its start transaction
+     * begins before a read looks at the locks, and it takes the token's lock and writes the job only after that look. The
+     * look missed the lock, so the read can tell the job alive only by its start time. Written with
+     * {@code clock_timestamp()}, as startJob writes it since that review, the start is later than the look and the job
+     * reads running; written with {@code now()}, the start transaction's begin, it is earlier and the job read interrupted.
+     * startJob itself takes the lock before its transaction begins ({@code claim.holdJob(token)}, then
+     * {@code tx.executeWithoutResult}), so either way it is safe; {@code clock_timestamp()} keeps it so whatever the order.
+     */
+    @Test
+    void aStartWhoseTransactionBeganBeforeTheLookReadsRunningWithItsClockTime() throws Exception {
+        assertThat(readAcrossAStartBegunBeforeTheLook("clock_timestamp()").state())
+                .as("written with clock_timestamp()")
+                .isEqualTo("running");
+        ImportRuns.Job withNow = readAcrossAStartBegunBeforeTheLook("now()");
+        assertThat(withNow.state()).as("written with now()").isEqualTo("failed");
+        assertThat(withNow.failureCode()).isEqualTo(ImportJobs.INTERRUPTED);
+    }
+
+    /** A read held after its look while a fabricated server, its transaction begun before, starts a job with {@code at}. */
+    ImportRuns.Job readAcrossAStartBegunBeforeTheLook(String at) throws Exception {
+        UUID runId = emptyRun();
+        UUID token = UUID.randomUUID();
+        try (Connection server = TestDatabase.ownerDataSource().getConnection();
+                ReadWindow window = new ReadWindow(ReadWindow.LOCKS_READ)) {
+            server.setAutoCommit(false);
+            try (Statement begin = server.createStatement()) {
+                // The transaction begins here: now() is fixed before the look.
+                begin.execute("SELECT now()");
+            }
+            var read = window.enter(() -> as(() -> runs.get(runId).job()));
+            try (PreparedStatement lock = server.prepareStatement("SELECT pg_advisory_lock(hashtextextended(?, 0))")) {
+                lock.setString(1, "core.imports.job:" + token);
+                lock.execute();
+            }
+            try (PreparedStatement start = server.prepareStatement("UPDATE import_runs SET job_kind = 'dry_run',"
+                    + " job_by = ?, job_started_at = " + at + ", job_token = ? WHERE id = ?")) {
+                start.setObject(1, staff);
+                start.setObject(2, token);
+                start.setObject(3, runId);
+                assertThat(start.executeUpdate()).isEqualTo(1);
+            }
+            server.commit();
+            try {
+                return window.leave(read);
+            } finally {
+                try (Statement unlock = server.createStatement()) {
+                    unlock.execute("SELECT pg_advisory_unlock_all()");
+                }
+                server.commit();
+            }
+        }
+    }
+
     @Autowired
     ReconciliationService reconciliation;
 
