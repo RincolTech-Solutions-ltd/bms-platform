@@ -321,7 +321,7 @@ class ImportRunService implements ImportRuns {
             ImportJobs.Held held = ImportJobs.held(jdbc);
             return jdbc.sql("SELECT " + RUN_COLUMNS
                             + " FROM import_runs WHERE origin = 'framework' ORDER BY created_at DESC, id LIMIT 50")
-                    .params(held.keys(), held.at(), held.keys(), held.at())
+                    .params(held.runParams())
                     .query(ImportRunService::run)
                     .list();
         });
@@ -2314,7 +2314,7 @@ class ImportRunService implements ImportRuns {
     private Run find(UUID runId, boolean forUpdate) {
         ImportJobs.Held held = ImportJobs.held(jdbc);
         return jdbc.sql("SELECT " + RUN_COLUMNS + " FROM import_runs WHERE id = ?" + (forUpdate ? " FOR UPDATE" : ""))
-                .params(held.keys(), held.at(), held.keys(), held.at(), runId)
+                .params(held.runParams(runId))
                 .query(ImportRunService::run)
                 .optional()
                 .orElseThrow(ApiException::notFound);
