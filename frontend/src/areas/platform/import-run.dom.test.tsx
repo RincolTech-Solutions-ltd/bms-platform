@@ -131,6 +131,17 @@ describe('a run that stopped by itself (review of e3f95b2 on #895)', () => {
     await waitFor(() => expect(sent).toEqual(['resume']));
   });
 
+  it('shows the card with one Resume, its time and reason, when Stop was pressed before it stopped by itself (#896)', async () => {
+    state = { ...state, run: { ...base, halt_requested: true, loop_stopped: { at: '2026-11-14T07:32:00Z', code: 'failed' } } };
+    show();
+    expect(await screen.findByRole('heading', { name: 'Stopped by itself' })).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'Resume the import' })).toHaveLength(1);
+    expect(screen.getByText('Stopped by itself on 14 Nov 2026 10:32. A file failed with an unexpected error.')).toBeTruthy();
+    expect(screen.getByText(/It stopped on 14 Nov 2026 10:32\. A file failed with an unexpected error\./)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Resume the import' }));
+    await waitFor(() => expect(sent).toEqual(['resume']));
+  });
+
   it('reads a lost loop as stopped by itself after a restart (issue #896)', async () => {
     state = { ...state, run: { ...base, loop_stopped: { at: '2026-11-14T07:32:00Z', code: 'interrupted' } } };
     show();

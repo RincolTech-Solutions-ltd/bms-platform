@@ -53,11 +53,13 @@ export const STALE_AFTER_MS = 10 * 60 * 1000;
  * file, a restart), with no loop alive. A healthy run is not offered it (issue #897): only once it has been committing longer
  * than STALE_AFTER_MS, or once the server answered an action on it with the 409 IMPORT_IN_PROGRESS (`refused`), so the
  * operator can try Resume. A run with no committing_at is not stale. The server still answers IMPORT_IN_PROGRESS while a
- * loop lives, so offering it is safe. A run the server marks loop_stopped (issue #896) has stopped by itself for certain.
+ * loop lives, so offering it is safe. A run the server marks loop_stopped (issue #896) has stopped by itself for certain,
+ * even after Stop was pressed (a batch failed before the stop was reached): its card always shows, with the one Resume.
  */
 export function stoppedBySelf(run: ImportRun, commitEnabled: boolean, now: number, refused = false): boolean {
-  if (run.status !== 'committing' || run.halt_requested || !commitEnabled) return false;
+  if (run.status !== 'committing') return false;
   if (run.loop_stopped) return true;
+  if (run.halt_requested || !commitEnabled) return false;
   const since = run.committing_at ? Date.parse(run.committing_at) : Number.NaN;
   return refused || (!Number.isNaN(since) && now - since > STALE_AFTER_MS);
 }
@@ -126,7 +128,12 @@ export function OperatorImportRun({ slug, runId }: { slug: string; runId: string
   const s = state.data;
   const r = s?.run;
   // Only an operator who may change businesses is offered an action; one who may only read sees the facts.
-  const main = r && s && canAct ? operatorAction(r, s.commit_enabled ?? false) : null;
+  const selfStopped = Boolean(
+    r && s && canAct && stoppedBySelf(r, s.commit_enabled ?? false, Date.now(), busy || (act.error instanceof ImportError && act.error.code === 'IMPORT_IN_PROGRESS')),
+  );
+  const action = r && s && canAct ? operatorAction(r, s.commit_enabled ?? false) : null;
+  // The card of a run that stopped by itself carries the one Resume; the main action never repeats it (issue #896).
+  const main = selfStopped && action?.action === 'resume' ? null : action;
   const head = (
     <>
       <Breadcrumbs items={[{ label: 'Operator portal', to: '/platform' }, { label: 'Imports', to: '/platform/imports' }, { label: slug }]} />
@@ -204,7 +211,7 @@ export function OperatorImportRun({ slug, runId }: { slug: string; runId: string
             />
           )}
           {/* JUSTIFICATION-A3: the review of e3f95b2 asks Resume for a run that stopped by itself; one card beside Stop. */}
-          {canAct && stoppedBySelf(r, s.commit_enabled ?? false, Date.now(), busy || (act.error instanceof ImportError && act.error.code === 'IMPORT_IN_PROGRESS')) && !confirming && (
+          {selfStopped && !confirming && (
             <section className="card stack" aria-labelledby="resume-title">
               <h2 id="resume-title">{r.loop_stopped ? STOPPED_BY_ITSELF : `${STOPPED_BY_ITSELF}?`}</h2>
               {r.loop_stopped && (
