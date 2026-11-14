@@ -1,71 +1,70 @@
-# Three rules for every screen
+# The three UX rules (issue #336)
 
-**Status:** Draft · **Issue:** #336 (split task #794) · **Decision:** ADR-049 (Proposed) · **Lives beside:** `docs/ui/design-system.md`, `docs/ui-rules.md`
+Every staff screen follows three rules, raised by the owner on 19 Oct 2026 and recorded in ADR-049 (Proposed). They sit
+beside the house rules in `docs/ui-rules.md` and the design system in `docs/ui/design-system.md`. The audit of every staff
+route against them is `docs/ui/ux-audit.md`; a new screen adds its row there.
 
-The owner's aim is that a new user needs no training. Every staff screen follows these three rules. The audit of each screen
-against them is in `docs/specs/retail-ui-notes.md`, section "Navigation and tour coverage" (rule 2) and section "The three
-rules, screen by screen" (rules 1 and 3).
+The shared pieces that carry them, so each screen does not invent its own:
 
-## Rule 1. Show little, let people open more
+| Rule | Component | Where |
+|---|---|---|
+| 1 | Expandable groups with a summary on each header (`GroupedBodies`, `groupByCategory`, `defaultOpen`) | `frontend/src/areas/staff/retail/category-groups.tsx` |
+| 1 | The chain of levels for dated lists (year, month, day, branch, buyer) | `retail/sales-chain.tsx` (`SalesChain`), `retail/list-chain.tsx` |
+| 2 | `ScreenLink`, `SaleLink`, `ItemLink`, `BranchLink` | `frontend/src/areas/staff/retail/screen-link.tsx` |
+| 2 | `ToStock`, `ToSales`, `ToItems`, `ToUsage` for figures | `frontend/src/areas/staff/retail/analytics-ui.tsx` |
+| 2 | Breadcrumbs (each route declares a `crumb`) | `frontend/src/app/router.tsx` |
+| 3 | `EmptyState`, `EmptyChoice`, `ActionBar`, `Hint`, help tips, the glossary | `frontend/src/app/ui`, `frontend/src/app/glossary.ts`, `frontend/src/app/help-tips.ts` |
 
-A screen opens short. A list is grouped (by category, by day, month or year, by branch or by buyer), each group header says
-what is in it (a count and a total), and the rows sit behind the header until it is tapped. A record shows its main facts
-first and keeps the rest behind a button.
+## Rule 1: show little, let people open more
 
-- **Good.** All sales opens on one row per year with the number of sales and the takings. Tap a year for its months, a month
-  for its days, a day for its sales (`sales-chain.tsx`).
-- **Bad.** A list that draws every row the server sent, hundreds of cards one under another, with no group and no Show more.
+A screen opens short. A list that can grow is grouped (by category, by day, month or year, by branch or by buyer), each
+group header carries its summary (a count, a total), and the rows sit behind the header until it is tapped. A record keeps
+its long sections closed until asked. A list that cannot be grouped is paged with Show more, never cut off in silence.
 
-Use `useCategoryGroups` with `GroupedCards` or `GroupedBodies` (`retail/category-groups.tsx`) for items, `SalesChain` for
-sales, and `ListGroupBy` with `useListView` (`retail/list-chain.tsx`) for other chains. A short list (30 rows or fewer)
-may start open.
+**Do.** All sales opens on the years with a total on each; a tap opens the months, then the days, then the sales of that
+day (#328, #341). Stock groups items by category with the count on each header, open only when the list is short
+(`OPEN_UP_TO`). Cash summary shows Closing cash and Cash expected, and Show every line opens the rest (#798).
 
-## Rule 2. Every name opens its record
+**Don't.** The old Stock moves showed the last 50 moves as one flat list with nothing said about older ones. The old On the
+way screen opened every move with its whole receive form, so every card carried a brand button. Both were fixed in #798.
 
-A name on a screen is a way in. A buyer's name opens the buyer's account, an item opens its stock, a sale number opens the
-sale with its documents and returns, a branch opens its stock, and a total opens the rows behind it. The breadcrumb trail is
-always there and leads back.
+## Rule 2: every name opens its record
 
-- **Good.** A credit note shows "Sale S-HQ-000123" as a row with a chevron; tapping it opens that sale
-  (`/staff/retail/sales?sale=<id>`).
-- **Bad.** The same sale number printed as plain text, so the user goes to All sales and searches for it by hand.
+Wherever a screen shows a buyer, an item, a sale, a branch or a total, that value is a link to its record, drawn only for a
+person who may open it and plain text otherwise. Breadcrumbs are always there, so the way back is never in doubt.
 
-Use `ScreenLink` and `SaleLink` (`retail/screen-link.tsx`) and `ToStock` with `item` or `branch`
-(`retail/analytics-ui.tsx`): each draws a link only for a person who may open the screen, and plain text otherwise, so a
-link never leads to "not allowed". A screen that opens one record has a stable address that can be linked to and shared
-(`useAddress` in `retail/screen-link.tsx` reads it):
+| Value | Opens | Address |
+|---|---|---|
+| A sale number | The sale: lines, payments, documents, returns | `/staff/retail/sales/$saleId` (`SaleLink`) |
+| An item name | The item page: stock in each shop and every movement | `/staff/retail/items/$productId` (`ItemLink`, `ToStock item`) |
+| A branch name | The branch page: what it is and its stock, usage and moves | `/staff/retail/branches/$branchId` (`BranchLink`, `ToStock branch`) |
+| A buyer name | The buyer's account | `/staff/retail/accounts/$customerId` |
+| A total | The rows behind it | the list screen with the filter in the address |
 
-| Record | Address |
-|---|---|
-| A sale | `/staff/retail/sales?sale=<id>` (Credit sales takes the same `sale`) |
-| An item's stock | `/staff/retail/stock?item=<id>` |
-| A branch's stock | `/staff/retail/stock?branch=<id>` (switches to that branch when the person may use it) |
-| A category's items | `/staff/retail/catalogue/products?category=<id>` (`ToItems`, issue #798) |
-| Used and damaged stock of a branch | `/staff/retail/usage-history?branch=<id>&from=<day>&to=<day>` (`ToUsage`, issue #798) |
-| What stock counts found missing at a branch | `/staff/retail/usage-history?branch=<id>&from=<day>&to=<day>&kind=missing` (`ToUsage`, issue #863) |
-| A unit's items | `/staff/retail/catalogue/products?unit=<id>` (for that visit only, issue #863) |
-| A loan, a member (from an Insights drill-down) | `/staff/lending/loans/<id>`, `/staff/lending/members/<id>` (issue #863) |
-| A buyer's account, a credit note, a delivery, an order | their own routes with the id in the path |
+**Do.** A credit note shows "Sale 1042" and it opens that sale. Stock health's item names open the item page and its shop
+names open the branch page. Cash summary's figures each open the rows behind them.
 
-## Rule 3. No training needed
+**Don't.** A sale number in plain text on a return, so the person has to go to All sales and search for it. An item name
+that opens the whole Stock list and leaves the person to find the item again. An underlined word for an action: an action
+is a button.
 
-Plain words a shop owner uses, one clear main action, and an empty screen that says what to do next. The page tour helps,
-but a screen should make sense without it.
+## Rule 3: no training needed
 
-- **Good.** An empty list says what to do: "No expenses in this period. Record one with Record an expense." and the one
-  brand button on the screen is Record an expense.
-- **Bad.** "No records found." on an empty page, two brand coloured buttons side by side, or a heading such as "GRNI
-  variance" with no help tip.
+A new person can use the screen without being shown. Words are the ones a shop owner uses (the glossary), and a word they
+would not use has a help tip. Each view has one primary action, brand filled; everything else is a plain button or a link
+row. An empty list says what to do next and, where it can, offers it. The page tour exists for every route (ADR-049), but a
+screen that needs its tour to be understood breaks this rule.
 
-In practice:
+**Do.** Items, when empty: "Add one with Add an item, or choose another category." Import items, after a clean check:
+Check these items is a plain button and Add 5 items is the one primary. Investments say "Return earned so far".
 
-1. Words come from `frontend/src/app/glossary.ts` (`WORDS`). A word a shop owner would not use gets a `HelpTip`.
-2. One primary button per view (`docs/ui-rules.md` rule 6). Other actions are plain buttons or rows.
-3. An empty list uses `EmptyState` or `EmptyChoice` and names the next step, with a button or link to it when the person
-   may take it.
-4. No dashes, no emoji, no coloured side or top stripes, no gradients, no purple; info alerts are neutral grey.
+**Don't.** "No records." with nothing after it. Check and Record both brand filled on the same form (existing loans, fixed
+in #798). "Return accrued" or "Portfolio at risk" with no tip.
 
-## Checking a screen
+## Checklist for a new screen
 
-Before a pull request adds or changes a staff screen, check it against the three rules, add its row to the audit when it
-breaks one, and keep the page tour current (ADR-049; `tour-guard` and `tour/route-coverage.test.ts` check the tour).
+1. Can the list grow past a screen? Then it is grouped with a summary on each header, or paged with Show more.
+2. Does the screen show a sale, an item, a branch, a buyer or a total? Then each is a link from `screen-link.tsx` or
+   `analytics-ui.tsx`, and a DOM test proves the address.
+3. Is there exactly one brand button in each state? Does the empty state name the next step?
+4. Add the route's row to `docs/ui/ux-audit.md` and its page tour (ADR-049).
