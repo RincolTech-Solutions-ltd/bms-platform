@@ -11477,6 +11477,7 @@ export interface components {
             /** Format: uuid */
             id?: string;
             job?: components["schemas"]["ImportRunJob"];
+            loop_stopped?: components["schemas"]["ImportRunLoopStopped"];
             /** @description The file name of the pre-import dump recorded, or null */
             pre_import_dump_file?: string;
             pre_import_dump_verified?: boolean;
@@ -11501,6 +11502,12 @@ export interface components {
         };
         ImportRunList: {
             items?: components["schemas"]["ImportRun"][];
+        };
+        /** @description A commit or resume that stopped by itself, with the time and a code, never a message (#896) */
+        ImportRunLoopStopped: {
+            /** Format: date-time */
+            at?: string;
+            code?: string;
         };
         /** @description The metrics of an import run, from its stored data (spec section 8) */
         ImportRunMetrics: {
@@ -14076,6 +14083,7 @@ export interface components {
         };
         /** @description One run on the platform report; the business by its slug only */
         PlatformImportRun: {
+            loop_stopped?: components["schemas"]["ImportRunLoopStopped"];
             metrics?: components["schemas"]["ImportRunMetrics"];
             tenant_slug?: string;
         };

@@ -271,6 +271,23 @@ class ImportJobsIT extends IntegrationTest {
     }
 
     /**
+     * The code the service keeps for a stopped job or commit loop has the form the columns' CHECKs allow (V154, V156), so
+     * a stamp is never refused by the database and lost (review of 09d09be on #925).
+     */
+    @Test
+    void theStoredCodeFormIsTheFormTheColumnsAllow() {
+        List<String> checks = TestDatabase.owner().sql("""
+                        SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c
+                         WHERE c.conrelid = 'import_runs'::regclass AND c.contype = 'c'
+                           AND c.conname IN ('import_runs_job_failure_code_check',
+                                             'import_runs_loop_stopped_code_check')
+                        """).query(String.class).list();
+        assertThat(checks)
+                .hasSize(2)
+                .allSatisfy(def -> assertThat(def).contains("'^" + ImportJobs.CODE.pattern() + "$'"));
+    }
+
+    /**
      * A job whose work throws an {@link Error} (running out of memory, say) is stamped {@code failed} before its claim is
      * given back, never {@code interrupted}, which says the server restarted (the Lead on the review of 3d86d31, NH1).
      */

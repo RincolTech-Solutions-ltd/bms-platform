@@ -4541,6 +4541,88 @@ class MigrationOrderIT {
         }
     }
 
+    /**
+     * V156 (issue #896) is expand only: a committing run stored before it keeps its state, holds no loop token and reads
+     * as not stopped; the database refuses a stop that is not whole, a stop beside a live token and a code that is not a
+     * code; a stamped stop and a token whose lock nobody holds both read as stopped, and the platform report carries it.
+     * JUSTIFICATION-A3: a new test case; no existing case covers V156.
+     */
+    @Test
+    void importCommitLoopStoppedMigrationKeepsEveryRun() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            String before = VERSIONS.get(VERSIONS.indexOf("156") - 1);
+            assertThat(flyway(postgres, before).migrate().targetSchemaVersion).isEqualTo(before);
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            UUID tenant = UUID.randomUUID();
+            owner.sql("INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v156', 'Test Tenant V156',"
+                            + " '00000000-0000-4000-8000-000000000001')")
+                    .param(tenant)
+                    .update();
+            UUID run = UUID.randomUUID();
+            owner.sql("INSERT INTO import_runs (id, tenant_id, created_by, status, committing_at)"
+                            + " VALUES (?, ?, ?, 'committing', now())")
+                    .params(run, tenant, UUID.randomUUID())
+                    .update();
+
+            assertThat(DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD)
+                            .success)
+                    .isTrue();
+
+            assertThat(owner.sql("SELECT status = 'committing' AND loop_token IS NULL AND loop_started_at IS NULL"
+                                    + " AND loop_stopped_at IS NULL AND loop_stopped_code IS NULL"
+                                    + " AND import_run_loop_stopped(id) IS NULL FROM import_runs WHERE id = ?")
+                            .param(run)
+                            .query(Boolean.class)
+                            .single())
+                    .isTrue();
+            assertThatThrownBy(() -> owner.sql("UPDATE import_runs SET loop_stopped_at = now() WHERE id = ?")
+                            .param(run)
+                            .update())
+                    .hasMessageContaining("import_runs_loop_whole");
+            assertThatThrownBy(() -> owner.sql("UPDATE import_runs SET loop_token = gen_random_uuid() WHERE id = ?")
+                            .param(run)
+                            .update())
+                    .as("a token needs its start")
+                    .hasMessageContaining("import_runs_loop_whole");
+            assertThatThrownBy(() -> owner.sql("UPDATE import_runs SET loop_token = gen_random_uuid(),"
+                                    + " loop_started_at = now(), loop_stopped_at = now(), loop_stopped_code = 'failed'"
+                                    + " WHERE id = ?")
+                            .param(run)
+                            .update())
+                    .as("a stopped loop holds no token")
+                    .hasMessageContaining("import_runs_loop_whole");
+            assertThatThrownBy(() -> owner.sql("UPDATE import_runs SET loop_stopped_at = now(),"
+                                    + " loop_stopped_code = 'Fab Buyer quoted from a row' WHERE id = ?")
+                            .param(run)
+                            .update())
+                    .hasMessageContaining("loop_stopped_code");
+
+            // A token whose lock no session holds: the loop died, so the run reads stopped, interrupted.
+            owner.sql("UPDATE import_runs SET loop_token = gen_random_uuid(), loop_started_at = now() WHERE id = ?")
+                    .param(run)
+                    .update();
+            assertThat(owner.sql("SELECT import_run_loop_stopped(id) ->> 'code' FROM import_runs WHERE id = ?")
+                            .param(run)
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("interrupted");
+            owner.sql(
+                            "UPDATE import_runs SET loop_token = NULL, loop_stopped_at = now(), loop_stopped_code = 'import_busy'"
+                                    + " WHERE id = ?")
+                    .param(run)
+                    .update();
+            assertThat(owner.sql(
+                                    "SELECT metrics -> 'loop_stopped' ->> 'code' FROM platform_import_runs_report(NULL, 10)"
+                                            + " WHERE run_id = ?")
+                            .param(run)
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("import_busy");
+        }
+    }
+
     /** The blocks V147 adds to the guards (issue #139), whitespace collapsed. */
     private static final String PURGE_BLOCK =
             " IF bms_import_purging(TG_TABLE_NAME, to_jsonb(OLD), to_jsonb(NEW)) THEN RETURN NEW; END IF;";

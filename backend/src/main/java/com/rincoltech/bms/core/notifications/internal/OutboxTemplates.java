@@ -844,6 +844,14 @@ class OutboxTemplates {
                     "BMS import run {run} of {business} was purged on {day}, {reason}, without its warning (the job or"
                             + " the outbox was down). Its certificate of deletion is on the run; the dump on the host"
                             + " still needs deleting and confirming with purge-import."),
+            // Issue #896: a background import commit or resume stopped by itself; the run stays committing and
+            // resumable. Ids, the slug, a day, a time and a fixed sentence for the code only, never a message.
+            "imports.commit_stopped",
+            new Template(
+                    null,
+                    "BMS import run {run} of {business} stopped by itself on {day} at {time}: {reason}. It is still"
+                            + " being brought in and nothing more is written; open it in the operator portal and"
+                            + " Resume it once the cause is fixed."),
             // ADR-036 decision 13: the operator hears when SMS use reaches 80 percent of a daily cap or
             // a cap holds messages back. The scope is "platform" or a tenant id; no number, no text.
             "sms.provider_alert",

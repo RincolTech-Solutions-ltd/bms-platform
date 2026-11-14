@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { killSwitch, platformRuns, setKillSwitch, type PlatformRun } from '../../api/imports';
 import { platformMe } from '../../api/onboarding';
 import { Breadcrumbs } from '../../components/breadcrumbs';
-import { currentStage, mayAct, mayOpen, stateWords, STEPS } from '../staff/imports/pipeline';
+import { currentStage, mayAct, mayOpen, stateWords, STEPS, stopWords, STOPPED_BY_ITSELF } from '../staff/imports/pipeline';
 import { ConfirmPanel, TourButton } from './operator-parts';
 import { formatMoment } from './operator-state';
 
@@ -13,12 +13,18 @@ import { formatMoment } from './operator-state';
 // override and dump record. The platform kill switch stops every import before its next file. Each business is named by its
 // slug only, as the platform report gives it.
 
+/** The group of a committing run whose commit or resume stopped by itself (issue #896), shown first under its own heading. */
+export const STOPPED = 'stopped';
+
 /** The order the states are shown in: what needs an operator first, then the rest of the pipeline. */
-export const STATE_ORDER = ['committing', 'ready', 'in_review', 'uploaded', 'draft', 'committed', 'signed_off', 'purged', 'cancelled'];
+export const STATE_ORDER = [STOPPED, 'committing', 'ready', 'in_review', 'uploaded', 'draft', 'committed', 'signed_off', 'purged', 'cancelled'];
+
+/** A run's group: its state, or STOPPED for a committing run the server marks loop_stopped. */
+const groupOf = (r: PlatformRun) => (r.metrics?.status === 'committing' && r.loop_stopped ? STOPPED : r.metrics?.status);
 
 /** The runs grouped by state, in STATE_ORDER, empty states left out. */
 export function byState(runs: PlatformRun[]): { status: string; runs: PlatformRun[] }[] {
-  return STATE_ORDER.map((status) => ({ status, runs: runs.filter((r) => r.metrics?.status === status) })).filter((g) => g.runs.length > 0);
+  return STATE_ORDER.map((status) => ({ status, runs: runs.filter((r) => groupOf(r) === status) })).filter((g) => g.runs.length > 0);
 }
 
 export const QUEUE_KEY = ['platform-import-runs'] as const;
@@ -82,7 +88,7 @@ export function ImportQueue() {
         {groups.map((g) => (
           <section key={g.status} className="card stack" aria-labelledby={`queue-${g.status}`}>
             <h2 id={`queue-${g.status}`}>
-              {stateWords(g.status)} ({g.runs.length})
+              {g.status === STOPPED ? STOPPED_BY_ITSELF : stateWords(g.status)} ({g.runs.length})
             </h2>
             <ul className="stack">
               {g.runs.map((r) => (
@@ -111,6 +117,11 @@ function QueueRow({ run }: { run: PlatformRun }) {
         {stage ? `Stage ${stage.number} of 10: ${stage.words}` : 'Not started'}
         {step >= 0 ? `. Step ${step + 1} of ${STEPS.length} for the business.` : '.'}
       </p>
+      {run.loop_stopped && (
+        <p>
+          {STOPPED_BY_ITSELF} on {formatMoment(run.loop_stopped.at)}. {stopWords(run.loop_stopped.code)}
+        </p>
+      )}
       <p>Started {formatMoment(run.metrics?.stamps?.created_at)}</p>
     </li>
   );

@@ -60,8 +60,8 @@ class ImportJobs {
                        AND ((l.classid::bigint << 32) | l.objid::bigint)
                            = hashtextextended('core.imports.job:' || job_token::text, 0)) AS job_alive""";
 
-    /** The form of a stored code (the CHECK of V154). */
-    private static final Pattern CODE = Pattern.compile("[A-Za-z][A-Za-z_]{0,63}");
+    /** The form of a stored code (the CHECKs of V154 and V156; ImportJobsIT holds them to it). */
+    static final Pattern CODE = Pattern.compile("[A-Za-z][A-Za-z_]{0,63}");
 
     private static final Logger log = LoggerFactory.getLogger(ImportJobs.class);
 
@@ -153,15 +153,23 @@ class ImportJobs {
             work.run();
             log.info("import {} of run {} done", kind, runId);
             return null;
-        } catch (ApiException e) {
-            log.info("import {} of run {} refused: {}", kind, runId, e.code());
-            return e.code() != null && CODE.matcher(e.code()).matches() ? e.code() : FAILED;
         } catch (RuntimeException e) {
-            // The class only: a message may quote a row.
-            log.warn(
-                    "import {} of run {} stopped: {}", kind, runId, e.getClass().getSimpleName());
-            return FAILED;
+            return code(runId, kind, e);
         }
+    }
+
+    /**
+     * The code stored for a job, or since issue #896 a portal commit loop, that {@code e} stopped: the refusal's code, or
+     * {@code failed} for any other error. Never the message.
+     */
+    static String code(UUID runId, String kind, RuntimeException e) {
+        if (e instanceof ApiException refusal) {
+            log.info("import {} of run {} refused: {}", kind, runId, refusal.code());
+            return refusal.code() != null && CODE.matcher(refusal.code()).matches() ? refusal.code() : FAILED;
+        }
+        // The class only: a message may quote a row.
+        log.warn("import {} of run {} stopped: {}", kind, runId, e.getClass().getSimpleName());
+        return FAILED;
     }
 
     /**

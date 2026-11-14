@@ -10,8 +10,11 @@ import com.rincoltech.bms.core.imports.ImportForecast;
 import com.rincoltech.bms.core.imports.ImportRefs;
 import com.rincoltech.bms.core.imports.ImportRuns;
 import com.rincoltech.bms.core.imports.ImportTemplate;
+import com.rincoltech.bms.core.notifications.Outbox;
 import com.rincoltech.bms.core.tenancy.Branches;
+import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.kernel.ApiException;
+import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.ImportedRecords;
 import com.rincoltech.bms.kernel.LiveRecordProbe;
@@ -146,6 +149,7 @@ class ImportRunService implements ImportRuns {
             allow_trading_approved_by, pre_import_dump_file, committing_at, committed_at,
             pre_import_dump_verified_at, commit_requested_by, commit_approved_by, commit_approved_version, fabricated,
             job_kind, job_started_at, job_finished_at, job_failure_code,
+            (SELECT ARRAY[ls ->> 'at', ls ->> 'code'] FROM import_run_loop_stopped(id) AS ls) AS loop_stopped,
             """ + ImportJobs.ALIVE;
 
     /** The key of a background job's own lock, followed by its token (issue #922, V154). */
@@ -179,6 +183,12 @@ class ImportRunService implements ImportRuns {
     /** The command's runs, one of which a commit takes over once its lease expired (issue #876). */
     private final CommandRunService commandRuns;
 
+    /** The operators' chat hears of a portal loop that stopped by itself, in the stamp's transaction (issue #896). */
+    private final Outbox outbox;
+
+    /** The business's slug and time zone, for that notice. */
+    private final CurrentTenant tenant;
+
     /**
      * The application's build and commit: a dry run of another build no longer counts, and a run rehearsed on one build
      * neither starts nor resumes on another (reviews of #869). Null when the server knows neither; it then refuses both.
@@ -210,7 +220,11 @@ class ImportRunService implements ImportRuns {
             RefService refs,
             ObjectProvider<CommitSeams> seams,
             ReconciliationService reconciliations,
-            CommandRunService commandRuns) {
+            CommandRunService commandRuns,
+            Outbox outbox,
+            CurrentTenant tenant) {
+        this.outbox = outbox;
+        this.tenant = tenant;
         this.reconciliations = reconciliations;
         this.commandRuns = commandRuns;
         this.approvals = approvals;
@@ -828,12 +842,33 @@ class ImportRunService implements ImportRuns {
      */
     private void handOff(UUID runId, LoopClaim claim, Consumer<Work> background) {
         boolean handed = false;
+        // The loop's own token, locked by the claim's session before it is written, as a background job's is (#922,
+        // startJob): a loop whose process dies reads as stopped by itself, interrupted (V156, issue #896).
+        UUID token = UUID.randomUUID();
         try {
+            claim.holdJob(token);
+            tx.executeWithoutResult(s -> jdbc.sql("""
+                            UPDATE import_runs SET loop_token = ?, loop_started_at = now(), loop_stopped_at = NULL,
+                                   loop_stopped_code = NULL
+                             WHERE id = ?
+                            """).params(token, runId).update());
             background.accept(new Work() {
                 @Override
                 public CommitOutcome get() {
                     try (claim) {
-                        return writeBatches(runId, claim);
+                        // Stamped in the finally, for an Error too, as a background job's end is (#922): null when the
+                        // loop ended as asked (committed, the stop button, the kill switch).
+                        String[] code = {ImportJobs.FAILED};
+                        try {
+                            CommitOutcome outcome = writeBatches(runId, claim);
+                            code[0] = claim.lost;
+                            return outcome;
+                        } catch (RuntimeException e) {
+                            code[0] = ImportJobs.code(runId, "commit loop", e);
+                            throw e;
+                        } finally {
+                            loopEnded(runId, token, code[0]);
+                        }
                     }
                 }
 
@@ -848,6 +883,82 @@ class ImportRunService implements ImportRuns {
                 claim.close();
             }
         }
+    }
+
+    // JUSTIFICATION-A3: issue #896 stamps how a portal loop ended and tells the operators, as the purge does for #886.
+    /**
+     * The end of a portal commit or resume loop (issue #896, V156), while its claim is still held. {@code code} null (it
+     * ended as asked): its token is cleared. Otherwise, in one transaction, the run is stamped stopped by itself with the
+     * time and the code and the operators' chat is told through the outbox, as the purge tells it of a missed warning
+     * (#886): ids, the slug, the day, the time and a fixed sentence for the code, never a message. Both name the loop's
+     * token, so a loop that lost its claim never marks a run a newer resume owns, and the notice is keyed by the token, so
+     * a loop is announced once. A stamp that cannot be written is logged by its class only and not thrown over the loop's
+     * own failure: the claim's close then drops the token's lock and the run reads interrupted.
+     */
+    private void loopEnded(UUID runId, UUID token, String code) {
+        try {
+            tx.executeWithoutResult(s -> {
+                if (code == null) {
+                    jdbc.sql("UPDATE import_runs SET loop_token = NULL WHERE id = ? AND loop_token = ?")
+                            .params(runId, token)
+                            .update();
+                    return;
+                }
+                Optional<Instant> at = jdbc.sql("""
+                                UPDATE import_runs SET loop_token = NULL, loop_stopped_at = now(), loop_stopped_code = ?
+                                 WHERE id = ? AND loop_token = ? AND status = 'committing'
+                                RETURNING loop_stopped_at
+                                """)
+                        .params(code, runId, token)
+                        .query((rs, n) -> rs.getTimestamp(1).toInstant())
+                        .optional();
+                if (at.isEmpty()) {
+                    // A run no longer committing (committed before the reconciliation failed) keeps no stop.
+                    jdbc.sql("UPDATE import_runs SET loop_token = NULL WHERE id = ? AND loop_token = ?")
+                            .params(runId, token)
+                            .update();
+                    return;
+                }
+                CurrentTenant.Profile business = tenant.profile();
+                java.time.ZonedDateTime local = at.get()
+                        .atZone(business.timezone() == null ? BusinessClock.DEFAULT_ZONE : business.timezone())
+                        .truncatedTo(java.time.temporal.ChronoUnit.MINUTES);
+                Map<String, String> params = new LinkedHashMap<>();
+                params.put("run", runId.toString());
+                params.put("business", business.slug());
+                params.put("day", local.toLocalDate().toString());
+                // The business's time with its zone, so no operator reads it as their own (review of 09d09be).
+                params.put("time", local.toLocalTime() + " " + local.getZone().getId());
+                params.put("reason", stopSentence(code));
+                outbox.enqueue(new Outbox.Message(
+                        Outbox.TELEGRAM,
+                        Outbox.OPERATOR_CHAT,
+                        COMMIT_STOPPED,
+                        params,
+                        COMMIT_STOPPED + ":" + runId + ":" + token));
+            });
+        } catch (RuntimeException e) {
+            // Only a RuntimeException is caught: an Error here (out of memory, say) goes up in place of the loop's own
+            // throwable and the stamp's transaction rolls back; the claim's close then drops the token's lock, so
+            // the run still reads interrupted (review of c93bd8e).
+            log.warn(
+                    "import commit loop of run {} not stamped: {}",
+                    runId,
+                    e.getClass().getSimpleName());
+        }
+    }
+
+    /** The template of the operators' notice of a loop that stopped by itself (issue #896). */
+    static final String COMMIT_STOPPED = "imports.commit_stopped";
+
+    /** The fixed sentence of the notice for a stop's code: written here, never taken from the exception (#896). */
+    static String stopSentence(String code) {
+        return switch (code) {
+            case ImportJobs.FAILED -> "a file failed with an unexpected error";
+            case "claim_not_held", "claim_connection_lost" -> "it lost its hold on the business (" + code + ")";
+            case IMPORT_BUSY -> "another large import was being written (import_busy)";
+            default -> "a file was refused with code " + code;
+        };
     }
 
     // JUSTIFICATION-A3: issue #922 starts the check and the dry run as startCommit starts a commit: claimed, then
@@ -1077,10 +1188,13 @@ class ImportRunService implements ImportRuns {
             }
             // The trading guard is not asked again: it was passed when the run started, and the batches this run
             // already committed are the business's records now.
-            jdbc.sql(
-                            "UPDATE import_runs SET halt_requested = false, version = version + 1, updated_at = now() WHERE id = ?")
-                    .param(runId)
-                    .update();
+            // A resume clears the stop a loop stamped or left behind (V156, issue #896); the portal's takes a new
+            // token.
+            jdbc.sql("""
+                            UPDATE import_runs SET halt_requested = false, version = version + 1, updated_at = now(),
+                                   loop_token = NULL, loop_stopped_at = NULL, loop_stopped_code = NULL
+                             WHERE id = ?
+                            """).param(runId).update();
             audit(runId, "core.import_run.resumed", Map.of(), Map.of("halt_requested", false));
         });
     }
@@ -1521,6 +1635,9 @@ class ImportRunService implements ImportRuns {
         /** The key of the background job this claim holds (issue #922), or null. */
         private String jobKey;
 
+        /** Why the commit loop found this claim lost before a batch, or null (issue #896). */
+        private volatile String lost;
+
         LoopClaim(Connection connection, String key) {
             this.connection = connection;
             this.key = key;
@@ -1636,6 +1753,8 @@ class ImportRunService implements ImportRuns {
             // Without the claim a resume may already own the business: write nothing more, leave the run resumable.
             String lost = claim.lostReason();
             if (lost != null) {
+                // A portal loop stamps it as its stop (issue #896).
+                claim.lost = lost;
                 log.warn("import commit loop lost its claim before batch {}: {}", batch.seq(), lost);
                 tx.executeWithoutResult(s -> audit(
                         runId,
@@ -2276,7 +2395,17 @@ class ImportRunService implements ImportRuns {
                 rs.getObject("commit_approved_by", UUID.class),
                 (Integer) rs.getObject("commit_approved_version"),
                 rs.getBoolean("fabricated"),
-                ImportJobs.read(rs));
+                ImportJobs.read(rs),
+                // V156 (#896): the same rule as the platform report's, one SQL function for both, called once per row
+                // so the time and the code come from one reading of pg_locks (review of 09d09be).
+                loopStopped(rs.getArray("loop_stopped")));
+    }
+
+    private static LoopStopped loopStopped(java.sql.Array value) throws SQLException {
+        String[] atAndCode = value == null ? null : (String[]) value.getArray();
+        return atAndCode == null || atAndCode[1] == null
+                ? null
+                : new LoopStopped(atAndCode[0] == null ? null : Instant.parse(atAndCode[0]), atAndCode[1]);
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {

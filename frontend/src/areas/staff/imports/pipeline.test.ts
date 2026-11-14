@@ -15,6 +15,7 @@ import {
   quantity,
   stepLine,
   stepStates,
+  stopWords,
 } from './pipeline';
 
 // The words and the order of the import screens (issue #141): the stage progress of a run, what to do next, the problems grouped
@@ -22,6 +23,16 @@ import {
 
 const issue = (code: string, severity: string, extra: Partial<ImportIssue> = {}): ImportIssue => ({ id: `${code}-${Math.random()}`, code, severity, line: 2, version: 1, ...extra });
 const dry = (extra: Partial<DryRun> = {}): DryRun => ({ at: '2026-11-09T08:00:00Z', current: true, preview_matches: true, ...extra });
+
+describe('a commit that stopped by itself (issue #896)', () => {
+  it('names each code in plain words and never shows a message', () => {
+    expect(stopWords('failed')).toBe('A file failed with an unexpected error.');
+    expect(stopWords('interrupted')).toBe('The server restarted or the work ended while it ran.');
+    expect(stopWords('claim_not_held')).toBe(stopWords('claim_connection_lost'));
+    expect(stopWords('TENANT_TRADING')).toBe('A file was refused (TENANT_TRADING).');
+    expect(stopWords(undefined)).toBe('It ended before every file was in.');
+  });
+});
 
 describe('stage progress', () => {
   it('marks the steps before the run’s own done, its own now and the rest later', () => {

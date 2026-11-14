@@ -4650,6 +4650,9 @@
           "job" : {
             "$ref" : "#/components/schemas/ImportRunJob"
           },
+          "loop_stopped" : {
+            "$ref" : "#/components/schemas/ImportRunLoopStopped"
+          },
           "pre_import_dump_file" : {
             "description" : "The file name of the pre-import dump recorded, or null",
             "type" : "string"
@@ -4704,6 +4707,18 @@
               "$ref" : "#/components/schemas/ImportRun"
             },
             "type" : "array"
+          }
+        }
+      },
+      "ImportRunLoopStopped" : {
+        "description" : "A commit or resume that stopped by itself, with the time and a code, never a message (#896)",
+        "properties" : {
+          "at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "code" : {
+            "type" : "string"
           }
         }
       },
@@ -10350,6 +10365,9 @@
       "PlatformImportRun" : {
         "description" : "One run on the platform report; the business by its slug only",
         "properties" : {
+          "loop_stopped" : {
+            "$ref" : "#/components/schemas/ImportRunLoopStopped"
+          },
           "metrics" : {
             "$ref" : "#/components/schemas/ImportRunMetrics"
           },

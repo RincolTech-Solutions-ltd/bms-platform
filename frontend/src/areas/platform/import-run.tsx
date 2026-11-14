@@ -16,9 +16,10 @@ import { BusyButton } from '../../app/ui/BusyButton';
 import { Field, FieldsNeededNote } from '../../app/ui/Field';
 import { Breadcrumbs } from '../../components/breadcrumbs';
 import { platformMe } from '../../api/onboarding';
-import { mayAct, mayOpen, stateWords } from '../staff/imports/pipeline';
+import { mayAct, mayOpen, stateWords, stopWords, STOPPED_BY_ITSELF } from '../staff/imports/pipeline';
 import { StageProgress } from '../staff/imports/stage-progress';
 import { ConfirmPanel, TourButton } from './operator-parts';
+import { formatMoment } from './operator-state';
 
 // One import run of a business in the operator portal (issue #141, spec sections 3.7, 3.11 and 11): where it stands, the stop
 // button while it is being brought in and the resume after it, the start once a second person approved it and the dump is
@@ -52,10 +53,13 @@ export const STALE_AFTER_MS = 10 * 60 * 1000;
  * file, a restart), with no loop alive. A healthy run is not offered it (issue #897): only once it has been committing longer
  * than STALE_AFTER_MS, or once the server answered an action on it with the 409 IMPORT_IN_PROGRESS (`refused`), so the
  * operator can try Resume. A run with no committing_at is not stale. The server still answers IMPORT_IN_PROGRESS while a
- * loop lives, so offering it is safe.
+ * loop lives, so offering it is safe. A run the server marks loop_stopped (issue #896) has stopped by itself for certain,
+ * even after Stop was pressed (a batch failed before the stop was reached): its card always shows, with the one Resume.
  */
 export function stoppedBySelf(run: ImportRun, commitEnabled: boolean, now: number, refused = false): boolean {
-  if (run.status !== 'committing' || run.halt_requested || !commitEnabled) return false;
+  if (run.status !== 'committing') return false;
+  if (run.loop_stopped) return true;
+  if (run.halt_requested || !commitEnabled) return false;
   const since = run.committing_at ? Date.parse(run.committing_at) : Number.NaN;
   return refused || (!Number.isNaN(since) && now - since > STALE_AFTER_MS);
 }
@@ -64,7 +68,14 @@ export function stoppedBySelf(run: ImportRun, commitEnabled: boolean, now: numbe
 export function runFacts(state: PlatformRunState): { label: string; value: string }[] {
   const r = state.run ?? {};
   return [
-    { label: 'State', value: stateWords(r.status) },
+    {
+      label: 'State',
+      // Issue #896: a commit or resume that stopped by itself says so, with its time, instead of "Being brought in".
+      value:
+        r.status === 'committing' && r.loop_stopped
+          ? `${STOPPED_BY_ITSELF} on ${formatMoment(r.loop_stopped.at)}. ${stopWords(r.loop_stopped.code)}`
+          : stateWords(r.status),
+    },
     { label: 'Approval', value: r.commit_approved ? 'Approved by a second person' : 'Not approved yet; it is given in the business’s Approvals' },
     {
       label: 'Backup before the import',
@@ -117,7 +128,12 @@ export function OperatorImportRun({ slug, runId }: { slug: string; runId: string
   const s = state.data;
   const r = s?.run;
   // Only an operator who may change businesses is offered an action; one who may only read sees the facts.
-  const main = r && s && canAct ? operatorAction(r, s.commit_enabled ?? false) : null;
+  const selfStopped = Boolean(
+    r && s && canAct && stoppedBySelf(r, s.commit_enabled ?? false, Date.now(), busy || (act.error instanceof ImportError && act.error.code === 'IMPORT_IN_PROGRESS')),
+  );
+  const action = r && s && canAct ? operatorAction(r, s.commit_enabled ?? false) : null;
+  // The card of a run that stopped by itself carries the one Resume; the main action never repeats it (issue #896).
+  const main = selfStopped && action?.action === 'resume' ? null : action;
   const head = (
     <>
       <Breadcrumbs items={[{ label: 'Operator portal', to: '/platform' }, { label: 'Imports', to: '/platform/imports' }, { label: slug }]} />
@@ -195,9 +211,15 @@ export function OperatorImportRun({ slug, runId }: { slug: string; runId: string
             />
           )}
           {/* JUSTIFICATION-A3: the review of e3f95b2 asks Resume for a run that stopped by itself; one card beside Stop. */}
-          {canAct && stoppedBySelf(r, s.commit_enabled ?? false, Date.now(), busy || (act.error instanceof ImportError && act.error.code === 'IMPORT_IN_PROGRESS')) && !confirming && (
+          {selfStopped && !confirming && (
             <section className="card stack" aria-labelledby="resume-title">
-              <h2 id="resume-title">Stopped by itself?</h2>
+              <h2 id="resume-title">{r.loop_stopped ? STOPPED_BY_ITSELF : `${STOPPED_BY_ITSELF}?`}</h2>
+              {r.loop_stopped && (
+                <p>
+                  It stopped on {formatMoment(r.loop_stopped.at)}. {stopWords(r.loop_stopped.code)} Nothing more is written until
+                  it is resumed.
+                </p>
+              )}
               <p>
                 After a failed file or a restart the import waits here with nothing running. Resume goes on from the first file
                 not yet brought in; while it is still running, nothing changes and you are told so.

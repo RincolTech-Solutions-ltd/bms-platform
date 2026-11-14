@@ -1893,7 +1893,25 @@ section 4.1; coordinated with #110, which builds no second framework).**
   throws, or never starts its thread, gives it back at once (#897). The kill
   switch refuses a resume in the service (`prepareResume`), for every caller, not only in the portal's controller. A run
   being brought in is offered Resume beside Stop only once it has been committing longer than one file's time limit (10
-  minutes) or after the server refused an action on it (#897). The queue follows the run's state. The `import_commit` approval is still given in the
+  minutes) or after the server refused an action on it (#897). The queue follows the run's state. A commit or resume that
+  stops by itself says so (issue #896, V156): the loop's claim also takes the lock of a token of its own (`loop_token`,
+  the key family of a background job, #922). When the loop ends committed, or halted by Stop or the kill switch, the token
+  is cleared and nothing is stamped. When it ends by itself (a batch failed or was refused, any other `Throwable`, or its
+  claim was lost), one transaction stamps `loop_stopped_at` and `loop_stopped_code` (a refusal's code such as
+  `import_busy`, `failed`, `claim_not_held` or `claim_connection_lost`, never a message) and writes the operators' chat
+  notice `imports.commit_stopped` to the outbox (the run's id, the slug, the day, the time and a fixed sentence for the
+  code), as the purge tells it of a missed warning (#886); the notice is keyed by the run and the token, so a loop is
+  announced once. Each update names the token, so a loop that lost its claim never marks a run a newer resume owns. A
+  redeploy that ends the thread can stamp nothing: such a dead loop is found as a dead background job is (#923), when the
+  run is read or listed, by the function `import_run_loop_stopped`: a token whose lock no session holds reads stopped,
+  code `interrupted`, at the loop's last sign of life (the later of its start and its last committed batch). No notice is
+  sent for a dead loop, nor for work the portal's thread closed without running it (the thread failed before the work,
+  #897): its token stays and its lock went with the closed claim, so the run reads `interrupted` the same way. The
+  notice's time is the business's local time with its zone (for example `14:32 Africa/Kampala`). The run's read takes
+  `import_run_loop_stopped` once per row, so the time and the code come from one reading of `pg_locks`. The run stays `committing` and resumable; a resume clears the stamps and takes a new token. The
+  run's read, the list and the platform report carry it as `loop_stopped`, and the portal shows the run as "Stopped by
+  itself" with the time and the reason, on its page with Resume and in its own group at the top of the queue, instead of
+  "Being brought in". The `import_commit` approval is still given in the
   business's Approvals by a holder of `core.imports.approve_commit`; the portal shows whether it is given.
 - **Not in this build:** recording a policy decision (spec section 3.8) and saving a mapping from a screen. A run that
   needs a decision is refused with `CREDIT_DECISION_MISSING`, whose words the screen shows; the decision and the mapping
