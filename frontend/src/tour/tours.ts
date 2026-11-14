@@ -1266,7 +1266,7 @@ export const helpArticlePage: Tour = {
 // Feedback (issue #447, ADR-065): the form and what the person sent before, with the BMS team's reply.
 export const feedbackPage: Tour = {
   id: 'page-feedback',
-  version: 1,
+  version: 2,
   title: 'This page: feedback',
   audience: () => true,
   autoStart: false,
@@ -1300,7 +1300,7 @@ export const feedbackPage: Tour = {
       id: 'history',
       target: 'feedback-history',
       title: 'What you sent',
-      body: 'Everything you sent is here, with whether the team has read it or finished with it, and their reply. Only you see your own.',
+      body: 'The last ten you sent, newest first, each with whether the team has read it. Tap one to read it all and their reply; Show more brings older ones. Only you see your own.',
     },
   ],
 };

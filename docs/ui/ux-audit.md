@@ -24,9 +24,31 @@ Counted over the 148 work routes (the component kit is a review page, outside th
 
 | Rule | Meets | Gap |
 |---|---|---|
-| 1 Progressive disclosure | 145 of 148 | 3: Feedback, Payment reconciliation, Unallocated payments |
-| 2 Cross links | 138 of 148 | 10, all buyer names (and All sales opening a sale in place): the sale page, All sales, Credit sales, Customer returns, Quotations, Documents, Orders, an Order, Delivery fees and cancellations, and the saved sale on Record a sale. Every sale number, item name and branch name now opens its record |
-| 3 No training needed | 141 of 148 | 7: Payment reconciliation, Unallocated payments, Orders, Notifications and app, Bring in your data, Delivery fees and cancellations, Imports to sign off |
+| 1 Progressive disclosure | 146 of 148 | 2: Payment reconciliation, Unallocated payments |
+| 2 Cross links | 138 of 148 | 10, all buyer names: the sale page, All sales, Credit sales, Customer returns, Quotations, Documents, Orders, an Order, Delivery fees and cancellations, and the saved sale on Record a sale. Every sale number, item name and branch name now opens its record, and All sales opens a sale at its own address (#933) |
+| 3 No training needed | 146 of 148 | 2: Payment reconciliation, Unallocated payments |
+
+**Closed by #933 (tickets 1, 4 and 6 to 10).** Frontend only, no endpoint and no migration:
+
+- All sales (ticket 1, rule 2): a sale opened from the list goes to `/staff/retail/sales/$saleId`, and an old
+  `/staff/retail/sales?sale=<id>` address is taken there in place of itself. Back to the list finds the same groups open,
+  the same days, searches and Paid by, once (kept in memory for this tab and this person, never in the address, since the
+  buyer search can hold a name or a phone). The row stays a rule 2 gap only for the buyer names of ticket 5. Tested in
+  `retail/sales-address.dom.test.tsx` and `retail/record-links.dom.test.tsx`.
+- Orders (ticket 4, rule 3): while a delivery is being recorded, New order and the new order's Save are plain buttons, so
+  Save: delivered and paid is the one primary, and one delivery is recorded at a time (opening a second closes the first).
+  Delivery fees and cancellations (ticket 9): each empty list ends "Choose other days above." Both in
+  `retail/orders-primary.dom.test.tsx`.
+- Feedback (ticket 6, rule 1): What you sent shows the last ten, newest first, each closed to its first line with its kind,
+  date and status (and "with a reply" when there is one) on a 48px row; Show more adds ten. Page tour `page-feedback` v2
+  says so. Tested in `feedback/feedback-history.dom.test.tsx`.
+- Notifications and app (ticket 7): "No device yet: turn on Notifications on this device above to add this one.", shown
+  only once the list has loaded. Tested in `notifications/notifications.dom.test.tsx`.
+- Bring in your data (ticket 8): "No import yet. Start a new import to bring in your first sheets.", naming the one primary
+  below it. Tested in `imports/runs.dom.test.tsx`.
+- Imports to sign off (ticket 10): the opening line says "This reconciliation compares your sheet with what BMS now holds,
+  check by check." with a help tip on reconciliation (`help-tips.ts`, held by the help tips guard). Tested in
+  `imports/imports.dom.test.tsx`.
 
 **Closed by this change (rule 2).** A sale number, an item name and a branch name could not open their record, because the
 routes took no id (triage of 2 Nov 2026). Now:
@@ -78,7 +100,7 @@ No backend change: every record already had its id endpoint (`GET /retail/sales/
 | `/staff` | Home | `page-staff-home` v5 | meets: summary cards, each opens its page | meets: member name opens the member; each card opens its page | meets: KYC has a tip (#798) |
 | `/staff/approvals` | Approvals | `page-approvals` v1 | meets: cards, paged | meets: Open the item on collateral releases | meets |
 | `/staff/assistant` | AI assistant | `page-assistant` v2 | meets | meets: no record shown | meets: one primary per state (#798) |
-| `/staff/feedback` | Feedback | `page-feedback` v1 | gap: What you sent lists every message in full, with no paging | meets: no record shown | meets: one primary, Send |
+| `/staff/feedback` | Feedback | `page-feedback` v2 | meets: the last ten sent, each closed to its first line, Show more (#933) | meets: no record shown | meets: one primary, Send |
 | `/staff/help` | How do I...? | `page-help` v1 | meets: answers grouped by job | meets: each answer opens | meets: no answer offers Ask us |
 | `/staff/help/$articleId` | Answer | `page-help-article` v1 | meets: one answer | meets: a missing answer offers All the answers | meets |
 | `/staff/insights` | Insights | `page-insights` v1 | meets: bounded by the filter | meets: loan and member numbers open their record (#863) | meets: tips on the terms (#798) |
@@ -114,7 +136,7 @@ No backend change: every record already had its id endpoint (`GET /retail/sales/
 | `/staff/lending/savings/products` | Savings products | `page-savings-products` v1 | meets: short list | meets: account count opens the list | meets (#798) |
 | `/staff/money` | Money | `page-money` v2 | meets: a short list of links | meets | meets |
 | `/staff/more` | More | `page-more` v2 | meets: links grouped by section | meets | meets |
-| `/staff/notifications` | Notifications and app | `page-notifications` v3 | meets: four short cards | meets: no record shown | gap: "No device receives notifications for you yet." does not point to the switch above it |
+| `/staff/notifications` | Notifications and app | `page-notifications` v3 | meets: four short cards | meets: no record shown | meets: the empty device line points to the switch above it (#933) |
 | `/staff/payments` | Receive payments | `page-payments` v1 | meets | meets | meets: one primary per state (#798) |
 | `/staff/payments/reconciliation` | Payment reconciliation | `page-reconciliation` v1 | gap: up to 1,000 statement lines and 500 findings shown flat; past statements not limited | meets: no sale, item or branch shown | gap: Upload, each row's Save and Run it now are all brand buttons; "No statement has been uploaded yet." names no next step |
 | `/staff/payments/unallocated` | Unallocated payments | `page-unallocated` v1 | gap: every receipt shown as a full card, no paging or dates | meets: no sale, item or branch shown | gap: a brand button on every row; "Nothing is waiting." names no next step |
@@ -161,8 +183,8 @@ No backend change: every record already had its id endpoint (`GET /retail/sales/
 | `/staff/retail/landed-costs/$landedCostId` | Landed cost | `page-landed-cost` v1 | meets: one record | meets: supplier, delivery and each item open (this change) | meets |
 | `/staff/retail/landed-costs/new` | New landed cost | `page-landed-cost-new` v1 | meets: one form | meets | meets |
 | `/staff/retail/margins` | Margins | `page-margins` v1 | meets: top lists | meets: sales total opens All sales; items open the item page | meets |
-| `/staff/retail/orders` | Orders | `page-orders` v1 | meets: by step, Show more | gap: the customer's name is plain text (the shop opens the branch, each line its item, a delivered order's sale opens it, this change) | gap: while Delivered is open, New order and Save: delivered and paid are both brand buttons |
-| `/staff/retail/orders-report` | Delivery fees and cancellations | `page-orders-report` v1 | meets: bounded by dates, grouped | gap: the customer's name on a cancelled order is plain text (each order opens) | gap: "No orders delivered on these days." names no next step |
+| `/staff/retail/orders` | Orders | `page-orders` v1 | meets: by step, Show more | gap: the customer's name is plain text (the shop opens the branch, each line its item, a delivered order's sale opens it, this change) | meets: while a delivery is recorded, Save: delivered and paid is the one primary, one delivery at a time (#933) |
+| `/staff/retail/orders-report` | Delivery fees and cancellations | `page-orders-report` v1 | meets: bounded by dates, grouped | gap: the customer's name on a cancelled order is plain text (each order opens) | meets: both empty lists say to choose other days (#933) |
 | `/staff/retail/orders/$orderId` | Order | `page-order` v2 | meets: one record | gap: the customer's name is plain text (Open sale; the shop opens the branch and each line its item, this change) | meets |
 | `/staff/retail/price-lists` | Price lists | `page-price-lists` v1 | meets: one list at a time | meets: each item opens the item page (this change) | meets |
 | `/staff/retail/profit` | Daily profit | `page-profit` v2 | meets: bounded by dates, grouped | meets: branches open the branch page; See the sales behind it | meets |
@@ -180,7 +202,7 @@ No backend change: every record already had its id endpoint (`GET /retail/sales/
 | `/staff/retail/returns/$returnId` | Credit note | `page-credit-note` v1 | meets: one record | meets: buyer, sale and each line's item open (this change) | meets |
 | `/staff/retail/returns/new/$saleId` | Take goods back | `page-return-new` v1 | meets: one form | meets: buyer opens the account | meets |
 | `/staff/retail/sale` | Record a sale | `page-sale` v4 | meets: one form | gap: the buyer named on the saved sale is plain text | meets |
-| `/staff/retail/sales` | All sales | `page-sales` v3 | meets: grouped by year, month, day (#328, #341) | gap: a sale opens in place (`?sale=`), not at its own address `/sales/$saleId`; each row's buyer name is plain text | meets |
+| `/staff/retail/sales` | All sales | `page-sales` v3 | meets: grouped by year, month, day (#328, #341) | gap: each row's buyer name is plain text (a sale opens at its own address `/sales/$saleId`, and `?sale=` is taken there, #933) | meets |
 | `/staff/retail/sales-analysis` | Sales analysis | `page-sales-analysis` v1 | meets: top lists | meets: totals open All sales; items and branches open their page | meets |
 | `/staff/retail/sales/$saleId` | Sale (new) | `page-sale-record` v1 | meets: one record | gap: the buyer name is plain text (the branch and each line's item open, this change) | meets: an unknown sale, or one at a branch the person does not work at, reads as not found |
 | `/staff/retail/savings` | Savings | `page-savings` v1 | meets: grouped | meets: the saved summary's branch opens the branch page (this change) | meets |
@@ -211,8 +233,8 @@ No backend change: every record already had its id endpoint (`GET /retail/sales/
 | `/staff/setup/billing` | Plan and billing | `page-billing` v2 | meets | meets | meets (#798) |
 | `/staff/setup/branches` | Branches | `page-branches` v4 | meets: one row per branch | meets | meets |
 | `/staff/setup/close` | Close the business | `page-close` v1 | meets: one step at a time | meets | meets: one action per step |
-| `/staff/setup/imports` | Imports to sign off | `page-imports-sign-off` v1 | meets: item lists closed | meets | gap: "reconciliation" has no help tip |
-| `/staff/setup/imports/runs` | Bring in your data | `page-import-runs` v1 | meets: a short list | meets: each run opens | gap: "No import yet." names no next step |
+| `/staff/setup/imports` | Imports to sign off | `page-imports-sign-off` v1 | meets: item lists closed | meets | meets: "reconciliation" has a help tip (#933) |
+| `/staff/setup/imports/runs` | Bring in your data | `page-import-runs` v1 | meets: a short list | meets: each run opens | meets: the empty line names Start a new import (#933) |
 | `/staff/setup/imports/runs/$runId` | Import | `page-import-run` v1 | meets: findings closed | meets: Problems opens | meets |
 | `/staff/setup/imports/runs/$runId/problems` | Problems | `page-import-problems` v1 | meets: grouped by kind, closed | meets | meets |
 | `/staff/setup/notifications` | Notifications for the business | `page-business-notifications` v1 | meets: a fixed set | meets | meets |
@@ -233,7 +255,7 @@ read in the code on 2026-11-14 for this audit.
 ## Screen tickets, in order
 
 Each is one screen ticket, most valuable first: the gaps that a new person meets on a daily screen come before the rare
-ones.
+ones. Tickets 1, 4 and 6 to 10 are done (#933); 2, 3 and 5 are open.
 
 1. All sales: a sale opened from the list goes to `/staff/retail/sales/$saleId`, so the address is the record (rule 2).
 2. Unallocated payments: page the receipts by month with Show more, one brand button per view, and an empty line that says where a payment comes from (rules 1 and 3).
