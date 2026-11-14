@@ -2002,7 +2002,8 @@ Now:
   same statement as the run's row did so after the statement's snapshot was taken, so a job that stamped and gave its
   lock back in between read with neither its stamp nor its lock, failed `interrupted` (`ImportJobsIT` failed so once on
   #926). Every read of a job (the run, the business's list, the sign-off list) therefore looks at the locks first, in a
-  statement of its own (`ImportJobs.HELD`: the keys held and the statement's start time), and takes the rows in the next
+  statement of its own (`ImportJobs.HELD`: the keys held and the statement's start time, read as a `bigint[]` and a
+  `timestamptz` and bound back typed, never as text the session's DateStyle or TimeZone would shape, #929), and takes the rows in the next
   statement, whose snapshot holds every stamp written before a lock that look found gone. A job is alive when its token's
   lock was held at that look, or when it started after it: `job_started_at` and `loop_started_at` are written with
   `clock_timestamp()` after the token's lock is taken, so a start not held at the look carries a later time. The
@@ -2037,7 +2038,10 @@ Now:
   with a REPEATABLE READ snapshot taken before the end puts the window itself on record: there the old one-statement
   read says `interrupted` and the read since #927 says running; a start whose transaction began before the look and
   which took its lock after it reads running with `clock_timestamp()` as its start time and would read interrupted
-  with `now()`), `ImportRunsIT`
+  with `now()`; since #929, under day-first dates (`ISO, DMY`) and the time zone `Pacific/Chatham` the run, the run
+  list, the sign-off list and the platform report read held, dead and later-started jobs and loops as the defaults do,
+  the driver closes a session set to `SQL, DMY` so no read meets that style, and a `ReadWindow` refuses to open while
+  another holds the seam), `ImportRunsIT`
   (#927: a run read held the same way while a portal loop's batch fails reads its stamp `failed`, and on a snapshot
   taken before the end the function alone says `interrupted` while the run's read shows no stop; the platform report
   held between its two readings answers the stamp a loop wrote meanwhile), `ImportPurgeIT` (the two code columns),
