@@ -887,6 +887,13 @@ describe('design guard, every button class keeps the 48px target (issue #825)', 
     expect(shrinkingButtons(code(file))).toEqual([]);
   });
 
+  // Review of #931 (issue #336): a target gets its size in the layout, never from an invisible ::before or ::after box sized to
+  // the target, which reaches over the button or link beside it. A pseudo element may draw (a chevron), not widen the tap area.
+  it.each(allStylesheets.map((f) => relative(SRC, f)))('%s gives no ::before or ::after the size of a tap target', (file) => {
+    const overlays = rulesOf(code(file)).filter(({ selectors, body }) => selectors.some((s) => /::?(before|after)\b/.test(s)) && /var\(--tap\)/.test(body));
+    expect(overlays.map(({ selectors }) => selectors.join(', '))).toEqual([]);
+  });
+
   it('keeps the sizes on the tokens: 48px, 8px apart, at most --button-max wide from 1024px', () => {
     const theme = code('app/theme.css');
     expect(theme).toMatch(/--tap:\s*48px/);

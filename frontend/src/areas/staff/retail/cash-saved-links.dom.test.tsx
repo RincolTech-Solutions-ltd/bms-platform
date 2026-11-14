@@ -54,8 +54,8 @@ async function branchLinkIn(title: string) {
 
 describe('the saved summary of a cash record opens its branch (#336)', () => {
   it('Banking', async () => {
-    vi.spyOn(retail, 'bankingExpected').mockResolvedValue({ branch_id: BRANCH, business_date: today } as never);
-    vi.spyOn(retail, 'createBanking').mockResolvedValue({ id: 'b1', branch_id: BRANCH, business_date: today, amount_minor: 30000 } as never);
+    vi.spyOn(retail, 'bankingExpected').mockResolvedValue({ branch_id: BRANCH, business_date: today });
+    vi.spyOn(retail, 'createBanking').mockResolvedValue({ id: 'b1', branch_id: BRANCH, business_date: today, amount_minor: 30000 });
     show(<BankingScreen />);
     fireEvent.change(await screen.findByLabelText('Amount banked'), { target: { value: '30000' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save banking' }));
@@ -63,7 +63,7 @@ describe('the saved summary of a cash record opens its branch (#336)', () => {
   });
 
   it('Cash withdrawals', async () => {
-    vi.spyOn(retail, 'createWithdrawal').mockResolvedValue({ id: 'w1', branch_id: BRANCH, business_date: today, amount_minor: 20000 } as never);
+    vi.spyOn(retail, 'createWithdrawal').mockResolvedValue({ id: 'w1', branch_id: BRANCH, business_date: today, amount_minor: 20000 });
     show(<WithdrawalsScreen />);
     fireEvent.change(await screen.findByLabelText('Amount withdrawn'), { target: { value: '20000' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save withdrawal' }));
@@ -71,7 +71,7 @@ describe('the saved summary of a cash record opens its branch (#336)', () => {
   });
 
   it('Advances', async () => {
-    vi.spyOn(retail, 'createAdvance').mockResolvedValue({ id: 'a1', advance_no: 'ADV-0001', branch_id: BRANCH, business_date: today, principal_minor: 15000, party_name: 'Test Staff 07' } as never);
+    vi.spyOn(retail, 'createAdvance').mockResolvedValue({ id: 'a1', advance_no: 'ADV-0001', branch_id: BRANCH, business_date: today, principal_minor: 15000, party_name: 'Test Staff 07' });
     show(<AdvancesScreen />, (c) => c.setQueryData(['retail', 'cash-parties'], [{ id: 'cp1', name: 'Test Staff 07', kind: 'staff', active: true }]));
     fireEvent.click(await screen.findByRole('radio', { name: 'New advance' }));
     fireEvent.change(await screen.findByLabelText('Who is the advance for?'), { target: { value: 'cp1' } });
@@ -81,7 +81,7 @@ describe('the saved summary of a cash record opens its branch (#336)', () => {
   });
 
   it('Expenses', async () => {
-    vi.spyOn(retail, 'createExpense').mockResolvedValue({ id: 'e1', branch_id: BRANCH, business_date: today, amount_minor: 5000, category_name: 'Transport', item_name: 'Fuel' } as never);
+    vi.spyOn(retail, 'createExpense').mockResolvedValue({ id: 'e1', branch_id: BRANCH, business_date: today, amount_minor: 5000, category_name: 'Transport', item_name: 'Fuel' });
     show(<ExpensesScreen />, (c) => {
       c.setQueryData(['retail', 'expense-categories', true], [{ id: 'c1', name: 'Transport', active: true, version: 1, items: [{ id: 'i1', name: 'Fuel', requires_explanation: false, active: true, version: 1 }] }]);
       c.setQueryData(['retail', 'cash-parties'], []);

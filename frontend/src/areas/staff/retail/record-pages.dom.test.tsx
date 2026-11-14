@@ -154,9 +154,9 @@ describe('the item page from a link (#336)', () => {
 describe('the saved summary of a cash record names its branch as a link (#336, review of #931)', () => {
   it('Savings', async () => {
     const today = businessToday();
-    vi.spyOn(retail, 'savingsSuggestion').mockResolvedValue({ branch_id: BRANCH_A, business_date: today, total_sold_minor: 50000, suggestion_token: 'tok-1', available_minor: 8000, suggested_minor: 4000 } as never);
+    vi.spyOn(retail, 'savingsSuggestion').mockResolvedValue({ branch_id: BRANCH_A, business_date: today, total_sold_minor: 50000, suggestion_token: 'tok-1', available_minor: 8000, suggested_minor: 4000 });
     vi.spyOn(retail, 'listSavings').mockResolvedValue([]);
-    vi.spyOn(retail, 'createSavings').mockResolvedValue({ id: 'sv-1', branch_id: BRANCH_A, business_date: today, currency: 'UGX', amount_minor: 4000, suggested_minor: 4000, overwritten: false, voided: false } as never);
+    vi.spyOn(retail, 'createSavings').mockResolvedValue({ id: 'sv-1', branch_id: BRANCH_A, business_date: today, currency: 'UGX', amount_minor: 4000, suggested_minor: 4000, overwritten: false, voided: false });
     show(<SavingsScreen />, '/staff/retail/savings');
     await screen.findByText('UGX 4,000', { selector: '.key-figure-value' });
     fireEvent.click(screen.getByRole('button', { name: 'Save savings' }));
