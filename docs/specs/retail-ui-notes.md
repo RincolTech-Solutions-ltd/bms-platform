@@ -1159,114 +1159,10 @@ state; Insights drill-down rows carry no ids; the used, damaged and found-missin
 open their records too). A product opening "its stock and history" is
 therefore as far as the existing routes go: Stock, and Past restocks and Stock moves for the history.
 
-| Route | Breadcrumb | Page tour | Cross links added (#336) |
-|---|---|---|---|
-| `/staff` | Home | `page-staff-home` v1 (added); v2 adds the shop summary step (#485) | member name opens the member; each shop summary card opens its full page (#485) |
-| `/staff/approvals` | Approvals | `page-approvals` v1 (added) | "Open the item" on collateral releases |
-| `/staff/assistant` | AI assistant | `page-assistant` v1 (existing) | none added |
-| `/staff/insights` | Insights | `page-insights` v1 (added) | links to the loan list and to maturities |
-| `/staff/lending` | Lending | `page-loans` v1 (existing) | none added |
-| `/staff/lending/collateral` | Collateral | `page-collateral` v1 (existing) | none added |
-| `/staff/lending/collateral/$collateralId` | Item | `page-collateral-item` v1 (existing) | none added |
-| `/staff/lending/collateral/$collateralId/edit` | Change details | `page-collateral-edit` v1 (added) | Cancel returns to the item |
-| `/staff/lending/collateral/new` | Register collateral | `page-collateral-new` v1 (existing) | none added |
-| `/staff/lending/investments` | Investments | `page-investments` v1 (added) | none added |
-| `/staff/lending/investments/$investmentId` | Investment | `page-investment` v1 (added) | member name opens the member; certificate number opens the certificate |
-| `/staff/lending/investments/$investmentId/certificate` | Certificate | `page-investment-certificate` v1 (added) | none added |
-| `/staff/lending/investments/maturities` | Maturities | `page-investment-maturities` v1 (added) | largest investors open their investments |
-| `/staff/lending/investments/member/$memberId` | Member investments | `page-member-investments` v1 (added) | member number opens the member; link to their savings |
-| `/staff/lending/investments/member/$memberId/new` | New investment | `page-investment-new-member` v1 (added) | member name opens the member |
-| `/staff/lending/investments/new` | New investment | `page-investment-new` v1 (added) | member name opens the member |
-| `/staff/lending/investments/products` | Investment products | `page-investment-products` v1 (added) | none added |
-| `/staff/lending/loans/$loanId` | Loan | `page-loan` v1 (existing) | none added |
-| `/staff/lending/members` | Members | `page-members` v1 (existing) | none added |
-| `/staff/lending/members/$memberId` | Member | `page-member` v1 (existing) | none added |
-| `/staff/lending/members/$memberId/edit` | Change details | `page-member-edit` v1 (added) | none added |
-| `/staff/lending/members/$memberId/savings` | Member savings | `page-member-savings` v1 (added) | member name opens the member; link to the member's investments |
-| `/staff/lending/members/new` | New member | `page-member-new` v1 (existing) | none added |
-| `/staff/lending/savings` | Savings | `page-lending-savings` v1 (added) | none added |
-| `/staff/lending/savings/accounts/$accountId` | Account | `page-savings-account` v1 (added) | none added |
-| `/staff/lending/savings/accounts/$accountId/statement` | Statement | `page-savings-statement` v1 (added) | account number opens the account |
-| `/staff/lending/savings/products` | Savings products | `page-savings-products` v1 (added) | the account count opens the savings list |
-| `/staff/payments` | Receive payments | `page-payments` v1 (added) | none added |
-| `/staff/reports` | Reports | `page-reports` v1 (added) | none added |
-| `/staff/retail` | Retail | `page-retail-home` v2 (the seller's own sales, ADR-055) | none added |
-| `/staff/retail/accounts` | Customer accounts | `page-accounts` v1 (existing) | none added |
-| `/staff/retail/accounts/$customerId` | Account | `page-account` v1 (added) | each sale a payment paid, and each sale before system start, opens that sale (#798) |
-| `/staff/retail/advances` | Advances | `page-advances` v1 (added) | link to Cash summary |
-| `/staff/retail/banking` | Banking | `page-banking` v1 (added) | link to the banking report |
-| `/staff/retail/banking-report` | Banking report | `page-banking-report` v1 (added) | link back to Banking |
-| `/staff/retail/branch-roles` | Branch roles | `page-branch-roles` v1 (added) | branch row opens Stores and shops |
-| `/staff/retail/cash-summary` | Cash summary | `page-cash-summary` v2 (Show every line, #798) | each figure opens the rows behind it (sales, expenses report, banking report, withdrawals, advances, savings) |
-| `/staff/retail/catalogue` | Catalogue | `page-catalogue` v1 (existing) | none added |
-| `/staff/retail/catalogue/buyers` | Credit buyers | `page-buyers` v1 (added) | Open account (already there) |
-| `/staff/retail/catalogue/categories` | Categories | `page-categories` v1 (added) | Open on each row opens the category's page; Items opens the Items list on that category (`?category=`, #798) |
-| `/staff/retail/catalogue/import` | Import items | `page-import` v1 (added) | none added |
-| `/staff/retail/catalogue/products` | Items | `page-products` v1 (added) | each item has a Stock link, which opens that item's stock (#798); `?category=<id>` opens the items of that category (#798) |
-| `/staff/retail/catalogue/suppliers` | Suppliers | `page-suppliers` v1 (added) | Open items link (supplier payment form) |
-| `/staff/retail/catalogue/units` | Units | `page-units` v1 (added) | Items link on each row |
-| `/staff/retail/credit-control` | Credit control | `page-credit-control` v1 (added) | overdue buyer opens the account; "See the credit sales" |
-| `/staff/retail/credit-sales` | Credit sales | `page-credit-sales` v2 (existing) | none added |
-| `/staff/retail/customer-ageing` | Customer ageing | `page-customer-ageing` v1 (added) | buyer opens the account (already there); Credit sales link |
-| `/staff/retail/customer-groups` | Customer groups | `page-customer-groups` v1 (added) | Credit buyers and Price lists links |
-| `/staff/retail/documents` | Documents | `page-documents` v1 (existing) | none added |
-| `/staff/retail/evaluation` | Business evaluation | `page-evaluation` v1 (added) | item names open Stock; category names open Items on that category (#798) |
-| `/staff/retail/expense-lists` | Expense lists | `page-expense-lists` v2 (tap a category to open it, #798) | link to Expenses |
-| `/staff/retail/expenses` | Expenses | `page-expenses` v1 (added) | links to the expenses report and the expense lists |
-| `/staff/retail/expenses-report` | Expenses report | `page-expenses-report` v1 (added) | link back to Expenses |
-| `/staff/retail/goods-received` | Goods received | `page-goods-received` v1 (added) | none added |
-| `/staff/retail/goods-received/$receiptId` | Delivery | `page-goods-receipt` v1 (added) | supplier opens its open items |
-| `/staff/retail/goods-received/new` | Receive without an order | `page-goods-receipt` v1 (added) | none added |
-| `/staff/retail/in-transit` | On the way | `page-in-transit` v2 (forms open on a tap, #798) | none added |
-| `/staff/retail/landed-costs` | Landed costs | `page-landed-costs` v1 (existing) | none added |
-| `/staff/retail/landed-costs/$landedCostId` | Landed cost | `page-landed-cost` v1 (added) | supplier opens its open items; delivery number opens the delivery |
-| `/staff/retail/landed-costs/new` | New landed cost | `page-landed-cost-new` v1 (added) | none added |
-| `/staff/retail/margins` | Margins | `page-margins` v1 (added) | sales total opens All sales; item names open Stock |
-| `/staff/retail/price-lists` | Price lists | `page-price-lists` v1 (existing) | none added |
-| `/staff/retail/profit` | Daily profit | `page-profit` v1 (added) | branch names open Stock; "See the sales behind it" opens All sales |
-| `/staff/retail/purchase-orders` | Purchase orders | `page-purchase-orders` v1 (existing) | none added |
-| `/staff/retail/purchase-orders/$orderId` | Purchase order | `page-purchase-order` v1 (added) | supplier opens its open items |
-| `/staff/retail/purchase-orders/$orderId/edit` | Change order | `page-purchase-order-edit` v1 (added) | none added |
-| `/staff/retail/purchase-orders/$orderId/receive` | Receive goods | `page-order-receive` v1 (added) | none added |
-| `/staff/retail/purchase-orders/new` | New purchase order | `page-purchase-order-new` v1 (added) | none added |
-| `/staff/retail/quotations` | Quotations | `page-quotations` v1 (existing) | none added |
-| `/staff/retail/restock` | Restock | `page-restock` v1 (added) | none added |
-| `/staff/retail/restocks` | Past restocks | `page-restocks` v2 (existing) | none added |
-| `/staff/retail/returns` | Customer returns | `page-returns` v1 (existing) | none added |
-| `/staff/retail/returns/$returnId` | Credit note | `page-credit-note` v1 (added) | buyer opens the account |
-| `/staff/retail/returns/new/$saleId` | Take goods back | `page-return-new` v1 (added) | buyer opens the account |
-| `/staff/retail/sale` | Record a sale | `page-sale` v1 (existing) | none added |
-| `/staff/retail/sales` | All sales | `page-sales` v2 (existing) | none added |
-| `/staff/retail/sales-analysis` | Sales analysis | `page-sales-analysis` v1 (added) | sales total and count open All sales; item and branch names open Stock |
-| `/staff/retail/savings` | Savings | `page-savings` v1 (added) | link to Cash summary |
-| `/staff/retail/settings` | Retail settings | `page-retail-settings` v4 (slow movers step, #414) | none added |
-| `/staff/retail/stock` | Stock | `page-stock` v3 (existing) | none added |
-| `/staff/retail/stock-by-location` | Stores and shops | `page-stock-by-location` v1 (existing) | none added |
-| `/staff/retail/stock-health` | Stock health | `page-stock-health` v4 (slow movers step, #414; why-low, #412; damage and use share for profit readers, #822) | item and branch names open Stock; Move on a slow mover opens Move stock filled in; the Used and Damaged counts open Past usage and damage for that branch and those days (#798) |
-| `/staff/retail/stocktake` | Stock-take | `page-stocktake` v1 (existing) | none added |
-| `/staff/retail/supplier-bills` | Supplier invoices | `page-supplier-bills` v1 (added) | none added |
-| `/staff/retail/supplier-bills/$billId` | Supplier invoice | `page-supplier-bill` v1 (added) | supplier opens its open items; delivery number opens the delivery |
-| `/staff/retail/supplier-bills/new` | New supplier invoice | `page-supplier-bill-new` v1 (added) | none added |
-| `/staff/retail/supplier-credits` | Supplier credit notes | `page-supplier-credits` v1 (added) | none added |
-| `/staff/retail/supplier-credits/$creditId` | Supplier credit note | `page-supplier-credit` v1 (added) | supplier opens its open items |
-| `/staff/retail/supplier-credits/new` | New credit note | `page-supplier-credit-new` v1 (added) | none added |
-| `/staff/retail/supplier-payables` | What I owe suppliers | `page-supplier-payables` v2 (issue #557) | Pay a supplier, Supplier payments; per supplier Pay and Statement |
-| `/staff/retail/supplier-payments` | Supplier payments | `page-supplier-payments` v2 (issue #557) | none added |
-| `/staff/retail/supplier-payments/$paymentId` | Supplier payment | `page-supplier-payment` v2 (issue #557) | supplier opens its open items |
-| `/staff/retail/supplier-payments/new` | Pay a supplier | `page-supplier-payment-new` v2 (issue #557) | What I owe suppliers, Supplier payments, the supplier's Statement |
-| `/staff/retail/suppliers/$supplierId/statement` | Supplier statement | `page-supplier-statement` v1 (added, issue #557) | Pay this supplier, What I owe suppliers |
-| `/staff/retail/transfer` | Move stock | `page-transfer` v1 (added) | branch names on the saved summary open Stock |
-| `/staff/retail/transfers` | Stock moves | `page-transfers` v1 (added) | branch names in a move open Stock; link to Move stock |
-| `/staff/retail/usage` | Usage and damage | `page-usage` v1 (added) | "See the stock" link on the saved summary |
-| `/staff/retail/valuation` | Stock value | `page-valuation` v1 (added) | item and branch names open Stock; category names open Items on that category (#798) |
-| `/staff/retail/withdrawals` | Cash withdrawals | `page-withdrawals` v1 (added) | link to Cash summary |
-| `/staff/setup` | Business set-up | `page-setup` v1 (existing) | none added |
-| `/staff/setup/branches` | Branches | `page-branches` v1 (existing) | none added |
-| `/staff/sms` | SMS | `page-sms-settings` v1 (added) | none added |
-| `/staff/sms/opt-outs` | Opt-outs | `page-sms-opt-outs` v1 (added) | none added |
-| `/staff/sms/wording` | Wording | `page-sms-wording` v1 (added) | none added |
-| `/staff/users` | Staff users | `page-users` v2 (existing) | none added |
-| `/staff/users/new` | Invite someone | `page-invite-user` v1 (added) | none added |
+**The table of 105 routes moved** on 2026-11-14 (issue #336) to `docs/ui/ux-audit.md`, which now has every staff route
+with a column per rule, the current tour versions and the screen tickets. Since then a sale number, an item name and a
+branch name open their own record page (`/staff/retail/sales/$saleId`, `/staff/retail/items/$productId`,
+`/staff/retail/branches/$branchId`), not the Stock list or All sales; the notes below keep the history of how that came.
 
 **Stable addresses for one record (issue #336, task #794).** The three gaps named above are closed without a new route: a
 route that opens one record reads it from the address. `/staff/retail/sales?sale=<id>` (and `/staff/retail/credit-sales?sale=<id>`)
@@ -1309,6 +1205,9 @@ Tested in `retail/record-links.dom.test.tsx`, `insights/screens.test.tsx`, `api/
 `RetailNewItemPacksIT`, `InsightsGoldenIT`, `InsightsRulesTest` and `RetailStockHealthIT`.
 
 ## The three rules, screen by screen (issue #336, task #794)
+
+The current audit, one row per staff route with a column per rule, is `docs/ui/ux-audit.md` (moved there on 2026-11-14);
+this section is the record of the 2026-11-03 pass and its fixes.
 
 Audit of 2026-11-03 over the staff routes in `frontend/src/app/router.tsx` (136 routes: the 105 above and those added since;
 the same exclusions as above, and the component kit), brought up to date on 2026-11-05 with the three routes main gained since
