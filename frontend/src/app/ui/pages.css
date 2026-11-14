@@ -486,6 +486,26 @@
   overflow-wrap: anywhere;
 }
 
+/* What you sent on Feedback (issue #933, rule 1): each message closed to its first line under a 48px row (rule 12). */
+.feedback-sent > summary {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  min-height: var(--tap);
+  cursor: pointer;
+}
+
+.feedback-first-line {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.feedback-sent[open] .feedback-first-line {
+  display: none;
+}
+
 /* The steps of an import (issue #141): done, now and later, said in words beside each step so colour is never the only sign. */
 .import-stages ol {
   display: grid;

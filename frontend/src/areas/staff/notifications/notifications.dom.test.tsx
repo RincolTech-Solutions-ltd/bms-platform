@@ -123,8 +123,7 @@ describe('the devices', () => {
 
   it('says so when no device is registered, and points to the switch above it (issue #933, rule 3)', async () => {
     await show(fakePush('off'));
-    const line = await screen.findByText(/No device receives notifications for you yet/);
-    expect(line.textContent).toBe('No device receives notifications for you yet. Turn on Notifications on this device above to add this one.');
+    const line = await screen.findByText('No device yet: turn on Notifications on this device above to add this one.');
     // The switch it names is on the page, above the line.
     expect(toggle().compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
@@ -133,7 +132,7 @@ describe('the devices', () => {
     list.mockReturnValue(new Promise(() => undefined));
     await show(fakePush('off'));
     await waitFor(() => expect(ready(toggle())).toBe(true));
-    expect(screen.queryByText(/No device receives notifications/)).toBeNull();
+    expect(screen.queryByText(/No device yet/)).toBeNull();
   });
 
   it('carries the anchors of the tour on the install control, the appearance choice, the switch and the list', async () => {

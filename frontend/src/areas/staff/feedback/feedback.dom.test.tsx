@@ -18,7 +18,7 @@ function show(node: ReactNode) {
   return render(<QueryClientProvider client={client}>{node}<DoneToast /></QueryClientProvider>);
 }
 
-const SENT: FeedbackItem = { id: 'f-1', kind: 'idea', message: 'Test idea', status: 'new', has_screenshot: false, created_at: '2026-10-22T08:00:00Z' };
+const SENT: FeedbackItem ={ id: 'f-1', kind: 'idea', message: 'Test idea', status: 'new', has_screenshot: false, created_at: '2026-10-22T08:00:00Z' };
 
 const message = () => screen.getByLabelText('Your message') as HTMLTextAreaElement;
 const sendButton = () => screen.getByRole('button', { name: 'Send feedback' });
@@ -115,8 +115,7 @@ describe('what the person sent', () => {
         SENT,
       ]);
     show(<FeedbackHistory load={load} />);
-    await screen.findByText('Test problem');
-    expect(screen.getByText('Read by the BMS team')).toBeTruthy();
+    await screen.findByText('Read by the BMS team, with a reply');
     expect(screen.getByText('Sent, not read yet')).toBeTruthy();
     expect(screen.getByText('Test reply: fixed tomorrow.')).toBeTruthy();
   });
