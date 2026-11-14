@@ -121,6 +121,22 @@ describe('a run that stopped by itself (review of e3f95b2 on #895)', () => {
     expect(screen.queryByRole('button', { name: 'Resume the import' })).toBeNull();
   });
 
+  it('says Stopped by itself with its time and reason, not Being brought in, and offers Resume (issue #896)', async () => {
+    state = { ...state, run: { ...base, loop_stopped: { at: '2026-11-14T07:32:00Z', code: 'failed' } } };
+    show();
+    expect(await screen.findByRole('heading', { name: 'Stopped by itself' })).toBeTruthy();
+    expect(screen.getByText('Stopped by itself on 14 Nov 2026 10:32. A file failed with an unexpected error.')).toBeTruthy();
+    expect(screen.queryByText('Being brought in')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Resume the import' }));
+    await waitFor(() => expect(sent).toEqual(['resume']));
+  });
+
+  it('reads a lost loop as stopped by itself after a restart (issue #896)', async () => {
+    state = { ...state, run: { ...base, loop_stopped: { at: '2026-11-14T07:32:00Z', code: 'interrupted' } } };
+    show();
+    expect(await screen.findByText('Stopped by itself on 14 Nov 2026 10:32. The server restarted or the work ended while it ran.')).toBeTruthy();
+  });
+
   it('offers no Resume on a run that has no committing_at (review of a5168f7)', async () => {
     state = { ...state, run: { ...base, committing_at: undefined } };
     show();
