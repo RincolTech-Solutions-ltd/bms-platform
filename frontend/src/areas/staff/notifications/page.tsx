@@ -112,7 +112,9 @@ function Devices() {
         </p>
       )}
       {list.isError && <p role="alert">Could not load your devices.</p>}
-      {!list.isError && devices.length === 0 && <p className="hint">No device receives notifications for you yet.</p>}
+      {list.isSuccess && devices.length === 0 && (
+        <p className="hint">No device receives notifications for you yet. Turn on Notifications on this device above to add this one.</p>
+      )}
       {devices.length > 0 && (
         <ul className="stack">
           {devices.map((device) => (
