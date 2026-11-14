@@ -1,6 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, createLazyRoute } from '@tanstack/react-router';
-import { useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { businessToday, retail, type Product } from '../../../api/retail';
 import { retailOrders, type Delivered, type Order, type OrderQuery, type OrderSource } from '../../../api/retail-orders';
@@ -109,11 +109,25 @@ export function DeliveredNote({ done }: { done: Delivered }) {
   );
 }
 
+/**
+ * The order whose delivery is being recorded on the Orders page (issue #933, rule 3): one at a time, and while there is one,
+ * New order and the new order's Save are plain, so Save: delivered and paid is the one primary. Outside the page it is null.
+ */
+const Delivering = createContext<{ id: string | null; set: Dispatch<SetStateAction<string | null>> } | null>(null);
+
 /** The buttons of an open order: packed, out for delivery (with who takes it), delivered, cancel (with why). */
 export function OrderActions({ order, onDelivered }: { order: Order; onDelivered?: (d: Delivered) => void }) {
   const { me } = useStaff();
   const client = useQueryClient();
   const [panel, setPanel] = useState<'send' | 'deliver' | 'cancel' | null>(null);
+  const delivering = useContext(Delivering);
+  const setDelivering = delivering?.set;
+  const deliverOpen = panel === 'deliver' && (delivering === null || delivering.id === order.id);
+  // Closing this delivery, or leaving the page, frees the page's one primary again.
+  useEffect(() => {
+    if (!deliverOpen || !setDelivering) return undefined;
+    return () => setDelivering((id) => (id === order.id ? null : id));
+  }, [deliverOpen, setDelivering, order.id]);
   const [rider, setRider] = useState(order.delivered_by ?? '');
   const [reason, setReason] = useState('');
   const [done, setDone] = useState<Delivered | null>(null);
@@ -135,7 +149,7 @@ export function OrderActions({ order, onDelivered }: { order: Order; onDelivered
       <div className="rt-row">
         {steps.includes('pack') && <BusyButton busy={pack.isPending} type="button" className="btn-sm" onClick={() => pack.mutate()}>Packed</BusyButton>}
         {steps.includes('send') && <button type="button" className="btn-sm" onClick={() => setPanel(panel === 'send' ? null : 'send')}>Out for delivery</button>}
-        {steps.includes('deliver') && maySell && <button type="button" className="btn-sm" onClick={() => setPanel(panel === 'deliver' ? null : 'deliver')}>Delivered</button>}
+        {steps.includes('deliver') && maySell && <button type="button" className="btn-sm" onClick={() => { setPanel(deliverOpen ? null : 'deliver'); if (!deliverOpen) setDelivering?.(order.id ?? null); }}>Delivered</button>}
         {steps.includes('cancel') && <button type="button" className="btn-sm" onClick={() => setPanel(panel === 'cancel' ? null : 'cancel')}>Cancel</button>}
       </div>
       {panel === 'send' && (
@@ -146,7 +160,7 @@ export function OrderActions({ order, onDelivered }: { order: Order; onDelivered
           <BusyButton busy={send.isPending} type="button" disabled={rider.trim() === ''} onClick={() => send.mutate()}>Save: out for delivery</BusyButton>
         </fieldset>
       )}
-      {panel === 'deliver' && <DeliverPanel order={order} onDone={(d) => { setDone(d); setPanel(null); onDelivered?.(d); }} />}
+      {deliverOpen && <DeliverPanel order={order} onDone={(d) => { setDone(d); setPanel(null); onDelivered?.(d); }} />}
       {panel === 'cancel' && (
         <fieldset>
           <legend>Cancel this order</legend>
@@ -207,6 +221,7 @@ function OrderCard({ order, branchName }: { order: Order; branchName?: string })
 /** The quick entry of an order copied from a chat: the phone first, then the items, the place and the fee. */
 export function OrderForm({ branchId, onSaved }: { branchId: string; onSaved: (o: Order) => void }) {
   const { me } = useStaff();
+  const delivering = (useContext(Delivering)?.id ?? null) !== null;
   const today = businessToday();
   const { key, draft, setDraft, finish, discard } = usePersistedDraft<OrderDraft>(`order:${me.user_id ?? ''}:${branchId}`, blankOrder(branchId, today));
   const unitsOn = capabilityOn(me, 'retail', UNITS);
@@ -301,7 +316,7 @@ export function OrderForm({ branchId, onSaved }: { branchId: string; onSaved: (o
       <Hint full>Saving keeps these items aside, so they are not sold at the till. Nothing is paid until the order is delivered.</Hint>
       {problem && draft.lines.length > 0 && <Note>{problem}</Note>}
       <Problem error={save.error} />
-      <BusyButton busy={save.isPending} type="submit" className="rt-primary" notReady={problem !== null} data-tour="order-save">
+      <BusyButton busy={save.isPending} type="submit" className={delivering ? undefined : 'rt-primary'} notReady={problem !== null} data-tour="order-save">
         Save the order
       </BusyButton>
       {draft.lines.length > 0 && !save.isPending && <button type="button" onClick={() => { discard(); save.reset(); }}>Clear this order</button>}
@@ -338,6 +353,8 @@ export function OrdersPage() {
   const [source, setSource] = useState<OrderSource | ''>('');
   const [making, setMaking] = useState(false);
   const [formKey, setFormKey] = useState(0);
+  const [deliveringId, setDeliveringId] = useState<string | null>(null);
+  const delivering = useMemo(() => ({ id: deliveringId, set: setDeliveringId }), [deliveringId]);
   const scope = all ? undefined : (branchId ?? undefined);
   const board = useQuery({ queryKey: ['retail', 'orders', 'board', scope ?? 'all'], queryFn: ({ signal }) => retailOrders.board(scope, signal), enabled: all || branchId !== null });
   const list = useInfiniteQuery({
@@ -360,6 +377,7 @@ export function OrdersPage() {
   ];
   return (
     <Gate screen="orders" title="Orders" wide>
+      <Delivering.Provider value={delivering}>
       <Hint tour="orders-help">Orders that come by WhatsApp, Instagram, Facebook, a phone call or at the counter. Saving an order keeps its items aside. The money is taken when it is delivered, and then it is a normal sale.</Hint>
       <div className="rt-row" data-tour="orders-board" aria-label="Orders at each step">
         {tiles.map((t) => (
@@ -371,7 +389,7 @@ export function OrdersPage() {
       </div>
       {atStore && <p className="hint">{single.branchName} is a store, and a store does not sell. Choose a shop to take an order.</p>}
       {!making && !atStore && (
-        <button type="button" className="rt-primary" disabled={single.branchId === null} data-tour="order-new" onClick={() => setMaking(true)}>
+        <button type="button" className={deliveringId === null ? 'rt-primary' : undefined} disabled={single.branchId === null} data-tour="order-new" onClick={() => setMaking(true)}>
           New order
         </button>
       )}
@@ -426,6 +444,7 @@ export function OrdersPage() {
         <ScreenLink screen="stock" to="/staff/retail/stock">Stock</ScreenLink>
         <ScreenLink screen="creditSales" to="/staff/retail/credit-sales">Credit sales</ScreenLink>
       </p>
+      </Delivering.Provider>
     </Gate>
   );
 }
