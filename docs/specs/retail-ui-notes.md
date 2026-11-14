@@ -1140,7 +1140,7 @@ name their last crumb after the entity they load). Page tours: 29 before this ch
 changed, so no existing version was bumped). `tour/route-coverage.test.ts` now fails when a staff route has no page tour, and the `tour-guard` CI guard fails a
 pull request that adds or renames a route without a change under `frontend/src/tour/` or a `TOUR-EXEMPT: <reason>` line in its body (ADR-049).
 
-**Added after the first audit (merge of main, 2026-10-20).** The routes that arrived with the Controls page (`/staff/retail/controls`, tour `page-controls`), the two-step policy page (`/staff/setup/two-step`, `page-two-step`) and the user's own two-step page (`/staff/two-step`, `page-own-two-step`, added here) each have a page tour, so the count stays complete; `route-coverage.test.ts` is what keeps it so, and the table below is the state at the first audit.
+**Added after the first audit (merge of main, 2026-10-20).** The routes that arrived with the Controls page (`/staff/retail/controls`, tour `page-controls`), the two-step policy page (`/staff/setup/two-step`, `page-two-step`) and the user's own two-step page (`/staff/two-step`, `page-own-two-step`, added here) each have a page tour, so the count stays complete; `route-coverage.test.ts` is what keeps it so. The table of the first audit is now in `docs/ui/ux-audit.md`.
 
 **Conventions the tours follow.** A tour is data in one of the slice files (`tours.ts`, `tours-customers.ts`, `tours-retail-reports.ts`, `tours-retail-cash.ts`,
 `tours-retail-purchasing.ts`, `tours-lending-more.ts`), `page` is the route path (`$name` matches any one segment), plain words, one step per main action,
@@ -1209,9 +1209,9 @@ Tested in `retail/record-links.dom.test.tsx`, `insights/screens.test.tsx`, `api/
 The current audit, one row per staff route with a column per rule, is `docs/ui/ux-audit.md` (moved there on 2026-11-14);
 this section is the record of the 2026-11-03 pass and its fixes.
 
-Audit of 2026-11-03 over the staff routes in `frontend/src/app/router.tsx` (136 routes: the 105 above and those added since;
+Audit of 2026-11-03 over the staff routes in `frontend/src/app/router.tsx` (136 routes: the 105 of the first audit and those added since;
 the same exclusions as above, and the component kit), brought up to date on 2026-11-05 with the three routes main gained since
-(139 routes; see "Added since the audit" below). Rule 2, cross links, is the table above. The rules are in
+(139 routes; see "Added since the audit" below). Rule 2, cross links, was the first audit's table, now a column of `docs/ui/ux-audit.md`. The rules are in
 `docs/ui/ux-rules.md`. Rule 1 is "show little, let people open more": a list that can grow is grouped with a summary on each
 group header, or paged, and a record keeps its long sections closed. Rule 3 is "no training needed": plain words (a word a
 shop owner would not use has a help tip), one primary action per view, and an empty list that names the next step.

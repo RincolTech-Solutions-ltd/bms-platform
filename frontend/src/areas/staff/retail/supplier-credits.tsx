@@ -14,7 +14,7 @@ import { PAYABLE_MANAGE, canUse, holdsAt } from './permissions';
 import { Facts, MoreButton, ReasonPanel, StatusBadge, SupplierOwed, useActionKeys, useCursorList } from './purchasing-ui';
 import { showDate } from './transfers';
 import { Gate, Problem, money, useBranchName, useToast } from './ui';
-import { ItemLink } from './screen-link';
+import { BranchLink, ItemLink } from './screen-link';
 import { NoAccess } from '../../../app/ui/EmptyState';
 import { Hint } from '../../../app/ui/Hint';
 
@@ -91,7 +91,7 @@ export function SupplierCreditView({ credit, nameOf, payable }: { credit: Suppli
           ['Their credit note number', credit.supplier_ref ?? ''],
           ['Against invoice', credit.bill_id ? <Link key="b" to="/staff/retail/supplier-bills/$billId" params={{ billId: credit.bill_id }}>{credit.bill_no}</Link> : ''],
           ['What it is', creditKindWords(credit.kind)],
-          ['Branch', nameOf(credit.branch_id)],
+          ['Branch', <BranchLink key="b" branchId={credit.branch_id}>{nameOf(credit.branch_id)}</BranchLink>],
           ['Date', showDate(credit.credit_date)],
           ['Credit total', money(credit.total_minor ?? 0)],
           ['Why', credit.reason ?? ''],

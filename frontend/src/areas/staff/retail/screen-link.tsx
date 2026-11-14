@@ -50,12 +50,13 @@ export function ItemLink({ productId, branch, children }: { productId: string | 
 
 /**
  * A branch name that opens the branch page (issue #336): what the branch is, and its stock, usage and moves. Plain text for a
- * session that may not read stock, or outside a router.
+ * session that may not read stock, for a branch this person does not work at (the page would only refuse), or outside a router.
  */
 export function BranchLink({ branchId, children }: { branchId: string | undefined; children: ReactNode }) {
   const me = useOptionalStaff()?.me;
   const router = useRouter({ warn: false });
-  if (!branchId || !me || !router || !canUse(me, 'stock')) return <>{children}</>;
+  const works = (me?.branches ?? []).some((b) => b.id === branchId);
+  if (!branchId || !me || !router || !works || !canUse(me, 'stock')) return <>{children}</>;
   return <Link className="figure-link" to="/staff/retail/branches/$branchId" params={{ branchId }}>{children}</Link>;
 }
 

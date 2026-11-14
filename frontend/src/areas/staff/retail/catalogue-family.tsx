@@ -124,7 +124,7 @@ export function FamilyScreen({ familyId }: { familyId: string }) {
 }
 
 /** The item's stock: every variant together, per shop or store the person may see, and in all. */
-function StockOf({ family }: { family: Family }) {
+export function StockOf({ family }: { family: Family }) {
   const { me } = useStaff();
   const nameOf = (id: string | undefined) => me.branches?.find((b) => b.id === id)?.name ?? 'Branch';
   const rows = family.stock_by_branch ?? [];

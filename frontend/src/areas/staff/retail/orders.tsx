@@ -101,6 +101,15 @@ export function DeliverPanel({ order, onDone }: { order: Order; onDone: (d: Deli
 }
 
 /** The buttons of an open order: packed, out for delivery (with who takes it), delivered, cancel (with why). */
+/** What a delivery made: the sale, which opens it (issue #336), and what was paid now and left on credit. */
+export function DeliveredNote({ done }: { done: Delivered }) {
+  return (
+    <div role="status" className="alert alert-success" data-testid="delivered">
+      <p>Delivered. Sale <SaleLink saleId={done.sale_id}>{done.sale_no}</SaleLink> made: paid now {money(done.paid_now_minor ?? 0)}{(done.owed_minor ?? 0) > 0 ? `, on credit ${money(done.owed_minor ?? 0)}` : ''}.</p>
+    </div>
+  );
+}
+
 export function OrderActions({ order, onDelivered }: { order: Order; onDelivered?: (d: Delivered) => void }) {
   const { me } = useStaff();
   const client = useQueryClient();
@@ -119,13 +128,7 @@ export function OrderActions({ order, onDelivered }: { order: Order; onDelivered
   const steps = nextSteps(order);
   // Delivering records a sale, so it is offered to whoever may sell at the order's shop.
   const maySell = holdsAt(me, 'retail.sale.create', order.branch_id);
-  if (done) {
-    return (
-      <div role="status" className="alert alert-success" data-testid="delivered">
-        <p>Delivered. Sale <SaleLink saleId={done.sale_id}>{done.sale_no}</SaleLink> made: paid now {money(done.paid_now_minor ?? 0)}{(done.owed_minor ?? 0) > 0 ? `, on credit ${money(done.owed_minor ?? 0)}` : ''}.</p>
-      </div>
-    );
-  }
+  if (done) return <DeliveredNote done={done} />;
   if (steps.length === 0) return null;
   return (
     <>

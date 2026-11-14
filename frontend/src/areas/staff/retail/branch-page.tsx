@@ -26,7 +26,8 @@ export function BranchPageView({ branchId }: { branchId: string }) {
   return (
     <Gate screen="stock" title={name ?? 'Branch'}>
       {!branch ? (
-        <EmptyState text="You do not work at this branch. Ask the owner to add you to it, or choose a branch at the top of the page." />
+        // Who works at every branch sees them all, so a branch missing for them does not exist; anyone else cannot tell the two apart.
+        <EmptyState text={me.all_branches ? 'No branch has this address. The link may be old or mistyped.' : 'This branch is not one you work at, or the link is old. Ask the owner if you need it.'} />
       ) : (
         <>
           <p data-tour="branch-page-kind">{branchKind(branch)}</p>

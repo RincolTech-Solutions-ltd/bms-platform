@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
-import { useRef, useState } from 'react';
+import { Fragment, useRef, useState } from 'react';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { retail, type InFlightReport, type InFlightTransfer } from '../../../api/retail';
 import { EmptyState, SkeletonList } from '../../../components/states';
@@ -111,7 +111,7 @@ export function InTransitCard({ transfer, mayReceive, mayTakeBack, opened = null
     <li className="rt-card">
       <strong style={{ display: 'block' }}>From <BranchLink branchId={transfer.from_branch_id}>{label(transfer.from_branch_id)}</BranchLink> to <BranchLink branchId={transfer.to_branch_id}>{label(transfer.to_branch_id)}</BranchLink></strong>
       <span className="muted" style={{ display: 'block' }}>{showDate(transfer.transfer_date)}, {waiting(transfer.age_days)}</span>
-      <span style={{ display: 'block' }}>{names.length} {names.length === 1 ? 'item' : 'items'}: {names.slice(0, 2).join(', ')}{more}</span>
+      <span style={{ display: 'block' }}>{names.length} {names.length === 1 ? 'item' : 'items'}: {lines.slice(0, 2).map((l, i) => <Fragment key={l.line_no ?? i}>{i > 0 && ', '}<ItemLink productId={l.product_id}>{names[i]}</ItemLink></Fragment>)}{more}</span>
       {profit && transfer.cost_total_minor !== undefined && <p>Value at cost: {money(transfer.cost_total_minor)}</p>}
       {/* The note is part of the summary, so a reader with no button still sees it. */}
       {transfer.note && <p>Note: {transfer.note}</p>}

@@ -13,6 +13,7 @@ import { Facts, MoreButton, ReasonPanel, StatusBadge, SupplierOwed, useActionKey
 import { showDate } from './transfers';
 import { WORDS } from '../../../app/glossary';
 import { Gate, Problem, Money, useBranchName, useToast } from './ui';
+import { BranchLink } from './screen-link';
 import { NoAccess } from '../../../app/ui/EmptyState';
 import { Hint } from '../../../app/ui/Hint';
 
@@ -90,7 +91,7 @@ export function SupplierPaymentView({ payment, nameOf, payable }: { payment: Sup
           ['Paid on', showDate(payment.paid_on)],
           ['Amount', <Money key="a" minor={payment.amount_minor ?? 0} />],
           [WORDS.paidHow, methodWords(payment.method)],
-          ['From the till or bank of', nameOf(payment.branch_id)],
+          ['From the till or bank of', <BranchLink key="b" branchId={payment.branch_id}>{nameOf(payment.branch_id)}</BranchLink>],
           ['What it paid', payment.allocation === 'manual' ? 'What was chosen' : 'The oldest first'],
           ...(payment.reference ? [['Reference', payment.reference] as [string, string]] : []),
           ...(payment.note ? [['Note', payment.note] as [string, string]] : []),

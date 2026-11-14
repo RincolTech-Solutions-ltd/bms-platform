@@ -11,7 +11,7 @@ import { usePersistedDraft } from './idempotency';
 import { PartyPicker, useCashParties } from './party-picker';
 import { CASHBOOK_READ, holds } from './permissions';
 import { ContactLinks } from './contact-links';
-import { ScreenLink } from './screen-link';
+import { BranchLink, ScreenLink } from './screen-link';
 import { useToast } from './toast';
 import { BranchRequired, Gate, Problem, money, useBranchName, useSingleBranch } from './ui';
 import { showDate } from './transfers';
@@ -333,7 +333,7 @@ export function AdvancesScreen() {
 
       {mode === 'new' && (branchId === null ? <BranchRequired permissions={[ADVANCE_CREATE]} /> : savedAdvance ? (
         <Saved title="Advance recorded" again="Record another advance" onAgain={() => { setSavedAdvance(null); setRound((n) => n + 1); }}>
-          <p>{savedAdvance.advance_no}: <strong>{money(savedAdvance.principal_minor ?? 0)}</strong> for {savedAdvance.party_name}, from {branchName}'s till.</p>
+          <p>{savedAdvance.advance_no}: <strong>{money(savedAdvance.principal_minor ?? 0)}</strong> for {savedAdvance.party_name}, from <BranchLink branchId={branchId}>{branchName}</BranchLink>'s till.</p>
         </Saved>
       ) : (
         <>
@@ -350,7 +350,7 @@ export function AdvancesScreen() {
         </Saved>
       ) : (
         <>
-          <p className="branch-line">Receiving branch: <strong>{branchName}</strong></p>
+          <p className="branch-line">Receiving branch: <strong><BranchLink branchId={branchId}>{branchName}</BranchLink></strong></p>
           <RepaymentForm key={`${branchId}-${round}`} branchId={branchId} onSaved={(repayment, advance) => setSavedRepayment({ repayment, advance })} />
         </>
       ))}

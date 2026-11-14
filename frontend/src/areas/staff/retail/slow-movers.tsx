@@ -39,7 +39,7 @@ function Better({ row, nameOf }: { row: SlowMover; nameOf: NameOf }) {
   if (!to) return null;
   return (
     <span className="hint">
-      Sells better at {nameOf(to.branch_id)} ({showQty(to.sold_last90 ?? '0')} sold in 90 days). Move {showQty(to.suggested_qty ?? '0')} {row.unit} there.{' '}
+      Sells better at <ToStock branch={to.branch_id}>{nameOf(to.branch_id)}</ToStock> ({showQty(to.sold_last90 ?? '0')} sold in 90 days). Move {showQty(to.suggested_qty ?? '0')} {row.unit} there.{' '}
       <MoveLink row={row} />
     </span>
   );

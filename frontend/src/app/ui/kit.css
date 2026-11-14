@@ -845,12 +845,25 @@ p:has(> .link-row:only-child) {
 
 /* A figure or a word that opens the rows behind it (issue #526): the link colour and a small chevron, no underline. */
 .figure-link {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 2px;
   color: var(--color-link);
   font-weight: var(--weight-semibold);
   text-decoration: none;
+}
+
+/* The tap area is the full target height (issue #336: names in a table head or a hint line), centred on the text, so the
+   line keeps its height and the layout does not move. */
+.figure-link::before {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  top: 50%;
+  min-width: var(--tap);
+  height: var(--tap);
+  transform: translateY(-50%);
 }
 
 .figure-link::after {

@@ -14,7 +14,7 @@ import { varianceWords } from './payables-state';
 import { Facts, MoreButton, ReasonPanel, StatusBadge, SupplierOwed, useActionKeys, useCursorList } from './purchasing-ui';
 import { showDate } from './transfers';
 import { Gate, Problem, money, useBranchName, useToast } from './ui';
-import { ItemLink } from './screen-link';
+import { BranchLink, ItemLink } from './screen-link';
 import { NoAccess } from '../../../app/ui/EmptyState';
 import { Hint } from '../../../app/ui/Hint';
 
@@ -94,7 +94,7 @@ export function SupplierBillView({ bill, nameOf, landedCostId, payable }: { bill
               ? <Link key="lc" to="/staff/retail/landed-costs/$landedCostId" params={{ landedCostId }}>The invoice of a landed cost</Link>
               : 'The invoice of a landed cost'] as [string, ReactNode]]
             : []),
-          ['Branch', nameOf(bill.branch_id)],
+          ['Branch', <BranchLink key="b" branchId={bill.branch_id}>{nameOf(bill.branch_id)}</BranchLink>],
           ['Invoice date', showDate(bill.bill_date)],
           ['Due on', showDate(bill.due_date)],
           ['Invoice total', money(bill.total_minor ?? 0)],

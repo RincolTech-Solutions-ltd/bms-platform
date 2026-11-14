@@ -58,7 +58,7 @@ export function firstLines(items: StockMovement[]): Set<string> {
   return first;
 }
 
-function UsageRow({ m, branch, where, first }: { m: StockMovement; branch?: string; where?: EntryDistance; first: boolean }) {
+export function UsageRow({ m, branch, where, first }: { m: StockMovement; branch?: string; where?: EntryDistance; first: boolean }) {
   const { me } = useStaff();
   const cost = costOf(m);
   return (

@@ -13,7 +13,7 @@ import { RECEIPT_STATUS_WORDS, canVoidReceipt, inLineUnit } from './purchasing-s
 import { Facts, MoreButton, ReasonPanel, StatusBadge, SupplierOwed, useActionKeys, useCursorList } from './purchasing-ui';
 import { showDate } from './transfers';
 import { Gate, Problem, money, useBranchName, useToast } from './ui';
-import { ItemLink } from './screen-link';
+import { BranchLink, ItemLink } from './screen-link';
 import { NoAccess } from '../../../app/ui/EmptyState';
 import { Hint } from '../../../app/ui/Hint';
 
@@ -98,7 +98,7 @@ export function GoodsReceiptView({ receipt, nameOf, payable }: { receipt: GoodsR
       <Facts
         rows={[
           ['Supplier', <SupplierOwed key="s" id={receipt.supplier_id} name={receipt.supplier_name} payable={payable} />],
-          ['Into', nameOf(receipt.branch_id)],
+          ['Into', <BranchLink key="b" branchId={receipt.branch_id}>{nameOf(receipt.branch_id)}</BranchLink>],
           ['Received on', showDate(receipt.received_on)],
           ...(receipt.order_no && receipt.order_id
             ? [['Order', <Link key="o" to="/staff/retail/purchase-orders/$orderId" params={{ orderId: receipt.order_id }}>{receipt.order_no}</Link>] as [string, ReactNode]]

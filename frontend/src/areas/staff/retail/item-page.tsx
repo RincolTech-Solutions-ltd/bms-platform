@@ -185,7 +185,8 @@ export function ItemPage() {
     <Gate screen="stock" title={item.data?.description ?? 'Item'}>
       {item.isPending && <SkeletonList label="Loading the item" />}
       <Problem error={item.error} />
-      {item.data && <ItemPageView item={item.data} productId={productId} branch={branch} />}
+      {/* Keyed on the shop: the router keeps this page mounted when only `?branch=` changes, and the shop is chosen on mount. */}
+      {item.data && <ItemPageView key={branch ?? ''} item={item.data} productId={productId} branch={branch} />}
     </Gate>
   );
 }

@@ -3,7 +3,7 @@
 The audit of every staff route against the three rules of `docs/ui/ux-rules.md`: (1) show little, let people open more;
 (2) every name opens its record, breadcrumbs always; (3) no training needed. It was in `docs/specs/retail-ui-notes.md`
 ("Navigation and tour coverage" and "The three rules, screen by screen"), where it began on 2026-10-20 with 105 routes; it
-moved here on 2026-11-14 and now covers all 148 staff routes in `frontend/src/app/router.tsx` (the sign-in, sign-up,
+moved here on 2026-11-14 and now covers all 149 staff routes in `frontend/src/app/router.tsx` (the sign-in, sign-up,
 platform console, member area and style routes are not staff screens). A new screen adds its row here.
 
 ## How to read it
@@ -12,7 +12,7 @@ platform console, member area and style routes are not staff screens). A new scr
   a date range or a top count, and a record keeps its long sections closed. A one record page or a short form meets it.
 - **Rule 2** meets when each sale number, item name, branch name, buyer name and total the screen shows opens its record
   for a person who may open it (`retail/screen-link.tsx`, `retail/analytics-ui.tsx`). Breadcrumbs are structural: every
-  route declares a `crumb` and a test fails without one, so all 148 have them and the column does not repeat it.
+  route declares a `crumb` and a test fails without one, so all 149 have them and the column does not repeat it.
 - **Rule 3** meets when the words are plain (a word a shop owner would not use has a help tip), each view has one brand
   filled primary action, and an empty list says what to do next.
 - **Tour** is the page tour of ADR-049 (`frontend/src/tour/`), with its version.
@@ -20,13 +20,13 @@ platform console, member area and style routes are not staff screens). A new scr
 
 ## Result
 
-Counted over the 147 work routes (the component kit is a review page, outside the rules):
+Counted over the 148 work routes (the component kit is a review page, outside the rules):
 
 | Rule | Meets | Gap |
 |---|---|---|
-| 1 Progressive disclosure | 144 of 147 | 3: Feedback, Payment reconciliation, Unallocated payments |
-| 2 Cross links | 136 of 147 | 11: the sale page's buyer, All sales opening in place, Quotations, Documents, Business evaluation, Stock moves rows, and the saved summary's branch on Advances, Banking, Expenses, Savings and Cash withdrawals |
-| 3 No training needed | 140 of 147 | 7: Payment reconciliation, Unallocated payments, Orders, Notifications and app, Bring in your data, Delivery fees and cancellations, Imports to sign off |
+| 1 Progressive disclosure | 145 of 148 | 3: Feedback, Payment reconciliation, Unallocated payments |
+| 2 Cross links | 144 of 148 | 4, all buyer names or an address: the sale page's buyer, All sales opening a sale in place, Quotations, Documents. Every sale number, item name and branch name now opens its record |
+| 3 No training needed | 141 of 148 | 7: Payment reconciliation, Unallocated payments, Orders, Notifications and app, Bring in your data, Delivery fees and cancellations, Imports to sign off |
 
 **Closed by this change (rule 2).** A sale number, an item name and a branch name could not open their record, because the
 routes took no id (triage of 2 Nov 2026). Now:
@@ -45,9 +45,19 @@ routes took no id (triage of 2 Nov 2026). Now:
   links each item and each branch column; the branch of a sale, of a customer order, of a payment on account, of each shop
   on the item page and its movements, of each size's stock, of the shop rows on Retail home, and the shop names on Stock
   health, slow movers and Daily profit open the branch page; the sale of a delivered order and of a delivery fee on an
-  account open the sale.
+  account open the sale. After review: the item of each line of a sale, the items named on a move on the way, the branch on
+  the saved summary of Advances, Banking, Expenses, Savings and Cash withdrawals, the branch facts of a purchase order, a
+  delivery, a supplier invoice, a supplier credit note, a supplier payment and a landed cost, the branch headings of
+  Business evaluation, Sells better at on slow movers, and the two branches of each Stock moves row (beside its button).
+- `BranchLink` is drawn only for a branch the person works at (`me.branches`), so a link never ends on a refusal. The branch
+  page tells an unknown address from a branch the person does not work at when it can (someone who works at every branch).
+- The sale page says "This sale was not found" in plain words for an unknown sale and for one at a branch the person may not
+  read; the server answers 404 for both (`SalesService.get`, proven for another branch in `RetailOwnerDecisionsIT`).
+- `figure-link` has a 48px tap area (`--tap`) centred on the text, so a name in a table head or a hint line is a full target
+  without changing the line height.
 - Tested in `retail/record-pages.dom.test.tsx`, `retail/record-names.dom.test.tsx`, `retail/record-links.dom.test.tsx`,
-  `retail/links-retail-reports.dom.test.tsx` and the page tour test `tour/tours-retail-reports.test.tsx`.
+  `retail/links-retail-reports.dom.test.tsx` and the page tour test `tour/tours-retail-reports.test.tsx`;
+  `tour/ux-audit-coverage.test.ts` fails when a staff route has no row here, or a row names a route that is gone.
 
 No backend change: every record already had its id endpoint (`GET /retail/sales/{sale_id}`, the item page's endpoints of
 #813), and the branch page needs none.
@@ -103,8 +113,8 @@ No backend change: every record already had its id endpoint (`GET /retail/sales/
 | `/staff/retail` | Retail | `page-retail-home` v5 | meets: summary cards | meets: each shop row opens the branch page (this change) | meets |
 | `/staff/retail/accounts` | Customer accounts | `page-accounts` v1 | meets: paged | meets: each buyer opens the account | meets |
 | `/staff/retail/accounts/$customerId` | Account | `page-account` v1 | meets: payments paged by month (#798) | meets: sales and delivery fees open the sale; the branch of a payment opens the branch (this change) | meets |
-| `/staff/retail/advances` | Advances | `page-advances` v1 | meets: grouped | gap: the saved summary's branch is plain text | meets |
-| `/staff/retail/banking` | Banking | `page-banking` v1 | meets: grouped | gap: the saved summary's branch is plain text | meets |
+| `/staff/retail/advances` | Advances | `page-advances` v1 | meets: grouped | meets: the branch on the saved summary and the receiving branch open the branch page (this change) | meets |
+| `/staff/retail/banking` | Banking | `page-banking` v1 | meets: grouped | meets: the saved summary's branch opens the branch page (this change) | meets |
 | `/staff/retail/banking-report` | Banking report | `page-banking-report` v1 | meets: bounded by dates | meets: link back to Banking | meets |
 | `/staff/retail/branch-roles` | Branch roles | `page-branch-roles` v2 | meets: one row per branch | meets: each branch opens Stores and shops | meets |
 | `/staff/retail/branches/$branchId` | Branch (new) | `page-branch` v1 | meets: one record | meets: stock, past usage, every store and shop | meets: one primary, See its stock; an unknown branch is said |
@@ -129,9 +139,9 @@ No backend change: every record already had its id endpoint (`GET /retail/sales/
 | `/staff/retail/customer-ageing` | Customer ageing | `page-customer-ageing` v2 | meets: grouped by age | meets: buyer opens the account | meets |
 | `/staff/retail/customer-groups` | Customer groups | `page-customer-groups` v2 | meets: short list | meets: Credit buyers and Price lists links | meets |
 | `/staff/retail/documents` | Documents | `page-documents` v1 | meets: paged | gap: the buyer name is plain text | meets |
-| `/staff/retail/evaluation` | Business evaluation | `page-evaluation` v1 | meets: one section per branch, top lists | gap: each branch section heading is plain text (items and categories open) | meets |
+| `/staff/retail/evaluation` | Business evaluation | `page-evaluation` v1 | meets: one section per branch, top lists | meets: each branch heading opens the branch page (this change); items and categories open | meets |
 | `/staff/retail/expense-lists` | Expense lists | `page-expense-lists` v2 | meets: closed until tapped (#798) | meets: link to Expenses | meets |
-| `/staff/retail/expenses` | Expenses | `page-expenses` v2 | meets: grouped | gap: the saved summary's branch is plain text | meets |
+| `/staff/retail/expenses` | Expenses | `page-expenses` v2 | meets: grouped | meets: the saved summary's branch opens the branch page (this change) | meets |
 | `/staff/retail/expenses-report` | Expenses report | `page-expenses-report` v1 | meets: bounded by dates | meets: link back to Expenses | meets |
 | `/staff/retail/goods-received` | Goods received | `page-goods-received` v1 | meets: paged | meets: each row opens the delivery | meets |
 | `/staff/retail/goods-received/$receiptId` | Delivery | `page-goods-receipt` v1 | meets: one record | meets: supplier opens; each item opens the item page (this change) | meets |
@@ -163,8 +173,8 @@ No backend change: every record already had its id endpoint (`GET /retail/sales/
 | `/staff/retail/sale` | Record a sale | `page-sale` v4 | meets: one form | meets | meets |
 | `/staff/retail/sales` | All sales | `page-sales` v3 | meets: grouped by year, month, day (#328, #341) | gap: a sale opens in place (`?sale=`), not at its own address `/sales/$saleId` | meets |
 | `/staff/retail/sales-analysis` | Sales analysis | `page-sales-analysis` v1 | meets: top lists | meets: totals open All sales; items and branches open their page | meets |
-| `/staff/retail/sales/$saleId` | Sale (new) | `page-sale-record` v1 | meets: one record | gap: the buyer name is plain text (the branch opens, this change) | meets |
-| `/staff/retail/savings` | Savings | `page-savings` v1 | meets: grouped | gap: the saved summary's branch is plain text | meets |
+| `/staff/retail/sales/$saleId` | Sale (new) | `page-sale-record` v1 | meets: one record | gap: the buyer name is plain text (the branch and each line's item open, this change) | meets: an unknown sale, or one at a branch the person does not work at, reads as not found |
+| `/staff/retail/savings` | Savings | `page-savings` v1 | meets: grouped | meets: the saved summary's branch opens the branch page (this change) | meets |
 | `/staff/retail/settings` | Retail settings | `page-retail-settings` v5 | meets: sections | meets | meets |
 | `/staff/retail/stock` | Stock | `page-stock` v4 | meets: grouped by category | meets: Open the item on each row; `?item=` and `?branch=` | meets |
 | `/staff/retail/stock-by-location` | Stores and shops | `page-stock-by-location` v1 | meets: branches behind Show branches on a phone | meets: each item and each branch open (this change) | meets |
@@ -182,11 +192,11 @@ No backend change: every record already had its id endpoint (`GET /retail/sales/
 | `/staff/retail/supplier-payments/new` | Pay a supplier | `page-supplier-payment-new` v2 | meets: one form | meets: payables, payments, statement | meets |
 | `/staff/retail/suppliers/$supplierId/statement` | Supplier statement | `page-supplier-statement` v1 | meets: bounded by dates | meets: Pay this supplier | meets |
 | `/staff/retail/transfer` | Move stock | `page-transfer` v4 | meets: one form | meets: the saved move's branches and items open (this change) | meets |
-| `/staff/retail/transfers` | Stock moves | `page-transfers` v1 | meets: by month, Show more (#798) | gap: a row's branches sit inside the row button, so they open only once the move is open | meets |
+| `/staff/retail/transfers` | Stock moves | `page-transfers` v1 | meets: by month, Show more (#798) | meets: each row's two branches open the branch page, beside the row button (this change) | meets |
 | `/staff/retail/usage` | Usage and damage | `page-usage` v3 | meets: one form | meets: See the stock | meets |
 | `/staff/retail/usage-history` | Past usage and damage | `page-usage-history` v1 | meets: grouped, Show older records | meets: each item opens the item page at that branch (this change) | meets |
 | `/staff/retail/valuation` | Stock value | `page-valuation` v3 | meets: grouped by category (#798) | meets: items, branches and categories open | meets |
-| `/staff/retail/withdrawals` | Cash withdrawals | `page-withdrawals` v1 | meets: grouped | gap: the saved summary's branch is plain text | meets |
+| `/staff/retail/withdrawals` | Cash withdrawals | `page-withdrawals` v1 | meets: grouped | meets: the saved summary's branch opens the branch page (this change) | meets |
 | `/staff/setup` | Business set-up | `page-setup` v2 | meets: sections | meets: each opens its page | meets |
 | `/staff/setup/approvals` | Approval rules | `page-approval-rules` v1 | meets: short list | meets | meets |
 | `/staff/setup/billing` | Plan and billing | `page-billing` v2 | meets | meets | meets (#798) |
@@ -221,8 +231,8 @@ ones.
 3. Payment reconciliation: group findings by kind with closed rows, page the statement lines, keep Run it now the one primary, say what to upload when empty (rules 1 and 3).
 4. Orders: New order is plain while a delivery is being recorded, so Save: delivered and paid is the one primary (rule 3).
 5. Quotations and Documents: the buyer name opens the buyer's account (rule 2).
-6. Business evaluation: each branch section heading opens the branch page (rule 2).
-7. Cash records (Advances, Banking, Expenses, Savings, Cash withdrawals): the branch on the saved summary opens the branch page (rule 2).
-8. Stock moves: show the two branches as links beside the row button, not inside it (rule 2).
-9. Feedback: What you sent shows the last ten with Show more, each message closed to its first line (rule 1).
-10. Empty lines and words: Notifications and app points to its switch, Bring in your data names Start a new import, Delivery fees and cancellations says to choose other days, Imports to sign off gives "reconciliation" a tip (rule 3).
+6. Feedback: What you sent shows the last ten with Show more, each message closed to its first line (rule 1).
+7. Notifications and app: the empty device line points to the switch above it (rule 3).
+8. Bring in your data: the empty line names Start a new import (rule 3).
+9. Delivery fees and cancellations: the empty lines say to choose other days (rule 3).
+10. Imports to sign off: "reconciliation" gets a help tip, or a plainer word (rule 3).

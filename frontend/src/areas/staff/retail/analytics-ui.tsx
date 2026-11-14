@@ -97,7 +97,7 @@ export function Choice<T extends string | number>({ id, label, value, options, o
   );
 }
 
-export function Section({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
+export function Section({ title, hint, children }: { title: ReactNode; hint?: string; children: ReactNode }) {
   return (
     <section className="an-section">
       <h2>{title}</h2>

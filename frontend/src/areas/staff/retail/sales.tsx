@@ -1,10 +1,11 @@
 import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Link, createLazyRoute } from '@tanstack/react-router';
-import { BranchLink, useAddress } from './screen-link';
+import { BranchLink, ItemLink, useAddress } from './screen-link';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Highlight, NoResults, SearchBox } from '../../../app/ui/SearchBox';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
-import { businessToday, retail, type Sale, type SalePayment, type SalesQuery } from '../../../api/retail';
+import { RetailError, businessToday, retail, type Sale, type SalePayment, type SalesQuery } from '../../../api/retail';
+import { EmptyState } from '../../../app/ui/EmptyState';
 import { receiptNote } from './price-state';
 import { enteredPriceMinor, enteredQty } from './units-state';
 import { useCrumbLabel, useCrumbTail } from '../../../components/breadcrumbs';
@@ -148,7 +149,7 @@ export function SaleDetail({ sale, today, branchName }: { sale: Sale; today: str
           {(sale.lines ?? []).map((l) => (
             <tr key={l.id ?? l.product_id}>
               <td>
-                {l.description}
+                <ItemLink productId={l.product_id} branch={sale.branch_id}>{l.description}</ItemLink>
                 {phone && <><br /><span className="hint">{enteredQty(l)} at {money(enteredPriceMinor(l))}</span></>}
                 <br /><ItemPageLink productId={l.product_id} name={l.description} />
                 {l.price && <><br /><span className="hint" data-testid="price-note">{receiptNote(l, money)}</span></>}
@@ -186,7 +187,12 @@ export function OpenSale({ id, onClose, page = false }: { id: string; onClose: (
     <>
       <button type="button" onClick={onClose} data-tour={page ? 'sale-page-back' : undefined}>{page ? 'See all sales' : 'Back to the list'}</button>
       {sale.isPending && <p className="loading">Loading</p>}
-      <Problem error={sale.error} />
+      {/* The server answers 404 for an unknown sale and for one at a branch this person may not read (SalesService.get). */}
+      {sale.error instanceof RetailError && (sale.error.status === 404 || sale.error.status === 403) ? (
+        <EmptyState text="This sale was not found. The link may be old, or the sale is at a branch you do not work at." />
+      ) : (
+        <Problem error={sale.error} />
+      )}
       {sale.data && <SaleDetail sale={sale.data} today={businessToday()} branchName={nameOf(sale.data.branch_id)} />}
       {sale.data && <PaySaleAction sale={sale.data} today={businessToday()} />}
       {sale.data && <ShareReceipt sale={sale.data} />}
