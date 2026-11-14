@@ -128,6 +128,15 @@ describe('the devices', () => {
     expect(toggle().compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it('does not point to the switch where it cannot be used (unsupported or blocked)', async () => {
+    for (const state of ['unsupported', 'blocked'] as const) {
+      await show(fakePush(state));
+      expect(await screen.findByText('No device receives notifications for you yet.')).toBeTruthy();
+      expect(screen.queryByText(/turn on Notifications on this device above/)).toBeNull();
+      cleanup();
+    }
+  });
+
   it('says nothing about devices while the list is still loading', async () => {
     list.mockReturnValue(new Promise(() => undefined));
     await show(fakePush('off'));

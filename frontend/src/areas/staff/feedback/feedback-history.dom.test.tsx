@@ -16,7 +16,7 @@ const as = <T,>(value: T): T => value;
 const sent = (n: number) =>
   as<FeedbackItem>({
     id: `f-${n}`, kind: 'idea', message: `\nTest message ${n}\nSecond line ${n}`, status: 'seen', has_screenshot: false,
-    created_at: '2026-11-10T08:00:00Z', reply_note: n === 1 ? 'Test reply' : undefined,
+    created_at: `2026-11-${String(30 - n).padStart(2, '0')}T08:00:00Z`, reply_note: n === 1 ? 'Test reply' : undefined,
   });
 
 function show(items: FeedbackItem[]) {
@@ -46,6 +46,15 @@ describe('what you sent', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
     expect(rows()).toHaveLength(12);
     expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
+  });
+
+  it('shows the newest ten first even when the list arrives oldest first', async () => {
+    // sent(1) is the newest (29 Nov), sent(12) the oldest (18 Nov); the list comes oldest first.
+    const view = show(Array.from({ length: 12 }, (_, i) => sent(12 - i)));
+    await screen.findByText('Test message 1', { selector: '.feedback-first-line' });
+    const lines = Array.from(view.container.querySelectorAll('.feedback-first-line')).map((s) => s.textContent);
+    expect(lines).toEqual(Array.from({ length: 10 }, (_, i) => `Test message ${i + 1}`));
+    expect(screen.queryByText('Test message 12', { selector: '.feedback-first-line' })).toBeNull();
   });
 
   it('offers no Show more for ten or fewer', async () => {

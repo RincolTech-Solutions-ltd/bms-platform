@@ -18,7 +18,7 @@ function show(node: ReactNode) {
   return render(<QueryClientProvider client={client}>{node}<DoneToast /></QueryClientProvider>);
 }
 
-const SENT: FeedbackItem ={ id: 'f-1', kind: 'idea', message: 'Test idea', status: 'new', has_screenshot: false, created_at: '2026-10-22T08:00:00Z' };
+const SENT: FeedbackItem = { id: 'f-1', kind: 'idea', message: 'Test idea', status: 'new', has_screenshot: false, created_at: '2026-10-22T08:00:00Z' };
 
 const message = () => screen.getByLabelText('Your message') as HTMLTextAreaElement;
 const sendButton = () => screen.getByRole('button', { name: 'Send feedback' });

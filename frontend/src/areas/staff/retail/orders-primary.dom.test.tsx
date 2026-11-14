@@ -90,6 +90,10 @@ describe('Orders keeps one primary while a delivery is recorded (ticket 4)', () 
     expect(within(card(1)).queryByRole('button', { name: 'Save: delivered and paid' })).toBeNull();
     expect(within(card(2)).getByRole('button', { name: 'Save: delivered and paid' })).toBeTruthy();
     expect(primaries()).toEqual(['Save: delivered and paid']);
+    // Closing the second leaves the first closed too: it was closed, not only hidden.
+    fireEvent.click(deliveredOn(2));
+    expect(screen.queryByRole('button', { name: 'Save: delivered and paid' })).toBeNull();
+    expect(primaries()).toEqual(['New order']);
   });
 
   it('keeps the new order form Save plain while a delivery is open', async () => {

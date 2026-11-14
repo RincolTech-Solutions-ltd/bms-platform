@@ -162,7 +162,8 @@ const firstLine = (text: string | undefined) => (text ?? '').split('\n').find((l
 export function FeedbackHistory({ load = myFeedback }: { load?: () => Promise<FeedbackItem[]> }) {
   const list = useQuery({ queryKey: ['feedback', 'mine'], queryFn: load });
   const [shown, setShown] = useState(SENT_PAGE);
-  const all = list.data ?? [];
+  // Newest first, whatever order the list arrives in (the server sends its last 100 newest first).
+  const all = [...(list.data ?? [])].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''));
   const items = all.slice(0, shown);
   return (
     <section className="rt-card stack" aria-labelledby="feedback-history-title" data-tour="feedback-history">

@@ -437,6 +437,15 @@ describe('design guard, the cross-cutting fixes of the 70-screen audit', () => {
     }
   });
 
+  // Issue #933: a Feedback row keeps its summary a list item, so the open and close triangle stays (review of 69a35ec).
+  it('keeps the What you sent rows on Feedback opening by a visible triangle', () => {
+    const rows = rulesFor(/\.feedback-sent > summary/);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.body).not.toMatch(/display\s*:/);
+    expect(rows[0]?.body).not.toMatch(/list-style\s*:\s*none/);
+    expect(rows[0]?.body).toMatch(/min-height: var\(--tap\)/);
+  });
+
   it('keeps every no-access line on the one NoAccess, which says who can give access and links Home', () => {
     for (const file of components.map((f) => relative(SRC, f))) {
       expect(code(file), file).not.toMatch(/<p className="empty-state">You do not have access/);

@@ -128,6 +128,11 @@ export function OrderActions({ order, onDelivered }: { order: Order; onDelivered
     if (!deliverOpen || !setDelivering) return undefined;
     return () => setDelivering((id) => (id === order.id ? null : id));
   }, [deliverOpen, setDelivering, order.id]);
+  // Another order's delivery opened: this card's form is closed, not only hidden.
+  const elsewhere = delivering !== null && delivering.id !== null && delivering.id !== order.id;
+  useEffect(() => {
+    if (elsewhere && panel === 'deliver') setPanel(null);
+  }, [elsewhere, panel]);
   const [rider, setRider] = useState(order.delivered_by ?? '');
   const [reason, setReason] = useState('');
   const [done, setDone] = useState<Delivered | null>(null);
@@ -375,9 +380,8 @@ export function OrdersPage() {
     { view: 'today', label: 'To deliver today', count: b?.due_today },
     { view: 'overdue', label: 'Late', count: b?.overdue },
   ];
-  return (
+  const page = (
     <Gate screen="orders" title="Orders" wide>
-      <Delivering.Provider value={delivering}>
       <Hint tour="orders-help">Orders that come by WhatsApp, Instagram, Facebook, a phone call or at the counter. Saving an order keeps its items aside. The money is taken when it is delivered, and then it is a normal sale.</Hint>
       <div className="rt-row" data-tour="orders-board" aria-label="Orders at each step">
         {tiles.map((t) => (
@@ -444,9 +448,9 @@ export function OrdersPage() {
         <ScreenLink screen="stock" to="/staff/retail/stock">Stock</ScreenLink>
         <ScreenLink screen="creditSales" to="/staff/retail/credit-sales">Credit sales</ScreenLink>
       </p>
-      </Delivering.Provider>
     </Gate>
   );
+  return <Delivering.Provider value={delivering}>{page}</Delivering.Provider>;
 }
 
 export const Route = createLazyRoute('/staff/retail/orders')({ component: OrdersPage });

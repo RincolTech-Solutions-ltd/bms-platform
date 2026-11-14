@@ -30,7 +30,7 @@ vi.mock('../../../api/retail', async (original) => {
   };
 });
 
-const { AllSales } = await import('./sales');
+const { AllSales, openedFromAllSales } = await import('./sales');
 
 const me = mockMe('admin');
 const SALE = '5eed0000-0000-4000-8000-000000000933';
@@ -50,8 +50,7 @@ const LEVELS: Record<string, SalesSummaryGroup[]> = {
   day: [group('2026-10-19', '2026-10-19', { period: '2026-10-19', from: '2026-10-19', to: '2026-10-19' })],
 };
 
-function show() {
-  const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff/retail/sales'] }) });
+function show(router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff/retail/sales'] }) })) {
   render(
     <RouterContextProvider router={router}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
@@ -99,24 +98,34 @@ describe('a sale opened from All sales', () => {
     fireEvent.click(await screen.findByRole('button', { name: /^Open the sale of .* to Test Buyer One$/ }));
     await waitFor(() => expect(router.state.location.pathname).toBe(`/staff/retail/sales/${SALE}`));
     expect(router.state.location.search).toEqual({});
+    // The sale page's own way back is Back, since the sale was opened from the list.
+    expect(openedFromAllSales(SALE)).toBe(true);
 
-    // Back to the list: the screen is drawn again, as the router does when the list's route comes back.
+    // Back, on the same history: the list's route comes back and its screen is drawn again, as the router does.
     cleanup();
-    show();
+    router.history.back();
+    // Outside a RouterProvider nothing listens to the history, so the router is told to read it, as the provider does.
+    await router.load();
+    expect(router.state.location.pathname).toBe('/staff/retail/sales');
+    show(router);
     expect(await trail()).toEqual(before);
     expect(buyerBox().value).toBe('Test');
   });
 
-  it('keeps the list as it was only once: the next visit starts closed', async () => {
-    show();
+  it('starts fresh when All sales is reached any other way, such as from the menu after the sale', async () => {
+    const router = show();
+    fireEvent.change(buyerBox(), { target: { value: 'Test' } });
     await openTheDay();
     fireEvent.click(await screen.findByRole('button', { name: /^Open the sale of / }));
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/staff/retail/sales/${SALE}`));
     cleanup();
-    show();
-    await trail();
-    cleanup();
-    show();
+    // Home, then All sales from the menu: a new history entry, not the one the list was left on.
+    await router.navigate({ to: '/staff' });
+    await router.navigate({ to: '/staff/retail/sales' });
+    show(router);
     expect(await head(/^Test Branch Gayaza /)).toBeTruthy();
     expect(screen.queryByRole('navigation', { name: 'Where you are' })).toBeNull();
+    expect(buyerBox().value).toBe('');
+    expect(openedFromAllSales(SALE)).toBe(false);
   });
 });

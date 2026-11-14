@@ -363,11 +363,15 @@ export function CreditSales() {
 
 /**
  * What All sales had chosen and open when it opened a sale (issue #933). The sale opens at its own address, a route of its own,
- * so Back to the list finds the same days, searches and groups open, once. In memory only: this tab, this person, this branch
- * choice and this chain of levels.
+ * so Back to the list finds the same days, searches and groups open. Only Back: it is kept for the history entry the list was
+ * on (`entry`), so reaching All sales any other way, from the menu or a link, starts it fresh. In memory only: this tab, this
+ * person, this branch choice and this chain of levels; the history entry carries no part of it.
  */
-interface AllSalesKept { user: string; key: string; chain: string; from: string; to: string; buyer: string; method: SalePayment | ''; item: string; productId: string; open: OpenGroups }
+interface AllSalesKept { entry: string; sale: string; user: string; key: string; chain: string; from: string; to: string; buyer: string; method: SalePayment | ''; item: string; productId: string; open: OpenGroups }
 let allSalesKept: AllSalesKept | null = null;
+
+/** Whether this sale's page was opened from All sales, so its way back is Back, which finds the list as it was. */
+export const openedFromAllSales = (saleId: string) => allSalesKept?.sale === saleId;
 
 export function AllSales() {
   const { all, branchId } = useBranchView();
@@ -376,9 +380,11 @@ export function AllSales() {
   const { me } = useStaff();
   const key = all ? 'all' : (branchId ?? '');
   const user = chainUser(me);
+  const router = useRouter({ warn: false });
+  const entry = router?.state.location.state.__TSR_key;
   const [kept] = useState(() => {
     const k = allSalesKept;
-    return k && k.user === user && k.key === key && k.chain === JSON.stringify(readChain(user, 'all')) ? k : null;
+    return k && entry !== undefined && k.entry === entry && k.user === user && k.key === key && k.chain === JSON.stringify(readChain(user, 'all')) ? k : null;
   });
   useEffect(() => { allSalesKept = null; }, []);
   // Empty to start with: every year shows, grouped by the chain the person chose, with nothing open (issues #328, #341).
@@ -401,13 +407,13 @@ export function AllSales() {
   const view = useChainView(user, 'all', kept?.open);
   // A sale opened here goes to its own address, so the address is the record (issue #933, rule 2); an old `?sale=` link is
   // taken there too. Outside a router (a test drawing the list alone) it opens in place, as before.
-  const router = useRouter({ warn: false });
   useEffect(() => {
     if (router && open) void router.navigate({ to: '/staff/retail/sales/$saleId', params: { saleId: open }, replace: true });
   }, [router, open]);
   const openSale = (id: string) => {
     if (!router) return setOpen(id);
-    allSalesKept = { user, key, chain: JSON.stringify(view.chain), from, to, buyer: search.text, method, item: itemBox.text, productId, open: view.open };
+    const here = router.state.location.state.__TSR_key;
+    allSalesKept = here === undefined ? null : { entry: here, sale: id, user, key, chain: JSON.stringify(view.chain), from, to, buyer: search.text, method, item: itemBox.text, productId, open: view.open };
     void router.navigate({ to: '/staff/retail/sales/$saleId', params: { saleId: id } });
   };
   // Issue #384: the Size and colour level is offered once the business has an item with sizes and colours.

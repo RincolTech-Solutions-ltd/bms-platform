@@ -95,7 +95,7 @@ export const HELP_TIPS = {
   // Issue #933 (ticket 10 of the #336 audit): the word on Imports to sign off.
   reconciliation: {
     label: 'reconciliation',
-    text: 'Your own figures set beside what BMS now holds after the import. Every difference must be explained before you can sign.',
+    text: 'Your own figures set beside what BMS now holds after the import. Read each check, tick each section, then sign with your name and today\'s date.',
   },
 } as const satisfies Record<string, HelpTipWords>;
 

@@ -89,9 +89,12 @@ export function PushToggle({ push = defaultPush }: { push?: ReturnType<typeof cr
   );
 }
 
-function Devices() {
+function Devices({ push }: { push: ReturnType<typeof createPush> }) {
   const queryClient = useQueryClient();
   const list = useQuery({ queryKey: ['push-devices'], queryFn: () => pushApi.list(), retry: false });
+  // The same read as the switch above (one cache entry): whether that switch can be turned on here.
+  const state = useQuery({ queryKey: ['push-state'], queryFn: () => push.state(), retry: false });
+  const switchable = state.data === 'on' || state.data === 'off';
   const [error, setError] = useState<string | null>(null);
   const remove = useMutation({
     mutationFn: (device: PushDevice) => pushApi.remove(device.id ?? ''),
@@ -112,9 +115,12 @@ function Devices() {
         </p>
       )}
       {list.isError && <p role="alert">Could not load your devices.</p>}
-      {list.isSuccess && devices.length === 0 && (
+      {/* It points to the switch only while the switch can be used; blocked, unsupported or not offered, the card above says why. */}
+      {list.isSuccess && devices.length === 0 && (switchable ? (
         <p className="hint">No device yet: turn on Notifications on this device above to add this one.</p>
-      )}
+      ) : (
+        <p className="hint">No device receives notifications for you yet.</p>
+      ))}
       {devices.length > 0 && (
         <ul className="stack">
           {devices.map((device) => (
@@ -181,7 +187,7 @@ export function NotificationsPage({ push = defaultPush }: { push?: ReturnType<ty
       </section>
       <section className="rt-card stack" aria-labelledby="devices-title" data-tour="notifications-devices">
         <h2 id="devices-title">Your devices</h2>
-        <Devices />
+        <Devices push={push} />
       </section>
     </main>
   );

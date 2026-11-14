@@ -184,7 +184,7 @@ describe('imports to sign off', () => {
     const tip = await screen.findByRole('button', { name: 'More about reconciliation' });
     expect(tip.closest('p')?.textContent).toContain('This reconciliation compares your sheet with what BMS now holds, check by check.');
     fireEvent.click(tip);
-    expect(await screen.findByText(/Your own figures set beside what BMS now holds after the import/)).toBeTruthy();
+    expect(await screen.findByText(/Your own figures set beside what BMS now holds after the import\. Read each check, tick each section, then sign/)).toBeTruthy();
   });
 
   it('signs only once every section is ticked and the name and today are typed', async () => {
