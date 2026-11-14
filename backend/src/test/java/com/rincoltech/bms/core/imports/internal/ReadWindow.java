@@ -39,8 +39,8 @@ public final class ReadWindow implements AutoCloseable {
     private final Consumer<String> seam;
 
     /**
-     * Opens the window; refuses when another window holds the seam, which this one would otherwise steal, leaving that
-     * window's reads to wait out their timeout (issue #929).
+     * Opens the window; refuses when the seam is already set, by another window or by a test that set it itself, which
+     * this one would otherwise steal, leaving that holder's reads to wait out their timeout (issue #929).
      */
     public ReadWindow(String step) {
         Consumer<String> mine = at -> {
@@ -55,9 +55,11 @@ public final class ReadWindow implements AutoCloseable {
             }
         };
         synchronized (ReadWindow.class) {
-            if (ImportJobs.pause != null) {
+            Consumer<String> holder = ImportJobs.pause;
+            if (holder != null) {
                 threads.shutdownNow();
-                throw new IllegalStateException("another ReadWindow is open: close it before opening this one");
+                throw new IllegalStateException("the seam ImportJobs.pause is already set, held by " + holder
+                        + ": close or clear it before opening this window");
             }
             ImportJobs.pause = mine;
         }

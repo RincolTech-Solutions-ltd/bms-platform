@@ -239,9 +239,10 @@ class ImportJobs {
     // loop.
     /**
      * When {@link #HELD} looked at the locks, and the keys it found held, both as the database typed them (issue #929):
-     * never text, which the session's DateStyle and TimeZone would shape.
+     * never text, which the session's DateStyle and TimeZone would shape. The keys are an unmodifiable list, so the
+     * record compares by value.
      */
-    record Held(OffsetDateTime at, Long[] keys) {
+    record Held(OffsetDateTime at, List<Long> keys) {
 
         /**
          * The two parameters of one {@link #ALIVE} or {@link #LOOP_ALIVE}: the keys as a {@code bigint[]} made by the
@@ -250,7 +251,7 @@ class ImportJobs {
          */
         Object[] params() {
             return new Object[] {
-                new SqlArrayValue("bigint", (Object[]) keys), new SqlParameterValue(Types.TIMESTAMP_WITH_TIMEZONE, at)
+                new SqlArrayValue("bigint", keys.toArray()), new SqlParameterValue(Types.TIMESTAMP_WITH_TIMEZONE, at)
             };
         }
 
@@ -266,7 +267,7 @@ class ImportJobs {
                 .query((rs, n) -> {
                     Array keys = rs.getArray(2);
                     try {
-                        return new Held(rs.getObject(1, OffsetDateTime.class), (Long[]) keys.getArray());
+                        return new Held(rs.getObject(1, OffsetDateTime.class), List.of((Long[]) keys.getArray()));
                     } finally {
                         keys.free();
                     }

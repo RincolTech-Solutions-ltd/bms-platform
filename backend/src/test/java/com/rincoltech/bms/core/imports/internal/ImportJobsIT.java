@@ -28,14 +28,18 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.context.ApplicationContext;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -685,16 +689,58 @@ class ImportJobsIT extends IntegrationTest {
     static final String ODD_SESSION = """
             SELECT set_config('DateStyle', 'ISO, DMY', true), set_config('TimeZone', 'Pacific/Chatham', true)""";
 
-    /** {@code read} in a transaction whose session is {@link #ODD_SESSION} first; the read's own transaction joins it. */
-    <T> T inAnOddSession(Supplier<T> read) {
+    /** A database session as the connection bound to the current transaction sees itself. */
+    record Session(int pid, String dateStyle, String timeZone) {}
+
+    Session session() {
+        return appJdbc.sql("SELECT pg_backend_pid(), current_setting('DateStyle'), current_setting('TimeZone')")
+                .query((rs, n) -> new Session(rs.getInt(1), rs.getString(2), rs.getString(3)))
+                .single();
+    }
+
+    // JUSTIFICATION-A3: the review of 4192dc8 (point 3) asks the read's own session proven, not assumed. Tests only.
+    /**
+     * {@code read} in a transaction whose session is {@link #ODD_SESSION} first. That it reads on that very session is
+     * proven, not assumed (review of 4192dc8, point 3): the seam {@link ImportJobs#pause}, run by the reading thread inside
+     * the read's own transaction at {@code step} (right after its look at the locks, or between the report's two
+     * readings), records the session that transaction holds, and each must be the odd session itself, the same backend.
+     * Spring binds one connection per data source to a transaction, so a read that began a transaction of its own
+     * (REQUIRES_NEW) would show another backend there; that the application has one data source, one transaction manager
+     * and one JdbcClient ({@link #theReadsShareOneDataSourceTransactionManagerAndJdbcClient}) rules out another source.
+     */
+    <T> T inAnOddSession(String step, Supplier<T> read) {
         return new TransactionTemplate(transactions).execute(s -> {
             appJdbc.sql(ODD_SESSION).query().listOfRows();
-            assertThat(appJdbc.sql("SHOW DateStyle").query(String.class).single())
-                    .isEqualTo("ISO, DMY");
-            assertThat(appJdbc.sql("SHOW TimeZone").query(String.class).single())
-                    .isEqualTo("Pacific/Chatham");
-            return read.get();
+            Session odd = session();
+            assertThat(odd.dateStyle()).isEqualTo("ISO, DMY");
+            assertThat(odd.timeZone()).isEqualTo("Pacific/Chatham");
+            List<Session> seen = new CopyOnWriteArrayList<>();
+            assertThat(ImportJobs.pause).as("no other seam is set").isNull();
+            ImportJobs.pause = at -> {
+                if (at.equals(step)) {
+                    seen.add(session());
+                }
+            };
+            try {
+                T answer = read.get();
+                assertThat(seen).as("the sessions the read held at %s", step).isNotEmpty();
+                assertThat(seen).allSatisfy(x -> assertThat(x).isEqualTo(odd));
+                return answer;
+            } finally {
+                ImportJobs.pause = null;
+            }
         });
+    }
+
+    @Autowired
+    ApplicationContext context;
+
+    /** Issue #929, review of 4192dc8 (point 3): the reads' services can only be on the data source the test sets. */
+    @Test
+    void theReadsShareOneDataSourceTransactionManagerAndJdbcClient() {
+        assertThat(context.getBeansOfType(DataSource.class)).hasSize(1);
+        assertThat(context.getBeansOfType(PlatformTransactionManager.class)).hasSize(1);
+        assertThat(context.getBeansOfType(JdbcClient.class)).hasSize(1);
     }
 
     /** A run of the business with a job as a server records it, started at {@code at} under {@code token}. */
@@ -743,19 +789,22 @@ class ImportJobsIT extends IntegrationTest {
                 lock.execute();
             }
             for (ImportRuns.Run run : List.of(
-                    as(() -> inAnOddSession(() -> runs.get(heldRun))),
-                    as(() -> inAnOddSession(() -> runs.list())).stream()
+                    as(() -> inAnOddSession(ImportJobs.LOCKS_READ, () -> runs.get(heldRun))),
+                    as(() -> inAnOddSession(ImportJobs.LOCKS_READ, () -> runs.list())).stream()
                             .filter(r -> r.id().equals(heldRun))
                             .findFirst()
                             .orElseThrow())) {
                 assertThat(run.job()).isEqualTo(new ImportRuns.Job(ImportJobs.DRY_RUN, "running", before, null, null));
             }
-            assertThat(as(() -> inAnOddSession(() -> runs.get(deadRun))).job())
+            assertThat(as(() -> inAnOddSession(ImportJobs.LOCKS_READ, () -> runs.get(deadRun)))
+                            .job())
                     .isEqualTo(new ImportRuns.Job(ImportJobs.DRY_RUN, "failed", before, null, ImportJobs.INTERRUPTED));
-            assertThat(as(() -> inAnOddSession(() -> runs.get(laterRun))).job())
+            assertThat(as(() -> inAnOddSession(ImportJobs.LOCKS_READ, () -> runs.get(laterRun)))
+                            .job())
                     .isEqualTo(new ImportRuns.Job(ImportJobs.CHECK, "running", after, null, null));
 
-            List<ImportReconciliation.RunSummary> list = as(() -> inAnOddSession(() -> reconciliation.forSignOff()));
+            List<ImportReconciliation.RunSummary> list =
+                    as(() -> inAnOddSession(ImportJobs.LOCKS_READ, () -> reconciliation.forSignOff()));
             assertThat(list)
                     .filteredOn(r -> r.runId().equals(signing))
                     .singleElement()
@@ -768,15 +817,19 @@ class ImportJobsIT extends IntegrationTest {
                             .isEqualTo(new ImportRuns.Job(
                                     ImportJobs.SIGN_OFF, "failed", before, null, ImportJobs.INTERRUPTED)));
 
-            assertThat(as(() -> inAnOddSession(() -> runs.get(committing))).loopStopped())
+            assertThat(as(() -> inAnOddSession(ImportJobs.LOCKS_READ, () -> runs.get(committing)))
+                            .loopStopped())
                     .as("started after the look: alive")
                     .isNull();
-            assertThat(as(() -> inAnOddSession(() -> runs.list())))
+            assertThat(as(() -> inAnOddSession(ImportJobs.LOCKS_READ, () -> runs.list())))
                     .filteredOn(r -> r.id().equals(committing))
                     .singleElement()
                     .extracting(ImportRuns.Run::loopStopped)
                     .isNull();
-            assertThat(inAnOddSession(() -> metrics.platformReport(before.minus(1, ChronoUnit.HOURS), 500, operatorId)))
+            // The report fires REPORT_READ: its first reading finds this loop interrupted, so it reads again.
+            assertThat(inAnOddSession(
+                            ImportJobs.REPORT_READ,
+                            () -> metrics.platformReport(before.minus(1, ChronoUnit.HOURS), 500, operatorId)))
                     .filteredOn(r -> committing.equals(r.metrics().runId()))
                     .singleElement()
                     .extracting(ImportMetrics.PlatformRun::loopStopped)
@@ -788,8 +841,12 @@ class ImportJobsIT extends IntegrationTest {
     @Test
     void aReadWindowNeverStealsTheSeamOfAnOpenOne() {
         try (ReadWindow open = new ReadWindow(ReadWindow.LOCKS_READ)) {
-            assertThatThrownBy(() -> new ReadWindow(ReadWindow.REPORT_READ)).isInstanceOf(IllegalStateException.class);
-            assertThat(ImportJobs.pause).as("the open window's seam stays").isNotNull();
+            Consumer<String> held = ImportJobs.pause;
+            assertThat(held).isNotNull();
+            assertThatThrownBy(() -> new ReadWindow(ReadWindow.REPORT_READ))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("already set");
+            assertThat(ImportJobs.pause).as("the open window's own seam stays").isSameAs(held);
         }
         assertThat(ImportJobs.pause).isNull();
         try (ReadWindow next = new ReadWindow(ReadWindow.REPORT_READ)) {
@@ -800,7 +857,9 @@ class ImportJobsIT extends IntegrationTest {
     /**
      * Issue #929: a DateStyle that does not begin with ISO, such as {@code SQL, DMY}, never reaches a read of this
      * application, because the PostgreSQL JDBC driver closes the connection that sets it. The test above therefore runs
-     * the strongest day-first style the driver allows; should a driver ever accept this, this test fails and says so.
+     * the strongest day-first style the driver allows; should a driver ever accept this, this test fails and says so. A
+     * tripwire on the driver, not the application: the connection is the driver's own, from a DriverManagerDataSource
+     * with no pool, so {@code isClosed()} is the driver's answer, not a pool's eviction.
      */
     @Test
     void theDriverClosesASessionWhoseDateStyleIsSqlDayFirst() throws Exception {
