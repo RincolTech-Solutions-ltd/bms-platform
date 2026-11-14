@@ -53,7 +53,8 @@ routes took no id (triage of 2 Nov 2026). Now:
   page tells an unknown address from a branch the person does not work at when it can (someone who works at every branch).
 - The sale page says "This sale was not found" in plain words for an unknown sale and for one at a branch the person may not
   read; the server answers 404 for both (`SalesService.get`, proven for another branch in `RetailOwnerDecisionsIT`).
-- A name that stands alone, in a table head or on a line of its own (`.target-line`), is at least `--tap` (48px) tall and
+- A name that stands alone (the first thing in a table cell or head, a section heading, or a line of its own: `.target-line`,
+  such as a stock move's From and To and the name on a shop card) is at least `--tap` (48px) tall and
   takes that room in the layout, so it never overlaps the button or link beside it. A name inside a sentence keeps the height
   of its text, so a hint line does not grow (`docs/ui-rules.md` rule 12; both proven in `layout/record-links.layout.test.ts`
   at 412px). The design guard fails a `::before` or `::after` that would widen a target by an invisible box.
@@ -61,8 +62,10 @@ routes took no id (triage of 2 Nov 2026). Now:
   a quotation, a delivery row, a credit note row, a supplier payment row and a document row opens the branch page. A sale's
   lines keep one link each (the name); the separate Open the item button there is gone. Documents show no item lines, so
   there is nothing there to link.
-- Tested in `retail/record-pages.dom.test.tsx`, `retail/record-names.dom.test.tsx`, `retail/record-links.dom.test.tsx`,
-  `retail/links-retail-reports.dom.test.tsx` and the page tour test `tour/tours-retail-reports.test.tsx`;
+- Tested in `retail/record-pages.dom.test.tsx`, `retail/record-names.dom.test.tsx`, `retail/record-review.dom.test.tsx`,
+  `retail/cash-saved-links.dom.test.tsx`, `retail/record-links.dom.test.tsx`, `retail/links-retail-reports.dom.test.tsx`
+  and the page tour test `tour/tours-retail-reports.test.tsx`; the 48px targets and the text-height names at 412px in
+  `layout/record-links.layout.test.ts`; the tap overlay rule in `app/ui/design-guard.test.ts`.
   `tour/ux-audit-coverage.test.ts` fails when a staff route has no row here, or a row names a route that is gone.
 
 No backend change: every record already had its id endpoint (`GET /retail/sales/{sale_id}`, the item page's endpoints of

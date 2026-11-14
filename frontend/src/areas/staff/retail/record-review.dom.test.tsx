@@ -189,7 +189,8 @@ describe('the item page follows ?branch= on every change (#336, point 6)', () =>
     });
     routed(router);
     await waitFor(() => expect((screen.getByLabelText('Shop') as HTMLSelectElement).value).toBe(BRANCH_A));
-    await router.navigate({ to: ITEM_PAGE as never, search: { branch: BRANCH_B } as never });
+    // A second link, as a tap on it does: a new address in the history.
+    router.history.push(`${ITEM_PAGE}?branch=${BRANCH_B}`);
     await waitFor(() => expect((screen.getByLabelText('Shop') as HTMLSelectElement).value).toBe(BRANCH_B));
   });
 });

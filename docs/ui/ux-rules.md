@@ -41,6 +41,22 @@ person who may open it and plain text otherwise. Breadcrumbs are always there, s
 | A buyer name | The buyer's account | `/staff/retail/accounts/$customerId` |
 | A total | The rows behind it | the list screen with the filter in the address |
 
+The stable addresses a link may use. Each is safe to share; a screen reads its query once and says so when the record named
+is not there.
+
+| Address | Opens | Drawn by |
+|---|---|---|
+| `/staff/retail/sales/$saleId` | One sale at its own address | `SaleLink` |
+| `/staff/retail/sales?sale=<id>`, `/staff/retail/credit-sales?sale=<id>` | The list with that sale open in place (`credit-sales` for a person who reads only credit sales) | `SaleLink` with `credit` |
+| `/staff/retail/items/$productId?branch=<id>` | The item page, on that shop's movements when `branch` is given | `ItemLink`, `ToStock` with `item` |
+| `/staff/retail/branches/$branchId` | The branch page | `BranchLink`, `ToStock` with `branch` |
+| `/staff/retail/stock?item=<id>&branch=<id>` | Stock, showing that one item, switched to that branch once | `ScreenLink` with `search` |
+| `/staff/retail/catalogue/products?category=<id>` | Items on that category, for that visit only (#798) | `ToItems` |
+| `/staff/retail/catalogue/products?unit=<id>` | Items of that unit, every category (#863) | the Items link of a unit row |
+| `/staff/retail/usage-history?branch=<id>&from=&to=&kind=used\|damaged\|missing` | Past usage and damage for that branch, those days and that kind; `missing` lists the short lines of stock counts (#798, #863) | `ToUsage` |
+| `/staff/retail/sales`, `/staff/retail/credit-sales` | The sales behind a total | `ToSales` |
+| `/staff/lending/loans/$loanId`, `/staff/lending/members/$memberId` | A loan or member named on an Insights table (#863) | the Insights tables, by their `id` columns |
+
 **Do.** A credit note shows "Sale 1042" and it opens that sale. Stock health's item names open the item page and its shop
 names open the branch page. Cash summary's figures each open the rows behind them.
 

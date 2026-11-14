@@ -119,6 +119,8 @@ describe('item names open the item page (#336)', () => {
     show(<InTransitCard transfer={transfer} mayReceive={false} mayTakeBack={false} opened="receive" />);
     expect(hrefs('Test bulb')).toEqual([ITEM_PAGE, ITEM_PAGE]);
     expect(hrefs(/Test Branch B/)).toContain(BRANCH_PAGE);
+    // The words around the links read as a sentence (review of #931: a space after the colon).
+    expect(screen.getByTestId('in-transit-items').textContent).toBe('1 item: Test bulb');
   });
 
   it('a saved stock move', () => {

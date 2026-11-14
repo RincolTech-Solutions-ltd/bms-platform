@@ -67,7 +67,7 @@ function ShopCard({ shop, unit }: { shop: ItemShop; unit?: string }) {
   return (
     <li className="rt-card item-shop" data-testid="item-shop">
       <p>
-        <strong><BranchLink branchId={shop.branch_id}>{shop.name}</BranchLink></strong>
+        <strong className="target-line"><BranchLink branchId={shop.branch_id}>{shop.name}</BranchLink></strong>
         {shop.closed && <span className="hint"> (closed)</span>}
       </p>
       <p>

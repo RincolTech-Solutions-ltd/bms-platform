@@ -103,7 +103,7 @@ export function LocationList({ report }: { report: StockByLocation }) {
         return (
           <li key={id} className="rt-card">
             <div className="rt-row">
-              <span><strong><ItemLink productId={r.product_id}>{r.description}</ItemLink></strong><br /><CategoryLabel category={r.category} /></span>
+              <span><strong className="target-line"><ItemLink productId={r.product_id}>{r.description}</ItemLink></strong><br /><CategoryLabel category={r.category} /></span>
               <span className="num"><strong>Combined <Qty qty={r.combined_qty ?? '0'} unit={r.unit} negative={r.negative} /></strong></span>
             </div>
             {groups.map((g) => (

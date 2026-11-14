@@ -111,7 +111,7 @@ export function InTransitCard({ transfer, mayReceive, mayTakeBack, opened = null
     <li className="rt-card">
       <strong className="target-line" style={{ display: 'block' }}>From <BranchLink branchId={transfer.from_branch_id}>{label(transfer.from_branch_id)}</BranchLink> to <BranchLink branchId={transfer.to_branch_id}>{label(transfer.to_branch_id)}</BranchLink></strong>
       <span className="muted" style={{ display: 'block' }}>{showDate(transfer.transfer_date)}, {waiting(transfer.age_days)}</span>
-      <span style={{ display: 'block' }} data-testid="in-transit-items">{lines.length} {lines.length === 1 ? 'item' : 'items'}:{lines.slice(0, 2).map((l, i) => <Fragment key={l.line_no ?? i}>{i > 0 && ', '}<ItemLink productId={l.product_id}>{l.description ?? l.code ?? ''}</ItemLink></Fragment>)}{more}</span>
+      <span style={{ display: 'block' }} data-testid="in-transit-items">{lines.length} {lines.length === 1 ? 'item' : 'items'}{': '}{lines.slice(0, 2).map((l, i) => <Fragment key={l.line_no ?? i}>{i > 0 && ', '}<ItemLink productId={l.product_id}>{l.description ?? l.code ?? ''}</ItemLink></Fragment>)}{more}</span>
       {profit && transfer.cost_total_minor !== undefined && <p>Value at cost: {money(transfer.cost_total_minor)}</p>}
       {/* The note is part of the summary, so a reader with no button still sees it. */}
       {transfer.note && <p>Note: {transfer.note}</p>}

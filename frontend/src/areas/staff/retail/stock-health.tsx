@@ -152,7 +152,7 @@ export function StockHealthView({ data, nameOf, range = {} }: { data: StockHealt
           <ul className="an-cards">
             {shrink.map((x) => (
               <li key={x.branch_id} className="rt-card">
-                <strong><ToStock branch={x.branch_id}>{nameOf(x.branch_id)}</ToStock></strong>
+                <strong className="target-line"><ToStock branch={x.branch_id}>{nameOf(x.branch_id)}</ToStock></strong>
                 <div className="rt-row"><span>Used</span><span className="num"><ToUsage branch={x.branch_id} {...range} kind="used">{plural(x.used_reports, 'report')}</ToUsage></span></div>
                 <div className="rt-row"><span>Damaged</span><span className="num"><ToUsage branch={x.branch_id} {...range} kind="damaged">{plural(x.damaged_reports, 'report')}</ToUsage></span></div>
                 <div className="rt-row"><span>Found missing</span><span className="num"><ToUsage branch={x.branch_id} {...range} kind="missing">{plural(x.short_lines, 'line')}</ToUsage></span></div>

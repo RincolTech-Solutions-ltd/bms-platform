@@ -1,11 +1,11 @@
-import { chromium, type Browser, type Page } from 'playwright';
+import { chromium, type Browser, type Locator, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { openLayout } from './open';
 
 // Names that open their record (issue #336, reviews of #931), in Chromium on a phone 412 wide. docs/ui-rules.md rule 12: a name
-// that stands alone (a table head, a line of its own) is a 48px target that takes its own room in the layout, so no two targets
-// overlap; a name inside a sentence keeps the height of its text, so a hint line does not grow. The page is
-// layout/record-links.html.
+// that stands alone (the first thing in a table cell or head, a section heading, a line of its own) is a 48px target that takes
+// its own room in the layout, so no two targets overlap; a name inside a sentence keeps the height of its text, so its line is
+// as tall as it would be without the link. The page is layout/record-links.html.
 
 let browser: Browser;
 
@@ -20,6 +20,7 @@ afterAll(async () => {
 const WIDTH = 412;
 type Box = { x: number; y: number; width: number; height: number };
 const overlap = (p: Box, q: Box) => p.x < q.x + q.width && q.x < p.x + p.width && p.y < q.y + q.height && q.y < p.y + p.height;
+const ALONE = 'th > a.figure-link, td > a.figure-link, h2 > a.figure-link, .target-line > a.figure-link';
 
 async function open(): Promise<Page> {
   const page = await browser.newPage({ viewport: { width: WIDTH, height: 915 }, hasTouch: true, isMobile: true });
@@ -27,19 +28,45 @@ async function open(): Promise<Page> {
   return page;
 }
 
+/** How much taller `line` is with its links drawn as they are than with them drawn as plain inline text. */
+async function growth(line: Locator): Promise<number> {
+  return line.evaluate((el) => {
+    const before = el.getBoundingClientRect().height;
+    const links = [...el.querySelectorAll<HTMLElement>('a.figure-link')];
+    for (const a of links) { a.style.display = 'inline'; a.style.minHeight = '0'; }
+    const plain = el.getBoundingClientRect().height;
+    for (const a of links) { a.style.display = ''; a.style.minHeight = ''; }
+    return before - plain;
+  });
+}
+
 describe('record links at 412px (#336)', () => {
   it('makes every name that stands alone a 48px target, and no two targets overlap', async () => {
     const page = await open();
-    // The From and To of the two moves and of the move on the way, and the two branch heads of Stores and shops.
-    const alone = page.locator('.target-line > a.figure-link, th > a.figure-link');
-    expect(await alone.count()).toBe(8);
-    for (const el of await alone.all()) {
-      expect((await el.boundingBox())!.height, (await el.textContent()) ?? '').toBeGreaterThanOrEqual(48);
+    const sections: [string, number][] = [
+      // The From and To of two moves and of the move on the way.
+      ['moves', 4], ['on-the-way', 2],
+      // Two branch heads and an item cell on the table; the item on the phone card.
+      ['stores', 4],
+      // The Branch fact and the two lines of a sale; the Into fact and the two lines of a delivery.
+      ['sale', 3], ['receipt', 3],
+      // The name on each shop card; the item and the branch cells of the reorder table and the shop of each damage and use card.
+      ['item', 2], ['evaluation', 2],
+    ];
+    for (const [id, count] of sections) {
+      const alone = page.getByTestId(id).locator(ALONE);
+      expect(await alone.count(), id).toBe(count);
+      for (const el of await alone.all()) {
+        expect((await el.boundingBox())!.height, `${id}: ${await el.textContent()}`).toBeGreaterThanOrEqual(48);
+      }
     }
+    const health = page.getByTestId('health').locator(ALONE);
+    expect(await health.count(), 'health').toBeGreaterThanOrEqual(3);
+    for (const el of await health.all()) expect((await el.boundingBox())!.height, `health: ${await el.textContent()}`).toBeGreaterThanOrEqual(48);
     const targets: { name: string; box: Box }[] = [];
-    for (const el of await page.locator('a.figure-link, button, a.btn-sm').all()) {
+    for (const el of await page.locator('a.figure-link, button, a.btn-sm, a.btn').all()) {
       const box = await el.boundingBox();
-      if (box) targets.push({ name: (await el.textContent()) ?? '', box });
+      if (box && box.width > 0 && box.height > 0) targets.push({ name: (await el.textContent()) ?? '', box });
     }
     for (let i = 0; i < targets.length; i++) {
       for (let j = i + 1; j < targets.length; j++) {
@@ -53,16 +80,19 @@ describe('record links at 412px (#336)', () => {
 
   it('keeps a name inside a sentence at the height of its text, so its line does not grow', async () => {
     const page = await open();
-    // The items named on the move on the way, and the branch in the hint line of each list row.
-    const lines = [page.getByTestId('in-transit-items'), ...(await page.getByTestId('rows').locator('.hint').all())];
-    expect(lines).toHaveLength(3);
-    for (const line of lines) {
-      const link = line.locator('a.figure-link').first();
-      const lineHeight = await line.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
-      const box = (await link.boundingBox())!;
-      expect(box.height, (await line.textContent()) ?? '').toBeLessThanOrEqual(lineHeight + 1);
-      // One line of text holds the whole sentence on a phone this wide only if it is short; either way the link adds no height.
-      expect((await line.boundingBox())!.height % lineHeight, (await line.textContent()) ?? '').toBeLessThan(2);
+    const rows = page.getByTestId('rows');
+    const lines: [string, Locator, string][] = [
+      ['items on the way', page.getByTestId('in-transit-items'), '/staff/retail/items/p1'],
+      ['delivery row', rows.locator('.hint').nth(0), '/staff/retail/branches/'],
+      ['credit note row', rows.locator('.hint').nth(1), '/staff/retail/branches/'],
+      ['movement on the item page', page.getByTestId('item-move').locator('.hint').first(), '/staff/retail/branches/'],
+    ];
+    for (const [name, line, href] of lines) {
+      // The link the line is about, by its address: the branch, not the sale number before it.
+      const link = line.locator(`a.figure-link[href^="${href}"]`).first();
+      expect(await link.count(), name).toBe(1);
+      expect(await link.evaluate((el) => el.closest('.target-line, th, td, h2') === null), name).toBe(true);
+      expect(await growth(line), name).toBeLessThan(1);
     }
     await page.close();
   });
