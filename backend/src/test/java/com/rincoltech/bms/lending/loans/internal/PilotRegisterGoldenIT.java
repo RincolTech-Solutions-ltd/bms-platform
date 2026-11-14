@@ -221,7 +221,15 @@ class PilotRegisterGoldenIT extends IntegrationTest {
                 .containsEntry("Records created as lending.member", "6")
                 .containsEntry("Records created as lending.next_of_kin", "6")
                 .containsEntry("Records created as lending.collateral", "7")
-                .containsEntry("Records created as lending.loan", "7");
+                .containsEntry("Records created as lending.loan", "7")
+                .containsEntry(
+                        "Records created as lending.loan_transaction",
+                        String.valueOf(count("SELECT count(*) FROM lending_loan_transactions WHERE tenant_id = ?")));
+        // Those transactions: each loan's historic disbursement and the 2 historic repayments of 13.12.
+        assertThat(lines("""
+                        SELECT txn_type || '|' || count(*) FROM lending_loan_transactions WHERE tenant_id = ?
+                         GROUP BY txn_type
+                        """)).containsExactlyInAnyOrder("disbursement|7", "repayment|2");
         List<String> principal = new ArrayList<>();
         section(r, "loan_principal")
                 .get("checks")
