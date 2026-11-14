@@ -44,6 +44,8 @@ const ELSEWHERE: Partial<Record<HelpTipKey, string>> = {
   kyc: 'areas/staff/rule-three.dom.test.tsx',
   portfolioAtRisk: 'areas/staff/rule-three.dom.test.tsx',
   postedLinesOnly: 'areas/staff/rule-three.dom.test.tsx',
+  // Issue #933: Imports to sign off.
+  reconciliation: 'areas/staff/imports/imports.dom.test.tsx',
 };
 const HERE: HelpTipKey[] = ['averageBuyingPrice', 'sellingPrice', 'priceList', 'appraisal', 'outstanding', 'collateral'];
 

@@ -178,6 +178,15 @@ async function signAll(today: string) {
 afterEach(() => cleanup());
 
 describe('imports to sign off', () => {
+  it('explains the word reconciliation with a help tip beside it (issue #933, rule 3)', async () => {
+    show(admin);
+    fireEvent.click(await screen.findByRole('button', { name: /Imported on 1 Oct 2026/ }));
+    const tip = await screen.findByRole('button', { name: 'More about reconciliation' });
+    expect(tip.closest('p')?.textContent).toContain('This reconciliation compares your sheet with what BMS now holds, check by check.');
+    fireEvent.click(tip);
+    expect(await screen.findByText(/Your own figures set beside what BMS now holds after the import/)).toBeTruthy();
+  });
+
   it('signs only once every section is ticked and the name and today are typed', async () => {
     show(admin);
     fireEvent.click(await screen.findByRole('button', { name: /Imported on 1 Oct 2026/ }));

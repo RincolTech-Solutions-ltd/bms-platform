@@ -16,6 +16,7 @@ import { BusyButton } from '../../../app/ui/BusyButton';
 import { EmptyState, NoAccess } from '../../../app/ui/EmptyState';
 import { Field } from '../../../app/ui/Field';
 import { Hint } from '../../../app/ui/Hint';
+import { HelpTip } from '../../../app/ui/HelpTip';
 import { ListRow, RowList } from '../../../app/ui/ListRow';
 import { showDate } from '../../../app/ui/PeriodPicker';
 import { Skeleton } from '../../../app/ui/Skeleton';
@@ -210,7 +211,8 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
     <main className="stack">
       <h1>Sign off the import</h1>
       <p data-tour="imports-about">
-        Version {r.version}, as at {showDate(r.as_at)}. Each check compares your sheet with what BMS now holds.
+        Version {r.version}, as at {showDate(r.as_at)}. This reconciliation compares your sheet with what BMS now holds, check by check.
+        <HelpTip tip="reconciliation" />
       </p>
       {signed ? (
         <section className="rt-card stack" aria-labelledby="imports-signed" data-tour="imports-signed">
