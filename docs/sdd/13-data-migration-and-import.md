@@ -675,14 +675,22 @@ rows 7, 9 and 13), commit must create:
 As built (issue #110): the pilot register is the first mapping of `lending_loans_v1`
 (`fixtures/imports/lending_loans_v1.pilot_register.mapping.json`, source `register`), not a
 template of its own. The table above is held without a database by `LendingLoansV1TemplateTest`
-and, on PostgreSQL as `bms_app`, by `PilotRegisterGoldenIT`: the register alone, on the path a
-business takes (the check in the background, the standard resolutions through the review's
-route, the decision that the requested principal was disbursed, the dry run in the background
-writing nothing and matching the preview, ready, the dump recorded and checked, `import_commit`
-asked for by the maker, refused to the maker and approved by a second person, the commit started
-from the operator portal, the reconciliation signable and the sign-off in the background to
-`signed_off`). Besides the counts above it asserts, from the tables: the codes of every line as
-the check stored them; that row 4's next of kin is linked by NIN to the borrower of row 3 and
+and, on PostgreSQL as `bms_app`, by `PilotRegisterGoldenIT`: the register alone, through the
+routes (the run opened and the file uploaded through the quarantine, the check in the
+background, the standard resolutions through the review's route, the dry run in the background
+leaving every row of the lending and ledger tables as it was and matching the preview, ready,
+the dump recorded and checked from the operator portal, the portal's start refused
+`commit_not_approved` before any approval and again while only the maker has tried,
+`import_commit` asked for by the maker, refused to the maker and approved by a second person,
+the commit started from the portal, the reconciliation signable with 6 members, 6 next of kin,
+7 collateral items and 7 loans created and a loan principal of 2,810,000 that ties, and the
+sign-off in the background to `signed_off`). Three steps have no route on `main` and are
+shortcuts in the test: the mapping is saved through `ImportMappings`, the cutover moment of
+30 June 2026 (21:00 in Kampala, the batch business date above) is set on the run by the owner
+role, and the decision that the requested principal was disbursed (13.8 row 15) is recorded
+through `ImportRuns.recordPolicy`, dated the business's today. Besides the counts above it
+asserts, from the tables: the codes of every line as the check stored them, the two infos the
+table leaves out present as infos; that row 4's next of kin is linked by NIN to the borrower of row 3 and
 row 11's to that of row 5; each loan's principal, rate (row 6 at the accepted 1,000 bp),
 disbursement day, due day and interest due of its one bullet item; row 12's loan closed on
 2026-05-18; row 4's collateral a `vehicle` with the plate `UXX001X`; row 10's 400,000 allocated
