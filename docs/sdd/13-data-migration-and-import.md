@@ -611,7 +611,8 @@ to the business, runs the sign-off above with a batch's 10-minute limit per stat
 writes (a job that lost its claim writes nothing), and stamps how it ended: `done` (signed), or `failed` with the
 refusal's code (`reconciliation_changed`, `unitemised_difference`, `sections_not_ticked`, `run_not_committed`,
 `sign_off_date_not_today` when the day turned, `sign_off_too_big` should even a batch's limit pass, `failed` for any other
-error), or read as `interrupted` when its process died. The typed name is held only by the job's thread until it is
+error), or read as `interrupted` when its process died, never while it ends (#927: the sign-off list and the run's read
+look at the locks before the rows, section 13.14.1). The typed name is held only by the job's thread until it is
 written to `import_signoffs`; a job that dies loses it, and the signer signs again. Because the next version is stored in
 the job's transaction before its outcome is stamped, and `GET .../reconciliation` reads the job before the reconciliation,
 a refusal is never shown beside the version it refused. The screen shows the sign-off pending (nothing to tick or type)
@@ -686,8 +687,8 @@ the commit started from the portal, the reconciliation signable with 6 members, 
 7 collateral items and 7 loans created and a loan principal of 2,810,000 that ties, and the
 sign-off in the background to `signed_off`). Three steps have no route on `main` and are
 shortcuts in the test: the mapping is saved through `ImportMappings`, the cutover moment of
-30 June 2026 (21:00 in Kampala, the batch business date above) is set on the run by the owner
-role, and the decision that the requested principal was disbursed (13.8 row 15) is recorded
+30 June 2026 (21:00 in Kampala, the batch business date above) is set on the run by direct SQL
+as the database owner, and the decision that the requested principal was disbursed (13.8 row 15) is recorded
 through `ImportRuns.recordPolicy`, dated the business's today. Besides the counts above it
 asserts, from the tables: the codes of every line as the check stored them, the two infos the
 table leaves out present as infos; that row 4's next of kin is linked by NIN to the borrower of row 3 and
@@ -1935,7 +1936,9 @@ section 4.1; coordinated with #110, which builds no second framework).**
   sent for a dead loop, nor for work the portal's thread closed without running it (the thread failed before the work,
   #897): its token stays and its lock went with the closed claim, so the run reads `interrupted` the same way. The
   notice's time is the business's local time with its zone (for example `14:32 Africa/Kampala`). The run's read takes
-  `import_run_loop_stopped` once per row, so the time and the code come from one reading of `pg_locks`. The run stays `committing` and resumable; a resume clears the stamps and takes a new token. The
+  `import_run_loop_stopped` once per row, so the time and the code come from one reading of `pg_locks`; since #927 it
+  looks at the locks first and a loop alive at that look never reads `interrupted` (section 13.14.1, the background
+  jobs, "Never read interrupted while it ends"). The run stays `committing` and resumable; a resume clears the stamps and takes a new token. The
   run's read, the list and the platform report carry it as `loop_stopped`, and the portal shows the run as "Stopped by
   itself" with the time and the reason, on its page with Resume and in its own group at the top of the queue, instead of
   "Being brought in". The `import_commit` approval is still given in the
@@ -1994,7 +1997,21 @@ Now:
   when the stamp could not be written, so after a restart, or a failed stamp, the run reads failed, `interrupted`. The
   token is the job's own: a later claim of the business on the same pooled session holds the loop key but never the dead
   job's token, so it never makes the dead job look alive, as a backend pid would (review of 3d86d31). It is read by `ImportJobs.read` from `ImportRunService.RUN_COLUMNS`,
-  with no sweep and no heartbeat. The
+  with no sweep and no heartbeat. **Never read interrupted while it ends (#927).** A job stamps how it ended and
+  commits, and only then does its claim's close give the token's lock back. A read that looked at `pg_locks` in the
+  same statement as the run's row did so after the statement's snapshot was taken, so a job that stamped and gave its
+  lock back in between read with neither its stamp nor its lock, failed `interrupted` (`ImportJobsIT` failed so once on
+  #926). Every read of a job (the run, the business's list, the sign-off list) therefore looks at the locks first, in a
+  statement of its own (`ImportJobs.HELD`: the keys held and the statement's start time), and takes the rows in the next
+  statement, whose snapshot holds every stamp written before a lock that look found gone. A job is alive when its token's
+  lock was held at that look, or when it started after it: `job_started_at` and `loop_started_at` are written with
+  `clock_timestamp()` after the token's lock is taken, so a start not held at the look carries a later time. The
+  run's `loop_stopped` sets aside the `interrupted` of `import_run_loop_stopped` for a loop alive at that look, and the
+  platform report, which reads the function alone, reads a run again when it finds a loop `interrupted` and keeps that
+  answer only when both readings give it (a run the first reading did not list, new or moved by the limit, keeps the
+  second reading's answer: a narrow window that the next report heals). The reads assume READ COMMITTED, as every
+  caller runs them: in a REPEATABLE READ transaction whose snapshot predates the look, a job that ended between the
+  two would read interrupted again. The
   next check or dry run claims the loop and starts again; nothing a dead job did was kept (the dry run rolls back and
   stores its report only while it holds its claim, the check writes in one transaction at its end, also only while it
   holds it).
@@ -2014,6 +2031,15 @@ Now:
   runs; a job whose session died reads `interrupted`, a later claim of the business on another session never makes it look
   alive, and a new one starts; a dead job still reads interrupted when its own session claims the business again, as a
   pid would not; a work that throws an Error is stamped `failed`; a check whose claim connection is ended while it runs
-  stops at its probe with `claim_connection_lost` and writes nothing), `ImportPurgeIT` (the two code columns),
+  stops at its probe with `claim_connection_lost` and writes nothing; since #927, a read held by the test seam
+  `ImportJobs.pause` between its look at the locks and its rows while a dry run ends reads it done, one held while a dry
+  run starts reads it running, and the sign-off list held while a sign-off job ends reads it done; a second read held
+  with a REPEATABLE READ snapshot taken before the end puts the window itself on record: there the old one-statement
+  read says `interrupted` and the read since #927 says running; a start whose transaction began before the look and
+  which took its lock after it reads running with `clock_timestamp()` as its start time and would read interrupted
+  with `now()`), `ImportRunsIT`
+  (#927: a run read held the same way while a portal loop's batch fails reads its stamp `failed`, and on a snapshot
+  taken before the end the function alone says `interrupted` while the run's read shows no stop; the platform report
+  held between its two readings answers the stamp a loop wrote meanwhile), `ImportPurgeIT` (the two code columns),
   `MigrationOrderIT` (V154). In the frontend: `pipeline.test.ts` (the words) and `run.dom.test.tsx` (running, done,
   failed, busy and a reload).

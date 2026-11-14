@@ -222,6 +222,7 @@ class ReconciliationService implements ImportReconciliation {
     @Override
     public List<RunSummary> forSignOff() {
         TenantContext.require();
+        // The locks looked at first, in a statement of their own (#927, ImportJobs.HELD).
         return tx.execute(s -> jdbc.sql("""
                         SELECT r.id, r.status, r.committed_at, c.version, c.signable, r.signed_off_at,
                                -- The run's job in the same read (#874, review of 03e9515, point 5).
@@ -238,6 +239,7 @@ class ReconciliationService implements ImportReconciliation {
                          ORDER BY r.committed_at DESC NULLS LAST, r.id
                          LIMIT 20
                         """)
+                .params(ImportJobs.held(jdbc).params())
                 .query((rs, n) -> {
                     Timestamp committed = rs.getTimestamp(3);
                     Timestamp signed = rs.getTimestamp(6);

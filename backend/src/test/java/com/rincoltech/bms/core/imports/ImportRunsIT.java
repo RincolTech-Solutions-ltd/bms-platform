@@ -7,6 +7,7 @@ import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.core.imports.ImportRuns.CommitOutcome;
 import com.rincoltech.bms.core.imports.ImportRuns.Run;
+import com.rincoltech.bms.core.imports.internal.ReadWindow;
 import com.rincoltech.bms.core.ledger.LedgerPosting;
 import com.rincoltech.bms.core.ledger.LedgerPosting.EntryRequest;
 import com.rincoltech.bms.core.ledger.LedgerPosting.Line;
@@ -603,6 +604,92 @@ class ImportRunsIT extends IntegrationTest {
                 .isEqualTo(lost.loopStopped());
         // A dead process never reaches the loop's end, so no notice can be written; nothing else sends one.
         assertThat(stopNotices(run.id())).as("no notice without the loop's end").isZero();
+    }
+
+    // JUSTIFICATION-A3: issue #927 asks the window of a job's end proven for the portal loop and its report. Tests
+    // only.
+    /**
+     * Issue #927 for the portal loop (#896): a read of the run held after its look at the locks, which found the loop's
+     * token held, while the loop's batch fails, the stop is stamped and the claim gives the lock back, reads the stamp
+     * ({@code failed}), never {@code interrupted}.
+     */
+    @Test
+    void aReadThatStraddlesTheEndOfAPortalLoopReadsItsStampNeverInterrupted() throws Exception {
+        Run run = readyRun(1);
+        UUID operatorId = Api.platformUser(Api.email("loop-read-window"));
+        BatchWriter failing = (runId, batchId, seq, checkpoint) -> {
+            throw new IllegalStateException("fabricated refusal of a batch");
+        };
+        AtomicReference<ImportRuns.Work> held = new AtomicReference<>();
+        as(t, () -> {
+            runs.startCommit(script(run.id(), failing), operatorId, held::set);
+            return null;
+        });
+        try (ReadWindow window = new ReadWindow(ReadWindow.LOCKS_READ)) {
+            Future<Run> read = window.enter(() -> as(t, () -> runs.get(run.id())));
+            // A second read holding a REPEATABLE READ snapshot taken before the end: the window of #927 itself. On it
+            // the function alone, the old read of the loop, says interrupted (review of e8b96ed, point 1).
+            Future<Object[]> onOldSnapshot = window.enter(() -> as(
+                    t,
+                    () -> ReadWindow.repeatableRead(transactionManager).execute(s -> new Object[] {
+                        runs.get(run.id()),
+                        jdbc.sql("SELECT import_run_loop_stopped(?) ->> 'code'")
+                                .param(run.id())
+                                .query(String.class)
+                                .single()
+                    })));
+            List<Object> ended = new CopyOnWriteArrayList<>();
+            as(t, () -> {
+                inline(ended).accept(held.get());
+                return null;
+            });
+            assertThat(ended).singleElement().isInstanceOf(IllegalStateException.class);
+            Run straddled = window.leave(read);
+            assertThat(straddled.status()).isEqualTo("committing");
+            assertThat(straddled.loopStopped()).isNotNull();
+            assertThat(straddled.loopStopped().code()).isEqualTo("failed");
+            Object[] snapshot = window.leave(onOldSnapshot);
+            assertThat(snapshot[1]).as("the old read inside the window").isEqualTo("interrupted");
+            assertThat(((Run) snapshot[0]).loopStopped())
+                    .as("the read since #927 on the same snapshot: the loop was alive at its look")
+                    .isNull();
+        }
+    }
+
+    /**
+     * Issue #927 for the platform report: {@code import_run_loop_stopped} still looks at pg_locks after the row's snapshot,
+     * so a loop the report reads {@code interrupted} is read again. Here the first reading finds a dead loop and, held
+     * between the two readings, the run is stamped as a loop that ended in that window would be: the report answers the
+     * stamp.
+     */
+    @Test
+    void thePlatformReportReadsALoopInterruptedOnlyWhenASecondReadingSaysSoToo() throws Exception {
+        Instant since = Instant.now().minusSeconds(300);
+        Run run = readyRun(1);
+        UUID operatorId = Api.platformUser(Api.email("loop-report-window"));
+        AtomicReference<ImportRuns.Work> held = new AtomicReference<>();
+        as(t, () -> {
+            runs.startCommit(script(run.id(), NOTHING), operatorId, held::set);
+            return null;
+        });
+        killTheLoopSession();
+        try (ReadWindow window = new ReadWindow(ReadWindow.REPORT_READ)) {
+            Future<List<ImportMetrics.PlatformRun>> read =
+                    window.enter(() -> metrics.platformReport(since, 500, operatorId));
+            TestDatabase.owner().sql("""
+                            UPDATE import_runs SET loop_token = NULL, loop_stopped_at = now(), loop_stopped_code = 'failed'
+                             WHERE id = ?
+                            """).param(run.id()).update();
+            List<ImportMetrics.PlatformRun> report = window.leave(read);
+            assertThat(report)
+                    .filteredOn(r -> run.id().equals(r.metrics().runId()))
+                    .singleElement()
+                    .satisfies(r -> assertThat(r.loopStopped().code()).isEqualTo("failed"));
+        } finally {
+            held.get().close();
+        }
+        // A dead loop, both readings saying so, still reads interrupted
+        // (aPortalLoopWhoseSessionDiesReadsStoppedInTheRunTheListAndThePlatformReport).
     }
 
     /** A portal start of the run whose batches go on in this thread; how the loop ended. */

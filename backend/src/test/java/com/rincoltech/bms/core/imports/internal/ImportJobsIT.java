@@ -7,6 +7,7 @@ import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.core.imports.ImportMappings;
 import com.rincoltech.bms.core.imports.ImportMappings.Mapping;
+import com.rincoltech.bms.core.imports.ImportReconciliation;
 import com.rincoltech.bms.core.imports.ImportRuns;
 import com.rincoltech.bms.core.imports.ImportUploads;
 import com.rincoltech.bms.core.imports.ImportUploads.Upload;
@@ -36,6 +37,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
 import tools.jackson.databind.JsonNode;
 
 /**
@@ -435,6 +437,237 @@ class ImportJobsIT extends IntegrationTest {
                     .as("same pid, same loop key, still not alive")
                     .isEqualTo(ImportJobs.INTERRUPTED);
             assertCode(() -> as(() -> jobs.startDryRun(runId, staff)), "IMPORT_IN_PROGRESS");
+        }
+    }
+
+    /** Waits until the run's job is stamped and its token's lock is gone, as a job's end leaves it (issue #927). */
+    static void awaitStampedAndUnlocked(UUID runId) throws InterruptedException {
+        long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        while (!Boolean.TRUE.equals(
+                TestDatabase.owner().sql("""
+                        SELECT r.job_finished_at IS NOT NULL
+                               AND NOT EXISTS (SELECT 1 FROM pg_locks l
+                                                WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
+                                                  AND ((l.classid::bigint << 32) | l.objid::bigint)
+                                                      = hashtextextended('core.imports.job:' || r.job_token::text, 0))
+                          FROM import_runs r WHERE r.id = ?
+                        """).param(runId).query(Boolean.class).single())) {
+            assertThat(System.nanoTime()).as("the job ended within 30 seconds").isLessThan(end);
+            Thread.sleep(20);
+        }
+    }
+
+    @Autowired
+    PlatformTransactionManager transactions;
+
+    @Autowired
+    JdbcClient appJdbc;
+
+    /**
+     * The read of a run's job up to #927, in one statement: the row from the statement's snapshot, the lock looked at in
+     * {@code pg_locks} as the statement runs. True when it read the job failed {@code interrupted}.
+     */
+    static final String OLD_READ_SAYS_INTERRUPTED = """
+            SELECT job_finished_at IS NULL
+                   AND NOT EXISTS (SELECT 1 FROM pg_locks l
+                                    WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
+                                      AND ((l.classid::bigint << 32) | l.objid::bigint)
+                                          = hashtextextended('core.imports.job:' || job_token::text, 0))
+              FROM import_runs WHERE id = ?
+            """;
+
+    /** What a read in a REPEATABLE READ transaction answered, and what the old read answered on the same snapshot. */
+    record SnapshotRead<T>(T read, boolean oldReadSaysInterrupted) {}
+
+    /** {@code read}, then the old read of the run's job, in one REPEATABLE READ transaction, as the business. */
+    <T> SnapshotRead<T> onOneSnapshot(UUID runId, Supplier<T> read) {
+        return as(() -> ReadWindow.repeatableRead(transactions)
+                .execute(s -> new SnapshotRead<>(
+                        read.get(),
+                        appJdbc.sql(OLD_READ_SAYS_INTERRUPTED)
+                                .param(runId)
+                                .query(Boolean.class)
+                                .single())));
+    }
+
+    // JUSTIFICATION-A3: issue #927 asks an IT that forces a read into the window where a job ends. Tests only.
+    /**
+     * Issue #927 (the flaky line 191 above), forced: two reads are held after their look at the locks, which found the
+     * dry run's lock held, while the job ends, stamps done and its claim gives the lock back. The one in READ COMMITTED
+     * then reads its rows on a new snapshot: done. The other holds a REPEATABLE READ snapshot taken before the end, so its
+     * rows still show the job unfinished while its lock is gone: the window of #927. There the old one-statement read
+     * answers {@code interrupted} (asserted on the same snapshot), and the look taken before the end answers running.
+     * With the old read put back, this test fails (review of e8b96ed, point 1).
+     */
+    @Test
+    void aReadThatStraddlesTheEndOfAJobReadsItDoneNeverInterrupted() throws Exception {
+        UUID runId = emptyRun();
+        CountDownLatch writing = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        FixtureShopTemplate.SCRIPT = (r, b, s, c) -> {
+            writing.countDown();
+            try {
+                release.await(30, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return Map.of();
+        };
+        try (ReadWindow window = new ReadWindow(ReadWindow.LOCKS_READ)) {
+            as(() -> jobs.startDryRun(runId, staff));
+            assertThat(writing.await(30, TimeUnit.SECONDS)).isTrue();
+            var read = window.enter(() -> as(() -> runs.get(runId).job()));
+            var onOldSnapshot = window.enter(
+                    () -> onOneSnapshot(runId, () -> runs.get(runId).job()));
+            release.countDown();
+            awaitStampedAndUnlocked(runId);
+            ImportRuns.Job job = window.leave(read);
+            assertThat(job.state()).as("%s", job).isEqualTo("done");
+            assertThat(job.failureCode()).isNull();
+            SnapshotRead<ImportRuns.Job> held = window.leave(onOldSnapshot);
+            assertThat(held.oldReadSaysInterrupted())
+                    .as("the old read inside the window")
+                    .isTrue();
+            assertThat(held.read().state())
+                    .as("the read since #927 on the same snapshot: %s", held.read())
+                    .isEqualTo("running");
+        } finally {
+            release.countDown();
+        }
+    }
+
+    /**
+     * Issue #927, the other side of the look: a job that starts after a read looked at the locks (its lock was not held
+     * yet) and before the read takes its rows reads running, never {@code interrupted}.
+     */
+    @Test
+    void aJobThatStartsInsideTheReadsWindowReadsRunningNeverInterrupted() throws Exception {
+        UUID runId = emptyRun();
+        CountDownLatch writing = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        FixtureShopTemplate.SCRIPT = (r, b, s, c) -> {
+            writing.countDown();
+            try {
+                release.await(30, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return Map.of();
+        };
+        try (ReadWindow window = new ReadWindow(ReadWindow.LOCKS_READ)) {
+            var read = window.enter(() -> as(() -> runs.get(runId).job()));
+            as(() -> jobs.startDryRun(runId, staff));
+            assertThat(writing.await(30, TimeUnit.SECONDS)).isTrue();
+            ImportRuns.Job job = window.leave(read);
+            assertThat(job.state()).as("%s", job).isEqualTo("running");
+        } finally {
+            release.countDown();
+        }
+        assertThat(ended(runId).state()).isEqualTo("done");
+    }
+
+    // JUSTIFICATION-A3: the Lead on the review of e8b96ed (point 2) asks a test of the start-side window. Tests only.
+    /**
+     * Issue #927, the start-side window of the review of e8b96ed (point 2), on a fabricated server: its start transaction
+     * begins before a read looks at the locks, and it takes the token's lock and writes the job only after that look. The
+     * look missed the lock, so the read can tell the job alive only by its start time. Written with
+     * {@code clock_timestamp()}, as startJob writes it since that review, the start is later than the look and the job
+     * reads running; written with {@code now()}, the start transaction's begin, it is earlier and the job read interrupted.
+     * startJob itself takes the lock before its transaction begins ({@code claim.holdJob(token)}, then
+     * {@code tx.executeWithoutResult}), so either way it is safe; {@code clock_timestamp()} keeps it so whatever the order.
+     */
+    @Test
+    void aStartWhoseTransactionBeganBeforeTheLookReadsRunningWithItsClockTime() throws Exception {
+        assertThat(readAcrossAStartBegunBeforeTheLook("clock_timestamp()").state())
+                .as("written with clock_timestamp()")
+                .isEqualTo("running");
+        ImportRuns.Job withNow = readAcrossAStartBegunBeforeTheLook("now()");
+        assertThat(withNow.state()).as("written with now()").isEqualTo("failed");
+        assertThat(withNow.failureCode()).isEqualTo(ImportJobs.INTERRUPTED);
+    }
+
+    /** A read held after its look while a fabricated server, its transaction begun before, starts a job with {@code at}. */
+    ImportRuns.Job readAcrossAStartBegunBeforeTheLook(String at) throws Exception {
+        UUID runId = emptyRun();
+        UUID token = UUID.randomUUID();
+        try (Connection server = TestDatabase.ownerDataSource().getConnection();
+                ReadWindow window = new ReadWindow(ReadWindow.LOCKS_READ)) {
+            server.setAutoCommit(false);
+            try (Statement begin = server.createStatement()) {
+                // The transaction begins here: now() is fixed before the look.
+                begin.execute("SELECT now()");
+            }
+            var read = window.enter(() -> as(() -> runs.get(runId).job()));
+            try (PreparedStatement lock = server.prepareStatement("SELECT pg_advisory_lock(hashtextextended(?, 0))")) {
+                lock.setString(1, "core.imports.job:" + token);
+                lock.execute();
+            }
+            try (PreparedStatement start = server.prepareStatement("UPDATE import_runs SET job_kind = 'dry_run',"
+                    + " job_by = ?, job_started_at = " + at + ", job_token = ? WHERE id = ?")) {
+                start.setObject(1, staff);
+                start.setObject(2, token);
+                start.setObject(3, runId);
+                assertThat(start.executeUpdate()).isEqualTo(1);
+            }
+            server.commit();
+            try {
+                return window.leave(read);
+            } finally {
+                try (Statement unlock = server.createStatement()) {
+                    unlock.execute("SELECT pg_advisory_unlock_all()");
+                }
+                server.commit();
+            }
+        }
+    }
+
+    @Autowired
+    ReconciliationService reconciliation;
+
+    /**
+     * Issue #927 for the sign-off (#874): its job ends the way a check's does (startJob), and the sign-off screen's list
+     * reads it with the same look at the locks. A list held after that look while the job stamps done and gives its lock
+     * back, in that order, reads it done, never {@code interrupted}; one holding a REPEATABLE READ snapshot taken before
+     * the end reads it running, where the old read on that snapshot says interrupted. The job is the fabricated
+     * server's, as above.
+     */
+    @Test
+    void theSignOffListReadAcrossTheEndOfASignOffJobReadsItDone() throws Exception {
+        UUID runId = as(() -> runs.open(staff).id());
+        UUID token = UUID.randomUUID();
+        try (Connection server = claimAs(token)) {
+            TestDatabase.owner().sql("""
+                            UPDATE import_runs SET status = 'committed', committed_at = now(), job_kind = 'sign_off',
+                                   job_by = ?, job_started_at = now(), job_token = ?
+                             WHERE id = ?
+                            """).params(staff, token, runId).update();
+            try (ReadWindow window = new ReadWindow(ReadWindow.LOCKS_READ)) {
+                var read = window.enter(() -> as(() -> reconciliation.forSignOff()));
+                var onOldSnapshot = window.enter(() -> onOneSnapshot(runId, () -> reconciliation.forSignOff()));
+                TestDatabase.owner()
+                        .sql("UPDATE import_runs SET job_finished_at = now() WHERE id = ?")
+                        .param(runId)
+                        .update();
+                try (Statement unlock = server.createStatement()) {
+                    unlock.execute("SELECT pg_advisory_unlock_all()");
+                }
+                List<ImportReconciliation.RunSummary> list = window.leave(read);
+                assertThat(list)
+                        .filteredOn(r -> r.runId().equals(runId))
+                        .singleElement()
+                        .satisfies(r ->
+                                assertThat(r.job().state()).as("%s", r.job()).isEqualTo("done"));
+                SnapshotRead<List<ImportReconciliation.RunSummary>> held = window.leave(onOldSnapshot);
+                assertThat(held.oldReadSaysInterrupted())
+                        .as("the old read inside the window")
+                        .isTrue();
+                assertThat(held.read())
+                        .filteredOn(r -> r.runId().equals(runId))
+                        .singleElement()
+                        .satisfies(r -> assertThat(r.job().state())
+                                .as("on the same snapshot: %s", r.job())
+                                .isEqualTo("running"));
+            }
         }
     }
 

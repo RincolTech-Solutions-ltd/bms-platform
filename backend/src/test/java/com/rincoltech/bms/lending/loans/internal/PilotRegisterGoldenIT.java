@@ -45,10 +45,11 @@ import tools.jackson.databind.json.JsonMapper;
  * in the background (202, polled), the review with the standard resolutions of 13.12, the dry run in the background, ready,
  * the dump recorded and checked from the operator portal, the commit refused by the portal before approval, the maker's
  * {@code import_commit} request refused to the maker and approved by a checker, the commit started from the portal and run
- * on in the background, the reconciliation and the sign-off in the background to {@code signed_off}. Two steps have no
- * route on main and are shortcuts here: the cutover moment of 13.12 (30 June 2026, 21:00 in Kampala) is set on the run by
- * the owner role, and the decision that the requested principal was disbursed (13.8 row 15) is recorded through
- * {@code ImportRuns.recordPolicy}, dated the business's today. It asserts the issues of the 13.12 table as the check stored
+ * on in the background, the reconciliation and the sign-off in the background to {@code signed_off}. Three steps have no
+ * route on main and are shortcuts here: the mapping is saved through {@code ImportMappings.save}, the cutover moment of
+ * 13.12 (30 June 2026, 21:00 in Kampala) is set on the run by direct SQL as the database owner, and the decision that the
+ * requested principal was disbursed (13.8 row 15) is recorded through {@code ImportRuns.recordPolicy}, dated the
+ * business's today. It asserts the issues of the 13.12 table as the check stored
  * them and everything 13.12 says the commit creates, read from the lending tables and the ledger, and the reconciliation's
  * counts and loan principal.
  * {@code LendingLoansV1TemplateIT} runs the same register beside a second branch's through the services; this one is the
@@ -198,14 +199,23 @@ class PilotRegisterGoldenIT extends IntegrationTest {
         assertThat(approved.getStatusCode()).as("%s", approved.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(as(() -> runs.get(run).commitApproved())).isTrue();
 
-        // The commit, started from the operator portal and run on in the background; a stop or a failure ends the wait.
+        // The commit, started from the operator portal and run on in the background: waited for while the run is ready
+        // (not yet moved on) or committing and its loop has not stopped; a stop or a failure ends the wait. An approval
+        // is no status of a run (commit_approved_by), so a run awaiting it reads ready. The start moves the run to
+        // committing before it answers 202, so a run still ready 10 seconds after an accepted start fails at once
+        // (the Lead on the review of e8b96ed, point 8).
         ResponseEntity<JsonNode> start = platform.post(portal + "/start", null, token);
         assertThat(start.getStatusCode()).as("%s", start.getBody()).isEqualTo(HttpStatus.ACCEPTED);
         long until = System.nanoTime() + TimeUnit.MINUTES.toNanos(2);
+        long readyUntil = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         JsonNode state = send(maker, MANAGE, HttpMethod.GET, base, null).getBody();
-        while ("committing".equals(state.get("status").asString())
-                && state.get("loop_stopped").isNull()
+        while (List.of("ready", "committing").contains(state.path("status").asString())
+                && (state.path("loop_stopped").isMissingNode()
+                        || state.path("loop_stopped").isNull())
                 && System.nanoTime() < until) {
+            assertThat("ready".equals(state.path("status").asString()) && System.nanoTime() > readyUntil)
+                    .as("an accepted start left the run ready for 10 seconds: %s", state)
+                    .isFalse();
             Thread.sleep(100);
             state = send(maker, MANAGE, HttpMethod.GET, base, null).getBody();
         }
@@ -367,8 +377,8 @@ class PilotRegisterGoldenIT extends IntegrationTest {
                 .build()
                 .readValue(Files.readString(LendingLoansV1TemplateIT.MAPPING), new TypeReference<>() {});
         byte[] bytes = Files.readAllBytes(LendingLoansV1TemplateIT.PILOT);
-        // No route saves a mapping or sets the cutover on main: the mapping through the service, the cutover by the
-        // owner.
+        // No route saves a mapping or sets the cutover on main: the mapping through the service, the cutover by direct
+        // SQL as the database owner.
         UUID mapping =
                 as(() -> mappings.save("pilot-register", document, maker, null).id());
         ResponseEntity<JsonNode> opened = send(maker, MANAGE, HttpMethod.POST, "/api/v1/imports/runs", null);
