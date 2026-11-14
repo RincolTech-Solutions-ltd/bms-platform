@@ -45,7 +45,7 @@ export function ItemLink({ productId, branch, children }: { productId: string | 
   const me = useOptionalStaff()?.me;
   const router = useRouter({ warn: false });
   if (!productId || !me || !router || !canUse(me, 'stock')) return <>{children}</>;
-  return <Link className="figure-link" to="/staff/retail/items/$productId" params={{ productId }} search={(branch ? { branch } : {}) as never}>{children}</Link>;
+  return <Link className="figure-link" to="/staff/retail/items/$productId" params={{ productId }} search={{ branch }}>{children}</Link>;
 }
 
 /**

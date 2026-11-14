@@ -45,6 +45,9 @@ const ITEM_3 = '00000000-0000-4000-8000-0000000b0003';
 const SALE_2 = '5eed0000-0000-4000-8000-000000000002';
 const ITEM_PAGE = `/staff/retail/items/${ITEM_3}`;
 const nameOf = (id: string | undefined) => (id === BRANCH_A ? 'Test Branch A' : id === BRANCH_B ? 'Test Branch B' : 'Test Branch Far');
+/** A fixture checked against the API type `T` (an object literal passed here gets the excess property check). */
+const as = <T,>(value: T): T => value;
+type Line<T extends { lines?: unknown }> = NonNullable<T['lines']> extends (infer L)[] ? L : never;
 
 beforeEach(() => {
   Object.assign(retail, createMockRetail());
@@ -86,21 +89,21 @@ describe('the sale page refuses in plain words (#336, point 3)', () => {
 });
 
 describe('the lines of an order, a credit note and a quotation open their item (#336, point 2)', () => {
-  const orderLine = { line_no: 1, product_id: ITEM_3, description: 'Test bulb', qty: '2', unit: 'pc', unit_price_minor: 1500, line_total_minor: 3000 };
-
   it('a customer order', () => {
-    show(<OrderSummary order={{ id: 'o1', order_no: 'ORD-0001', status: 'confirmed', branch_id: BRANCH_B, lines: [orderLine] } as Order} branchName="Test Branch B" />);
+    const line = as<Line<Order>>({ line_no: 1, product_id: ITEM_3, description: 'Test bulb', qty: '2', unit: 'pc', unit_price_minor: 1500, line_total_minor: 3000 });
+    show(<OrderSummary order={as<Order>({ id: 'o1', order_no: 'ORD-0001', status: 'confirmed', branch_id: BRANCH_B, lines: [line] })} branchName="Test Branch B" />);
     expect(hrefs('Test bulb')).toEqual([ITEM_PAGE]);
   });
 
   it('a credit note', () => {
-    const note = { id: 'r1', credit_note_no: 'CN-0001', sale_id: SALE_2, sale_no: 'S-900002', returned_on: '2026-10-01', lines: [{ id: 'rl1', product_id: ITEM_3, description: 'Test bulb', qty: '1.000', line_total_minor: 1500 }] } as SaleReturn;
+    const note = as<SaleReturn>({ id: 'r1', credit_note_no: 'CN-0001', sale_id: SALE_2, sale_no: 'S-900002', returned_on: '2026-10-01', lines: [{ id: 'rl1', product_id: ITEM_3, description: 'Test bulb', qty: '1.000', line_total_minor: 1500 }] });
     show(<CreditNoteView note={note} nameOf={nameOf} />);
     expect(hrefs(/Test bulb/)).toEqual([ITEM_PAGE]);
   });
 
   it('a quotation, and its branch', () => {
-    const q = { id: 'q1', number: 'QT-0001', status: 'open', branch_id: BRANCH_B, quote_date: '2026-10-01', valid_until: '2026-10-15', total_minor: 3000, lines: [orderLine] } as Quotation;
+    const line = as<Line<Quotation>>({ line_no: 1, product_id: ITEM_3, description: 'Test bulb', qty: '2', unit: 'pc', unit_price_minor: 1500, line_total_minor: 3000 });
+    const q = as<Quotation>({ id: 'q1', number: 'QT-0001', status: 'open', branch_id: BRANCH_B, quote_date: '2026-10-01', valid_until: '2026-10-15', total_minor: 3000, lines: [line] });
     show(<QuotationCard q={q} branchName="Test Branch B" />);
     expect(hrefs('Test bulb')).toEqual([ITEM_PAGE]);
     expect(hrefs('Test Branch B')).toEqual([`/staff/retail/branches/${BRANCH_B}`]);
@@ -111,20 +114,20 @@ describe('the branch named on a list row opens it (#336)', () => {
   const PAGE = `/staff/retail/branches/${BRANCH_B}`;
   it('a delivery, a credit note, a supplier payment and a document', () => {
     show(<ul>
-      <ReceiptRow row={{ id: 'g1', receipt_no: 'GR-0001', status: 'posted', branch_id: BRANCH_B } as GoodsReceipt} branchName="Test Branch B" />
-      <ReturnRow row={{ id: 'r1', credit_note_no: 'CN-0001', branch_id: BRANCH_B } as SaleReturn} branchName="Test Branch B" />
-      <PaymentRow row={{ id: 'sp1', payment_no: 'SP-0001', status: 'posted', method: 'cash', branch_id: BRANCH_B } as SupplierPayment} branchName="Test Branch B" />
-      <DocumentCard doc={{ id: 'd1', number: 'INV-0001', type: 'invoice', status: 'issued', branch_id: BRANCH_B } as RetailDocument} branchName="Test Branch B" />
+      <ReceiptRow row={as<GoodsReceipt>({ id: 'g1', receipt_no: 'GR-0001', status: 'posted', branch_id: BRANCH_B })} branchName="Test Branch B" />
+      <ReturnRow row={as<SaleReturn>({ id: 'r1', credit_note_no: 'CN-0001', branch_id: BRANCH_B })} branchName="Test Branch B" />
+      <PaymentRow row={as<SupplierPayment>({ id: 'sp1', payment_no: 'SP-0001', status: 'posted', method: 'cash', branch_id: BRANCH_B })} branchName="Test Branch B" />
+      <DocumentCard doc={as<RetailDocument>({ id: 'd1', number: 'INV-0001', type: 'invoice', status: 'issued', branch_id: BRANCH_B })} branchName="Test Branch B" />
     </ul>);
     expect(hrefs('Test Branch B')).toEqual([PAGE, PAGE, PAGE, PAGE]);
   });
 });
 
 describe('Stores and shops for a seller (#336, point 4)', () => {
-  const report = {
+  const report = as<StockByLocation>({
     branches: [{ id: BRANCH_A, code: 'BR1', name: 'Test Branch A', role: 'shop' }, { id: FAR, code: 'BR9', name: 'Test Branch Far', role: 'shop' }],
     items: [{ product_id: ITEM_3, description: 'Test bulb', unit: 'pc', combined_qty: '6.000', balances: [{ branch_id: BRANCH_A, qty: '4.000' }, { branch_id: FAR, qty: '2.000' }] }],
-  } as StockByLocation;
+  });
 
   it('links a branch the seller works at and leaves one they do not as plain text', () => {
     show(<LocationTable report={report} />, mockMe('sales'));
@@ -149,7 +152,7 @@ describe('the rest of the branch links of point 1 (#336)', () => {
 
   it('the item page: the shop of each movement', () => {
     const item: ItemStock = { product_id: ITEM_3, code: 'TST-0003', description: 'Test bulb', unit: 'pc', total_qty: '2.000', active: true, shops: [{ branch_id: BRANCH_B, code: 'BR2', name: 'Test Branch B', closed: false, qty: '2.000', negative: false }] };
-    const move = { id: 'm1', at: `${businessToday()}T09:00:00Z`, branch_id: BRANCH_B, product_id: ITEM_3, unit: 'pc', kind: 'purchase', qty: '2.000', balance_after: '2.000', source_type: 'retail.purchase', historical: false } as StockMovement;
+    const move = as<StockMovement>({ id: 'm1', at: `${businessToday()}T09:00:00Z`, branch_id: BRANCH_B, product_id: ITEM_3, unit: 'pc', kind: 'purchase', qty: '2.000', balance_after: '2.000', source_type: 'retail.purchase', historical: false });
     show(<ItemPageView item={item} productId={ITEM_3} />, ADMIN, (c) => c.setQueryData(movementsKey(ITEM_3, '', '', ''), { pages: [{ items: [move] }], pageParams: [''] }));
     const moves = screen.getAllByTestId('item-move');
     expect(within(moves[0] as HTMLElement).getByRole('link', { name: 'Test Branch B' }).getAttribute('href')).toBe(`/staff/retail/branches/${BRANCH_B}`);
@@ -202,7 +205,6 @@ describe('the sale page names its crumb after the sale (#336, point 7)', () => {
 });
 
 describe('every link reads a field the API contract has (#336, point 5)', () => {
-  type Line<T extends { lines?: unknown }> = NonNullable<T['lines']> extends (infer L)[] ? L : never;
   it('has the item id on every line that links its item', () => {
     expectTypeOf<Line<GoodsReceipt>>().toHaveProperty('product_id');
     expectTypeOf<Line<PurchaseOrder>>().toHaveProperty('product_id');

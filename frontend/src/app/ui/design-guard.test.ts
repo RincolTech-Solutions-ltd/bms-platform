@@ -812,6 +812,20 @@ function sheetActionProblems(source: string): string[] {
 }
 
 /** The rules of `css` whose selector ends on a target (the target itself, not an icon inside it) and can shrink it. */
+/**
+ * The ::before and ::after rules that would widen a tap area with an invisible box (review of #931): one sized to the target
+ * token, one placed out past its element by a negative offset, or one given a target's height or width in pixels (44 or more).
+ */
+function tapOverlays(css: string): string[] {
+  const pseudo = /::?(before|after)\b/;
+  // A negative length is a minus right against its number (`-12px`), not the minus of a calc() (`100% - 22px`).
+  const outward = /(?:^|[;\s{])(?:inset(?:-[a-z-]+)?|top|right|bottom|left)\s*:(?:[^;]*\s)?-[\d.]/;
+  const bigBox = /(?:^|[;\s{])(?:min-|max-)?(?:height|width|block-size|inline-size)\s*:\s*(?:4[4-9]|[5-9]\d|\d{3,})(?:\.\d+)?px/;
+  return rulesOf(css)
+    .filter(({ selectors, body }) => selectors.some((s) => pseudo.test(s)) && (/var\(--tap\)/.test(body) || outward.test(body) || bigBox.test(body)))
+    .map(({ selectors }) => selectors.join(', '));
+}
+
 function shrinkingButtons(css: string): string[] {
   return rulesOf(css).flatMap(({ selectors, body }) => {
     const targets = selectors.filter(namesTarget);
@@ -890,8 +904,16 @@ describe('design guard, every button class keeps the 48px target (issue #825)', 
   // Review of #931 (issue #336): a target gets its size in the layout, never from an invisible ::before or ::after box sized to
   // the target, which reaches over the button or link beside it. A pseudo element may draw (a chevron), not widen the tap area.
   it.each(allStylesheets.map((f) => relative(SRC, f)))('%s gives no ::before or ::after the size of a tap target', (file) => {
-    const overlays = rulesOf(code(file)).filter(({ selectors, body }) => selectors.some((s) => /::?(before|after)\b/.test(s)) && /var\(--tap\)/.test(body));
-    expect(overlays.map(({ selectors }) => selectors.join(', '))).toEqual([]);
+    expect(tapOverlays(code(file))).toEqual([]);
+  });
+
+  it('finds a tap overlay however it is written', () => {
+    expect(tapOverlays('.a::before { position: absolute; height: var(--tap); }')).toHaveLength(1);
+    expect(tapOverlays('.a::after { content: ""; position: absolute; inset: -12px; }')).toHaveLength(1);
+    expect(tapOverlays('.a::before { position: absolute; top: -14px; bottom: -14px; }')).toHaveLength(1);
+    expect(tapOverlays('.a:before { min-height: 48px; }')).toHaveLength(1);
+    // A chevron drawn by a pseudo element is not an overlay.
+    expect(tapOverlays('.a::after { content: ""; width: 16px; height: 16px; background: currentColor; }')).toEqual([]);
   });
 
   it('keeps the sizes on the tokens: 48px, 8px apart, at most --button-max wide from 1024px', () => {

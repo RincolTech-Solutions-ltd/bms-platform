@@ -93,7 +93,7 @@ export function TransferList({ items, onOpen, resetKey = '', more = false }: { i
             </span>
           </button>
           {/* Beside the button, not in it, so each branch opens its page (issue #336). */}
-          <span style={{ display: 'block' }}>From <BranchLink branchId={t.from_branch_id}>{label(t.from_branch_id)}</BranchLink> to <BranchLink branchId={t.to_branch_id}>{label(t.to_branch_id)}</BranchLink></span>
+          <span className="target-line" style={{ display: 'block' }}>From <BranchLink branchId={t.from_branch_id}>{label(t.from_branch_id)}</BranchLink> to <BranchLink branchId={t.to_branch_id}>{label(t.to_branch_id)}</BranchLink></span>
         </li>
       )}
     />

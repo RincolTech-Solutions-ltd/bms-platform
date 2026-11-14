@@ -844,16 +844,21 @@ p:has(> .link-row:only-child) {
 }
 
 /* A figure or a word that opens the rows behind it (issue #526): the link colour and a small chevron, no underline. */
-/* It is a full target (issue #336, review of #931): at least --tap tall, so a name in a table head or a hint line takes the
-   room of its own target in the layout and never overlaps the button or link beside it. */
 .figure-link {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  min-height: var(--tap);
   color: var(--color-link);
   font-weight: var(--weight-semibold);
   text-decoration: none;
+}
+
+/* A name that stands alone (issue #336, reviews of #931) is a full target: in a table head, or on a line of its own
+   (`.target-line`, the From and To of a stock move under its button). It takes that room in the layout, so it never overlaps
+   the button or link beside it. A name inside a sentence keeps the height of its text (docs/ui-rules.md rule 12). */
+th > .figure-link,
+.target-line > .figure-link {
+  min-height: var(--tap);
 }
 
 .figure-link::after {

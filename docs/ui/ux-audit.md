@@ -25,7 +25,7 @@ Counted over the 148 work routes (the component kit is a review page, outside th
 | Rule | Meets | Gap |
 |---|---|---|
 | 1 Progressive disclosure | 145 of 148 | 3: Feedback, Payment reconciliation, Unallocated payments |
-| 2 Cross links | 144 of 148 | 4, all buyer names or an address: the sale page's buyer, All sales opening a sale in place, Quotations, Documents. Every sale number, item name and branch name now opens its record |
+| 2 Cross links | 138 of 148 | 10, all buyer names (and All sales opening a sale in place): the sale page, All sales, Credit sales, Customer returns, Quotations, Documents, Orders, an Order, Delivery fees and cancellations, and the saved sale on Record a sale. Every sale number, item name and branch name now opens its record |
 | 3 No training needed | 141 of 148 | 7: Payment reconciliation, Unallocated payments, Orders, Notifications and app, Bring in your data, Delivery fees and cancellations, Imports to sign off |
 
 **Closed by this change (rule 2).** A sale number, an item name and a branch name could not open their record, because the
@@ -53,8 +53,10 @@ routes took no id (triage of 2 Nov 2026). Now:
   page tells an unknown address from a branch the person does not work at when it can (someone who works at every branch).
 - The sale page says "This sale was not found" in plain words for an unknown sale and for one at a branch the person may not
   read; the server answers 404 for both (`SalesService.get`, proven for another branch in `RetailOwnerDecisionsIT`).
-- `figure-link` is at least `--tap` (48px) tall, so a name in a table head or a hint line takes the room of a full target in
-  the layout and never overlaps the button or link beside it (`layout/record-links.layout.test.ts` at 412px).
+- A name that stands alone, in a table head or on a line of its own (`.target-line`), is at least `--tap` (48px) tall and
+  takes that room in the layout, so it never overlaps the button or link beside it. A name inside a sentence keeps the height
+  of its text, so a hint line does not grow (`docs/ui-rules.md` rule 12; both proven in `layout/record-links.layout.test.ts`
+  at 412px). The design guard fails a `::before` or `::after` that would widen a target by an invisible box.
 - After the second review: the lines of a customer order, a credit note and a quotation open their item, and the branch on
   a quotation, a delivery row, a credit note row, a supplier payment row and a document row opens the branch page. A sale's
   lines keep one link each (the name); the separate Open the item button there is gone. Documents show no item lines, so
@@ -139,7 +141,7 @@ No backend change: every record already had its id endpoint (`GET /retail/sales/
 | `/staff/retail/catalogue/units` | Units | `page-units` v3 | meets: short list | meets: Items on each unit (#863) | meets |
 | `/staff/retail/controls` | Controls | `page-controls` v1 | meets: grouped | meets: Open on each sale row | meets |
 | `/staff/retail/credit-control` | Credit control | `page-credit-control` v2 | meets: top lists | meets: buyer opens the account, sale opens the sale | meets |
-| `/staff/retail/credit-sales` | Credit sales | `page-credit-sales` v3 | meets: grouped by year, month, day (#328) | meets: `?sale=` opens a sale | meets |
+| `/staff/retail/credit-sales` | Credit sales | `page-credit-sales` v3 | meets: grouped by year, month, day (#328) | gap: each row's buyer name is plain text (`?sale=` opens a sale) | meets |
 | `/staff/retail/customer-ageing` | Customer ageing | `page-customer-ageing` v2 | meets: grouped by age | meets: buyer opens the account | meets |
 | `/staff/retail/customer-groups` | Customer groups | `page-customer-groups` v2 | meets: short list | meets: Credit buyers and Price lists links | meets |
 | `/staff/retail/documents` | Documents | `page-documents` v1 | meets: paged | gap: the buyer name is plain text (each document's branch opens, this change; no item lines are shown) | meets |
@@ -156,9 +158,9 @@ No backend change: every record already had its id endpoint (`GET /retail/sales/
 | `/staff/retail/landed-costs/$landedCostId` | Landed cost | `page-landed-cost` v1 | meets: one record | meets: supplier, delivery and each item open (this change) | meets |
 | `/staff/retail/landed-costs/new` | New landed cost | `page-landed-cost-new` v1 | meets: one form | meets | meets |
 | `/staff/retail/margins` | Margins | `page-margins` v1 | meets: top lists | meets: sales total opens All sales; items open the item page | meets |
-| `/staff/retail/orders` | Orders | `page-orders` v1 | meets: by step, Show more | meets: the shop opens the branch, each line its item, a delivered order's sale opens it (this change) | gap: while Delivered is open, New order and Save: delivered and paid are both brand buttons |
-| `/staff/retail/orders-report` | Delivery fees and cancellations | `page-orders-report` v1 | meets: bounded by dates, grouped | meets: each order opens | gap: "No orders delivered on these days." names no next step |
-| `/staff/retail/orders/$orderId` | Order | `page-order` v2 | meets: one record | meets: Open sale; the shop opens the branch and each line its item (this change) | meets |
+| `/staff/retail/orders` | Orders | `page-orders` v1 | meets: by step, Show more | gap: the customer's name is plain text (the shop opens the branch, each line its item, a delivered order's sale opens it, this change) | gap: while Delivered is open, New order and Save: delivered and paid are both brand buttons |
+| `/staff/retail/orders-report` | Delivery fees and cancellations | `page-orders-report` v1 | meets: bounded by dates, grouped | gap: the customer's name on a cancelled order is plain text (each order opens) | gap: "No orders delivered on these days." names no next step |
+| `/staff/retail/orders/$orderId` | Order | `page-order` v2 | meets: one record | gap: the customer's name is plain text (Open sale; the shop opens the branch and each line its item, this change) | meets |
 | `/staff/retail/price-lists` | Price lists | `page-price-lists` v1 | meets: one list at a time | meets: each item opens the item page (this change) | meets |
 | `/staff/retail/profit` | Daily profit | `page-profit` v2 | meets: bounded by dates, grouped | meets: branches open the branch page; See the sales behind it | meets |
 | `/staff/retail/purchase-orders` | Purchase orders | `page-purchase-orders` v1 | meets: paged | meets: each order opens | meets |
@@ -171,11 +173,11 @@ No backend change: every record already had its id endpoint (`GET /retail/sales/
 | `/staff/retail/restock` | Buy stock | `page-restock` v6 | meets: one form | meets | meets |
 | `/staff/retail/restocks` | Past purchases | `page-restocks` v3 | meets: grouped by a chain (#350) | meets: each item opens the item page (this change) | meets |
 | `/staff/retail/restocks/$purchaseId` | Purchase | `page-purchase` v1 | meets: one record | meets: each item opens the item page (this change) | meets |
-| `/staff/retail/returns` | Customer returns | `page-returns` v1 | meets: paged | meets: sale opens the sale | meets |
+| `/staff/retail/returns` | Customer returns | `page-returns` v1 | meets: paged | gap: the buyer name is plain text (the sale and the branch open, this change) | meets |
 | `/staff/retail/returns/$returnId` | Credit note | `page-credit-note` v1 | meets: one record | meets: buyer, sale and each line's item open (this change) | meets |
 | `/staff/retail/returns/new/$saleId` | Take goods back | `page-return-new` v1 | meets: one form | meets: buyer opens the account | meets |
-| `/staff/retail/sale` | Record a sale | `page-sale` v4 | meets: one form | meets | meets |
-| `/staff/retail/sales` | All sales | `page-sales` v3 | meets: grouped by year, month, day (#328, #341) | gap: a sale opens in place (`?sale=`), not at its own address `/sales/$saleId` | meets |
+| `/staff/retail/sale` | Record a sale | `page-sale` v4 | meets: one form | gap: the buyer named on the saved sale is plain text | meets |
+| `/staff/retail/sales` | All sales | `page-sales` v3 | meets: grouped by year, month, day (#328, #341) | gap: a sale opens in place (`?sale=`), not at its own address `/sales/$saleId`; each row's buyer name is plain text | meets |
 | `/staff/retail/sales-analysis` | Sales analysis | `page-sales-analysis` v1 | meets: top lists | meets: totals open All sales; items and branches open their page | meets |
 | `/staff/retail/sales/$saleId` | Sale (new) | `page-sale-record` v1 | meets: one record | gap: the buyer name is plain text (the branch and each line's item open, this change) | meets: an unknown sale, or one at a branch the person does not work at, reads as not found |
 | `/staff/retail/savings` | Savings | `page-savings` v1 | meets: grouped | meets: the saved summary's branch opens the branch page (this change) | meets |
@@ -230,11 +232,11 @@ read in the code on 2026-11-14 for this audit.
 Each is one screen ticket, most valuable first: the gaps that a new person meets on a daily screen come before the rare
 ones.
 
-1. Sale page and All sales: the buyer name opens the buyer's account, and a sale opened from the list goes to `/staff/retail/sales/$saleId` (rule 2).
+1. All sales: a sale opened from the list goes to `/staff/retail/sales/$saleId`, so the address is the record (rule 2).
 2. Unallocated payments: page the receipts by month with Show more, one brand button per view, and an empty line that says where a payment comes from (rules 1 and 3).
 3. Payment reconciliation: group findings by kind with closed rows, page the statement lines, keep Run it now the one primary, say what to upload when empty (rules 1 and 3).
 4. Orders: New order is plain while a delivery is being recorded, so Save: delivered and paid is the one primary (rule 3).
-5. Quotations and Documents: the buyer name opens the buyer's account (rule 2).
+5. Buyer names: where the buyer has an account, the name opens it, through one shared `BuyerLink` beside `SaleLink`. It covers the sale page, the All sales and Credit sales rows, Customer returns, Quotations, Documents, Orders and an Order, Delivery fees and cancellations, and the saved sale on Record a sale (rule 2).
 6. Feedback: What you sent shows the last ten with Show more, each message closed to its first line (rule 1).
 7. Notifications and app: the empty device line points to the switch above it (rule 3).
 8. Bring in your data: the empty line names Start a new import (rule 3).
