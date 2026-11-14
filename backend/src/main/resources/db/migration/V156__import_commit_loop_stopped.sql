@@ -1,5 +1,5 @@
 -- V156: a background import commit or resume that stops by itself says so on the run (issue #896, refs #141, #886 and
--- #922; SDD chapter 13 section 13.11.1, chapter 7 section 7.11.3). Directly after V155. Expand only, safe on a populated
+-- #922; SDD chapter 13 section 13.14.1, chapter 7 section 7.11.3). Directly after V155. Expand only, safe on a populated
 -- database: four nullable columns and two CHECKs on import_runs, one new invoker function, and platform_import_runs_report
 -- (V148) replaced with the same signature to add one key to each run's metrics. No table, index, trigger or grant on a
 -- table changes: bms_app already has SELECT, INSERT and UPDATE on import_runs (V127), which is under forced row-level

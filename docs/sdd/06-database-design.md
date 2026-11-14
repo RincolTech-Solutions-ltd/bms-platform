@@ -1565,6 +1565,19 @@ job with V154's columns (`job_by` the signer, the outcome a refusal's code such 
 row already holds NULL, `check` or `dry_run`. No column, index, function, trigger or grant changes; the typed name is never
 written to `import_runs`, only to `import_signoffs.signed_name` (V144) once signed.
 
+Changed by `V156__import_commit_loop_stopped.sql` (issue #896, chapter 13 section 13.14.1), expand only: four nullable
+columns on `import_runs`. `loop_token` (uuid) and `loop_started_at` are the portal commit or resume loop alive, the token's
+advisory lock (`hashtextextended('core.imports.job:' || loop_token, 0)`, V154's key family) held by the loop's claim
+session. `loop_stopped_at` and `loop_stopped_code` (varchar(64), a code held by a CHECK to `^[A-Za-z][A-Za-z_]{0,63}$`,
+never a message) are stamped in one transaction with the operators' outbox notice `imports.commit_stopped` when the loop
+stops by itself, and cleared by a resume. The CHECK `import_runs_loop_whole`: a token only with its start, the stop's time
+and code both set or both NULL, and no token beside a stop. The invoker function `import_run_loop_stopped(run)` answers
+NULL unless the run is `committing` and either stamped or holds a token whose lock no session holds (a dead loop, read
+`interrupted` at the later of its start and its last committed batch), then `{at, code}`. `platform_import_runs_report`
+(V148) is replaced with the same signature to add `loop_stopped` to each run's metrics. No index, trigger or table grant
+changes; `ADD COLUMN` without a default rewrites no row, under `SET LOCAL lock_timeout = '5s'`. The purge leaves the
+columns (codes and times, `ImportPurgeIT`).
+
 ## 6.6 General ledger (RLS)
 
 ### 6.6.1 Tables
