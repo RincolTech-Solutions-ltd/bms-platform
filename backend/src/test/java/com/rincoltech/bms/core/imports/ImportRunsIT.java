@@ -484,11 +484,14 @@ class ImportRunsIT extends IntegrationTest {
                 .single();
     }
 
-    /** Ends the session that holds the business's loop key, as a redeploy ends the process that held it. */
+    /**
+     * Ends the session that holds the business's loop key, as a redeploy ends the process that held it, and waits up to 5
+     * seconds for it to exit, so its locks are gone when this returns (review of c93bd8e).
+     */
     void killTheLoopSession() {
         List<Boolean> ended = JdbcClient.create(TestDatabase.appDataSource())
                 .sql("""
-                        SELECT pg_terminate_backend(pid) FROM pg_locks
+                        SELECT pg_terminate_backend(pid, 5000) FROM pg_locks
                          WHERE locktype = 'advisory' AND granted AND objsubid = 1
                            AND ((classid::bigint << 32) | objid::bigint)
                                = hashtextextended('core.imports.loop:' || ?, 0)
@@ -668,6 +671,55 @@ class ImportRunsIT extends IntegrationTest {
                 .sql("UPDATE platform_import_settings SET commit_enabled = false WHERE id = 1")
                 .update());
         assertThat(startInline(run, writer, operatorId)).isEqualTo(CommitOutcome.HALTED);
+        assertThat(batchStatus(run.id(), 1)).isEqualTo("pending");
+        assertThat(audits("core.import_run.halted")).isEqualTo(1);
+        assertNotStopped(run.id());
+    }
+
+    /**
+     * A portal resume of the run whose batches go on in this thread; how the loop ended. The run is first left committing
+     * by a start whose work was closed unrun, so it reads interrupted until the resume clears it.
+     */
+    Object resumeInline(Run run, BatchWriter writer, UUID operatorId) {
+        as(t, () -> {
+            runs.startCommit(script(run.id(), NOTHING), operatorId, ImportRuns.Work::close);
+            return null;
+        });
+        assertThat(as(t, () -> runs.get(run.id())).loopStopped().code()).isEqualTo("interrupted");
+        List<Object> ended = new CopyOnWriteArrayList<>();
+        as(t, () -> {
+            runs.startResume(script(run.id(), writer), operatorId, inline(ended));
+            return null;
+        });
+        assertThat(ended).hasSize(1);
+        return ended.get(0);
+    }
+
+    // JUSTIFICATION-A3: the review of c93bd8e asks the Stop and kill switch cases through startResume too. Tests only.
+    /** Issue #896, review of c93bd8e: Stop pressed mid-batch on a portal resume ends it as asked, as on a start. */
+    @Test
+    void aPortalResumeStoppedMidBatchByTheStopButtonIsNotStampedAndSendsNothing() {
+        Run run = readyRun(1);
+        UUID operatorId = Api.platformUser(Api.email("resume-stop-button"));
+        BatchWriter writer = midBatch(() -> TestDatabase.owner()
+                .sql("UPDATE import_runs SET halt_requested = true WHERE id = ?")
+                .param(run.id())
+                .update());
+        assertThat(resumeInline(run, writer, operatorId)).isEqualTo(CommitOutcome.HALTED);
+        assertThat(batchStatus(run.id(), 1)).isEqualTo("pending");
+        assertThat(as(t, () -> runs.get(run.id())).haltRequested()).isTrue();
+        assertNotStopped(run.id());
+    }
+
+    /** Issue #896, review of c93bd8e: the kill switch mid-batch on a portal resume is not a stop by itself either. */
+    @Test
+    void aPortalResumeStoppedMidBatchByTheKillSwitchIsNotStampedAndSendsNothing() {
+        Run run = readyRun(1);
+        UUID operatorId = Api.platformUser(Api.email("resume-kill-switch"));
+        BatchWriter writer = midBatch(() -> TestDatabase.owner()
+                .sql("UPDATE platform_import_settings SET commit_enabled = false WHERE id = 1")
+                .update());
+        assertThat(resumeInline(run, writer, operatorId)).isEqualTo(CommitOutcome.HALTED);
         assertThat(batchStatus(run.id(), 1)).isEqualTo("pending");
         assertThat(audits("core.import_run.halted")).isEqualTo(1);
         assertNotStopped(run.id());

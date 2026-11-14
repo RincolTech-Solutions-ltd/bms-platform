@@ -279,8 +279,8 @@ class ImportJobsIT extends IntegrationTest {
         List<String> checks = TestDatabase.owner().sql("""
                         SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c
                          WHERE c.conrelid = 'import_runs'::regclass AND c.contype = 'c'
-                           AND (pg_get_constraintdef(c.oid) LIKE '%job_failure_code%~%'
-                                OR pg_get_constraintdef(c.oid) LIKE '%loop_stopped_code%~%')
+                           AND c.conname IN ('import_runs_job_failure_code_check',
+                                             'import_runs_loop_stopped_code_check')
                         """).query(String.class).list();
         assertThat(checks)
                 .hasSize(2)
