@@ -939,9 +939,8 @@ class ImportRunService implements ImportRuns {
             });
         } catch (RuntimeException e) {
             // Only a RuntimeException is caught: an Error here (out of memory, say) goes up in place of the loop's own
-            // throwable and the stamp's transaction rolls back; the claim's close then drops the token's lock, so the
-            // run
-            // still reads interrupted (review of c93bd8e).
+            // throwable and the stamp's transaction rolls back; the claim's close then drops the token's lock, so
+            // the run still reads interrupted (review of c93bd8e).
             log.warn(
                     "import commit loop of run {} not stamped: {}",
                     runId,
