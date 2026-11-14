@@ -1,5 +1,5 @@
 import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { Link, createLazyRoute } from '@tanstack/react-router';
+import { Link, createLazyRoute, useRouter } from '@tanstack/react-router';
 import { BranchLink, ItemLink, useAddress } from './screen-link';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Highlight, NoResults, SearchBox } from '../../../app/ui/SearchBox';
@@ -20,7 +20,7 @@ import { SaleDocuments } from './documents-ui';
 import { ShareReceipt } from './receipt-share';
 import { useRootFigures } from './sales-grouped';
 import { SalesChain, useChainView } from './sales-chain';
-import { chainUser, effectiveChain, usableChain, usableLevels, type Selection } from './sales-chain-state';
+import { chainUser, effectiveChain, readChain, usableChain, usableLevels, type OpenGroups, type Selection } from './sales-chain-state';
 import { GroupBy } from './sales-group-by';
 import { useSalesVariantLevel } from './catalogue-variants';
 import { PaySaleAction, VoidSaleAction, WriteOffSaleAction } from './sale-actions';
@@ -361,23 +361,55 @@ export function CreditSales() {
   );
 }
 
+/**
+ * What All sales had chosen and open when it opened a sale (issue #933). The sale opens at its own address, a route of its own,
+ * so Back to the list finds the same days, searches and groups open, once. In memory only: this tab, this person, this branch
+ * choice and this chain of levels.
+ */
+interface AllSalesKept { user: string; key: string; chain: string; from: string; to: string; buyer: string; method: SalePayment | ''; item: string; productId: string; open: OpenGroups }
+let allSalesKept: AllSalesKept | null = null;
+
 export function AllSales() {
   const { all, branchId } = useBranchView();
   const nameOf = useBranchName();
   const today = businessToday();
-  // Empty to start with: every year shows, grouped by the chain the person chose, with nothing open (issues #328, #341).
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState(today);
-  const search = useLiveSearch();
-  const [method, setMethod] = useState<SalePayment | ''>('');
-  const itemBox = useLiveSearch();
-  const itemSearch = itemBox.term;
-  const [productId, setProductId] = useState('');
-  useEffect(() => setProductId(''), [itemSearch]);
-  const [open, setOpen] = useOpenSale(all ? 'all' : (branchId ?? ''), '/staff/retail/sales');
-  const products = useQuery({ queryKey: ['retail', 'products', 'all', itemSearch], queryFn: ({ signal }) => retail.listProducts({ query: itemSearch, signal }), enabled: itemSearch !== '', placeholderData: keepPreviousData });
   const { me } = useStaff();
-  const view = useChainView(chainUser(me), 'all');
+  const key = all ? 'all' : (branchId ?? '');
+  const user = chainUser(me);
+  const [kept] = useState(() => {
+    const k = allSalesKept;
+    return k && k.user === user && k.key === key && k.chain === JSON.stringify(readChain(user, 'all')) ? k : null;
+  });
+  useEffect(() => { allSalesKept = null; }, []);
+  // Empty to start with: every year shows, grouped by the chain the person chose, with nothing open (issues #328, #341).
+  const [from, setFrom] = useState(kept?.from ?? '');
+  const [to, setTo] = useState(kept?.to ?? today);
+  const search = useLiveSearch({ initialText: kept?.buyer });
+  const [method, setMethod] = useState<SalePayment | ''>(kept?.method ?? '');
+  const itemBox = useLiveSearch({ initialText: kept?.item });
+  const itemSearch = itemBox.term;
+  const [productId, setProductId] = useState(kept?.productId ?? '');
+  // A new item search clears the item chosen; the one kept from before a sale was opened stays.
+  const searchedItem = useRef(itemSearch);
+  useEffect(() => {
+    if (searchedItem.current === itemSearch) return;
+    searchedItem.current = itemSearch;
+    setProductId('');
+  }, [itemSearch]);
+  const [open, setOpen] = useOpenSale(key, '/staff/retail/sales');
+  const products = useQuery({ queryKey: ['retail', 'products', 'all', itemSearch], queryFn: ({ signal }) => retail.listProducts({ query: itemSearch, signal }), enabled: itemSearch !== '', placeholderData: keepPreviousData });
+  const view = useChainView(user, 'all', kept?.open);
+  // A sale opened here goes to its own address, so the address is the record (issue #933, rule 2); an old `?sale=` link is
+  // taken there too. Outside a router (a test drawing the list alone) it opens in place, as before.
+  const router = useRouter({ warn: false });
+  useEffect(() => {
+    if (router && open) void router.navigate({ to: '/staff/retail/sales/$saleId', params: { saleId: open }, replace: true });
+  }, [router, open]);
+  const openSale = (id: string) => {
+    if (!router) return setOpen(id);
+    allSalesKept = { user, key, chain: JSON.stringify(view.chain), from, to, buyer: search.text, method, item: itemBox.text, productId, open: view.open };
+    void router.navigate({ to: '/staff/retail/sales/$saleId', params: { saleId: id } });
+  };
   // Issue #384: the Size and colour level is offered once the business has an item with sizes and colours.
   const variants = useSalesVariantLevel();
   const levels = usableLevels(canRankSellers(me, all ? null : branchId), variants);
@@ -387,7 +419,7 @@ export function AllSales() {
   const figures = useRootFigures(filter, { from, to }, (all || branchId !== null) && from <= to);
   return (
     <Gate screen="salesHistory" title="All sales">
-      {open ? (
+      {open && !router ? (
         <OpenSale id={open} onClose={() => setOpen(null)} />
       ) : (
         <>
@@ -413,7 +445,7 @@ export function AllSales() {
           <SalesChain
             rootLabel="All sales" filter={filter} range={{ from: from || undefined, to }} credit={false} chain={chain} view={view} enabled={(all || branchId !== null) && from <= to}
             empty={search.term ? <NoResults term={search.term} onClear={search.clear} noun="sales" /> : undefined}
-            renderSales={(sel) => <DaySales range={sel} filter={salesFor(filter, sel)} today={today} onOpen={setOpen} branchOf={all ? nameOf : undefined} term={search.term} action={(s) => <PaySaleAction compact sale={s} today={today} />} />}
+            renderSales={(sel) => <DaySales range={sel} filter={salesFor(filter, sel)} today={today} onOpen={openSale} branchOf={all ? nameOf : undefined} term={search.term} action={(s) => <PaySaleAction compact sale={s} today={today} />} />}
           />
         </>
       )}

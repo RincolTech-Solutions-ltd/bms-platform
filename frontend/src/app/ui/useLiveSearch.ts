@@ -56,6 +56,8 @@ export interface LiveSearchOptions {
    * Referer header); none of the lending screens sets it.
    */
   urlParam?: string;
+  /** The text the box starts with when there is no `urlParam` (All sales coming back from a sale it opened, issue #933). */
+  initialText?: string;
 }
 
 export interface LiveSearchState {
@@ -181,11 +183,11 @@ export interface LiveSearch extends LiveSearchState {
 
 /** The hook every search box uses. See the notes at the top of this file. */
 export function useLiveSearch(options: LiveSearchOptions = {}): LiveSearch {
-  const { delayMs, minLength, urlParam } = options;
+  const { delayMs, minLength, urlParam, initialText = '' } = options;
   const [live] = useState(() =>
     createLiveSearch(
       { delayMs, minLength },
-      urlParam && typeof window !== 'undefined' ? termFromUrl(window.location.search, urlParam) : '',
+      urlParam && typeof window !== 'undefined' ? termFromUrl(window.location.search, urlParam) : initialText,
     ),
   );
   const state = useSyncExternalStore(live.subscribe, live.state, live.state);
