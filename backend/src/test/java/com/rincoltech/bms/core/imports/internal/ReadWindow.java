@@ -38,8 +38,12 @@ public final class ReadWindow implements AutoCloseable {
     private final ExecutorService threads = Executors.newCachedThreadPool();
     private final Consumer<String> seam;
 
+    /**
+     * Opens the window; refuses when the seam is already set, by another window or by a test that set it itself, which
+     * this one would otherwise steal, leaving that holder's reads to wait out their timeout (issue #929).
+     */
     public ReadWindow(String step) {
-        seam = at -> {
+        Consumer<String> mine = at -> {
             CountDownLatch entered = readers.get(Thread.currentThread());
             if (at.equals(step) && entered != null && entered.getCount() > 0) {
                 entered.countDown();
@@ -50,7 +54,16 @@ public final class ReadWindow implements AutoCloseable {
                 }
             }
         };
-        ImportJobs.pause = seam;
+        synchronized (ReadWindow.class) {
+            Consumer<String> holder = ImportJobs.pause;
+            if (holder != null) {
+                threads.shutdownNow();
+                throw new IllegalStateException("the seam ImportJobs.pause is already set, held by " + holder
+                        + ": close or clear it before opening this window");
+            }
+            ImportJobs.pause = mine;
+        }
+        seam = mine;
     }
 
     /** A transaction whose snapshot is taken by its first statement and kept to its end. */
@@ -87,8 +100,10 @@ public final class ReadWindow implements AutoCloseable {
     @Override
     public void close() {
         // Only this window's seam, should another window ever be open at once (review of e8b96ed, point 6).
-        if (ImportJobs.pause == seam) {
-            ImportJobs.pause = null;
+        synchronized (ReadWindow.class) {
+            if (ImportJobs.pause == seam) {
+                ImportJobs.pause = null;
+            }
         }
         leave.countDown();
         threads.shutdownNow();

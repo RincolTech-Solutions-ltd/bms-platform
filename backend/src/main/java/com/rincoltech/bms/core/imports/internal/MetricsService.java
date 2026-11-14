@@ -14,7 +14,9 @@ import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.sql.Types;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,6 +25,7 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.SqlParameterValue;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -182,7 +185,11 @@ class MetricsService implements ImportMetrics {
     private List<PlatformRun> reportRows(Instant since, int limit) {
         return jdbc.sql("SELECT tenant_slug, CAST(metrics AS text) AS metrics"
                         + " FROM platform_import_runs_report(CAST(? AS timestamptz), ?)")
-                .params(since == null ? null : Timestamp.from(since), limit)
+                // Bound typed, never as text the session's DateStyle would read (issue #929).
+                .params(
+                        new SqlParameterValue(
+                                Types.TIMESTAMP_WITH_TIMEZONE, since == null ? null : since.atOffset(ZoneOffset.UTC)),
+                        limit)
                 .query((rs, n) -> {
                     JsonNode m = mapper.readTree(rs.getString("metrics"));
                     return new PlatformRun(rs.getString("tenant_slug"), metricsOf(m, true), loopStopped(m));

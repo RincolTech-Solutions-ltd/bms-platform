@@ -5,10 +5,14 @@ import com.rincoltech.bms.core.imports.ImportRuns;
 import com.rincoltech.bms.core.jobs.TenantJobs;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.TenantContext;
+import java.sql.Array;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.sql.Types;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,9 +20,12 @@ import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.core.SqlParameterValue;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.support.SqlArrayValue;
 import org.springframework.stereotype.Component;
 
 /**
@@ -62,11 +69,13 @@ class ImportJobs {
      * #927, the lock was looked at after the statement's snapshot was taken: a job that stamped and gave its lock back in
      * between read with neither, failed {@code interrupted}. It assumes READ COMMITTED, as every caller runs it: the rows'
      * statement then takes a snapshot of its own after this look. In a REPEATABLE READ transaction whose snapshot predates
-     * the look, a job that ended between the two would read interrupted again.
+     * the look, a job that ended between the two would read interrupted again. Both columns are read typed, a
+     * {@code timestamptz} and a {@code bigint[]}, and bound back typed ({@link Held#params}), never as text, so the
+     * session's DateStyle and TimeZone cannot change what the rows' statement compares against (issue #929).
      */
     static final String HELD = """
-            SELECT CAST(statement_timestamp() AS text),
-                   CAST(coalesce(array_agg((l.classid::bigint << 32) | l.objid::bigint), '{}') AS text)
+            SELECT statement_timestamp(),
+                   coalesce(array_agg((l.classid::bigint << 32) | l.objid::bigint), '{}')
               FROM pg_locks l
              WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1""";
 
@@ -75,17 +84,18 @@ class ImportJobs {
      * token lock of the run's job was held at the look of {@link #HELD}, or the job started after that look: startJob
      * writes {@code job_started_at} with {@code clock_timestamp()} after it took the lock, so a start the look missed
      * carries a later time (review of e8b96ed, point 2). Shared by the run's read and the sign-off
-     * list's (#874, review of 03e9515, point 5).
+     * list's (#874, review of 03e9515, point 5). The keys are bound as a {@code bigint[]} and the time as a
+     * {@code timestamptz} (issue #929).
      */
     static final String ALIVE = """
-            (hashtextextended('core.imports.job:' || job_token::text, 0) = ANY(CAST(? AS bigint[]))
-             OR job_started_at > CAST(? AS timestamptz)) AS job_alive""";
+            (hashtextextended('core.imports.job:' || job_token::text, 0) = ANY(?)
+             OR job_started_at > ?) AS job_alive""";
 
     /** {@link #ALIVE} for the portal's commit loop (V156, issue #896): {@code loop_alive}, two parameters as well. */
     static final String LOOP_ALIVE = """
             (loop_token IS NOT NULL
-             AND (hashtextextended('core.imports.job:' || loop_token::text, 0) = ANY(CAST(? AS bigint[]))
-                  OR loop_started_at > CAST(? AS timestamptz))) AS loop_alive""";
+             AND (hashtextextended('core.imports.job:' || loop_token::text, 0) = ANY(?)
+                  OR loop_started_at > ?)) AS loop_alive""";
 
     /** The step of a read between its look at the locks and its rows (#927), where a test pauses it. */
     static final String LOCKS_READ = "locks_read";
@@ -227,19 +237,41 @@ class ImportJobs {
 
     // JUSTIFICATION-A3: issue #927 reads the locks before the rows; one shared step for the three reads of a job or
     // loop.
-    /** When {@link #HELD} looked at the locks, and the keys it found held, as the text of a {@code bigint[]}. */
-    record Held(String at, String keys) {
+    /**
+     * When {@link #HELD} looked at the locks, and the keys it found held, both as the database typed them (issue #929):
+     * never text, which the session's DateStyle and TimeZone would shape. The keys are an unmodifiable list, so the
+     * record compares by value.
+     */
+    record Held(OffsetDateTime at, List<Long> keys) {
 
-        /** The two parameters of one {@link #ALIVE} or {@link #LOOP_ALIVE}. */
+        /**
+         * The two parameters of one {@link #ALIVE} or {@link #LOOP_ALIVE}: the keys as a {@code bigint[]} made by the
+         * statement's connection, a new one for each use since its cleanup frees it, and the time as a
+         * {@code timestamptz}.
+         */
         Object[] params() {
-            return new Object[] {keys, at};
+            return new Object[] {
+                new SqlArrayValue("bigint", keys.toArray()), new SqlParameterValue(Types.TIMESTAMP_WITH_TIMEZONE, at)
+            };
+        }
+
+        /** The parameters of {@code RUN_COLUMNS} ({@link #ALIVE}, then {@link #LOOP_ALIVE}), then {@code more}. */
+        Object[] runParams(Object... more) {
+            return Stream.of(params(), params(), more).flatMap(Arrays::stream).toArray();
         }
     }
 
     /** Step one of a read of a run's job or loop (#927): the look at the locks, before the rows are read. */
     static Held held(JdbcClient jdbc) {
         Held held = jdbc.sql(HELD)
-                .query((rs, n) -> new Held(rs.getString(1), rs.getString(2)))
+                .query((rs, n) -> {
+                    Array keys = rs.getArray(2);
+                    try {
+                        return new Held(rs.getObject(1, OffsetDateTime.class), List.of((Long[]) keys.getArray()));
+                    } finally {
+                        keys.free();
+                    }
+                })
                 .single();
         pauseAt(LOCKS_READ);
         return held;
