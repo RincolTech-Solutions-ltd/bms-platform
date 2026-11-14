@@ -83,6 +83,30 @@ export function stateWords(status: string | undefined): string {
   }
 }
 
+// JUSTIFICATION-A3: issue #896 asks a stopped commit shown as 'Stopped by itself' with its reason; no words existed.
+/** A committing run whose commit or resume stopped by itself (issue #896): the words the operator sees instead of its state. */
+export const STOPPED_BY_ITSELF = 'Stopped by itself';
+
+/**
+ * Why a commit or resume stopped by itself, from the code on the run (issue #896), in plain words. The server stamps only a
+ * code, never a message; an unknown code reads as a refusal with that code.
+ */
+export function stopWords(code: string | undefined): string {
+  switch (code) {
+    case 'failed':
+      return 'A file failed with an unexpected error.';
+    case 'interrupted':
+      return 'The server restarted or the work ended while it ran.';
+    case 'claim_not_held':
+    case 'claim_connection_lost':
+      return 'It lost its hold on the business.';
+    case 'import_busy':
+      return 'Another large import was being written.';
+    default:
+      return code ? `A file was refused (${code}).` : 'It ended before every file was in.';
+  }
+}
+
 /** The ten stages of spec section 2 in plain words, for the operator. */
 export const STAGE_WORDS: Record<string, string> = {
   discovery: 'Finding the data',
