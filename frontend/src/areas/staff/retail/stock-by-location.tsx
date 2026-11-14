@@ -8,6 +8,7 @@ import { branchLabel } from '../../../auth/branch';
 import { EmptyState, SkeletonList } from '../../../components/states';
 import { showQty } from './maths';
 import { CategoryLabel, Gate, Problem, money, useIsPhone, useProfitAccess } from './ui';
+import { BranchLink, ItemLink } from './screen-link';
 import { Hint } from '../../../app/ui/Hint';
 
 // Stock by store and shop (ADR-033, capability branch_roles): every product's balance in each branch
@@ -61,7 +62,7 @@ export function LocationTable({ report }: { report: StockByLocation }) {
           </tr>
           <tr>
             {groups.flatMap((g) => [
-              ...g.branches.map((b) => <th key={b.id} className="num">{branchLabel(b)}{b.closed && <span className="badge badge-warning"> Closed</span>}</th>),
+              ...g.branches.map((b) => <th key={b.id} className="num"><BranchLink branchId={b.id}>{branchLabel(b)}</BranchLink>{b.closed && <span className="badge badge-warning"> Closed</span>}</th>),
               ...(g.branches.length > 1 ? [<th key={`${g.role}-subtotal`} className="num">Subtotal</th>] : []),
             ])}
           </tr>
@@ -69,7 +70,7 @@ export function LocationTable({ report }: { report: StockByLocation }) {
         <tbody>
           {items.map((r) => (
             <tr key={r.product_id}>
-              <td>{r.description}<br /><CategoryLabel category={r.category} /></td>
+              <td><ItemLink productId={r.product_id}>{r.description}</ItemLink><br /><CategoryLabel category={r.category} /></td>
               {groups.flatMap((g) => [
                 ...g.branches.map((b) => {
                   const c = (r.balances ?? []).find((x) => x.branch_id === b.id);
@@ -102,7 +103,7 @@ export function LocationList({ report }: { report: StockByLocation }) {
         return (
           <li key={id} className="rt-card">
             <div className="rt-row">
-              <span><strong>{r.description}</strong><br /><CategoryLabel category={r.category} /></span>
+              <span><strong><ItemLink productId={r.product_id}>{r.description}</ItemLink></strong><br /><CategoryLabel category={r.category} /></span>
               <span className="num"><strong>Combined <Qty qty={r.combined_qty ?? '0'} unit={r.unit} negative={r.negative} /></strong></span>
             </div>
             {groups.map((g) => (

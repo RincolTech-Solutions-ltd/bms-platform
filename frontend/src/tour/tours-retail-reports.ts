@@ -106,6 +106,24 @@ export const itemPage: Tour = {
   ],
 };
 
+// One sale and one branch at their own address (issue #336).
+export const salePage: Tour = {
+  id: 'page-sale-record', version: 1, title: 'This page: one sale', audience: (me) => held(me, SALES_READ), autoStart: false, page: '/staff/retail/sales/$saleId',
+  steps: [
+    retail({ id: 'record', target: 'sale-page-record', title: 'The sale', body: 'See what was sold, what was paid and what is still owed. Record a payment, share the receipt or take goods back here.' }),
+    retail({ id: 'back', target: 'sale-page-back', title: 'Every sale', body: 'Tap See all sales to go back to the list of sales.' }),
+  ],
+};
+
+export const branchPage: Tour = {
+  id: 'page-branch', version: 1, title: 'This page: one branch', audience: (me) => held(me, STOCK_READ), autoStart: false, page: '/staff/retail/branches/$branchId',
+  steps: [
+    retail({ id: 'kind', target: 'branch-page-kind', title: 'What it is', body: 'Says if the branch is a shop that sells, a store that only holds stock, or keeps no goods.' }),
+    retail({ id: 'stock', target: 'branch-page-stock', title: 'Its stock', body: 'Tap See its stock to see what this branch holds now.' }),
+    retail({ id: 'links', target: 'branch-page-links', title: 'More about it', body: 'Open what was used or damaged here, or every store and shop side by side.' }),
+  ],
+};
+
 export const transferPage: Tour = {
   id: 'page-transfer',
   // Version 2 adds the Scan here step (issue #345, ADR-070).
@@ -246,6 +264,6 @@ export const evaluationPage: Tour = {
 };
 
 export const RETAIL_REPORT_TOURS: readonly Tour[] = [
-  retailHomePage, restockPage, usagePage, usageHistoryPage, itemPage, transferPage, transfersPage, valuationPage, profitPage,
+  retailHomePage, restockPage, usagePage, usageHistoryPage, itemPage, salePage, branchPage, transferPage, transfersPage, valuationPage, profitPage,
   salesAnalysisPage, marginsPage, stockHealthPage, creditControlPage, evaluationPage,
 ];

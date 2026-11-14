@@ -248,7 +248,7 @@ export function TransferSummary({ transfer, onNew }: { transfer: Transfer; onNew
           const short = l.received_qty !== undefined && milliOf(l.received_qty) < milliOf(l.qty ?? '0');
           return (
             <li key={l.line_no}>
-              {l.description} ({l.code}): {showQty(l.qty ?? '0')}
+              <ToStock item={l.product_id}>{l.description}</ToStock> ({l.code}): {showQty(l.qty ?? '0')}
               {short && <> sent, {showQty(l.received_qty ?? '0')} received</>}
             </li>
           );

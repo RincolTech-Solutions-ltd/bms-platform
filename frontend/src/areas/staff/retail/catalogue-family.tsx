@@ -10,7 +10,7 @@ import { PriceForm } from './catalogue-products';
 import { OptionBoxes, VariantPreview, linesOf, previewProblem, usePreview } from './catalogue-variants';
 import { ItemPhoto, PhotoEditor, shownPhoto } from './item-photo';
 import { showQty } from './maths';
-import { ScreenLink } from './screen-link';
+import { BranchLink, ScreenLink } from './screen-link';
 import { CategoryPicker } from './category-picker';
 import { ScreenToast } from './toast';
 import { Gate, Problem, money, useProfitAccess, useToast } from './ui';
@@ -135,7 +135,7 @@ function StockOf({ family }: { family: Family }) {
         <p className="empty-state">No stock of this item yet. Buy stock of it, and each size and colour shows its own count.</p>
       ) : (
         <ul>
-          {rows.map((b) => <li key={b.branch_id}>{nameOf(b.branch_id)}: {showQty(b.qty ?? '0')}</li>)}
+          {rows.map((b) => <li key={b.branch_id}><BranchLink branchId={b.branch_id}>{nameOf(b.branch_id)}</BranchLink>: {showQty(b.qty ?? '0')}</li>)}
         </ul>
       )}
     </>

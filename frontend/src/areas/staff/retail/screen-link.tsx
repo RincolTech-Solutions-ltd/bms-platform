@@ -23,16 +23,40 @@ export function ScreenLink({ screen, to, search, children, label, tour, action =
 }
 
 /**
- * A sale number that opens that sale (issue #336): All sales for a person who may read it, else Credit sales with `credit` (a
- * credit sale, or a row that may be one, such as a credit note: Credit sales opens any sale by its id), else the number as plain text. The address `?sale=<id>` is stable, so it can be shared too.
+ * A sale number that opens that sale (issue #336): the sale's own page `/staff/retail/sales/<id>` for a person who may read
+ * sales, else Credit sales with `?sale=<id>` with `credit` (a credit sale, or a row that may be one, such as a credit note:
+ * Credit sales opens any sale by its id), else the number as plain text. Both addresses are stable, so they can be shared.
  */
 export function SaleLink({ saleId, credit = false, children }: { saleId: string | undefined; credit?: boolean; children: ReactNode }) {
   const staff = useOptionalStaff();
   const router = useRouter({ warn: false });
   const me = staff?.me;
-  const to = !me ? null : canUse(me, 'salesHistory') ? '/staff/retail/sales' : credit && canUse(me, 'creditSales') ? '/staff/retail/credit-sales' : null;
-  if (!saleId || to === null || !router) return <>{children}</>;
-  return <Link className="figure-link" to={to} search={{ sale: saleId } as never}>{children}</Link>;
+  if (!saleId || !me || !router) return <>{children}</>;
+  if (canUse(me, 'salesHistory')) return <Link className="figure-link" to="/staff/retail/sales/$saleId" params={{ saleId }}>{children}</Link>;
+  if (credit && canUse(me, 'creditSales')) return <Link className="figure-link" to="/staff/retail/credit-sales" search={{ sale: saleId } as never}>{children}</Link>;
+  return <>{children}</>;
+}
+
+/**
+ * An item name that opens the item page (issue #336, #813): its stock in each shop and every movement of it. With `branch` the
+ * page starts on that shop's movements. Plain text for a session that may not read stock, or outside a router.
+ */
+export function ItemLink({ productId, branch, children }: { productId: string | undefined; branch?: string; children: ReactNode }) {
+  const me = useOptionalStaff()?.me;
+  const router = useRouter({ warn: false });
+  if (!productId || !me || !router || !canUse(me, 'stock')) return <>{children}</>;
+  return <Link className="figure-link" to="/staff/retail/items/$productId" params={{ productId }} search={(branch ? { branch } : {}) as never}>{children}</Link>;
+}
+
+/**
+ * A branch name that opens the branch page (issue #336): what the branch is, and its stock, usage and moves. Plain text for a
+ * session that may not read stock, or outside a router.
+ */
+export function BranchLink({ branchId, children }: { branchId: string | undefined; children: ReactNode }) {
+  const me = useOptionalStaff()?.me;
+  const router = useRouter({ warn: false });
+  if (!branchId || !me || !router || !canUse(me, 'stock')) return <>{children}</>;
+  return <Link className="figure-link" to="/staff/retail/branches/$branchId" params={{ branchId }}>{children}</Link>;
 }
 
 const NO_SEARCH: Record<string, unknown> = {};

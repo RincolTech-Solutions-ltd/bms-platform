@@ -157,6 +157,9 @@ const retailSaleRoute = retailScreen('/sale', 'Record a sale', textParams('item'
 // Issue #336: `sale` opens one sale, so a sale number elsewhere links to it; `item` and `branch` open the stock of one item or branch.
 const retailCreditSalesRoute = retailScreen('/credit-sales', 'Credit sales', textParams('sale')).lazy(() => import('../areas/staff/retail/sales').then((m) => m.CreditRoute));
 const retailSalesRoute = retailScreen('/sales', 'All sales', textParams('sale')).lazy(() => import('../areas/staff/retail/sales').then((m) => m.Route));
+// Issue #336: a sale and a branch at their own address, so a sale number or a branch name opens its record.
+const retailSalePageRoute = retailScreen('/sales/$saleId', 'Sale').lazy(() => import('../areas/staff/retail/sale-page').then((m) => m.Route));
+const retailBranchPageRoute = retailScreen('/branches/$branchId', 'Branch').lazy(() => import('../areas/staff/retail/branch-page').then((m) => m.Route));
 // Customer orders with delivery (issue #385): the list by step, one order with its history, and the fees and cancellations report.
 const retailOrdersRoute = retailScreen('/orders', 'Orders').lazy(() => import('../areas/staff/retail/orders').then((m) => m.Route));
 const retailOrderRoute = retailScreen('/orders/$orderId', 'Order').lazy(() => import('../areas/staff/retail/order').then((m) => m.Route));
@@ -170,7 +173,7 @@ const retailUsageRoute = retailScreen('/usage', 'Usage and damage').lazy(() => i
 const retailUsageHistoryRoute = retailScreen('/usage-history', 'Past usage and damage', textParams('branch', 'from', 'to', 'kind')).lazy(() => import('../areas/staff/retail/usage-history').then((m) => m.Route));
 const retailStockRoute = retailScreen('/stock', 'Stock', textParams('item', 'branch')).lazy(() => import('../areas/staff/retail/stock').then((m) => m.Route));
 // The item page (issue #813): one item's stock in each shop and every movement of it with the balance after each.
-const retailItemPageRoute = retailScreen('/items/$productId', 'Item').lazy(() => import('../areas/staff/retail/item-page').then((m) => m.Route));
+const retailItemPageRoute = retailScreen('/items/$productId', 'Item', textParams('branch')).lazy(() => import('../areas/staff/retail/item-page').then((m) => m.Route));
 // Quick add (issue #632): `name` is what Sell's search typed before it found nothing, so the form starts with it.
 const retailQuickAddRoute = retailScreen('/quick-add', 'Quick add', textParams('name')).lazy(() => import('../areas/staff/retail/quick-add').then((m) => m.Route));
 // Count it now (issue #700): `item` is the item just added, put on the sheet ready to type, and `from` the screen it came from.
@@ -465,6 +468,8 @@ export const router = createRouter({
         retailSaleRoute,
         retailCreditSalesRoute,
         retailSalesRoute,
+        retailSalePageRoute,
+        retailBranchPageRoute,
         retailOrdersRoute,
         retailOrderRoute,
         retailOrdersReportRoute,

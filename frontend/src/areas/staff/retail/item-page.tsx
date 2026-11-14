@@ -11,6 +11,7 @@ import { useCrumbLabel } from '../../../components/breadcrumbs';
 import { SkeletonList } from '../../../components/states';
 import { useStaff } from '../context';
 import { canUse } from './permissions';
+import { BranchLink } from './screen-link';
 import { showDate, showQty } from './maths';
 import { dayOf } from './usage-history';
 import { Gate, Money, Problem } from './ui';
@@ -66,7 +67,7 @@ function ShopCard({ shop, unit }: { shop: ItemShop; unit?: string }) {
   return (
     <li className="rt-card item-shop" data-testid="item-shop">
       <p>
-        <strong>{shop.name}</strong>
+        <strong><BranchLink branchId={shop.branch_id}>{shop.name}</BranchLink></strong>
         {shop.closed && <span className="hint"> (closed)</span>}
       </p>
       <p>
@@ -82,7 +83,7 @@ function MoveCard({ m, shop }: { m: StockMovement; shop: string }) {
   return (
     <li className="rt-card item-move" data-testid="item-move">
       <p>
-        <strong>{movementWords(m)}</strong> <span className="hint">{showDate(dayOf(m))}, {shop}</span>
+        <strong>{movementWords(m)}</strong> <span className="hint">{showDate(dayOf(m))}, <BranchLink branchId={m.branch_id}>{shop}</BranchLink></span>
       </p>
       <p>
         <span className="num">{inOrOut(m)}</span>. In stock after <span className="num item-after" data-testid="item-after">{withUnit(m.balance_after, m.unit)}</span>
@@ -94,10 +95,10 @@ function MoveCard({ m, shop }: { m: StockMovement; shop: string }) {
   );
 }
 
-export function ItemPageView({ item, productId }: { item: ItemStock; productId: string }) {
+export function ItemPageView({ item, productId, branch }: { item: ItemStock; productId: string; /** `?branch=` (issue #336): start on that shop's movements. */ branch?: string }) {
   const { me } = useStaff();
   const shops = item.shops ?? [];
-  const [branchId, setBranchId] = useState('');
+  const [branchId, setBranchId] = useState(shops.some((s) => s.branch_id === branch) ? (branch ?? '') : '');
   // Every day to start with (an empty first day), as All sales does; the balances are those of the whole history anyway.
   const today = businessToday();
   const [from, setFrom] = useState('');
@@ -173,6 +174,7 @@ const route = getRouteApi('/staff/retail/items/$productId');
 export function ItemPage() {
   const { me } = useStaff();
   const { productId } = route.useParams();
+  const { branch } = route.useSearch();
   const item = useQuery({
     queryKey: ['retail', 'item-stock', productId],
     queryFn: ({ signal }) => itemPageApi.item(productId, signal),
@@ -183,7 +185,7 @@ export function ItemPage() {
     <Gate screen="stock" title={item.data?.description ?? 'Item'}>
       {item.isPending && <SkeletonList label="Loading the item" />}
       <Problem error={item.error} />
-      {item.data && <ItemPageView item={item.data} productId={productId} />}
+      {item.data && <ItemPageView item={item.data} productId={productId} branch={branch} />}
     </Gate>
   );
 }

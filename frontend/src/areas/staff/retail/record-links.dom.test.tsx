@@ -23,7 +23,8 @@ import { SaleLink } from './screen-link';
 import { StockPage } from './stock';
 
 // Screens that open one record have a stable address (issue #336), so a sale number, an item or a branch name elsewhere opens
-// that record: `/staff/retail/sales?sale=<id>`, `/staff/retail/stock?item=<id>` and `/staff/retail/stock?branch=<id>`. The data is
+// that record: `/staff/retail/sales/<id>`, `/staff/retail/items/<id>` and `/staff/retail/branches/<id>` (the record pages
+// themselves are tested in `record-pages.dom.test.tsx`); the lists also read `?sale=`, `?item=` and `?branch=`. The data is
 // the fabricated retail mock; every name and figure is made up.
 
 vi.setConfig({ testTimeout: 20000 });
@@ -221,18 +222,17 @@ describe('Found missing on Stock health opens the count lines behind it (#863)',
     const row = await screen.findByTestId('missing-row');
     expect(row.textContent).toContain('2 piece missing at the stock count on');
     expect(row.textContent).not.toContain('Worth');
-    expect(screen.getByRole('link', { name: 'Test Bulb Short' }).getAttribute('href')).toBe(`/staff/retail/stock?item=${ITEM_3}&branch=${BRANCH_B}`);
+    expect(screen.getByRole('link', { name: 'Test Bulb Short' }).getAttribute('href')).toBe(`/staff/retail/items/${ITEM_3}?branch=${BRANCH_B}`);
     fireEvent.click(screen.getByRole('button', { name: 'Show used and damaged' }));
     await waitFor(() => expect(history).toHaveBeenLastCalledWith(expect.not.objectContaining({ kind: expect.anything() })));
   });
 });
 
 describe('a sale number opens that sale (#336)', () => {
-  it('links to All sales with the sale in the address', () => {
+  it('links to the sale page', () => {
     show(<SaleLink saleId={SALE_2}>S-900002</SaleLink>, '/staff');
-    expect(screen.getByRole('link', { name: 'S-900002' }).getAttribute('href')).toBe(`/staff/retail/sales?sale=${SALE_2}`);
+    expect(screen.getByRole('link', { name: 'S-900002' }).getAttribute('href')).toBe(`/staff/retail/sales/${SALE_2}`);
   });
-
   it('is plain text for a session that may not read sales', () => {
     const me = { ...mockMe('admin'), permissions: ['retail.stock.read'] } as Me;
     show(<SaleLink saleId={SALE_2}>S-900002</SaleLink>, '/staff', { me });
@@ -242,20 +242,20 @@ describe('a sale number opens that sale (#336)', () => {
 
   it('is the sale row of a credit note', () => {
     show(<CreditNoteView note={{ id: 'r1', credit_note_no: 'CN-HQ-000001', sale_id: SALE_2, sale_no: 'S-900002', returned_on: '2026-10-01', lines: [] }} nameOf={() => 'Test Branch A'} />, '/staff');
-    expect(screen.getByRole('link', { name: 'S-900002' }).getAttribute('href')).toBe(`/staff/retail/sales?sale=${SALE_2}`);
+    expect(screen.getByRole('link', { name: 'S-900002' }).getAttribute('href')).toBe(`/staff/retail/sales/${SALE_2}`);
   });
 
   it('is each sale an account payment paid, under its month (#798)', () => {
     const receipt = { id: 'p1', receipt_no: 'AP-000001', status: 'posted', amount_minor: 5000, method: 'cash', paid_on: '2026-10-03', branch_id: BRANCH_A, allocations: [{ sale_id: SALE_2, sale_no: 'S-900002', amount_minor: 5000 }] } as AccountPayment;
     show(<ReceiptList items={[receipt]} canReverse={() => false} nameOf={() => 'Test Branch A'} onReverse={() => undefined} />, '/staff');
     expect(screen.getByRole('button', { name: /October 2026/ }).textContent).toContain('1 payment');
-    expect(screen.getByRole('link', { name: 'S-900002' }).getAttribute('href')).toBe(`/staff/retail/sales?sale=${SALE_2}`);
+    expect(screen.getByRole('link', { name: 'S-900002' }).getAttribute('href')).toBe(`/staff/retail/sales/${SALE_2}`);
   });
 
   it('is each sale brought in from the old records on a statement (#798)', () => {
     const statement = { from: '2026-10-01', to: '2026-10-31', lines: [], before_system_start: { sales: [{ sale_id: SALE_2, sale_no: 'S-900002', sale_date: '2026-01-05', total_minor: 9000 }] } } as Statement;
     show(<StatementView statement={statement} />, '/staff');
-    expect(screen.getByRole('link', { name: 'S-900002' }).getAttribute('href')).toBe(`/staff/retail/sales?sale=${SALE_2}`);
+    expect(screen.getByRole('link', { name: 'S-900002' }).getAttribute('href')).toBe(`/staff/retail/sales/${SALE_2}`);
   });
 
   it('opens the sale on All sales from the address, whichever branch is in use, and Back to the list clears it', async () => {
@@ -318,9 +318,9 @@ describe('an item or a branch opens its stock (#336)', () => {
     expect(screen.getByText('LED bulb 9W screw')).toBeTruthy();
   });
 
-  it('links an item of one branch to that item at that branch', () => {
+  it('links an item of one branch to that item page on that branch', () => {
     show(<ToStock item={ITEM_3} branch={BRANCH_B}>LED bulb 9W screw</ToStock>, '/staff');
-    expect(screen.getByRole('link', { name: 'LED bulb 9W screw' }).getAttribute('href')).toBe(`/staff/retail/stock?item=${ITEM_3}&branch=${BRANCH_B}`);
+    expect(screen.getByRole('link', { name: 'LED bulb 9W screw' }).getAttribute('href')).toBe(`/staff/retail/items/${ITEM_3}?branch=${BRANCH_B}`);
   });
 
   it('shows only the item from the address, with a way back to every item', async () => {

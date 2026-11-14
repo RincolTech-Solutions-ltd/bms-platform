@@ -3,7 +3,7 @@ import { Link, createLazyRoute, getRouteApi } from '@tanstack/react-router';
 import { Fragment, useRef, useState } from 'react';
 import { GroupedCards, useCategoryGroups } from './category-groups';
 import { monthLabel } from './cash-state';
-import { SaleLink } from './screen-link';
+import { BranchLink, SaleLink } from './screen-link';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { businessToday, retail, type AccountPayment, type CustomerAccount, type OpenSale, type Statement } from '../../../api/retail';
 import { branchLabel } from '../../../auth/branch';
@@ -51,7 +51,7 @@ export function AccountSummary({ account, canManage, busy, error, onSave }: {
           <ul>
             {(account.delivery_fees ?? []).map((f) => (
               <li key={f.order_id}>
-                <Link to="/staff/retail/orders/$orderId" params={{ orderId: f.order_id ?? '' }}>Order {f.order_no}</Link>, sale {f.sale_no}: {money(f.fee_minor ?? 0)}
+                <Link to="/staff/retail/orders/$orderId" params={{ orderId: f.order_id ?? '' }}>Order {f.order_no}</Link>, sale <SaleLink saleId={f.sale_id} credit>{f.sale_no}</SaleLink>: {money(f.fee_minor ?? 0)}
               </li>
             ))}
           </ul>
@@ -204,7 +204,7 @@ export function ReceiptList({ items, canReverse, busy, error, nameOf, onReverse,
           <p>
             <strong>{r.receipt_no}</strong> {r.status === 'reversed' && <span className="badge badge-warning">Reversed</span>}
             <br />
-            {money(r.amount_minor ?? 0)} by {methodWords(r.method)} on {showDate(r.paid_on)}, received at {nameOf(r.branch_id)}.
+            {money(r.amount_minor ?? 0)} by {methodWords(r.method)} on {showDate(r.paid_on)}, received at <BranchLink branchId={r.branch_id}>{nameOf(r.branch_id)}</BranchLink>.
           </p>
           <p className="hint">
             {(r.allocations ?? []).map((a, i) => (

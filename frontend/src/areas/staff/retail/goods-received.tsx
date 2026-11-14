@@ -13,6 +13,7 @@ import { RECEIPT_STATUS_WORDS, canVoidReceipt, inLineUnit } from './purchasing-s
 import { Facts, MoreButton, ReasonPanel, StatusBadge, SupplierOwed, useActionKeys, useCursorList } from './purchasing-ui';
 import { showDate } from './transfers';
 import { Gate, Problem, money, useBranchName, useToast } from './ui';
+import { ItemLink } from './screen-link';
 import { NoAccess } from '../../../app/ui/EmptyState';
 import { Hint } from '../../../app/ui/Hint';
 
@@ -122,7 +123,7 @@ export function GoodsReceiptView({ receipt, nameOf, payable }: { receipt: GoodsR
           <tbody>
             {lines.map((l) => (
               <tr key={l.id}>
-                <td>{l.description}</td>
+                <td><ItemLink productId={l.product_id}>{l.description}</ItemLink></td>
                 <td className="num">{showQty(l.unit_qty ?? l.qty ?? '0')} {l.unit}</td>
                 {showBilled && <td className="num">{inLineUnit(l.billed_qty, l)} {l.unit}</td>}
                 <td className="num">{money(l.entered_cost_minor ?? 0)}</td>

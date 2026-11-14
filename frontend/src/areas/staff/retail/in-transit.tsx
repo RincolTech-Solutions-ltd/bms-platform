@@ -12,6 +12,7 @@ import { buildReceive, everythingArrived, receiveLineHint, receiveLineInvalid, r
 import { useBranchLabel } from './transfer';
 import { showDate } from './transfers';
 import { Gate, Problem, money, useProfitAccess } from './ui';
+import { BranchLink, ItemLink } from './screen-link';
 import { Hint } from '../../../app/ui/Hint';
 
 // Stock on its way (ADR-033, capability transfer_receipt): the transfers one branch has sent and the
@@ -24,7 +25,7 @@ function Items({ transfer }: { transfer: InFlightTransfer }) {
   return (
     <ul>
       {(transfer.lines ?? []).map((l) => (
-        <li key={l.line_no}>{l.description} ({l.code}): {showQty(l.qty ?? '0')}</li>
+        <li key={l.line_no}><ItemLink productId={l.product_id}>{l.description}</ItemLink> ({l.code}): {showQty(l.qty ?? '0')}</li>
       ))}
     </ul>
   );
@@ -108,7 +109,7 @@ export function InTransitCard({ transfer, mayReceive, mayTakeBack, opened = null
   const more = names.length > 2 ? `, and ${names.length - 2} more` : '';
   return (
     <li className="rt-card">
-      <strong style={{ display: 'block' }}>From {label(transfer.from_branch_id)} to {label(transfer.to_branch_id)}</strong>
+      <strong style={{ display: 'block' }}>From <BranchLink branchId={transfer.from_branch_id}>{label(transfer.from_branch_id)}</BranchLink> to <BranchLink branchId={transfer.to_branch_id}>{label(transfer.to_branch_id)}</BranchLink></strong>
       <span className="muted" style={{ display: 'block' }}>{showDate(transfer.transfer_date)}, {waiting(transfer.age_days)}</span>
       <span style={{ display: 'block' }}>{names.length} {names.length === 1 ? 'item' : 'items'}: {names.slice(0, 2).join(', ')}{more}</span>
       {profit && transfer.cost_total_minor !== undefined && <p>Value at cost: {money(transfer.cost_total_minor)}</p>}

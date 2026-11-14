@@ -18,7 +18,7 @@ import { UNITS, capabilityOn, holdsAt } from './permissions';
 import { newLine, withUnit } from './sale-state';
 import { SaleLineCard } from './sale';
 import { CustomerPicker } from './customer-picker';
-import { SaleLink, ScreenLink } from './screen-link';
+import { BranchLink, SaleLink, ScreenLink } from './screen-link';
 import { Gate, Note, Problem, ProductPicker, money, useBranchName, useBranchView, useSingleBranch } from './ui';
 import { Hint } from '../../../app/ui/Hint';
 import { ContactLinks } from './contact-links';
@@ -122,7 +122,7 @@ export function OrderActions({ order, onDelivered }: { order: Order; onDelivered
   if (done) {
     return (
       <div role="status" className="alert alert-success" data-testid="delivered">
-        <p>Delivered. Sale {done.sale_no} made: paid now {money(done.paid_now_minor ?? 0)}{(done.owed_minor ?? 0) > 0 ? `, on credit ${money(done.owed_minor ?? 0)}` : ''}.</p>
+        <p>Delivered. Sale <SaleLink saleId={done.sale_id}>{done.sale_no}</SaleLink> made: paid now {money(done.paid_now_minor ?? 0)}{(done.owed_minor ?? 0) > 0 ? `, on credit ${money(done.owed_minor ?? 0)}` : ''}.</p>
       </div>
     );
   }
@@ -174,7 +174,7 @@ export function OrderSummary({ order, branchName }: { order: Order; branchName?:
         {order.delivery_place ? `Deliver to ${order.delivery_place}` : 'Collects at the shop'}
         {order.delivery_date ? `, on ${showDate(order.delivery_date)}` : ''}
         {order.delivered_by ? `, taken by ${order.delivered_by}` : ''}
-        {branchName ? `, from ${branchName}` : ''}
+        {branchName ? <>, from <BranchLink branchId={order.branch_id}>{branchName}</BranchLink></> : ''}
       </p>
       <ul style={{ listStyle: 'none', padding: 0 }}>
         {(order.lines ?? []).map((l) => (

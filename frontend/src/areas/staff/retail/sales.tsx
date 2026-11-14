@@ -1,13 +1,13 @@
 import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Link, createLazyRoute } from '@tanstack/react-router';
-import { useAddress } from './screen-link';
+import { BranchLink, useAddress } from './screen-link';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Highlight, NoResults, SearchBox } from '../../../app/ui/SearchBox';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { businessToday, retail, type Sale, type SalePayment, type SalesQuery } from '../../../api/retail';
 import { receiptNote } from './price-state';
 import { enteredPriceMinor, enteredQty } from './units-state';
-import { useCrumbTail } from '../../../components/breadcrumbs';
+import { useCrumbLabel, useCrumbTail } from '../../../components/breadcrumbs';
 import { useStaff } from '../context';
 import { ENTRY_LOCATION, SALE_CREATE, SALE_RETURN, SALE_VOID, canRankSellers, canUse, holdsAt } from './permissions';
 import { ReceiptPhoto } from './receipt-photo';
@@ -109,9 +109,9 @@ export function SaleDetail({ sale, today, branchName }: { sale: Sale; today: str
   // ADR-122: how far from the shop the sale was made, for the owner only; a seller never asks.
   const { me } = useStaff();
   const where = useEntryDistances('sale', [sale.id ?? ''], holdsAt(me, ENTRY_LOCATION, sale.branch_id)).get(sale.id ?? '');
-  const facts: [string, string][] = [
+  const facts: [string, ReactNode][] = [
     ['Date', showDate(sale.sale_date)],
-    ...(branchName ? [['Branch', branchName] as [string, string]] : []),
+    ...(branchName ? [['Branch', <BranchLink key="branch" branchId={sale.branch_id}>{branchName}</BranchLink>] as [string, ReactNode]] : []),
     ['Paid by', methodLabel(sale.payment_method)],
     ...(sale.buyer_name ? [['Buyer', sale.buyer_name] as [string, string]] : []),
     ...(sale.buyer_contact ? [['Contact', sale.buyer_contact] as [string, string]] : []),
@@ -172,17 +172,19 @@ export function SaleDetail({ sale, today, branchName }: { sale: Sale; today: str
   );
 }
 
-export function OpenSale({ id, onClose }: { id: string; onClose: () => void }) {
+export function OpenSale({ id, onClose, page = false }: { id: string; onClose: () => void; /** The sale's own page (issue #336): it names its crumb, not adds one. */ page?: boolean }) {
   const nameOf = useBranchName();
   const { me } = useStaff();
   const sale = useQuery({ queryKey: ['retail', 'sale', id], queryFn: () => retail.getSale(id) });
   // Customer returns (returns capability, issue #201): offered only while it is on, to whoever may take goods back at the branch.
   const mayReturn = sale.data !== undefined && canUse(me, 'returns') && holdsAt(me, SALE_RETURN, sale.data.branch_id);
   const returns = useQuery({ queryKey: ['retail', 'sale-returns', id], queryFn: () => retail.listSaleReturns(id), enabled: mayReturn });
-  useCrumbTail(sale.data?.sale_no ? `Sale ${sale.data.sale_no}` : undefined, onClose);
+  const crumb = sale.data?.sale_no ? `Sale ${sale.data.sale_no}` : undefined;
+  useCrumbTail(page ? undefined : crumb, onClose);
+  useCrumbLabel(page ? crumb : undefined);
   return (
     <>
-      <button type="button" onClick={onClose}>Back to the list</button>
+      <button type="button" onClick={onClose} data-tour={page ? 'sale-page-back' : undefined}>{page ? 'See all sales' : 'Back to the list'}</button>
       {sale.isPending && <p className="loading">Loading</p>}
       <Problem error={sale.error} />
       {sale.data && <SaleDetail sale={sale.data} today={businessToday()} branchName={nameOf(sale.data.branch_id)} />}

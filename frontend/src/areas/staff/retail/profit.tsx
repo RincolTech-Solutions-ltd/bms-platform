@@ -109,7 +109,7 @@ export function ValuationTable({ valuation, nameOf }: { valuation: Valuation; na
       <td>
         <ToStock item={r.product_id} branch={r.branch_id}>{r.description}</ToStock>
         {!g.active && <><br /><CategoryLabel category={r.category} /></>}
-        {nameOf && <><br /><span className="hint">{nameOf(r.branch_id)}</span></>}
+        {nameOf && <><br /><span className="hint"><ToStock branch={r.branch_id}>{nameOf(r.branch_id)}</ToStock></span></>}
         {phone && <><br /><span className="hint">{showQty(r.qty ?? '0')} in stock{withCost && r.value_at_cost_minor !== undefined ? `, cost ${money(r.value_at_cost_minor)}` : ''}</span></>}
       </td>
       {!phone && <td className="num">{showQty(r.qty ?? '0')}</td>}

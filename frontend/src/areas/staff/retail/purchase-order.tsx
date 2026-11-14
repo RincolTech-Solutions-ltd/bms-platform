@@ -12,6 +12,7 @@ import { Facts, ReasonPanel, StatusBadge, SupplierOwed, useActionKeys } from './
 import { showDate } from './transfers';
 import type { ToastTone } from './toast';
 import { Problem, Success, money, useBranchName, useToast } from './ui';
+import { ItemLink } from './screen-link';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { NoAccess } from '../../../app/ui/EmptyState';
 import { Hint } from '../../../app/ui/Hint';
@@ -52,7 +53,7 @@ export function PurchaseOrderView({ order, nameOf, payable }: { order: PurchaseO
           <tbody>
             {lines.map((l) => (
               <tr key={l.id}>
-                <td>{l.description}</td>
+                <td><ItemLink productId={l.product_id}>{l.description}</ItemLink></td>
                 <td className="num">{showQty(l.unit_qty ?? l.qty ?? '0')} {l.unit}</td>
                 <td className="num">{inLineUnit(l.received_qty, l)} {l.unit}</td>
                 {showBilled && <td className="num">{inLineUnit(l.billed_qty, l)} {l.unit}</td>}

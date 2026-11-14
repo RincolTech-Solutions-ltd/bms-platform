@@ -14,6 +14,7 @@ import { varianceWords } from './payables-state';
 import { Facts, MoreButton, ReasonPanel, StatusBadge, SupplierOwed, useActionKeys, useCursorList } from './purchasing-ui';
 import { showDate } from './transfers';
 import { Gate, Problem, money, useBranchName, useToast } from './ui';
+import { ItemLink } from './screen-link';
 import { NoAccess } from '../../../app/ui/EmptyState';
 import { Hint } from '../../../app/ui/Hint';
 
@@ -127,7 +128,7 @@ export function SupplierBillView({ bill, nameOf, landedCostId, payable }: { bill
           <tbody>
             {(bill.lines ?? []).map((l) => (
               <tr key={l.id}>
-                <td>{l.description}</td>
+                <td><ItemLink productId={l.product_id}>{l.description}</ItemLink></td>
                 <td>{l.receipt_id && openReceipts ? <Link to="/staff/retail/goods-received/$receiptId" params={{ receiptId: l.receipt_id }}>{l.receipt_no}</Link> : l.receipt_no}</td>
                 <td className="num">{showQty(l.unit_qty ?? l.qty ?? '0')} {l.unit}</td>
                 <td className="num">{money(l.unit_price_minor ?? 0)}</td>

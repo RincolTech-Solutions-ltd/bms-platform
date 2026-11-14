@@ -12,6 +12,7 @@ import { PAYABLE_MANAGE, canUse, holdsAt } from './permissions';
 import { Facts, MoreButton, ReasonPanel, StatusBadge, SupplierOwed, useActionKeys, useCursorList } from './purchasing-ui';
 import { showDate } from './transfers';
 import { Gate, Problem, money, useBranchName, useToast } from './ui';
+import { ItemLink } from './screen-link';
 import { NoAccess } from '../../../app/ui/EmptyState';
 import { Hint } from '../../../app/ui/Hint';
 
@@ -111,7 +112,7 @@ export function AllocationTable({ lines, total }: { lines: LandedCostLine[]; tot
         <tbody>
           {lines.map((l, i) => (
             <tr key={l.receipt_line_id ?? i}>
-              <td>{l.description}</td>
+              <td><ItemLink productId={l.product_id}>{l.description}</ItemLink></td>
               <td>{l.receipt_id && openReceipts ? <Link to="/staff/retail/goods-received/$receiptId" params={{ receiptId: l.receipt_id }}>{l.receipt_no}</Link> : l.receipt_no}</td>
               <td className="num">{lineQtyWords(l.qty, '')}</td>
               {shares && <td className="num">{l.allocated_minor === undefined ? '' : money(l.allocated_minor)}</td>}

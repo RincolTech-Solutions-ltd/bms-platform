@@ -73,7 +73,7 @@ export function SlowMoversSection({ data, nameOf }: { data: SlowMovers | undefin
                 <tr key={`${r.branch_id}-${r.product_id}`}>
                   <td>
                     <ToStock item={r.product_id} branch={r.branch_id}>{r.description}</ToStock><br />
-                    <span className="hint">{r.code}, {nameOf(r.branch_id)}</span>
+                    <span className="hint">{r.code}, <ToStock branch={r.branch_id}>{nameOf(r.branch_id)}</ToStock></span>
                     {phone && <><br /><span className="hint">{showQty(r.qty_on_hand ?? '0')} {r.unit} in stock, last sold {showDate(r.last_sold_on)}</span></>}
                     {phone && r.value_at_cost_minor !== undefined && <><br /><span className="hint">Money tied up {money(r.value_at_cost_minor)}</span></>}
                     {r.better_at && <><br /><Better row={r} nameOf={nameOf} /></>}
