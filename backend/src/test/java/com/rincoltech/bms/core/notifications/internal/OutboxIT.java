@@ -909,7 +909,7 @@ class OutboxIT extends IntegrationTest {
                 Map.entry("run", "00000000-0000-4000-8000-000000000139"),
                 Map.entry("business", "test-shop"),
                 // A background import commit stopped by itself (issue #896).
-                Map.entry("time", "14:32 UTC"),
+                Map.entry("time", "14:32 Africa/Kampala"),
                 Map.entry("links", "Test Shop\nhttps://test-bms-staging.rincoltech.test/sign-in"));
         for (String channel : List.of("email", "telegram", "sms")) {
             for (String key : OutboxTemplates.keys(channel)) {

@@ -466,7 +466,7 @@ class ImportRunsIT extends IntegrationTest {
         return work -> {
             try (work) {
                 ended.add(work.get());
-            } catch (RuntimeException e) {
+            } catch (RuntimeException | Error e) {
                 ended.add(e);
             }
         };
@@ -575,6 +575,12 @@ class ImportRunsIT extends IntegrationTest {
                 .isNull();
 
         killTheLoopSession();
+        // Read before the work is closed: the kill alone, not the close, makes it read stopped (review of 09d09be).
+        assertThat(as(t, () -> runs.get(run.id())).loopStopped())
+                .as("read stopped once its session is gone, while the work is still open")
+                .isNotNull()
+                .extracting(ImportRuns.LoopStopped::code)
+                .isEqualTo("interrupted");
         held.get().close();
 
         Run lost = as(t, () -> runs.get(run.id()));
@@ -592,7 +598,181 @@ class ImportRunsIT extends IntegrationTest {
                 .singleElement()
                 .extracting(ImportMetrics.PlatformRun::loopStopped)
                 .isEqualTo(lost.loopStopped());
-        assertThat(stopNotices(run.id())).as("a dead process sends nothing").isZero();
+        // A dead process never reaches the loop's end, so no notice can be written; nothing else sends one.
+        assertThat(stopNotices(run.id())).as("no notice without the loop's end").isZero();
+    }
+
+    /** A portal start of the run whose batches go on in this thread; how the loop ended. */
+    Object startInline(Run run, BatchWriter writer, UUID operatorId) {
+        List<Object> ended = new CopyOnWriteArrayList<>();
+        as(t, () -> {
+            runs.startCommit(script(run.id(), writer), operatorId, inline(ended));
+            return null;
+        });
+        assertThat(ended).hasSize(1);
+        return ended.get(0);
+    }
+
+    /** A writer of 1,500 rows that runs {@code midway} at row 500 of its first pass: past no checkpoint yet. */
+    BatchWriter midBatch(Runnable midway) {
+        AtomicBoolean done = new AtomicBoolean();
+        return (runId, batchId, seq, checkpoint) -> {
+            postJournal(batchId, checkpoint);
+            for (int row = 1; row <= 1_500; row++) {
+                if (row == 500 && done.compareAndSet(false, true)) {
+                    midway.run();
+                }
+                checkpoint.rowWritten();
+            }
+            return Map.of("written", 1_500);
+        };
+    }
+
+    void assertNotStopped(UUID runId) {
+        assertThat(as(t, () -> runs.get(runId)).loopStopped()).isNull();
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT loop_token IS NULL AND loop_stopped_at IS NULL FROM import_runs WHERE id = ?")
+                        .param(runId)
+                        .query(Boolean.class)
+                        .single())
+                .isTrue();
+        assertThat(stopNotices(runId)).isZero();
+    }
+
+    // JUSTIFICATION-A3: the review of 09d09be on #925 asks for these cases (Stop, the kill switch, an Error, a lost
+    // claim, an old token). Tests only.
+    /**
+     * Issue #896, review of 09d09be: Stop pressed mid-batch on a portal commit ends the loop as asked: the batch rolls back,
+     * the run reads halted, never stopped by itself, and no notice is written.
+     */
+    @Test
+    void aPortalCommitStoppedMidBatchByTheStopButtonIsNotStampedAndSendsNothing() {
+        Run run = readyRun(1);
+        UUID operatorId = Api.platformUser(Api.email("loop-stop-button"));
+        BatchWriter writer = midBatch(() -> TestDatabase.owner()
+                .sql("UPDATE import_runs SET halt_requested = true WHERE id = ?")
+                .param(run.id())
+                .update());
+        assertThat(startInline(run, writer, operatorId)).isEqualTo(CommitOutcome.HALTED);
+        assertThat(batchStatus(run.id(), 1)).isEqualTo("pending");
+        assertThat(as(t, () -> runs.get(run.id())).haltRequested()).isTrue();
+        assertNotStopped(run.id());
+    }
+
+    /** Issue #896, review of 09d09be: the kill switch mid-batch on a portal commit is not a stop by itself either. */
+    @Test
+    void aPortalCommitStoppedMidBatchByTheKillSwitchIsNotStampedAndSendsNothing() {
+        Run run = readyRun(1);
+        UUID operatorId = Api.platformUser(Api.email("loop-kill-switch"));
+        BatchWriter writer = midBatch(() -> TestDatabase.owner()
+                .sql("UPDATE platform_import_settings SET commit_enabled = false WHERE id = 1")
+                .update());
+        assertThat(startInline(run, writer, operatorId)).isEqualTo(CommitOutcome.HALTED);
+        assertThat(batchStatus(run.id(), 1)).isEqualTo("pending");
+        assertThat(audits("core.import_run.halted")).isEqualTo(1);
+        assertNotStopped(run.id());
+    }
+
+    /**
+     * Issue #896, review of 09d09be: a writer that throws an {@link Error} stamps {@code failed} and tells the operators
+     * once, as a failed batch does; the run stays committing and resumes.
+     */
+    @Test
+    void aPortalCommitWhoseWriterThrowsAnErrorIsStampedFailedAndTellsTheOperatorsOnce() {
+        Run run = readyRun(1);
+        UUID operatorId = Api.platformUser(Api.email("loop-error"));
+        AtomicBoolean thrown = new AtomicBoolean();
+        BatchWriter writer = (runId, batchId, seq, checkpoint) -> {
+            postJournal(batchId, checkpoint);
+            if (thrown.compareAndSet(false, true)) {
+                throw new StackOverflowError("fabricated");
+            }
+            return Map.of();
+        };
+        assertThat(startInline(run, writer, operatorId)).isInstanceOf(StackOverflowError.class);
+        Run stopped = as(t, () -> runs.get(run.id()));
+        assertThat(stopped.status()).isEqualTo("committing");
+        assertThat(stopped.loopStopped()).isNotNull();
+        assertThat(stopped.loopStopped().code()).isEqualTo("failed");
+        assertThat(stopNotices(run.id())).isEqualTo(1);
+        assertThat(as(t, () -> runs.resume(script(run.id(), writer)))).isEqualTo(CommitOutcome.COMMITTED);
+        assertThat(as(t, () -> runs.get(run.id())).loopStopped()).isNull();
+    }
+
+    /**
+     * Issue #896, review of 09d09be: a portal loop that sees at its probe that it lost its claim (its claim session ended
+     * after the first batch) stamps the claim's code and tells the operators once; the run goes on from batch 2.
+     */
+    @Test
+    void aPortalLoopThatLosesItsClaimIsStampedWithTheClaimsCodeAndTellsTheOperatorsOnce() {
+        Run run = readyRun(2);
+        UUID operatorId = Api.platformUser(Api.email("loop-claim-lost"));
+        AtomicBoolean killed = new AtomicBoolean();
+        BatchWriter writer = (runId, batchId, seq, checkpoint) -> {
+            postJournal(batchId, checkpoint);
+            if (seq == 1 && killed.compareAndSet(false, true)) {
+                killTheLoopSession();
+            }
+            return Map.of();
+        };
+        assertThat(startInline(run, writer, operatorId)).isEqualTo(CommitOutcome.HALTED);
+        assertThat(batchStatus(run.id(), 1)).isEqualTo("committed");
+        assertThat(batchStatus(run.id(), 2)).isEqualTo("pending");
+        Run stopped = as(t, () -> runs.get(run.id()));
+        assertThat(stopped.status()).isEqualTo("committing");
+        assertThat(stopped.loopStopped()).isNotNull();
+        assertThat(stopped.loopStopped().code()).isIn("claim_connection_lost", "claim_not_held");
+        assertThat(stopNotices(run.id())).isEqualTo(1);
+        assertThat(as(t, () -> runs.resume(script(run.id(), writer)))).isEqualTo(CommitOutcome.COMMITTED);
+        assertThat(journals()).isEqualTo(2);
+    }
+
+    /**
+     * Issue #896, review of 09d09be: a loop that lost its claim to a newer resume never marks the run that resume owns.
+     * Loop A is started and its claim session ended before it runs; a resume (B) takes the business and a new token;
+     * then A runs, finds its claim lost and ends: no stamp, no notice, B's token kept, and B commits the run.
+     */
+    @Test
+    void aLoopThatLostItsClaimNeverMarksTheRunANewerResumeOwns() {
+        Run run = readyRun(1);
+        UUID operatorId = Api.platformUser(Api.email("loop-old-token"));
+        AtomicReference<ImportRuns.Work> a = new AtomicReference<>();
+        as(t, () -> {
+            runs.startCommit(script(run.id(), NOTHING), operatorId, a::set);
+            return null;
+        });
+        killTheLoopSession();
+        AtomicReference<ImportRuns.Work> b = new AtomicReference<>();
+        as(t, () -> {
+            runs.startResume(run.id(), operatorId, b::set);
+            return null;
+        });
+        UUID tokenOfB = TestDatabase.owner()
+                .sql("SELECT loop_token FROM import_runs WHERE id = ?")
+                .param(run.id())
+                .query(UUID.class)
+                .single();
+        assertThat(tokenOfB).isNotNull();
+
+        try (ImportRuns.Work old = a.get()) {
+            assertThat(as(t, old)).isEqualTo(CommitOutcome.HALTED);
+        }
+        assertThat(as(t, () -> runs.get(run.id())).loopStopped())
+                .as("B's loop is alive")
+                .isNull();
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT loop_token FROM import_runs WHERE id = ?")
+                        .param(run.id())
+                        .query(UUID.class)
+                        .single())
+                .as("A's end leaves B's token alone")
+                .isEqualTo(tokenOfB);
+        assertThat(stopNotices(run.id())).isZero();
+
+        try (ImportRuns.Work work = b.get()) {
+            assertThat(as(t, work)).isEqualTo(CommitOutcome.COMMITTED);
+        }
+        assertNotStopped(run.id());
     }
 
     /**

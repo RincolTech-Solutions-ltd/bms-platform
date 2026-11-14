@@ -1905,7 +1905,10 @@ section 4.1; coordinated with #110, which builds no second framework).**
   redeploy that ends the thread can stamp nothing: such a dead loop is found as a dead background job is (#923), when the
   run is read or listed, by the function `import_run_loop_stopped`: a token whose lock no session holds reads stopped,
   code `interrupted`, at the loop's last sign of life (the later of its start and its last committed batch). No notice is
-  sent for a dead loop. The run stays `committing` and resumable; a resume clears the stamps and takes a new token. The
+  sent for a dead loop, nor for work the portal's thread closed without running it (the thread failed before the work,
+  #897): its token stays and its lock went with the closed claim, so the run reads `interrupted` the same way. The
+  notice's time is the business's local time with its zone (for example `14:32 Africa/Kampala`). The run's read takes
+  `import_run_loop_stopped` once per row, so the time and the code come from one reading of `pg_locks`. The run stays `committing` and resumable; a resume clears the stamps and takes a new token. The
   run's read, the list and the platform report carry it as `loop_stopped`, and the portal shows the run as "Stopped by
   itself" with the time and the reason, on its page with Resume and in its own group at the top of the queue, instead of
   "Being brought in". The `import_commit` approval is still given in the

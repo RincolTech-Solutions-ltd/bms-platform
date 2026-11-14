@@ -60,8 +60,8 @@ class ImportJobs {
                        AND ((l.classid::bigint << 32) | l.objid::bigint)
                            = hashtextextended('core.imports.job:' || job_token::text, 0)) AS job_alive""";
 
-    /** The form of a stored code (the CHECK of V154). */
-    private static final Pattern CODE = Pattern.compile("[A-Za-z][A-Za-z_]{0,63}");
+    /** The form of a stored code (the CHECKs of V154 and V156; ImportJobsIT holds them to it). */
+    static final Pattern CODE = Pattern.compile("[A-Za-z][A-Za-z_]{0,63}");
 
     private static final Logger log = LoggerFactory.getLogger(ImportJobs.class);
 

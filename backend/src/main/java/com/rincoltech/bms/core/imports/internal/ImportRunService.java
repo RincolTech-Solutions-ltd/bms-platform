@@ -149,8 +149,7 @@ class ImportRunService implements ImportRuns {
             allow_trading_approved_by, pre_import_dump_file, committing_at, committed_at,
             pre_import_dump_verified_at, commit_requested_by, commit_approved_by, commit_approved_version, fabricated,
             job_kind, job_started_at, job_finished_at, job_failure_code,
-            (import_run_loop_stopped(id) ->> 'at')::timestamptz AS loop_stopped_moment,
-            import_run_loop_stopped(id) ->> 'code' AS loop_stopped_reason,
+            (SELECT ARRAY[ls ->> 'at', ls ->> 'code'] FROM import_run_loop_stopped(id) AS ls) AS loop_stopped,
             """ + ImportJobs.ALIVE;
 
     /** The key of a background job's own lock, followed by its token (issue #922, V154). */
@@ -928,7 +927,8 @@ class ImportRunService implements ImportRuns {
                 params.put("run", runId.toString());
                 params.put("business", business.slug());
                 params.put("day", local.toLocalDate().toString());
-                params.put("time", local.toLocalTime().toString());
+                // The business's time with its zone, so no operator reads it as their own (review of 09d09be).
+                params.put("time", local.toLocalTime() + " " + local.getZone().getId());
                 params.put("reason", stopSentence(code));
                 outbox.enqueue(new Outbox.Message(
                         Outbox.TELEGRAM,
@@ -2393,10 +2393,16 @@ class ImportRunService implements ImportRuns {
                 (Integer) rs.getObject("commit_approved_version"),
                 rs.getBoolean("fabricated"),
                 ImportJobs.read(rs),
-                // V156 (#896): the same rule as the platform report's, one SQL function for both.
-                rs.getString("loop_stopped_reason") == null
-                        ? null
-                        : new LoopStopped(instant(rs, "loop_stopped_moment"), rs.getString("loop_stopped_reason")));
+                // V156 (#896): the same rule as the platform report's, one SQL function for both, called once per row
+                // so the time and the code come from one reading of pg_locks (review of 09d09be).
+                loopStopped(rs.getArray("loop_stopped")));
+    }
+
+    private static LoopStopped loopStopped(java.sql.Array value) throws SQLException {
+        String[] atAndCode = value == null ? null : (String[]) value.getArray();
+        return atAndCode == null || atAndCode[1] == null
+                ? null
+                : new LoopStopped(atAndCode[0] == null ? null : Instant.parse(atAndCode[0]), atAndCode[1]);
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {
