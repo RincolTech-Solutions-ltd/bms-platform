@@ -11,7 +11,7 @@ import { showQty } from './maths';
 import { canUse } from './permissions';
 import { ChangeLine, ChartLegend, CompareLine, RangeChart, RangePicker } from './range-ui';
 import { DEFAULT_RANGE, daysBetween, previousWords, rangeQuery, rangeTitle, readRange, shortDate, writeRange, type RangeChoice } from './range-state';
-import { ScreenLink } from './screen-link';
+import { BranchLink, ScreenLink } from './screen-link';
 import { Problem, money, useBranchName, useBranchView, useIsPhone } from './ui';
 import { showDate } from './maths';
 
@@ -226,7 +226,7 @@ export function DashboardView({ data, nameOf, choice = DEFAULT_RANGE, onChoice, 
             {shops.map((s) => (
               <tr key={s.branch_id}>
                 <td>
-                  {nameOf(s.branch_id)}
+                  <BranchLink branchId={s.branch_id}>{nameOf(s.branch_id)}</BranchLink>
                   {phone && s.range_sales_minor !== undefined && s.previous_sales_minor !== undefined && <><br /><ChangeLine now={s.range_sales_minor} before={s.previous_sales_minor} words={before} /></>}
                   {phone && s.range_gross_profit_minor !== undefined && <><br /><span className="hint">Profit {money(s.range_gross_profit_minor)}</span></>}
                   {phone && s.out_of_stock !== undefined && <><br /><span className="hint">{s.out_of_stock} out, {s.low_stock ?? 0} low now</span></>}

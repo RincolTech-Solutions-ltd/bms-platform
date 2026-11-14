@@ -7,7 +7,7 @@ import { amountOrNull, dateFields, warningWords } from './cash-state';
 import { DateField, RecordsByShop, Saved, Warnings, WindowFields, useEntryDate, useReadScope, useSavedFor, useWindow } from './cash-ui';
 import { usePersistedDraft } from './idempotency';
 import { CASHBOOK_READ, holds, needsOf } from './permissions';
-import { ScreenLink } from './screen-link';
+import { BranchLink, ScreenLink } from './screen-link';
 import { useToast } from './toast';
 import { BranchRequired, Gate, Problem, money, useSingleBranch } from './ui';
 import { showDate } from './transfers';
@@ -122,7 +122,7 @@ export function WithdrawalsScreen() {
         <BranchRequired permissions={needsOf('withdrawals')} />
       ) : saved ? (
         <Saved title="Withdrawal recorded" notes={<Warnings words={(saved.warnings ?? []).map(warningWords).filter((w): w is string => w !== null)} />} again="Record another withdrawal" onAgain={() => { setSaved(null); setRound((n) => n + 1); }}>
-          <p>{branchName}, {showDate(saved.business_date)}: <strong>{money(saved.amount_minor ?? 0)}</strong> taken out of the bank.</p>
+          <p><BranchLink branchId={branchId}>{branchName}</BranchLink>, {showDate(saved.business_date)}: <strong>{money(saved.amount_minor ?? 0)}</strong> taken out of the bank.</p>
         </Saved>
       ) : (
         <>

@@ -13,6 +13,7 @@ import { Facts, MoreButton, ReasonPanel, StatusBadge, SupplierOwed, useActionKey
 import { showDate } from './transfers';
 import { WORDS } from '../../../app/glossary';
 import { Gate, Problem, Money, useBranchName, useToast } from './ui';
+import { BranchLink } from './screen-link';
 import { NoAccess } from '../../../app/ui/EmptyState';
 import { Hint } from '../../../app/ui/Hint';
 
@@ -31,7 +32,7 @@ export function PaymentRow({ row, branchName }: { row: SupplierPayment; branchNa
         {row.supplier_name}, {showDate(row.paid_on)}, <strong><Money minor={row.amount_minor ?? 0} /></strong>
       </p>
       <p className="hint">
-        By {methodWords(row.method).toLowerCase()}{row.reference ? `, reference ${row.reference}` : ''}{branchName ? `, from ${branchName}` : ''}.
+        By {methodWords(row.method).toLowerCase()}{row.reference ? `, reference ${row.reference}` : ''}{branchName ? <>, from <BranchLink branchId={row.branch_id}>{branchName}</BranchLink></> : ''}.
       </p>
       <p>
         <Link className="btn-sm" to="/staff/retail/supplier-payments/$paymentId" params={{ paymentId: row.id ?? '' }} aria-label={`Open supplier payment ${row.payment_no}`}>Open</Link>
@@ -90,7 +91,7 @@ export function SupplierPaymentView({ payment, nameOf, payable }: { payment: Sup
           ['Paid on', showDate(payment.paid_on)],
           ['Amount', <Money key="a" minor={payment.amount_minor ?? 0} />],
           [WORDS.paidHow, methodWords(payment.method)],
-          ['From the till or bank of', nameOf(payment.branch_id)],
+          ['From the till or bank of', <BranchLink key="b" branchId={payment.branch_id}>{nameOf(payment.branch_id)}</BranchLink>],
           ['What it paid', payment.allocation === 'manual' ? 'What was chosen' : 'The oldest first'],
           ...(payment.reference ? [['Reference', payment.reference] as [string, string]] : []),
           ...(payment.note ? [['Note', payment.note] as [string, string]] : []),

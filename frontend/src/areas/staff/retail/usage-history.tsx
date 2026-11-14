@@ -58,13 +58,13 @@ export function firstLines(items: StockMovement[]): Set<string> {
   return first;
 }
 
-function UsageRow({ m, branch, where, first }: { m: StockMovement; branch?: string; where?: EntryDistance; first: boolean }) {
+export function UsageRow({ m, branch, where, first }: { m: StockMovement; branch?: string; where?: EntryDistance; first: boolean }) {
   const { me } = useStaff();
   const cost = costOf(m);
   return (
     <li className="rt-card" data-testid="usage-row">
       <p>
-        <strong>{m.description}</strong> {m.code && <span className="hint">({m.code})</span>}{' '}
+        <strong><ToStock item={m.product_id} branch={m.branch_id}>{m.description}</ToStock></strong> {m.code && <span className="hint">({m.code})</span>}{' '}
         <span className={m.kind === 'damage' ? 'badge badge-warning' : 'badge badge-info'}>{m.kind === 'damage' ? 'Damaged' : 'Used'}</span>
         {m.undone && <>{' '}<UndoneMark /></>}
       </p>

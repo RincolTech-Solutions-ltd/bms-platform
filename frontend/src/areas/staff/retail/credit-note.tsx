@@ -15,7 +15,7 @@ import { showDate } from './transfers';
 import { Note, Problem, money, useBranchName, useToast } from './ui';
 import { NoAccess } from '../../../app/ui/EmptyState';
 import { Hint } from '../../../app/ui/Hint';
-import { SaleLink } from './screen-link';
+import { ItemLink, SaleLink } from './screen-link';
 
 // One credit note (returns capability, ADR-033, issue #201), on screen: the goods that came back, what each was credited,
 // where they went, and how the credit was settled. The printable credit note (a PDF under this number) shows while the documents capability is on. A
@@ -51,7 +51,7 @@ export function CreditNoteView({ note, nameOf, buyerOpens }: { note: SaleReturn;
         <tbody>
           {(note.lines ?? []).map((l) => (
             <tr key={l.id}>
-              <td>{returnedWords(l)}</td>
+              <td><ItemLink productId={l.product_id}>{returnedWords(l)}</ItemLink></td>
               <td>
                 {reasonWords(l.reason)}
                 <br />

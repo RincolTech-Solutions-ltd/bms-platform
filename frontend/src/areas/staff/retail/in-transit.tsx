@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
-import { useRef, useState } from 'react';
+import { Fragment, useRef, useState } from 'react';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { retail, type InFlightReport, type InFlightTransfer } from '../../../api/retail';
 import { EmptyState, SkeletonList } from '../../../components/states';
@@ -12,6 +12,7 @@ import { buildReceive, everythingArrived, receiveLineHint, receiveLineInvalid, r
 import { useBranchLabel } from './transfer';
 import { showDate } from './transfers';
 import { Gate, Problem, money, useProfitAccess } from './ui';
+import { BranchLink, ItemLink } from './screen-link';
 import { Hint } from '../../../app/ui/Hint';
 
 // Stock on its way (ADR-033, capability transfer_receipt): the transfers one branch has sent and the
@@ -24,7 +25,7 @@ function Items({ transfer }: { transfer: InFlightTransfer }) {
   return (
     <ul>
       {(transfer.lines ?? []).map((l) => (
-        <li key={l.line_no}>{l.description} ({l.code}): {showQty(l.qty ?? '0')}</li>
+        <li key={l.line_no}><ItemLink productId={l.product_id}>{l.description}</ItemLink> ({l.code}): {showQty(l.qty ?? '0')}</li>
       ))}
     </ul>
   );
@@ -104,13 +105,13 @@ export function InTransitCard({ transfer, mayReceive, mayTakeBack, opened = null
   const profit = useProfitAccess();
   const [form, setForm] = useState<'receive' | 'takeBack' | null>(opened);
   const lines = transfer.lines ?? [];
-  const names = lines.map((l) => l.description ?? l.code ?? '');
-  const more = names.length > 2 ? `, and ${names.length - 2} more` : '';
+  // The count, the two names shown and "and N more" all read the one list of lines, so they cannot disagree.
+  const more = lines.length > 2 ? `, and ${lines.length - 2} more` : '';
   return (
     <li className="rt-card">
-      <strong style={{ display: 'block' }}>From {label(transfer.from_branch_id)} to {label(transfer.to_branch_id)}</strong>
+      <strong className="target-line" style={{ display: 'block' }}>From <BranchLink branchId={transfer.from_branch_id}>{label(transfer.from_branch_id)}</BranchLink> to <BranchLink branchId={transfer.to_branch_id}>{label(transfer.to_branch_id)}</BranchLink></strong>
       <span className="muted" style={{ display: 'block' }}>{showDate(transfer.transfer_date)}, {waiting(transfer.age_days)}</span>
-      <span style={{ display: 'block' }}>{names.length} {names.length === 1 ? 'item' : 'items'}: {names.slice(0, 2).join(', ')}{more}</span>
+      <span style={{ display: 'block' }} data-testid="in-transit-items">{lines.length} {lines.length === 1 ? 'item' : 'items'}{': '}{lines.slice(0, 2).map((l, i) => <Fragment key={l.line_no ?? i}>{i > 0 && ', '}<ItemLink productId={l.product_id}>{l.description ?? l.code ?? ''}</ItemLink></Fragment>)}{more}</span>
       {profit && transfer.cost_total_minor !== undefined && <p>Value at cost: {money(transfer.cost_total_minor)}</p>}
       {/* The note is part of the summary, so a reader with no button still sees it. */}
       {transfer.note && <p>Note: {transfer.note}</p>}

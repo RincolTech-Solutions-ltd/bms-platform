@@ -12,6 +12,7 @@ import { PAYABLE_MANAGE, canUse, holdsAt } from './permissions';
 import { Facts, MoreButton, ReasonPanel, StatusBadge, SupplierOwed, useActionKeys, useCursorList } from './purchasing-ui';
 import { showDate } from './transfers';
 import { Gate, Problem, money, useBranchName, useToast } from './ui';
+import { BranchLink, ItemLink } from './screen-link';
 import { NoAccess } from '../../../app/ui/EmptyState';
 import { Hint } from '../../../app/ui/Hint';
 
@@ -111,7 +112,7 @@ export function AllocationTable({ lines, total }: { lines: LandedCostLine[]; tot
         <tbody>
           {lines.map((l, i) => (
             <tr key={l.receipt_line_id ?? i}>
-              <td>{l.description}</td>
+              <td><ItemLink productId={l.product_id}>{l.description}</ItemLink></td>
               <td>{l.receipt_id && openReceipts ? <Link to="/staff/retail/goods-received/$receiptId" params={{ receiptId: l.receipt_id }}>{l.receipt_no}</Link> : l.receipt_no}</td>
               <td className="num">{lineQtyWords(l.qty, '')}</td>
               {shares && <td className="num">{l.allocated_minor === undefined ? '' : money(l.allocated_minor)}</td>}
@@ -144,7 +145,7 @@ export function LandedCostView({ cost, nameOf, payable }: { cost: LandedCost; na
           ['Owed to', <SupplierOwed key="s" id={cost.supplier_id} name={cost.supplier_name} payable={payable} />],
           ['Their invoice number', cost.supplier_ref ?? ''],
           ['Their invoice on our books', cost.bill_id ? <Link key="b" to="/staff/retail/supplier-bills/$billId" params={{ billId: cost.bill_id }}>{cost.bill_no}</Link> : ''],
-          ['Branch', nameOf(cost.branch_id)],
+          ['Branch', <BranchLink key="b" branchId={cost.branch_id}>{nameOf(cost.branch_id)}</BranchLink>],
           ['Date of the charges', showDate(cost.cost_date)],
           ['Due on', showDate(cost.due_date)],
           ['Shared', methodWords(cost.method)],

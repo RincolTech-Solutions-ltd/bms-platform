@@ -853,6 +853,17 @@ p:has(> .link-row:only-child) {
   text-decoration: none;
 }
 
+/* A name that stands alone (issue #336, reviews of #931) is a full target: the first thing in a table cell or head (an item
+   line, a Facts value, a branch column), a section heading, or on a line of its own (`.target-line`: the From and To of a
+   stock move, a shop card's name). It takes that room in the layout, so it never overlaps the button or link beside it. A
+   name inside a sentence, such as a hint line, keeps the height of its text (docs/ui-rules.md rule 12). */
+th > .figure-link,
+td > .figure-link,
+h2 > .figure-link,
+.target-line > .figure-link {
+  min-height: var(--tap);
+}
+
 .figure-link::after {
   content: '';
   flex: none;

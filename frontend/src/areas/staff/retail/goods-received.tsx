@@ -13,6 +13,7 @@ import { RECEIPT_STATUS_WORDS, canVoidReceipt, inLineUnit } from './purchasing-s
 import { Facts, MoreButton, ReasonPanel, StatusBadge, SupplierOwed, useActionKeys, useCursorList } from './purchasing-ui';
 import { showDate } from './transfers';
 import { Gate, Problem, money, useBranchName, useToast } from './ui';
+import { BranchLink, ItemLink } from './screen-link';
 import { NoAccess } from '../../../app/ui/EmptyState';
 import { Hint } from '../../../app/ui/Hint';
 
@@ -30,7 +31,7 @@ export function ReceiptRow({ row, branchName }: { row: GoodsReceipt; branchName?
         {row.supplier_name}, {showDate(row.received_on)}, <strong>{money(row.total_minor ?? 0)}</strong>
       </p>
       <p className="hint">
-        {row.order_no ? `Against order ${row.order_no}` : 'No order'}{row.delivery_ref ? `, delivery note ${row.delivery_ref}` : ''}{branchName ? `, into ${branchName}` : ''}.
+        {row.order_no ? `Against order ${row.order_no}` : 'No order'}{row.delivery_ref ? `, delivery note ${row.delivery_ref}` : ''}{branchName ? <>, into <BranchLink branchId={row.branch_id}>{branchName}</BranchLink></> : ''}.
       </p>
       <p>
         <Link className="btn-sm" to="/staff/retail/goods-received/$receiptId" params={{ receiptId: row.id ?? '' }} aria-label={`Open goods received ${row.receipt_no}`}>Open</Link>
@@ -97,7 +98,7 @@ export function GoodsReceiptView({ receipt, nameOf, payable }: { receipt: GoodsR
       <Facts
         rows={[
           ['Supplier', <SupplierOwed key="s" id={receipt.supplier_id} name={receipt.supplier_name} payable={payable} />],
-          ['Into', nameOf(receipt.branch_id)],
+          ['Into', <BranchLink key="b" branchId={receipt.branch_id}>{nameOf(receipt.branch_id)}</BranchLink>],
           ['Received on', showDate(receipt.received_on)],
           ...(receipt.order_no && receipt.order_id
             ? [['Order', <Link key="o" to="/staff/retail/purchase-orders/$orderId" params={{ orderId: receipt.order_id }}>{receipt.order_no}</Link>] as [string, ReactNode]]
@@ -122,7 +123,7 @@ export function GoodsReceiptView({ receipt, nameOf, payable }: { receipt: GoodsR
           <tbody>
             {lines.map((l) => (
               <tr key={l.id}>
-                <td>{l.description}</td>
+                <td><ItemLink productId={l.product_id}>{l.description}</ItemLink></td>
                 <td className="num">{showQty(l.unit_qty ?? l.qty ?? '0')} {l.unit}</td>
                 {showBilled && <td className="num">{inLineUnit(l.billed_qty, l)} {l.unit}</td>}
                 <td className="num">{money(l.entered_cost_minor ?? 0)}</td>

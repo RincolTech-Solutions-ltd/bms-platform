@@ -62,7 +62,11 @@ back to what opened it.
     tabs, a stuck ActionBar) keeps its targets 8px inside every edge that faces the page.
     `layout/buttons.layout.test.ts` measures the daily screens at 412 by 900 and 1366 by 800, and the design guard lists every
     class named as a tap target (`.btn-*`, `.chip`, `.pill`, `*-btn`, `*-button`, `*-chip`, `*-pill`, `*-clear`, `*-close`,
-    `*-toggle`).
+    `*-toggle`). A name that opens its record (`.figure-link`, issue #336) is 48px tall where it stands alone: the first thing in
+    a table cell or head (an item line, a Facts value, a branch column), a section heading, or on a line of its own
+    (`.target-line`: the From and To of a stock move, the name on a shop card). Inside a sentence, such as a hint line, it
+    keeps the height of its text, as WCAG 2.5.8 allows for a target in a line of text. No target is widened by an invisible `::before` or `::after` box (the
+    design guard fails one).
 
 ## Motion
 

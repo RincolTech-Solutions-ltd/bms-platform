@@ -4,6 +4,7 @@ import { businessToday, daysBefore } from '../../../api/retail';
 import { StaffContext } from '../context';
 import { showPercent } from './maths';
 import { canUse } from './permissions';
+import { BranchLink, ItemLink } from './screen-link';
 import { money } from './ui';
 import { PeriodPicker } from '../../../app/ui/PeriodPicker';
 import { Hint } from '../../../app/ui/Hint';
@@ -14,12 +15,16 @@ import { Hint } from '../../../app/ui/Hint';
 
 export const MAX_RANGE_DAYS = 366;
 
-/** A name that opens the Stock page, for a session that may read stock; plain text for one that may not (issue #336). */
-export function ToStock({ children, item, branch }: { children: ReactNode; /** Opens that one item's stock (issue #336). */ item?: string; /** Opens that branch's stock (issue #336). */ branch?: string }) {
+/**
+ * A name that opens its record, for a session that may read stock; plain text for one that may not (issue #336): an item its
+ * item page, a branch its branch page, neither the Stock page.
+ */
+export function ToStock({ children, item, branch }: { children: ReactNode; /** Opens that item's page, on `branch` when given (issue #336). */ item?: string; /** Alone, opens that branch's page (issue #336). */ branch?: string }) {
   const staff = useContext(StaffContext);
   const router = useRouter({ warn: false });
-  const search = { ...(item ? { item } : {}), ...(branch ? { branch } : {}) };
-  return router && staff && canUse(staff.me, 'stock') ? <Link className="figure-link" to="/staff/retail/stock" search={search as never}>{children}</Link> : <>{children}</>;
+  if (item) return <ItemLink productId={item} branch={branch}>{children}</ItemLink>;
+  if (branch) return <BranchLink branchId={branch}>{children}</BranchLink>;
+  return router && staff && canUse(staff.me, 'stock') ? <Link className="figure-link" to="/staff/retail/stock">{children}</Link> : <>{children}</>;
 }
 
 /**
@@ -92,7 +97,7 @@ export function Choice<T extends string | number>({ id, label, value, options, o
   );
 }
 
-export function Section({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
+export function Section({ title, hint, children }: { title: ReactNode; hint?: string; children: ReactNode }) {
   return (
     <section className="an-section">
       <h2>{title}</h2>

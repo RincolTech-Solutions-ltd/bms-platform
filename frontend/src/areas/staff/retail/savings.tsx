@@ -8,7 +8,7 @@ import { DateField, RecordsByShop, Saved, WindowFields, useEntryDate, useReadSco
 import { usePersistedDraft } from './idempotency';
 import { CASHBOOK_READ, SALE_CREATE, SAVINGS_OVERWRITE, SAVINGS_RECORD, holds, savesAsSalesStaff } from './permissions';
 import { SAVINGS_REASONS, afterSavingsConflict, nowAboveWords, planSavings, reasonText, seesAmounts } from './savings-state';
-import { ScreenLink } from './screen-link';
+import { BranchLink, ScreenLink } from './screen-link';
 import { useToast } from './toast';
 import { BranchRequired, Gate, Note, Problem, money, useBranchName, useSingleBranch } from './ui';
 import { showDate } from './transfers';
@@ -320,7 +320,7 @@ export function SavingsScreen() {
       ) : saved ? (
         <Saved title="Savings recorded" again="Record another day" onAgain={() => { setSaved(null); setRound((n) => n + 1); }}>
           <p>
-            {branchName}, {showDate(saved.business_date)}. Sold that day: {money(saved.total_sold_minor ?? 0)}.
+            <BranchLink branchId={branchId}>{branchName}</BranchLink>, {showDate(saved.business_date)}. Sold that day: {money(saved.total_sold_minor ?? 0)}.
           </p>
           {saved.amount_minor !== undefined ? <p>Amount saved: <strong>{money(saved.amount_minor)}</strong></p> : <p>The savings were recorded using the standard amount.</p>}
         </Saved>

@@ -59,7 +59,7 @@ function CoverTable({ rows, nameOf, reorder }: { rows: CoverRow[]; nameOf: NameO
           <tr key={`${r.branch_id}-${r.product_id}`}>
             <td>
               <ToStock item={r.product_id} branch={r.branch_id}>{r.description}</ToStock><br />
-              <span className="hint">{r.code}, {nameOf(r.branch_id)}</span>
+              <span className="hint">{r.code}, <ToStock branch={r.branch_id}>{nameOf(r.branch_id)}</ToStock></span>
               {reorder && lowWords(r) && <><br /><span className="badge badge-warning">{lowWords(r)}</span></>}
               {reorder && <LevelToggle row={r} />}
               {phone && <><br /><span className="hint">{showQty(r.qty_on_hand ?? '0')} {r.unit} in stock, {showQty(r.sold_last30 ?? '0')} sold in 30 days</span></>}
@@ -152,7 +152,7 @@ export function StockHealthView({ data, nameOf, range = {} }: { data: StockHealt
           <ul className="an-cards">
             {shrink.map((x) => (
               <li key={x.branch_id} className="rt-card">
-                <strong>{nameOf(x.branch_id)}</strong>
+                <strong className="target-line"><ToStock branch={x.branch_id}>{nameOf(x.branch_id)}</ToStock></strong>
                 <div className="rt-row"><span>Used</span><span className="num"><ToUsage branch={x.branch_id} {...range} kind="used">{plural(x.used_reports, 'report')}</ToUsage></span></div>
                 <div className="rt-row"><span>Damaged</span><span className="num"><ToUsage branch={x.branch_id} {...range} kind="damaged">{plural(x.damaged_reports, 'report')}</ToUsage></span></div>
                 <div className="rt-row"><span>Found missing</span><span className="num"><ToUsage branch={x.branch_id} {...range} kind="missing">{plural(x.short_lines, 'line')}</ToUsage></span></div>
@@ -174,7 +174,7 @@ export function StockHealthView({ data, nameOf, range = {} }: { data: StockHealt
             <tbody>
               {shrink.map((x) => (
                 <tr key={x.branch_id}>
-                  <td>{nameOf(x.branch_id)}</td>
+                  <td><ToStock branch={x.branch_id}>{nameOf(x.branch_id)}</ToStock></td>
                   <td className="num"><ToUsage branch={x.branch_id} {...range} kind="used">{plural(x.used_reports, 'report')}</ToUsage></td>
                   <td className="num"><ToUsage branch={x.branch_id} {...range} kind="damaged">{plural(x.damaged_reports, 'report')}</ToUsage></td>
                   <td className="num"><ToUsage branch={x.branch_id} {...range} kind="missing">{plural(x.short_lines, 'line')}</ToUsage></td>

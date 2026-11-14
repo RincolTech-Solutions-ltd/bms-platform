@@ -11,6 +11,7 @@ import { holdsAt, PURCHASE_CREATE } from './permissions';
 import { ReceiptPhoto } from './receipt-photo';
 import { alreadyVoided, listIsStale, quantityWords, stateOf, unitHint, voidReasonOf, MIN_VOID_REASON } from './restock-correct-state';
 import { Gate, Problem, Success, money, useProfitAccess } from './ui';
+import { ItemLink } from './screen-link';
 import { DeliveryWorth } from './restock';
 import { ListGroupBy, ViewSwitch, useListView } from './list-chain';
 import { PURCHASE_ALL, PURCHASE_NAMES, PURCHASE_ORDER, listUser } from './list-chain-state';
@@ -104,7 +105,7 @@ export function RestockCard({ purchase, supplier, onDone }: { purchase: Purchase
       <ul>
         {(purchase.lines ?? []).map((l) => (
           <li key={l.id}>
-            {l.description}: {quantityWords(l)}
+            <ItemLink productId={l.product_id}>{l.description}</ItemLink>: {quantityWords(l)}
             {unitHint(l) && <span className="hint" data-testid="unit-hint"> {unitHint(l)}</span>}
           </li>
         ))}

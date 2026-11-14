@@ -9,6 +9,7 @@ import { newIdempotencyKey } from './idempotency';
 import { showDate } from './maths';
 import { DOCUMENT_ISSUE, canIssueDocuments, holdsAt } from './permissions';
 import { Problem, money } from './ui';
+import { BranchLink } from './screen-link';
 import { Hint } from '../../../app/ui/Hint';
 
 // The parts of the optional documents screens that more than one page shows (documents capability, ADR-033, issue #197):
@@ -123,7 +124,7 @@ export function DocumentCard({ doc, branchName, term = '' }: { doc: RetailDocume
         {showDate(doc.issue_date)}
         {doc.total_minor !== undefined ? `, ${money(doc.total_minor)}` : ''}
         {doc.type === 'quotation' && doc.valid_until ? `, valid until ${showDate(doc.valid_until)}` : ''}
-        {branchName ? `, ${branchName}` : ''}
+        {branchName ? <>, <BranchLink branchId={doc.branch_id}>{branchName}</BranchLink></> : ''}
       </p>
       {doc.status === 'void' && <Hint full>Its sale or quotation was cancelled. The PDF stays as it was issued.</Hint>}
       <PdfButton doc={doc} />

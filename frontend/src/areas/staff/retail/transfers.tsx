@@ -9,6 +9,7 @@ import { canUse } from './permissions';
 import { TransferDocument } from './documents-ui';
 import { TransferSummary, useBranchLabel } from './transfer';
 import { Gate, Problem, useSingleBranch } from './ui';
+import { BranchLink } from './screen-link';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { GroupedCards, useCategoryGroups } from './category-groups';
 import { monthLabel } from './cash-state';
@@ -86,12 +87,13 @@ export function TransferList({ items, onOpen, resetKey = '', more = false }: { i
               {showDate(t.transfer_date)}
               {statusBadge(t) && <span className="badge badge-warning"> {statusBadge(t)}</span>}
             </strong>
-            <span style={{ display: 'block' }}>From {label(t.from_branch_id)} to {label(t.to_branch_id)}</span>
             <span className="muted" style={{ display: 'block' }}>
               {whatMoved(t)}
               {t.created_by && t.created_by === me.user_id ? ', by you' : ''}
             </span>
           </button>
+          {/* Beside the button, not in it, so each branch opens its page (issue #336). */}
+          <span className="target-line" style={{ display: 'block' }}>From <BranchLink branchId={t.from_branch_id}>{label(t.from_branch_id)}</BranchLink> to <BranchLink branchId={t.to_branch_id}>{label(t.to_branch_id)}</BranchLink></span>
         </li>
       )}
     />

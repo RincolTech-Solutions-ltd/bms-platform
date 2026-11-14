@@ -9,7 +9,7 @@ import { amountOrNull, clockTime, dateFields, flagWords, groupByShopMonth, warni
 import { DateField, ImportedBadge, RecordsByShop, Saved, Warnings, WindowFields, useEntryDate, useReadScope, useSavedFor, useWindow } from './cash-ui';
 import { usePersistedDraft } from './idempotency';
 import { CASHBOOK_READ, holds, needsOf } from './permissions';
-import { ScreenLink } from './screen-link';
+import { BranchLink, ScreenLink } from './screen-link';
 import { useToast } from './toast';
 import { BranchRequired, Gate, Problem, money, useBranchName, useSingleBranch } from './ui';
 import { showDate } from './transfers';
@@ -172,7 +172,7 @@ export function BankingScreen() {
         <BranchRequired permissions={needsOf('banking')} />
       ) : saved ? (
         <Saved title="Banking recorded" notes={<Warnings words={bankingWarnings(saved)} />} again="Record another deposit" onAgain={() => { setSaved(null); setRound((n) => n + 1); }}>
-          <p>{branchName}</p>
+          <p><BranchLink branchId={branchId}>{branchName}</BranchLink></p>
           <BankingResult saved={saved} />
         </Saved>
       ) : (

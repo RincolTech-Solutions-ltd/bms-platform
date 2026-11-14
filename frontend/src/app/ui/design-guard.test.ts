@@ -811,6 +811,23 @@ function sheetActionProblems(source: string): string[] {
   });
 }
 
+/**
+ * The ::before and ::after rules that would widen a tap area with an invisible box (reviews of #931): one sized to the target
+ * token; one placed out past its element by a negative offset or margin; one given a target's height or width (44px, or
+ * 2.75rem or em, or more); or one grown by a transform (scale or translate).
+ */
+function tapOverlays(css: string): string[] {
+  const pseudo = /::?(before|after)\b/;
+  // A negative length is a minus right against its number (`-12px`), not the minus of a calc() (`100% - 22px`).
+  const outward = /(?:^|[;\s{])(?:inset(?:-[a-z-]+)?|top|right|bottom|left|margin(?:-[a-z-]+)?)\s*:(?:[^;]*\s)?-[\d.]/;
+  const bigBox = /(?:^|[;\s{])(?:min-|max-)?(?:height|width|block-size|inline-size)\s*:\s*(?:(?:4[4-9]|[5-9]\d|\d{3,})(?:\.\d+)?px|(?:2\.7[5-9]|2\.[89]\d*|[3-9](?:\.\d+)?|\d{2,}(?:\.\d+)?)r?em)/;
+  // A transform that enlarges (a scale above 1); a translate that centres a chevron, or a scale under 1, widens nothing.
+  const grown = /(?:^|[;\s{])transform\s*:[^;]*\bscale[XY]?\(\s*(?:1\.\d*[1-9]|[2-9]|\d{2,})/;
+  return rulesOf(css)
+    .filter(({ selectors, body }) => selectors.some((s) => pseudo.test(s)) && (/var\(--tap\)/.test(body) || outward.test(body) || bigBox.test(body) || grown.test(body)))
+    .map(({ selectors }) => selectors.join(', '));
+}
+
 /** The rules of `css` whose selector ends on a target (the target itself, not an icon inside it) and can shrink it. */
 function shrinkingButtons(css: string): string[] {
   return rulesOf(css).flatMap(({ selectors, body }) => {
@@ -885,6 +902,31 @@ describe('design guard, every button class keeps the 48px target (issue #825)', 
 
   it.each(allStylesheets.map((f) => relative(SRC, f)))('%s never makes a button smaller than the target', (file) => {
     expect(shrinkingButtons(code(file))).toEqual([]);
+  });
+
+  // Review of #931 (issue #336): a target gets its size in the layout, never from an invisible ::before or ::after box sized to
+  // the target, which reaches over the button or link beside it. A pseudo element may draw (a chevron), not widen the tap area.
+  it.each(allStylesheets.map((f) => relative(SRC, f)))('%s gives no ::before or ::after the size of a tap target', (file) => {
+    expect(tapOverlays(code(file))).toEqual([]);
+  });
+
+  it('finds a tap overlay however it is written', () => {
+    expect(tapOverlays('.a::before { position: absolute; height: var(--tap); }')).toHaveLength(1);
+    expect(tapOverlays('.a::after { content: ""; position: absolute; inset: -12px; }')).toHaveLength(1);
+    expect(tapOverlays('.a::before { position: absolute; top: -14px; bottom: -14px; }')).toHaveLength(1);
+    expect(tapOverlays('.a:before { min-height: 48px; }')).toHaveLength(1);
+    expect(tapOverlays('.a::before { min-height: 3rem; }')).toHaveLength(1);
+    expect(tapOverlays('.a::after { height: 2.75em; }')).toHaveLength(1);
+    expect(tapOverlays('.a::before { content: ""; position: absolute; inset: 0; transform: scale(2.4); }')).toHaveLength(1);
+    expect(tapOverlays('.a::before { position: absolute; inset: 0; transform: scale(1.5); }')).toHaveLength(1);
+    expect(tapOverlays('.a::after { margin: -14px; position: absolute; }')).toHaveLength(1);
+    expect(tapOverlays('.a::after { margin-block: -10px 0; }')).toHaveLength(1);
+    // A chevron drawn by a pseudo element, a chevron centred by a translate, a highlight that grows in from a smaller scale and
+    // a line that ends short of its box (a calc() with a minus) are not overlays.
+    expect(tapOverlays('.a::after { content: ""; width: 16px; height: 16px; background: currentColor; }')).toEqual([]);
+    expect(tapOverlays('.a::after { position: absolute; top: 50%; width: 8px; height: 8px; transform: translateY(-70%) rotate(45deg); }')).toEqual([]);
+    expect(tapOverlays('.a::before { position: absolute; inset: 0; transform: scaleX(0.6); }')).toEqual([]);
+    expect(tapOverlays('.a::before { position: absolute; bottom: calc(100% - 22px); }')).toEqual([]);
   });
 
   it('keeps the sizes on the tokens: 48px, 8px apart, at most --button-max wide from 1024px', () => {

@@ -20,7 +20,7 @@ import { BranchRequired, Gate, Problem, WaitingForApproval, money, useBranchName
 import { showDate } from './transfers';
 import { ActionBar } from '../../../app/ui/ActionBar';
 import { AddByName, EmptyChoice, showsEmptyChoice, type AddInline, type ChoiceAdd } from '../../../app/ui/EmptyChoice';
-import { addOn } from './screen-link';
+import { BranchLink, addOn } from './screen-link';
 import type { Kept } from '../../../offline/entries';
 import { EditNeedsInternet, KeptOnPhone, OfflineFormNote, isKept, useEntrySave } from '../../../offline/keep-entry';
 import { RECEIPT_KEPT, RECEIPT_LATER_NOTE, ReceiptPhoto, ReceiptPhotoChoice, bounded, withPhotoNote } from './receipt-photo';
@@ -313,7 +313,7 @@ export function ExpensesScreen() {
       ) : saved ? (
         <Saved title="Expense recorded" again="Record another expense" onAgain={() => { setSaved(null); setRound((n) => n + 1); }}>
           <p>
-            {branchName}, {showDate(saved.business_date)}: {saved.category_name} / {saved.item_name}, <strong>{money(saved.amount_minor ?? 0)}</strong>
+            <BranchLink branchId={branchId}>{branchName}</BranchLink>, {showDate(saved.business_date)}: {saved.category_name} / {saved.item_name}, <strong>{money(saved.amount_minor ?? 0)}</strong>
             {saved.party_name ? `, for ${saved.party_name}` : ''}.
           </p>
         </Saved>

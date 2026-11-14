@@ -53,6 +53,8 @@ function show(ui: ReactElement, me: Me = mockMe('admin')) {
 }
 
 const nameOf = (id?: string) => (id === BRANCH_A ? 'Test Branch A' : 'Test Branch B');
+/** The words of the Sells better at line, whose branch name is a link (issue #336). */
+const betterLine = () => [...document.querySelectorAll('.hint')].map((h) => h.textContent ?? '').find((t) => t.startsWith('Sells better at')) ?? '';
 
 const row = {
   branch_id: BRANCH_A, product_id: PRODUCT, code: 'TI-01', description: 'Test Item 01', unit: 'piece',
@@ -98,7 +100,9 @@ describe('slow movers section', () => {
 
   it('says where the item sells better and links to Move stock filled in', () => {
     show(<SlowMoversSection data={withCost} nameOf={nameOf} />);
-    expect(screen.getByText(/Sells better at Test Branch B \(30 sold in 90 days\)\. Move 8 piece there\./)).toBeTruthy();
+    expect(betterLine()).toMatch(/Sells better at Test Branch B \(30 sold in 90 days\)\. Move 8 piece there\./);
+    // The branch it sells better at opens its branch page (issue #336).
+    for (const a of screen.getAllByRole('link', { name: 'Test Branch B' })) expect(a.getAttribute('href')).toBe(`/staff/retail/branches/${BRANCH_B}`);
     const href = screen.getByRole('link', { name: 'Move 8 Test Item 01' }).getAttribute('href') ?? '';
     expect(href.startsWith('/staff/retail/transfer?')).toBe(true);
     // Read back the way the router reads the address of the page it opens.
@@ -107,7 +111,7 @@ describe('slow movers section', () => {
 
   it('offers no Move link to someone who may not move stock, but still says where it sells better', () => {
     show(<SlowMoversSection data={plain} nameOf={nameOf} />, mockMe('sales'));
-    expect(screen.getByText(/Sells better at Test Branch B/)).toBeTruthy();
+    expect(betterLine()).toMatch(/Sells better at Test Branch B/);
     expect(screen.queryByRole('link', { name: /^Move/ })).toBeNull();
   });
 

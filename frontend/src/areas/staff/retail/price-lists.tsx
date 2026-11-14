@@ -9,6 +9,7 @@ import { useStaff } from '../context';
 import { AddPanel } from './catalogue';
 import { STATUS_LABEL, belowCostHint, buildItemRequest, emptyItemForm, fromQty, itemProblem, unitChoices, withProduct, type ItemForm } from './price-list-state';
 import { Gate, Note, ProductPicker, Problem, changeFailureText, requireVersion } from './ui';
+import { ItemLink } from './screen-link';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { useComeBack } from '../../../app/ui/EmptyChoice';
 
@@ -65,7 +66,7 @@ export function ListCard({ list, selected, busy, onOpen, onChange }: {
 export function ItemRow({ item, showCost, busy, ending, onEnd }: { item: PriceListItem; showCost: boolean; busy?: boolean; ending?: boolean; onEnd: (item: PriceListItem) => void }) {
   return (
     <tr data-testid="price-item">
-      <td>{item.description} <span className="hint">({item.code})</span></td>
+      <td><ItemLink productId={item.product_id}>{item.description}</ItemLink> <span className="hint">({item.code})</span></td>
       <td>{item.unit}</td>
       <td>{fromQty(item.min_qty)}</td>
       <td className="num">{money(item.price_minor ?? 0)}{showCost && item.below_cost && <> <span className="badge badge-warning">Not above cost</span></>}</td>

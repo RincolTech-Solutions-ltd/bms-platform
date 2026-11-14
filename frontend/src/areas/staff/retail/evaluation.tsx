@@ -49,7 +49,7 @@ export function EvaluationView({ data, nameOf }: { data: Evaluation; nameOf: (id
       </Section>
       {(data.branches ?? []).length === 0 && <Empty>No stock and no sales to evaluate.</Empty>}
       {(data.branches ?? []).map((b) => (
-        <Section key={b.branch_id} title={nameOf(b.branch_id)}>
+        <Section key={b.branch_id} title={<ToStock branch={b.branch_id}>{nameOf(b.branch_id)}</ToStock>}>
           <PositionTable p={b} />
           {(b.categories ?? []).map((c) => (
             <div key={c.category_id} className="an-category">
