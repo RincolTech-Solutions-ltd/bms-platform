@@ -125,6 +125,24 @@ describe('Unallocated payments by month', () => {
     expect(screen.getAllByTestId('receipt')).toHaveLength(31);
   });
 
+  it('keeps an open form and what was typed in it when Show more pushes the loaded list past the open limit', async () => {
+    // Issue #940 (review of #942): 30 receipts start open; the next page makes the month 31 long, which would start closed.
+    list
+      .mockResolvedValueOnce(as<UnallocatedReceiptPage>({ items: Array.from({ length: 30 }, (_, i) => on(i + 1, '2026-10-05', 1000)), next_cursor: 'cursor-test-2' }))
+      .mockResolvedValueOnce(as<UnallocatedReceiptPage>({ items: [on(31, '2026-10-06', 1000)] }));
+    shell();
+    await screen.findByText('CONF-TEST-1');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Put on a loan or account' })[0] as HTMLElement);
+    fireEvent.change(screen.getByLabelText('Why'), { target: { value: 'Test reason for receipt one' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
+    await screen.findByText('CONF-TEST-31');
+    expect(screen.getByRole('button', { name: /^October 2026/ }).getAttribute('aria-expanded')).toBe('true');
+    const form = screen.getAllByTestId('receipt')[0]?.querySelector('form');
+    expect(form).not.toBeNull();
+    expect((screen.getByLabelText('Why') as HTMLTextAreaElement).value).toBe('Test reason for receipt one');
+    expect(brand()).toHaveLength(1);
+  });
+
   it('has no brand button until a form is open, then only that one, and opening a second closes the first', async () => {
     list.mockResolvedValue(as<UnallocatedReceiptPage>({ items: [on(1, '2026-10-03', 100000), on(2, '2026-10-04', 50000)] }));
     shell();

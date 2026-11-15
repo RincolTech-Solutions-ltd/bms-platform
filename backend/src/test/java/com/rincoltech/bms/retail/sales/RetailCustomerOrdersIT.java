@@ -650,7 +650,11 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         assertThat(byId.get(walkIn.toString()).has("customer_id")).isFalse();
         assertThat(byId.get(c.toString()).get("reason").asString()).isEqualTo("No answer on the phone");
         assertThat(byId.get(c.toString()).get("customer_id").asString()).isEqualTo(buyer.toString());
-        assertThat(cancelled.get("by_source").get(0).get("label").asString()).isEqualTo("WhatsApp");
+        // Issue #940: the source is looked up by its label, not by its place in the list.
+        Map<String, JsonNode> bySourceLabel = new LinkedHashMap<>();
+        cancelled.get("by_source").forEach(s -> bySourceLabel.put(s.get("label").asString(), s));
+        assertThat(bySourceLabel).containsKey("WhatsApp");
+        assertThat(bySourceLabel.get("WhatsApp").get("orders").asLong()).isEqualTo(2);
     }
 
     /** FR-RET-55: a cash fee comes into the till on the day of the delivery, so the cash book agrees with the cash account. */

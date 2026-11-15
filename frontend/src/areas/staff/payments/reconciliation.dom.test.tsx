@@ -75,10 +75,10 @@ describe('the report', () => {
   });
 
   it('names the receipt entered by hand to reverse, and offers no upload or run to a manager of some branches only', async () => {
-    reconciliation.latest.mockResolvedValue({
+    reconciliation.latest.mockResolvedValue(as<PaymentReconciliation>({
       ...report,
       findings: [{ id: 'f3', kind: 'manual_receipt_duplicate', other_transaction_id: 'txn-test-0001', bms_amount_minor: 310000, currency: 'UGX' }],
-    });
+    }));
     shell(MANAGER, false);
     expect(await screen.findByText(/Receipt entered by hand: txn-test-0001/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Run it now' })).toBeNull();
@@ -86,14 +86,14 @@ describe('the report', () => {
   });
 
   it('says when a run could not read everything and shows no business-wide counts to a branch reader', async () => {
-    reconciliation.latest.mockResolvedValue({ ...report, run: { ...report.run, truncated: true, intents_examined: undefined, statements_used: undefined } });
+    reconciliation.latest.mockResolvedValue(as<PaymentReconciliation>({ ...report, run: { ...report.run, truncated: true, intents_examined: undefined, statements_used: undefined } }));
     shell(['core.payments.read']);
     expect(await screen.findByText(/could not read everything/)).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/payments and .* statements looked at/);
   });
 
   it('says so when nothing differs and when nothing has run', async () => {
-    reconciliation.latest.mockResolvedValue({ ...report, findings: [], run: { ...report.run, finding_count: 0 } });
+    reconciliation.latest.mockResolvedValue(as<PaymentReconciliation>({ ...report, findings: [], run: { ...report.run, finding_count: 0 } }));
     shell(MANAGER);
     expect(await screen.findByText('Nothing differs.')).toBeTruthy();
     cleanup();
@@ -116,7 +116,7 @@ describe('the report', () => {
   });
 
   it('runs the reconciliation on request and shows the new report', async () => {
-    reconciliation.run.mockResolvedValue({ ...report, findings: (report.findings ?? []).slice(0, 1) });
+    reconciliation.run.mockResolvedValue(as<PaymentReconciliation>({ ...report, findings: (report.findings ?? []).slice(0, 1) }));
     shell(MANAGER);
     fireEvent.click(await screen.findByRole('button', { name: 'Run it now' }));
     await waitFor(() => expect(reconciliation.run).toHaveBeenCalledTimes(1));

@@ -56,18 +56,23 @@ const screens: [string, string, (page: Page) => Locator, string][] = [
 describe.each([1, 2])('Disclosure triangles at 412px, font scale %i (#935)', (font) => {
   it.each(screens)('draws the open and close triangle on %s', async (_name, path, ready, selector) => {
     const page = await open(`${path}${path.includes('?') ? '&' : '?'}font=${font}`, ready);
-    const summary = page.locator(selector).first();
-    const closed = await marker(summary);
-    expect(closed.display, 'a list item keeps its triangle').toBe('list-item');
-    expect(closed.type).toBe('disclosure-closed');
-    expect(closed.room, 'the triangle takes room before the words').toBeGreaterThan(6);
-    expect(closed.height, 'a 48px row').toBeGreaterThanOrEqual(48);
-    expect(closed.right, 'inside the phone').toBeLessThanOrEqual(WIDTH);
-    await summary.click();
-    const opened = await marker(summary);
-    expect(opened.type).toBe('disclosure-open');
-    expect(opened.room).toBeGreaterThan(6);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth), 'page width').toBeLessThanOrEqual(WIDTH);
-    await page.close();
+    try {
+      // Issue #940: the page really runs at this scale, so the large-text run is not a silent repeat of scale 1.
+      expect(await page.evaluate(() => getComputedStyle(document.documentElement).fontSize), 'root font size').toBe(`${16 * font}px`);
+      const summary = page.locator(selector).first();
+      const closed = await marker(summary);
+      expect(closed.display, 'a list item keeps its triangle').toBe('list-item');
+      expect(closed.type).toBe('disclosure-closed');
+      expect(closed.room, 'the triangle takes room before the words').toBeGreaterThan(6);
+      expect(closed.height, 'a 48px row').toBeGreaterThanOrEqual(48);
+      expect(closed.right, 'inside the phone').toBeLessThanOrEqual(WIDTH);
+      await summary.click();
+      const opened = await marker(summary);
+      expect(opened.type).toBe('disclosure-open');
+      expect(opened.room).toBeGreaterThan(6);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth), 'page width').toBeLessThanOrEqual(WIDTH);
+    } finally {
+      await page.close();
+    }
   });
 });

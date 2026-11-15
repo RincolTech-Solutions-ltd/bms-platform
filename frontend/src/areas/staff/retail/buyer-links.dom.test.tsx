@@ -118,6 +118,11 @@ function noTargetLine(name: string) {
   expect(lines.length).toBeGreaterThan(0);
   for (const line of lines) expect(line.closest('.target-line'), line.outerHTML).toBeNull();
 }
+/** The opposite of `noTargetLine`: at least one line that holds the name sits inside a 48px target line (issue #940). */
+function onTargetLine(name: string) {
+  const lines = [...document.body.querySelectorAll('*')].filter((el) => el.textContent?.includes(name) && ![...el.children].some((c) => c.textContent?.includes(name)));
+  expect(lines.some((line) => line.closest('.target-line') !== null)).toBe(true);
+}
 
 /** The buyer with a record opens the account; the buyer with none is plain text that is still shown. */
 function opensOnlyTheRecord() {
@@ -221,6 +226,18 @@ describe('a buyer name opens the account (#936)', () => {
 });
 
 describe('a person who may not open accounts sees the name as plain text (#936)', () => {
+  // Issue #940: the same screens for a person who may open accounts draw the name on a `.target-line`, so `noTargetLine`
+  // below cannot pass just because the class was renamed.
+  it('may open accounts: a list row, the saved sale and Orders put the name on a target line', async () => {
+    show(<><SaleList items={[sale(CUSTOMER, BUYER, 's1')]} today="2026-11-14" onOpen={() => undefined} /><Receipt sale={sale(CUSTOMER, BUYER)} /></>, OPENS);
+    expect(hrefs(BUYER)).toContain(ACCOUNT);
+    onTargetLine(BUYER);
+    cleanup();
+    show(<OrdersPage />, OPENS);
+    await screen.findByTestId(`order-${order(CUSTOMER, BUYER, 1).id ?? ''}`);
+    onTargetLine(BUYER);
+  });
+
   for (const [who, me] of [['the feature off', ADMIN], ['no sales read', NO_SALES_READ]] as const) {
     it(`${who}: a sale, a list row, the saved sale and a cancelled order`, async () => {
       show(<SaleDetail sale={sale(CUSTOMER, BUYER)} today="2026-11-14" />, me);
