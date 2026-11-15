@@ -18,7 +18,7 @@ import { UNITS, capabilityOn, holdsAt } from './permissions';
 import { newLine, withUnit } from './sale-state';
 import { SaleLineCard } from './sale';
 import { CustomerPicker } from './customer-picker';
-import { BranchLink, ItemLink, SaleLink, ScreenLink } from './screen-link';
+import { BranchLink, BuyerLink, ItemLink, SaleLink, ScreenLink, useBuyerOpens } from './screen-link';
 import { Gate, Note, Problem, ProductPicker, money, useBranchName, useBranchView, useSingleBranch } from './ui';
 import { Hint } from '../../../app/ui/Hint';
 import { ContactLinks } from './contact-links';
@@ -182,13 +182,14 @@ export function OrderActions({ order, onDelivered }: { order: Order; onDelivered
 /** One order: who, where, when, what, how much, and where it stands. */
 export function OrderSummary({ order, branchName }: { order: Order; branchName?: string }) {
   const step = stepOf(order.status);
+  const opens = useBuyerOpens();
   return (
     <>
       <p>
         <strong>{order.order_no}</strong> <span className={`badge badge-${step.tone}`}>{step.label}</span> <span className="hint">from {sourceLabel(order.source)}</span>
       </p>
-      <p>
-        {order.customer_name}
+      <p className={opens(order.customer_id) ? 'target-line' : undefined}>
+        <BuyerLink customerId={order.customer_id}>{order.customer_name}</BuyerLink>
         {order.customer_phone && <>, <a href={`tel:${order.customer_phone}`}>{order.customer_phone}</a></>}
       </p>
       <ContactLinks contact={order.customer_phone} name={order.customer_name} />

@@ -48,8 +48,12 @@ describe('record links at 412px (#336)', () => {
       ['moves', 4], ['on-the-way', 2],
       // Two branch heads and an item cell on the table; the item on the phone card.
       ['stores', 4],
-      // The Branch fact and the two lines of a sale; the Into fact and the two lines of a delivery.
-      ['sale', 3], ['receipt', 3],
+      // The Branch and Buyer facts and the two lines of a sale; the Into fact and the two lines of a delivery.
+      ['sale', 4], ['receipt', 3],
+      // The buyer on the title line of an All sales row, a quotation card and an order (issue #936).
+      ['buyers', 3],
+      // The buyer on a line of its own under the saved sale's sentence (issue #936).
+      ['saved', 1],
       // The name on each shop card; the item and the branch cells of the reorder table and the shop of each damage and use card.
       ['item', 2], ['evaluation', 2],
     ];
@@ -86,6 +90,9 @@ describe('record links at 412px (#336)', () => {
       ['delivery row', rows.locator('.hint').nth(0), '/staff/retail/branches/'],
       ['credit note row', rows.locator('.hint').nth(1), '/staff/retail/branches/'],
       ['movement on the item page', page.getByTestId('item-move').locator('.hint').first(), '/staff/retail/branches/'],
+      // Issue #936: the buyer inside the credit note row's sentence and the cancelled order's.
+      ['credit note buyer', rows.locator('.hint').nth(1), '/staff/retail/accounts/'],
+      ['cancelled order buyer', page.getByTestId('cancelled').locator('li'), '/staff/retail/accounts/'],
     ];
     for (const [name, line, href] of lines) {
       // The link the line is about, by its address: the branch, not the sale number before it.
@@ -94,6 +101,20 @@ describe('record links at 412px (#336)', () => {
       expect(await link.evaluate((el) => el.closest('.target-line, th, td, h2') === null), name).toBe(true);
       expect(await growth(line), name).toBeLessThan(1);
     }
+    await page.close();
+  });
+
+  it('gives a walk-in row with no account no 48px title line, and keeps its badge on the same line (#936)', async () => {
+    const page = await open();
+    const title = page.getByTestId('buyers').locator('p', { hasText: 'Test Walk In 37' }).first();
+    const name = title.locator('strong').first();
+    expect(await name.evaluate((el) => el.classList.contains('target-line'))).toBe(false);
+    const lineHeight = await title.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+    // One line of text (the badge may add a pixel or two), far from a 48px target line.
+    expect((await title.boundingBox())!.height).toBeLessThan(lineHeight * 1.5);
+    const badge = (await title.locator('.badge').boundingBox())!;
+    const box = (await name.boundingBox())!;
+    expect(Math.abs(badge.y + badge.height / 2 - (box.y + box.height / 2))).toBeLessThan(6);
     await page.close();
   });
 });

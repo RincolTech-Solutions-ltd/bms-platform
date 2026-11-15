@@ -1418,7 +1418,7 @@ own: the order is copied from the chat, so the form asks for the phone first and
   and the history: each step with the time, the person and the note. The breadcrumb names the order.
 - **Delivery fees and cancellations** (`/staff/retail/orders-report`, `orders-report.tsx`): the days (the last 30 by default), the fees taken
   grouped by day, where the orders came from or who delivered, and the orders cancelled with the reason and the source, each opening the
-  order.
+  order, and the customer opening the account when the order names one (`BuyerLink`, issue #936).
 - Stock kept aside: the Stock list and the item search of the sale, restock and order forms show "N free, M kept for orders" beside a
   balance that open orders hold part of (`reserved_qty`).
 - Tours: `page-orders`, `page-order`, `page-orders-report` (`frontend/src/tour/tours-retail-orders.ts`). The retail menu has an Orders
