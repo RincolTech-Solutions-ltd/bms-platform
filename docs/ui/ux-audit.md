@@ -34,8 +34,9 @@ through one shared `BuyerLink` beside `SaleLink` (`retail/screen-link.tsx`), on 
 orders of Delivery fees and cancellations, and the saved sale on Record a sale. It links only a buyer with a customer record
 (a `customer_id` in the payload) and only for a person who may open accounts (`canOpenAccount`: customer accounts on and
 sales read, the account page's own test), so it never leads to a refusal; any other name is plain text. A name alone in a
-Facts cell or on a card's own line (`.target-line`) is 48px; inside a sentence (Customer returns, the cancelled order, the
-saved sale) it keeps its text height (rule 12 of `docs/ui-rules.md`).
+Facts cell or on a line of its own (`.target-line`: a list row's or card's title line, and the saved sale's Buyer line,
+which left its sentence because the link's chevron wrapped it) is 48px; inside a sentence (Customer returns, the cancelled
+order) it keeps its text height (rule 12 of `docs/ui-rules.md`). Measured at 412px in `layout/record-links.layout.test.ts`.
 
 - The cancellations report gained `customer_id` (`RetailCancelledOrder`): it reads the same `retail_customer_orders` row
   that `GET /retail/orders/{id}` already answers with `customer_id`, under the same permission `retail.order.manage`.

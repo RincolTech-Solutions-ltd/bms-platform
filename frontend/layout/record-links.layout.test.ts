@@ -48,8 +48,12 @@ describe('record links at 412px (#336)', () => {
       ['moves', 4], ['on-the-way', 2],
       // Two branch heads and an item cell on the table; the item on the phone card.
       ['stores', 4],
-      // The Branch fact and the two lines of a sale; the Into fact and the two lines of a delivery.
-      ['sale', 3], ['receipt', 3],
+      // The Branch and Buyer facts and the two lines of a sale; the Into fact and the two lines of a delivery.
+      ['sale', 4], ['receipt', 3],
+      // The buyer on the title line of an All sales row, a quotation card and an order (issue #936).
+      ['buyers', 3],
+      // The buyer on a line of its own under the saved sale's sentence (issue #936).
+      ['saved', 1],
       // The name on each shop card; the item and the branch cells of the reorder table and the shop of each damage and use card.
       ['item', 2], ['evaluation', 2],
     ];
@@ -86,6 +90,8 @@ describe('record links at 412px (#336)', () => {
       ['delivery row', rows.locator('.hint').nth(0), '/staff/retail/branches/'],
       ['credit note row', rows.locator('.hint').nth(1), '/staff/retail/branches/'],
       ['movement on the item page', page.getByTestId('item-move').locator('.hint').first(), '/staff/retail/branches/'],
+      // Issue #936: the buyer inside the credit note row's sentence.
+      ['credit note buyer', rows.locator('.hint').nth(1), '/staff/retail/accounts/'],
     ];
     for (const [name, line, href] of lines) {
       // The link the line is about, by its address: the branch, not the sale number before it.

@@ -84,8 +84,9 @@ export function Receipt({ sale, received }: { sale: Sale; /** Cash the customer 
       <h2>Sale saved</h2>
       <p>
         Paid by {METHODS.find((m) => m.value === sale.payment_method)?.label ?? sale.payment_method} on {showDate(sale.sale_date)}
-        {sale.buyer_name ? <>, buyer <BuyerLink customerId={sale.customer_id}>{sale.buyer_name}</BuyerLink></> : ''}
       </p>
+      {/* On a line of its own, so the name that opens the account (issue #936) is a whole target and never wraps a sentence. */}
+      {sale.buyer_name && <p className="target-line">Buyer: <BuyerLink customerId={sale.customer_id}>{sale.buyer_name}</BuyerLink></p>}
       <div className="table-wrap" tabIndex={0}><table>
         <thead>
           <tr>

@@ -169,9 +169,10 @@ describe('a buyer name opens the account (#936)', () => {
     opensOnlyTheRecord();
   });
 
-  it('Record a sale: the saved sale', () => {
+  it('Record a sale: the saved sale, the buyer on a line of its own', () => {
     show(<Receipt sale={sale(CUSTOMER, BUYER)} />);
     expect(hrefs(BUYER)).toEqual([ACCOUNT]);
+    expect(screen.getByRole('link', { name: BUYER }).parentElement?.classList.contains('target-line')).toBe(true);
     cleanup();
     show(<Receipt sale={sale(undefined, WALK_IN)} />);
     expect(hrefs(WALK_IN)).toEqual([]);
