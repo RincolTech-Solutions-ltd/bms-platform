@@ -47,19 +47,24 @@ decrypt.
      newest backup is an age file, the host cannot decrypt it, so it runs a backup check instead: the newest object exists, is at
      most 26 hours old, is a well formed age file (the version line, exactly one X25519 stanza, no passphrase stanza, the header
      MAC line), is not smaller than `BACKUP_CHECK_MIN_BYTES` (32 KiB) and not under half the size the previous check saw. It
-     records `state/last_backup_check` (or `_error`) and uploads the line to `<environment>/drill/last_backup_check.txt` with
-     the SHA-256 fingerprint of the host's `BACKUP_AGE_RECIPIENT` and the live Flyway version. While the newest backup is still
+     records `state/last_backup_check` and uploads the line to `<environment>/drill/last_backup_check.txt` with the SHA-256
+     fingerprint of the host's `BACKUP_AGE_RECIPIENT` and the live Flyway version. A failed check goes to
+     `state/last_backup_check_error` and `drill/last_backup_check_error.txt`, never over the last good check, so its
+     fingerprint stays for the offline drill to compare. While the newest backup is still
      symmetric (the first night before the switch, or a host not switched yet) the full restore drill runs as before, line for
      line.
    - **Monthly, on the operator's Mac with the private key** (`deploy/restore-drill-offline.sh`). It downloads the newest
-     backup (or one named with `--file`), detects its format, decrypts it with the Keychain key, restores it into a throwaway
-     PostgreSQL container with no network, checks the Flyway version (not ahead of the checkout's newest migration), the row
-     counts and that `bms_app` reads a tenant's rows under row-level security, compares the fingerprint of the Keychain key's
-     public half with the one the host recorded, records the result in `~/bms-restore-drills/history.log` and uploads it to
-     `<environment>/drill/last_offline_drill.txt`. Everything it decrypted is removed whatever the outcome.
+     backup (or one named with `--file`) and detects its format. For an age file it compares the fingerprint of the Keychain
+     key's public half with the one in the host's last good check, and fails if they differ or there is none. It then
+     streams the decryption with the Keychain key straight into `pg_restore` in a throwaway PostgreSQL container with no
+     network, so the decrypted dump is never in a file, and checks the Flyway version (not ahead of the checkout's newest
+     migration), the row counts and that `bms_app` reads at least one of a tenant's rows under row-level security. It records
+     the result in `~/bms-restore-drills/history.log` and, for a drill of the newest daily backup only, uploads it to
+     `<environment>/drill/last_offline_drill.txt`; a drill of a named file or a monthly copy stays on the Mac.
    - **`monitor.sh`** alerts when the last weekly drill or backup check failed, when neither succeeded in 9 days, when the last
      offline drill failed, and when no full restore (on the host or offline) succeeded in 35 days. It reads the offline result
-     from R2 at most every 6 hours, only while the host has no full drill of its own inside the 35 days.
+     from R2 every 6 hours. Once the host checks age backups it counts an offline OK as the full restore only for an age file
+     from `daily/`, so restoring an old-format or monthly copy never stands in for a proof of the current key.
    An age file does not name its recipient (that is part of age's design), so the host check cannot prove that a backup was
    encrypted to the Keychain key. The monthly drill proves it by decrypting, and the fingerprint comparison catches a host
    whose `.env` recipient was changed after that.
@@ -83,6 +88,10 @@ decrypt.
 - Losing both the Keychain copies and the envelope loses every backup made since the switch. The envelope is kept apart from the
   Mac, and the ceremony checks the printed copy by reading it back.
 - Import rehearsals stop once the newest backup is an age file, until the owner decides decision 5.
-- The rollout is by hand and outside this change: install `age` on each host, run the key ceremony, add `BACKUP_AGE_RECIPIENT`,
-  run `backup.sh` and the drill once by hand, then remove `BACKUP_ENCRYPTION_KEY` from the host's `.env`
-  (`restore-from-backup.md` section 8.4).
+- The rollout is by hand and outside this change, and its order matters: the key ceremony, `age` and `BACKUP_AGE_RECIPIENT`
+  on every host **before** the release reaches any host (the staging puller deploys within minutes of the merge, and the new
+  `backup.sh` fails without them; the old one ignores the recipient). Then on each host `backup.sh` and the check by hand,
+  the offline drill, and only then `BACKUP_ENCRYPTION_KEY` removed from the host's `.env` (`restore-from-backup.md`
+  section 8.4).
+- The printed copy is a print job, which CUPS keeps on disk after printing; the ceremony prints to a USB printer and purges
+  and checks the spool (`restore-from-backup.md` section 8.2 step 4).

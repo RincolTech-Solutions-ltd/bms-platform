@@ -51,12 +51,17 @@ If macOS's own `openssl` refuses `-pbkdf2` on an old backup, use Homebrew's (`br
 
 `pg_restore_on_host <database>` (on the Mac) runs `pg_restore` in the host's postgres container, reading the dump from the
 SSH connection. `HOST` is an account that may use sudo on the host (`ops` on production); `DEPLOY_USER` runs the stack
-(`bms` on staging, the deploy user on production). `exec` only needs the three image variables set, not resolved:
+(`bms` on staging, the deploy user on production). `exec` only needs the three image variables set, not resolved.
+
+The connection's standard input carries the dump and there is no terminal, so `sudo` cannot ask for a password: the
+account needs passwordless sudo to the deploy user, at least for `docker` (`ops` has it on hosts built by cloud-init;
+elsewhere add a `sudoers.d` line for the restore and remove it after). `sudo -n` makes a missing rule fail at once instead
+of hanging. Check it first with `ssh "$HOST" "sudo -n -u $DEPLOY_USER docker ps --format '{{.Names}}'"`.
 
 ```bash
 HOST=<you>@<host>; DEPLOY_USER=<bms or the deploy user>
 pg_restore_on_host() {
-  ssh "$HOST" "cd /opt/bms && sudo -u $DEPLOY_USER env API_IMAGE=unused WEB_IMAGE=unused PROXY_IMAGE=unused \
+  ssh "$HOST" "cd /opt/bms && sudo -n -u $DEPLOY_USER env API_IMAGE=unused WEB_IMAGE=unused PROXY_IMAGE=unused \
     docker compose --project-name bms -f compose.yml exec -T postgres pg_restore -U bms_owner -d $1 --exit-on-error"
 }
 ```
@@ -163,7 +168,8 @@ records one line
 ```
 
 in `state/last_backup_check` or `state/last_backup_check_error`, appended to `state/restore-drill-history.log`, and uploads it to
-`r2:<bucket>/<environment>/drill/last_backup_check.txt`. `recipient` is the first 16 hex characters of the SHA-256 of
+`r2:<bucket>/<environment>/drill/last_backup_check.txt` (a good check) or `drill/last_backup_check_error.txt` (a failed one),
+so the first always holds the last good check and its fingerprint. `recipient` is the first 16 hex characters of the SHA-256 of
 `BACKUP_AGE_RECIPIENT`; the offline drill compares it with the Keychain key's (section 8.5). An age file does not name its
 recipient, so this check cannot prove the backup opens with the Keychain key: the monthly offline drill proves that.
 
@@ -494,9 +500,12 @@ staging and production. Everything below is done by hand by the operator; no pul
 
 ### 8.2 The key ceremony (the operator's Mac, once, with the owner)
 
-Do it with the owner beside you, with no screen sharing or recording on, in one Terminal window that you close at the end. The
-secret goes from `age-keygen` into a shell variable and from there into the Keychain, onto paper and into the iCloud copy; it is
-never written to a file and never typed on a command line.
+Do it with the owner beside you, with no screen sharing or recording on, in one Terminal window that you close at the end.
+Turn Handoff off for the ceremony (System Settings, General, AirDrop & Handoff, Allow Handoff between this Mac and your
+iCloud devices: off), so Universal Clipboard does not copy the secret to a nearby iPhone or iPad in step 3; turn it back on
+at the end. The secret goes from `age-keygen` into a shell variable and from there into the Keychain, onto paper and into the
+iCloud copy; it is never typed on a command line, and the only file it is ever in is the print job of step 4, which step 4
+purges and checks.
 
 1. Keep this window's commands out of the shell history and make the key in memory:
 
@@ -529,13 +538,22 @@ never written to a file and never typed on a command line.
 
    Open the entry on a second Apple device signed in to the same Apple Account and check the first and last six characters
    against the Mac's.
-4. **The printed copy.** Print to a printer on USB or the local network, never a cloud print service (CUPS deletes its spool
-   file once printed):
+4. **The printed copy.** A print job is a file: macOS's CUPS keeps each job's data in `/private/var/spool/cups` after it
+   prints (by default for up to a day, `PreserveJobFiles`), and many network printers keep jobs in their own memory or disk.
+   So print to a printer on **USB** with no job storage, never a network or cloud printer, then purge the job and check that
+   nothing is left:
 
    ```bash
    printf '%s\n' "BMS backup age key (ADR-129). Made $(date +%Y-%m-%d) by <operator>, witnessed by <owner>." "$key" \
      "Keep sealed. Opening it is recorded in docs/runbooks/restore-from-backup.md section 8.7." | lpr -o cpi=12
+   # once the page is out:
+   cancel -a -x                                   # every job of yours, its data files purged
+   sudo sh -c 'ls /private/var/spool/cups/d* 2> /dev/null | wc -l'   # 0: no job data left
    ```
+
+   If that last count is not 0, remove those files with `sudo rm -P /private/var/spool/cups/d*` and count again. With no USB
+   printer at hand, write the key by hand instead (the `AGE-SECRET-KEY-1` line, 74 characters, in capitals, with the date
+   and the public key) and check it in step 5 the same way.
 
 5. **Check the paper by reading it back.** Type the `AGE-SECRET-KEY-1` line from the paper (not from the screen) into:
 
@@ -580,8 +598,15 @@ exposed: section 8.6.
 
 ### 8.4 The switch, by hand (staging, then production)
 
-1. The release with this change is live on the host (`restore-drill.sh` and `backup.sh` arrive with releases).
-2. Section 8.3 on the host.
+**The key comes first, the release second.** The staging puller deploys every green build of main within minutes of the
+merge, and from then on the new `backup.sh` fails every night on a host without `BACKUP_AGE_RECIPIENT` or `age`, so no
+backup is made. The old `backup.sh` ignores `BACKUP_AGE_RECIPIENT`, so setting it early is harmless. So:
+
+1. **Before the change is merged** (and on production, before its release is deployed): the key ceremony (8.2), then 8.3
+   on **every** host, staging and production: `age` installed and `BACKUP_AGE_RECIPIENT` in `.env`. Keep
+   `BACKUP_ENCRYPTION_KEY` there for now: the release before this one still needs it.
+2. Merge; the release reaches staging through the puller, production when it is deployed. On each host in turn, once the
+   release with this change is live there (`restore-drill.sh` and `backup.sh` arrive with releases), do steps 3 to 7.
 3. A backup now, as the deploy user: `sudo -u <deploy user> /opt/bms/backup.sh` (on staging the cron user is `bms`). Its log
    says "for the age recipient in BACKUP_AGE_RECIPIENT"; without the recipient it fails at once, writes
    `state/last_backup_error` with the reason, uploads nothing, and `monitor.sh` reports it.
@@ -612,20 +637,23 @@ deploy/restore-drill-offline.sh --environment staging                     # when
 deploy/restore-drill-offline.sh --folder monthly --file <name>            # a monthly copy, or an old-format backup
 ```
 
-It downloads the newest backup into a mode-0700 temp dir, tells its format from its first bytes, decrypts an age file with the
-Keychain key (an old one with the old key), restores it into a throwaway PostgreSQL in Docker with no network, created by the
-checkout's `deploy/postgres/initdb`, and checks the Flyway version (not ahead of the checkout's newest migration), the counts
-of tenants, users and audit rows, and that `bms_app` reads a tenant's rows under row-level security. For an age file it also
-compares the fingerprint of the Keychain key's public half with the `recipient=` the host recorded in
-`drill/last_backup_check.txt`. It records one line in `~/bms-restore-drills/history.log` and uploads it to
-`<environment>/drill/last_offline_drill.txt`:
+It downloads the newest backup into a mode-0700 temp dir and tells its format from its first bytes. For an age file it first
+compares the fingerprint of the Keychain key's public half with the `recipient=` of the host's last good check in
+`drill/last_backup_check.txt`, and fails if they differ or there is none. It starts a throwaway PostgreSQL in Docker with no
+network, created by the checkout's `deploy/postgres/initdb`, and streams the decryption (the Keychain key, or the old key for
+an old file) straight into `pg_restore`, so the decrypted dump is never in a file. It checks the Flyway version (not ahead of
+the checkout's newest migration), the counts of tenants, users and audit rows, and that `bms_app` reads at least one of a
+tenant's rows under row-level security. It records one line in `~/bms-restore-drills/history.log` and, for a drill of the
+newest daily backup only, uploads it to `<environment>/drill/last_offline_drill.txt`. A drill of a named file or a monthly
+copy is kept on the Mac only, and once a host checks age backups `monitor.sh` counts only an offline restore of an age file
+from `daily/`: restoring an old backup proves nothing about the current key.
 
 ```
 <time> OK <file> folder=daily format=age seconds=<n> rto_ok=yes flyway=<v> repo_flyway=<v> tenants=<n> users=<n> audit=<n> app_visible_users=<n> recipient=match
 <time> FAILED <file> folder=daily format=age seconds=<n> <reason>
 ```
 
-It removes the temp dir, the decrypted dump and the container whatever the outcome. A pg_restore error is shown on the screen
+It removes the temp dir, the downloaded file and the container whatever the outcome. A pg_restore error is shown on the screen
 only. Exit 0 is a pass, 1 a failure (recorded and uploaded), 2 a usage error.
 
 | It says | Do |
@@ -633,7 +661,8 @@ only. Exit 0 is a pass, 1 a failure (recorded and uploaded), 2 a usage error.
 | `decryption failed: the Keychain key is not the one this backup was encrypted to` | The host encrypts to another key, or the Keychain item is wrong. Compare `recipient=` on the host (8.3) with the Keychain key's fingerprint; if the Keychain item is wrong, restore it from the iCloud copy or the envelope (8.6) |
 | `the host encrypts to another public key` | Someone changed `BACKUP_AGE_RECIPIENT` on the host. Put the right public key back today; backups since the change open only with that other key's private half |
 | `no age key in the login Keychain item` | 8.2 step 2 on this Mac, from the iCloud copy |
-| `recipient=unchecked` | The host has made no backup check yet (8.4 step 4); run it and the drill again |
+| `no good backup check with a recipient fingerprint from the host` | The host has no good weekly check in R2 yet, or its checks fail (see `drill/last_backup_check_error.txt` and the `drill` alert). Run the check on the host (8.4 step 4), put right what it reports, then the drill again |
+| `bms_app reads 0 users` | The restore's row-level security or grants hide every row from the application role: a finding to fix before the next release |
 | `ahead of this checkout's newest migration` | `git pull`, then run it again |
 | `COULD NOT UPLOAD the result` | Run the `rclone copyto` line it prints, or `monitor.sh` alerts after 35 days |
 
