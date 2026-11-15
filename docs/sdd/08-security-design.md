@@ -1095,7 +1095,7 @@ the lending module is switched on (runbook `docs/runbooks/`, onboarding a tenant
 | A lender's own Pesapal consumer key and secret | Table `payment_gateway_accounts`, AES-256-GCM sealed with `BMS_DATA_KEY` (the id of the key is inside the box); entered by the lender's administrator, write-only: no endpoint returns it, no log line, audit row or error carries it; the notification token is stored only as its SHA-256 (ADR-035 amendment of 2026-10-18) | When the lender rotates it at Pesapal (a new secret for the same key is allowed with payments in flight); data key rotation re-seals the rows and the second-factor seeds (`BMS_DATA_KEY_PREVIOUS`, runbook `payments.md` section 4a) |
 | SMS provider key and callback token (`BMS_SMS_AT_API_KEY`, `BMS_SMS_AT_USERNAME`, `BMS_SMS_CALLBACK_TOKEN`, `BMS_SMS_ALLOWLIST`) | Host env file (ADR-036) | Yearly, on staff change |
 | Language model provider key (`BMS_AI_API_KEY`, with `BMS_AI_BASE_URL`, `BMS_AI_MODEL`) | Host env file (ADR-037) | Yearly, on staff change |
-| Backup encryption key | Host env file and an offline copy held by the dev lead | On staff change |
+| Backup encryption key (ADR-129, owner decision D121): an age key pair. The host holds only the public key, `BACKUP_AGE_RECIPIENT`; the private key is made on the operator's Mac and kept in its Keychain and as a sealed printed copy with the owner, never on a server, in git or in CI. The old symmetric `BACKUP_ENCRYPTION_KEY` is kept offline only, for backups made before the switch | Public key: host env file. Private key: the operator's Keychain and the owner's sealed envelope (`docs/runbooks/restore-from-backup.md` section 8). Old key: the offline store and the operator's Keychain until the last symmetric backup ages out, then destroyed | On staff change, or when the private key may be exposed: a new pair, the old private key kept offline until the backups made with it age out |
 
 A lender's Pesapal consumer key (issue #309): the refused-key check and the cross-tenant uniqueness digest compare the key
 lower cased (nothing recorded says whether Pesapal treats letter case as significant, so the two checks assume it may not; the
@@ -1272,7 +1272,7 @@ Detailed requirements are NFR-DP-01 to NFR-DP-08 in chapter 4. Design consequenc
 | Forged payment callback | Signature verification plus status query before booking (FR-PAY-02) |
 | Replayed payment callback | Idempotency on the provider reference (FR-PAY-03) |
 | Another person's Idempotency-Key sent to read their stored answer | A replay answers only the person who stored the key; anyone else in the business gets 422 `idempotency_key_other_user`, nothing is done and nothing of the stored answer is shown (issue #852, ADR-026 decision 5) |
-| Leaked backup | Backups encrypted before upload; private bucket; 30-day retention |
+| Leaked backup | Backups encrypted on the host to an age public key whose private key is never on a server (ADR-129), so a stolen host or `.env` reads none made since the switch; private bucket; 30-day retention |
 | Enumeration of member records across the member portal | Ownership check returns 404, UUIDs not sequential |
 | Sign-up flood or a stranger consuming the shared host | Rate limits, honeypot, email confirmation, operator verification before anything is provisioned (ADR-024) |
 | Sign-up used to learn which emails are customers | Same answer for known and unknown emails; a known email gets the link by email only |

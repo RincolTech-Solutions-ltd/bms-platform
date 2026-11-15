@@ -663,6 +663,16 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   `BACKUP_RETENTION_ON_HOST=false` once the R2 lock and lifecycle rules are on (provider steps left for Hillary). Tests:
   `bash deploy/tests/monitor-test.sh` (CI, with shellcheck). Runbooks `docs/runbooks/monitoring-and-alerts.md`,
   `restore-from-backup.md` sections 5 to 7, `security-incident.md` and `support-and-on-call.md` (owner placeholders to fill).
+- **Built (backups to a public key, issue #46 item 3, owner decision D121, ADR-129):** host side and the operator's Mac only, no
+  migration and no application change. `backup.sh` pipes `pg_dump` into `age` to `BACKUP_AGE_RECIPIENT` and fails before it dumps,
+  uploading nothing, when the recipient is missing or malformed or `age` is not installed; it never reads `BACKUP_ENCRYPTION_KEY`.
+  `restore-drill.sh` with no argument tells the newest backup's format from its header: an age file gets a backup check (fresh,
+  well formed to one X25519 recipient, sane size; `state/last_backup_check`, `drill/last_backup_check.txt` with the recipient's
+  fingerprint), an old openssl file the full drill, unchanged; `--rehearse-import` refuses an age backup (exit 3).
+  `deploy/restore-drill-offline.sh` is the monthly full drill on the Mac with the Keychain key, recorded locally and in
+  `drill/last_offline_drill.txt`; `monitor.sh` alerts when no full restore succeeded in 35 days or the last offline drill failed.
+  Tests: `deploy/tests/backup-test.sh`, `offline-drill-test.sh`, `restore-drill-test.sh`, `rehearse-import-test.sh` and
+  `monitor-test.sh` (CI). Key ceremony, restore steps and rollout: `restore-from-backup.md` section 8 (by hand, by the operator).
 - **Built (launch hardening A, issue #426, ADR-059, revised after the review of #433):** migration `V78` (V77 is #421's):
   `sign_in_address_failures`, the five-failure count and lock of every sign-in address that matches no account, keyed by
   its SHA-256, so it locks exactly as an account across restarts (`SignInAddressFailures`, nightly purge
@@ -1018,7 +1028,8 @@ bms-platform/
 ├── .env.example         every environment variable, placeholders only
 ├── backend/             Spring Boot API, modules by package (ADR-010), Flyway migrations
 ├── frontend/            the React PWA: staff area, member area, platform console (ADR-009)
-├── deploy/              host-side files: compose.yml, deploy.sh, backup.sh, restore-drill.sh, monitor.sh, systemd units, Caddy, SQL (SDD ch. 9)
+├── deploy/              host-side files: compose.yml, deploy.sh, backup.sh, restore-drill.sh, monitor.sh, systemd units, Caddy, SQL (SDD ch. 9);
+│                        restore-drill-offline.sh runs on the operator's Mac only, never on a host (ADR-129)
 ├── scripts/db-bench/    throwaway PostgreSQL benchmark at 25 times the data (ADR-028); never production
 ├── fixtures/            fabricated test data only (pilot register sample)
 ├── docs/
@@ -1502,6 +1513,11 @@ Accepted (this list is the ADR index):
 - ADR-121 One page per item with each shop's stock and every movement of it (Proposed, #813): the movements are the ledger
   read with a running balance per shop from a window sum, one query per page; quantities to every stock reader, buying
   figures and profit only with `retail.profit.read`; a branch outside the scope is 404; kept offline (no migration)
+- ADR-129 Backups are encrypted to an age public key whose private key stays offline (proposed, #46 item 3, owner decision
+  D121): `backup.sh` encrypts to `BACKUP_AGE_RECIPIENT` and fails with nothing uploaded when it is missing, never falling back;
+  the private key lives in the operator's Mac Keychain and a sealed printed copy; old symmetric backups are told by their
+  header and stay readable until they age out; the host's weekly drill becomes a backup check, the full restore a monthly
+  drill on the Mac (`restore-drill-offline.sh`); the import rehearsal refuses an age backup until the owner decides (no migration)
 
 Pending (cite only as "pending ADR-NNN"):
 
