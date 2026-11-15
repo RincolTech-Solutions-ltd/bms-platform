@@ -43,20 +43,21 @@ Counted over the 148 work routes (the component kit is a review page, outside th
 - Orders (ticket 4, rule 3): while a delivery is being recorded, New order and the new order's Save are plain buttons, so
   Save: delivered and paid is the one primary, and one delivery is recorded at a time: opening a second closes the first
   for good. Tested in `retail/orders-primary.dom.test.tsx`.
-- Delivery fees and cancellations (ticket 9): each empty list ends "Choose other days above." Tested in
+- Delivery fees and cancellations (ticket 9, rule 3): each empty list ends "Choose other days above." Tested in
   `retail/orders-primary.dom.test.tsx`.
 - Feedback (ticket 6, rule 1): What you sent shows the last ten, newest first (sorted on the screen, whatever order the
   list arrives in), each closed to its first line with its kind, date and status (and "with a reply" when there is one) on
   a 48px row that keeps its open and close triangle; Show more adds ten. Page tour `page-feedback` v2 says so. Tested in
-  `feedback/feedback-history.dom.test.tsx`; the triangle is held by the design guard.
-- Notifications and app (ticket 7): with no device, the line is said once the list and this device's state are both read,
-  so it never changes under the eye. With the switch off it is "No device yet: turn on Notifications on this device above
-  to add this one."; with it on, "No device listed yet: reload the page to see this one."; where notifications are
-  blocked, not possible or not offered, "No device receives notifications for you yet." and the card above says why.
-  Tested in `notifications/notifications.dom.test.tsx`.
-- Bring in your data (ticket 8): "No import yet. Start a new import to bring in your first sheets.", naming the one
+  `feedback/feedback-history.dom.test.tsx`; the triangle is held by the design guard, which fails any rule that hides a
+  summary's marker (four older rows on other screens are listed there, waiting on #935).
+- Notifications and app (ticket 7, rule 3): with no device, the line is said once the list and this device's state are
+  both read, so it never changes under the eye. With the switch off it is "No device yet: turn on Notifications on this
+  device above to add this one."; with it on, "This device is not listed yet: turn the switch above off and on again to
+  add it."; where notifications are blocked, not possible or not offered, "No device receives notifications for you yet."
+  and the card above says why. Tested in `notifications/notifications.dom.test.tsx`.
+- Bring in your data (ticket 8, rule 3): "No import yet. Start a new import to bring in your first sheets.", naming the one
   primary below it. Tested in `imports/runs.dom.test.tsx`.
-- Imports to sign off (ticket 10): the opening line says "This reconciliation compares your sheet with what BMS now holds,
+- Imports to sign off (ticket 10, rule 3): the opening line says "This reconciliation compares your sheet with what BMS now holds,
   check by check." with a help tip on reconciliation (`help-tips.ts`, held by the help tips guard): "... Every difference
   must be explained before you can sign.", in the words of the refusal for a difference that is not explained
   (`unitemised_difference`, #874). Tested in `imports/imports.dom.test.tsx`.

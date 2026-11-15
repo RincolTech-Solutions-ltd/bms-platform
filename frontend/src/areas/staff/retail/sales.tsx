@@ -372,11 +372,16 @@ interface AllSalesKept { entry: string; index: number; page?: string; adopt?: bo
 let allSalesKept: AllSalesKept | null = null;
 
 /**
- * Whether the sale page on history entry `entry` is the one All sales opened, so its way back is Back, which finds the list as
- * it was. The same sale reached again another way (a credit note, a link) is a new entry, and its way back opens All sales.
+ * Whether the sale page at history entry `at` is the one All sales opened, with the list just before it, so its way back is
+ * Back, which finds the list as it was. The same sale reached again another way (a credit note, a link) is another entry, and
+ * its way back opens All sales.
  */
 export const openedFromAllSales = (saleId: string, at: { __TSR_key?: string; __TSR_index: number }) =>
-  at.__TSR_key !== undefined && allSalesKept?.sale === saleId && allSalesKept.page === at.__TSR_key && allSalesKept.index + 1 === at.__TSR_index;
+  allSalesKept?.sale === saleId &&
+  // The sale page sits at the index right after the list, known before it opens; its key is added once the move settles,
+  // so a press before that still goes Back.
+  at.__TSR_index === allSalesKept.index + 1 &&
+  (allSalesKept.page === undefined || allSalesKept.page === at.__TSR_key);
 
 /** The sale page opens All sales anew (not by Back): the list it opens takes what was kept, still only that business day. */
 export function keepAllSalesForNext() {

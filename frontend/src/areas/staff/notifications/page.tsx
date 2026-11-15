@@ -117,7 +117,7 @@ function Devices({ push }: { push: ReturnType<typeof createPush> }) {
       {/* Said once the list and this device's state are both read, so it never changes under the eye. Off, it points to the switch
           above; on, this device is not listed yet; blocked, unsupported or not offered, the card above says why. */}
       {list.isSuccess && state.isSuccess && devices.length === 0 && (
-        <p className="hint">{state.data === 'off' ? 'No device yet: turn on Notifications on this device above to add this one.' : state.data === 'on' ? 'No device listed yet: reload the page to see this one.' : 'No device receives notifications for you yet.'}</p>
+        <p className="hint">{state.data === 'off' ? 'No device yet: turn on Notifications on this device above to add this one.' : state.data === 'on' ? 'This device is not listed yet: turn the switch above off and on again to add it.' : 'No device receives notifications for you yet.'}</p>
       )}
       {devices.length > 0 && (
         <ul className="stack">

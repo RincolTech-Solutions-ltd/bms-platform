@@ -130,7 +130,8 @@ describe('the devices', () => {
 
   it('says this device is not listed yet when the switch is already on, never to turn it on', async () => {
     await show(fakePush('on'));
-    expect(await screen.findByText('No device listed yet: reload the page to see this one.')).toBeTruthy();
+    expect(await screen.findByText('This device is not listed yet: turn the switch above off and on again to add it.')).toBeTruthy();
+    expect(screen.queryByText(/reload/i)).toBeNull();
     expect(screen.queryByText(/turn on Notifications/)).toBeNull();
   });
 

@@ -115,7 +115,11 @@ describe('a sale opened from All sales', () => {
     fireEvent.change(buyerBox(), { target: { value: 'Test' } });
     await openTheDay();
     const before = await trail();
+    const listIndex = router.state.location.state.__TSR_index;
     fireEvent.click(await screen.findByRole('button', { name: /^Open the sale of .* to Test Buyer One$/ }));
+    // A press of See all sales before the move settles still goes Back: the sale page's index is known at once.
+    expect(openedFromAllSales(SALE, { __TSR_index: listIndex + 1 })).toBe(true);
+    expect(openedFromAllSales(SALE, { __TSR_index: listIndex + 2 })).toBe(false);
     await waitFor(() => expect(router.state.location.pathname).toBe(`/staff/retail/sales/${SALE}`));
     expect(router.state.location.search).toEqual({});
     // The sale page's own way back is Back, since the sale was opened from the list.
