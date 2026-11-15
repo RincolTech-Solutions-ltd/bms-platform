@@ -1,14 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { useState } from 'react';
-import { FormError, type PaymentStatementDetail, reconciliation, statements } from '../../../api/payments';
+import { FormError, type PaymentStatementDetail, type ReconciliationFinding, reconciliation, statements } from '../../../api/payments';
 import { businessZone } from '../../../api/retail';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { NoAccess } from '../../../app/ui/EmptyState';
 import { Hint } from '../../../app/ui/Hint';
 import { money } from '../lending/loan-state';
 import { useStaff } from '../context';
-import { FEE_WORDS, MATCH_WORDS, canManageStatements, fileProblem, findingWords, showReconciliation } from './state';
+import { FEE_WORDS, MATCH_WORDS, canManageStatements, fileProblem, findingGroups, findingWords, showReconciliation } from './state';
 
 // "Payment reconciliation" (extras slice A5 part 2, issue #224, task #317; FR-PAY-05, FR-PAY-11): the differences between what the payment provider
 // says, what this system holds and what people entered by hand, and the upload of the provider's statement. Nothing here changes a loan or a
@@ -21,6 +21,11 @@ function when(iso: string | undefined): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: businessZone() });
 }
+
+// Rule 1 (issue #941): the screen opens short and Show more adds the next lines, differences or statements.
+export const LINES_PAGE = 50;
+export const FINDINGS_PAGE = 20;
+export const PAST_PAGE = 10;
 
 export function UploadStatement({ onUploaded }: { onUploaded: (s: PaymentStatementDetail, replayed: boolean) => void }) {
   const [file, setFile] = useState<File | null>(null);
@@ -76,7 +81,8 @@ export function UploadStatement({ onUploaded }: { onUploaded: (s: PaymentStateme
           </div>
         )}
         <p>
-          <BusyButton type="submit" className="rt-primary" busy={upload.isPending} disabled={!file || problem !== null || coveredProblem !== null}>Upload</BusyButton>
+          {/* Plain: Run it now is the one brand button of the screen (issue #941, rule 3). */}
+          <BusyButton type="submit" busy={upload.isPending} disabled={!file || problem !== null || coveredProblem !== null}>Upload</BusyButton>
         </p>
       </form>
     </section>
@@ -89,6 +95,8 @@ export function StatementView({ detail, canMark }: { detail: PaymentStatementDet
   const [marking, setMarking] = useState<number | null>(null);
   const [note, setNote] = useState('');
   const [marked, setMarked] = useState<Set<number>>(new Set());
+  const [shown, setShown] = useState(LINES_PAGE);
+  const rows = detail.rows ?? [];
   const mark = useMutation({
     mutationFn: ({ rowNo, text }: { rowNo: number; text: string }) => statements.markOutside(s?.id ?? '', rowNo, text),
     onSuccess: (_row, v) => {
@@ -117,7 +125,7 @@ export function StatementView({ detail, canMark }: { detail: PaymentStatementDet
           </tr>
         </thead>
         <tbody>
-          {(detail.rows ?? []).map((r) => (
+          {rows.slice(0, shown).map((r) => (
             <tr key={r.row_no}>
               <td>{r.row_no}</td>
               <td>{r.confirmation_code ?? r.order_tracking_id}</td>
@@ -142,7 +150,7 @@ export function StatementView({ detail, canMark }: { detail: PaymentStatementDet
                       <label htmlFor={`why-${r.row_no}`}>What is it</label>
                       <input id={`why-${r.row_no}`} value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} />
                       {mark.error && <p role="alert" className="field-error">{messageOf(mark.error)}</p>}
-                      <BusyButton type="submit" className="rt-primary" busy={mark.isPending} disabled={note.trim().length < 3}>Save</BusyButton>
+                      <BusyButton type="submit" busy={mark.isPending} disabled={note.trim().length < 3}>Save</BusyButton>
                     </form>
                   ) : (
                     <button type="button" className="btn-ghost" onClick={() => { setMarking(r.row_no ?? null); setNote(''); }}>Not ours</button>
@@ -153,7 +161,13 @@ export function StatementView({ detail, canMark }: { detail: PaymentStatementDet
           ))}
         </tbody>
       </table>
-      {detail.rows_truncated && <p className="hint">Only the first 1,000 lines are shown.</p>}
+      {rows.length > shown && (
+        <p className="cluster">
+          <span className="hint">Showing {shown} of {rows.length} lines.</span>
+          <button type="button" onClick={() => setShown(shown + LINES_PAGE)}>Show more lines</button>
+        </p>
+      )}
+      {detail.rows_truncated && <p className="hint">Only the first 1,000 lines can be listed here; the counts above are of every line.</p>}
     </section>
   );
 }
@@ -165,13 +179,16 @@ export function PastStatements({ onOpen }: { onOpen: (detail: PaymentStatementDe
   // toast-exempt: saves nothing: opening reads a past statement and changes nothing; the statement shown below is the answer
   const open = useMutation({ mutationFn: (id: string) => statements.get(id), onSuccess: onOpen });
   const items = list.data ?? [];
+  const [shown, setShown] = useState(PAST_PAGE);
   return (
     <section className="rt-card stack" aria-labelledby="stmt-past">
       <h2 id="stmt-past">Statements uploaded before</h2>
       {list.error && <p role="alert" className="alert alert-danger">{messageOf(list.error)}</p>}
-      {list.data && items.length === 0 && <p className="empty-state">No statement has been uploaded yet.</p>}
+      {list.data && items.length === 0 && (
+        <p className="empty-state">No statement yet. Export the merchant statement from your payment provider's dashboard as a CSV file and upload it above.</p>
+      )}
       <ul className="stack list-plain">
-        {items.map((s) => (
+        {items.slice(0, shown).map((s) => (
           <li key={s.id}>
             {s.file_name}, {s.row_count} lines from {s.period_from} to {s.period_to}, uploaded {when(s.created_at)}{' '}
             <BusyButton type="button" className="btn-ghost" busy={open.isPending && open.variables === s.id} onClick={() => s.id && open.mutate(s.id)}>
@@ -180,8 +197,42 @@ export function PastStatements({ onOpen }: { onOpen: (detail: PaymentStatementDe
           </li>
         ))}
       </ul>
+      {items.length > shown && <button type="button" onClick={() => setShown(shown + PAST_PAGE)}>Show more statements</button>}
       {open.error && <p role="alert" className="alert alert-danger">{messageOf(open.error)}</p>}
     </section>
+  );
+}
+
+/** One kind of difference: a closed row with its count; open, what to do and its differences, 20 at a time. */
+export function FindingGroup({ kind, count, rows }: { kind: string; count: number; rows: ReconciliationFinding[] }) {
+  const [shown, setShown] = useState(FINDINGS_PAGE);
+  const words = findingWords(kind);
+  const unlisted = count - rows.length;
+  return (
+    <li>
+      <details className="recon-kind" data-testid="finding-kind">
+        <summary>
+          <strong>{words.title}</strong>: {count}
+        </summary>
+        <div className="stack">
+          <p className="hint">{words.help}</p>
+          <ul className="stack list-plain">
+            {rows.slice(0, shown).map((f) => (
+              <li key={f.id} className="rt-card stack" data-testid="finding">
+                <p>
+                  {f.confirmation_code ?? f.order_tracking_id}
+                  {f.bms_amount_minor !== undefined && f.bms_amount_minor !== null && <> | here {money(f.bms_amount_minor, f.currency)}</>}
+                  {f.provider_amount_minor !== undefined && f.provider_amount_minor !== null && <> | provider {money(f.provider_amount_minor, f.currency)}</>}
+                </p>
+                {f.other_transaction_id && <p className="hint">Receipt entered by hand: {f.other_transaction_id}</p>}
+              </li>
+            ))}
+          </ul>
+          {rows.length > shown && <button type="button" onClick={() => setShown(shown + FINDINGS_PAGE)}>Show more</button>}
+          {unlisted > 0 && <p className="hint">{unlisted === 1 ? '1 more is' : `${unlisted} more are`} beyond the first 500 listed. They show once these are put right and it runs again.</p>}
+        </div>
+      </details>
+    </li>
   );
 }
 
@@ -235,7 +286,7 @@ export function ReconciliationPage() {
         <h2 id="recon-report">Differences</h2>
         {report.error && <p role="alert" className="alert alert-danger">{messageOf(report.error)}</p>}
         {!data && !report.error && <p className="loading">Loading</p>}
-        {data && !data.run && <p className="empty-state">No reconciliation has run yet.</p>}
+        {data && !data.run && <p className="empty-state">No reconciliation has run yet. It runs every night{manage ? ', or tap Run it now below' : ''}.</p>}
         {data?.run && (
           <p className="hint">
             Last run {when(data.run.created_at)} ({data.run.trigger === 'manual' ? 'on request' : 'nightly'})
@@ -248,33 +299,13 @@ export function ReconciliationPage() {
           </p>
         )}
         {data?.run && findings.length === 0 && <p role="status" className="alert alert-success">Nothing differs.</p>}
-        {Object.keys(data?.counts_by_kind ?? {}).length > 0 && (
-          <ul className="list-plain" aria-label="How many of each">
-            {Object.entries(data?.counts_by_kind ?? {}).map(([kind, count]) => (
-              <li key={kind}>
-                {findingWords(kind).title}: <strong>{count}</strong>
-              </li>
-            ))}
-          </ul>
-        )}
-        <ul className="stack list-plain">
-          {findings.map((f) => {
-            const words = findingWords(f.kind);
-            return (
-              <li key={f.id} className="rt-card stack" data-testid="finding">
-                <h3>{words.title}</h3>
-                <p className="hint">{words.help}</p>
-                <p>
-                  {f.confirmation_code ?? f.order_tracking_id}
-                  {f.bms_amount_minor !== undefined && f.bms_amount_minor !== null && <> | here {money(f.bms_amount_minor, f.currency)}</>}
-                  {f.provider_amount_minor !== undefined && f.provider_amount_minor !== null && <> | provider {money(f.provider_amount_minor, f.currency)}</>}
-                </p>
-                {f.other_transaction_id && <p className="hint">Receipt entered by hand: {f.other_transaction_id}</p>}
-              </li>
-            );
-          })}
+        {/* One closed row per kind with its full count; a tap opens what to do and the differences (issue #941, rule 1). */}
+        <ul className="stack list-plain" aria-label="Differences by kind">
+          {findingGroups(findings, data?.counts_by_kind).map((g) => (
+            <FindingGroup key={g.kind} kind={g.kind} count={g.count} rows={g.rows} />
+          ))}
         </ul>
-        {data?.findings_truncated && <p className="hint">Only the first 500 are shown, the most serious first; the counts above are complete.</p>}
+        {data?.findings_truncated && <p className="hint">Only the first 500 differences are listed, the most serious first; the count on each kind is complete.</p>}
         {run.error && <p role="alert" className="alert alert-danger">{messageOf(run.error)}</p>}
         {manage && (
           <p>

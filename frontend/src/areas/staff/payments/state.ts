@@ -143,6 +143,17 @@ export const FINDING_WORDS: Record<string, { title: string; help: string }> = {
 
 export const findingWords = (kind: string | undefined) => (kind && FINDING_WORDS[kind]) || { title: 'A difference', help: 'Look at it with the person on call.' };
 
+/**
+ * The differences by kind (issue #941, rule 1): one group per kind in the order the report lists them (the most serious first),
+ * then any kind counted but not listed. `count` is the report's full count of that kind, never less than the rows listed.
+ */
+export function findingGroups<T extends { kind?: string }>(findings: T[], counts: Record<string, number> = {}): { kind: string; count: number; rows: T[] }[] {
+  const groups = new Map<string, T[]>();
+  for (const f of findings) groups.set(f.kind ?? '', [...(groups.get(f.kind ?? '') ?? []), f]);
+  for (const kind of Object.keys(counts)) if (!groups.has(kind)) groups.set(kind, []);
+  return [...groups].map(([kind, rows]) => ({ kind, count: Math.max(counts[kind] ?? 0, rows.length), rows }));
+}
+
 export const MATCH_WORDS: Record<string, string> = {
   matched: 'Matches',
   amount_mismatch: 'Different amount',

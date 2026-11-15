@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
 import { type ReceiptStatusFilter, type UnallocatedReceipt, receipts } from '../../../api/payments';
@@ -7,6 +7,8 @@ import { BusyButton } from '../../../app/ui/BusyButton';
 import { NoAccess } from '../../../app/ui/EmptyState';
 import { Hint } from '../../../app/ui/Hint';
 import { money } from '../lending/loan-state';
+import { GroupedCards, useCategoryGroups } from '../retail/category-groups';
+import { monthLabel } from '../retail/cash-state';
 import { useStaff } from '../context';
 import {
   ALLOCATE_PURPOSES,
@@ -34,6 +36,21 @@ function when(iso: string | undefined): string {
 }
 
 type Action = 'allocate' | 'refund';
+
+/** The day a receipt counts on: its value date, else the business day it was paid (issue #941). */
+export function receiptDay(r: UnallocatedReceipt): string {
+  if (r.value_date) return r.value_date;
+  const iso = r.paid_at ?? r.created_at;
+  if (!iso) return '';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-CA', { timeZone: businessZone() });
+}
+
+/** The words of the empty list: where a payment comes from when nothing waits, else how to see the rest (rule 3). */
+export const emptyWords = (status: ReceiptStatusFilter) =>
+  status === 'open'
+    ? 'Nothing is waiting. A payment comes here when a member pays by mobile money or card and the loan or account it was meant for will not take it.'
+    : 'None of these yet. Choose another under Show above.';
 
 export function ReceiptActionForm({ receipt, action, onDone, onCancel }: { receipt: UnallocatedReceipt; action: Action; onDone: () => void; onCancel: () => void }) {
   const [purpose, setPurpose] = useState(ALLOCATE_PURPOSES[0]?.value ?? '');
@@ -113,8 +130,9 @@ export function ReceiptActionForm({ receipt, action, onDone, onCancel }: { recei
   );
 }
 
-function Row({ receipt, canAsk, onAsked }: { receipt: UnallocatedReceipt; canAsk: boolean; onAsked: () => void }) {
-  const [action, setAction] = useState<Action | null>(null);
+// One form at a time (issue #941): the page holds which receipt and which action is open, so opening a second closes the first
+// and its Ask for approval stays the one brand button of the view; the row buttons are plain.
+function Row({ receipt, canAsk, action, setAction, onAsked }: { receipt: UnallocatedReceipt; canAsk: boolean; action: Action | null; setAction: (a: Action | null) => void; onAsked: () => void }) {
   const waiting = receipt.pending_requests ?? [];
   return (
     <li className="rt-card stack" data-testid="receipt">
@@ -143,7 +161,7 @@ function Row({ receipt, canAsk, onAsked }: { receipt: UnallocatedReceipt; canAsk
       )}
       {receipt.status === 'open' && canAsk && action === null && (
         <p className="cluster">
-          <button type="button" className="rt-primary" onClick={() => setAction('allocate')}>Put on a loan or account</button>
+          <button type="button" onClick={() => setAction('allocate')}>Put on a loan or account</button>
           <button type="button" className="btn-ghost" onClick={() => setAction('refund')}>Record a refund</button>
         </p>
       )}
@@ -167,8 +185,14 @@ export function UnallocatedPage() {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<ReceiptStatusFilter>('open');
   const [asked, setAsked] = useState(false);
+  const [open, setOpen] = useState<{ id: string; action: Action } | null>(null);
   const allowed = showUnallocated(me);
-  const query = useQuery({ queryKey: ['payments', 'unallocated', status], queryFn: () => receipts.list(status), enabled: allowed });
+  // The server pages the queue (50 at a time, oldest first, `next_cursor`); Show more asks for the next page (issue #941, rule 1).
+  const query = useInfiniteQuery({ queryKey: ['payments', 'unallocated', status], queryFn: ({ pageParam }) => receipts.list(status, pageParam || undefined), initialPageParam: '', getNextPageParam: (last) => last.next_cursor || undefined, enabled: allowed });
+  const items = query.data?.pages.flatMap((p) => p.items ?? []) ?? [];
+  // One header per month with how many and how much (rule 1), open while the loaded list is short; the last says "so far" while more exist.
+  const total = (rows: UnallocatedReceipt[]) => money(rows.reduce((sum, r) => sum + (r.amount_minor ?? 0), 0), rows[0]?.currency);
+  const months = useCategoryGroups({ screen: 'unallocated', items, categoryOf: (r) => monthLabel(receiptDay(r)) || 'No date', subtotalOf: total, resetKey: status, searching: false, keepOrder: true, noun: ['payment', 'payments'], more: query.hasNextPage });
   if (!allowed) {
     return (
       <main className="rt ln">
@@ -177,7 +201,6 @@ export function UnallocatedPage() {
       </main>
     );
   }
-  const items = query.data?.items ?? [];
   return (
     <main className="rt ln stack">
       <h1>Unallocated payments</h1>
@@ -186,7 +209,15 @@ export function UnallocatedPage() {
         was sent back. Either way a second person approves it before anything changes.
       </p>
       <label htmlFor="receipt-status">Show</label>
-      <select id="receipt-status" data-tour="unallocated-filter" value={status} onChange={(e) => setStatus(e.target.value as ReceiptStatusFilter)}>
+      <select
+        id="receipt-status"
+        data-tour="unallocated-filter"
+        value={status}
+        onChange={(e) => {
+          setStatus(e.target.value as ReceiptStatusFilter);
+          setOpen(null);
+        }}
+      >
         {STATUS_FILTERS.map((f) => (
           <option key={f.value} value={f.value}>{f.label}</option>
         ))}
@@ -194,20 +225,35 @@ export function UnallocatedPage() {
       {asked && <p role="status" className="alert alert-success">Asked. A second person now decides it in the approvals inbox.</p>}
       {query.error && <p role="alert" className="alert alert-danger">{messageOf(query.error)}</p>}
       {!query.data && !query.error && <p className="loading">Loading</p>}
-      {query.data && items.length === 0 && <p className="empty-state">{status === 'open' ? 'Nothing is waiting.' : 'Nothing to show.'}</p>}
-      <ul className="stack list-plain" data-tour="unallocated-list">
-        {items.map((r) => (
-          <Row
-            key={r.id}
-            receipt={r}
-            canAsk={canAskAllocate(me)}
-            onAsked={() => {
-              setAsked(true);
-              void queryClient.invalidateQueries({ queryKey: ['payments', 'unallocated'] });
-            }}
+      {query.data && items.length === 0 && <p className="empty-state">{emptyWords(status)}</p>}
+      <div className="stack" data-tour="unallocated-list">
+        {items.length > 0 && (
+          <GroupedCards
+            state={months}
+            renderItem={(r) => (
+              <Row
+                key={r.id}
+                receipt={r}
+                canAsk={canAskAllocate(me)}
+                action={open && open.id === r.id ? open.action : null}
+                setAction={(action) => setOpen(action ? { id: r.id ?? '', action } : null)}
+                onAsked={() => {
+                  setOpen(null);
+                  setAsked(true);
+                  void queryClient.invalidateQueries({ queryKey: ['payments', 'unallocated'] });
+                }}
+              />
+            )}
           />
-        ))}
-      </ul>
+        )}
+        {query.hasNextPage && (
+          <p>
+            <BusyButton type="button" busy={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>
+              Show more
+            </BusyButton>
+          </p>
+        )}
+      </div>
     </main>
   );
 }

@@ -67,8 +67,8 @@ describe('the report', () => {
     expect(screen.getByText('Entered by hand and also paid online')).toBeTruthy();
     expect(screen.getByText(/CONF-TEST-1/)).toBeTruthy();
     expect(screen.getAllByTestId('finding')).toHaveLength(2);
-    // The counts of every kind are shown, so a difference beyond the first 500 rows is never out of sight.
-    expect(screen.getByRole('list', { name: 'How many of each' }).textContent).toContain('Paid but not recorded: 1');
+    // Each kind is a closed row with its full count, so a difference beyond the first 500 rows is never out of sight (#941).
+    expect(screen.getByRole('list', { name: 'Differences by kind' }).textContent).toContain('Paid but not recorded: 1');
   });
 
   it('names the receipt entered by hand to reverse, and offers no upload or run to a manager of some branches only', async () => {
@@ -96,7 +96,10 @@ describe('the report', () => {
     cleanup();
     reconciliation.latest.mockResolvedValue({ findings: [], counts_by_kind: {}, findings_truncated: false });
     shell(MANAGER);
-    expect(await screen.findByText('No reconciliation has run yet.')).toBeTruthy();
+    expect(await screen.findByText('No reconciliation has run yet. It runs every night, or tap Run it now below.')).toBeTruthy();
+    cleanup();
+    shell(['core.payments.read']);
+    expect(await screen.findByText('No reconciliation has run yet. It runs every night.')).toBeTruthy();
   });
 
   it('shows a reader the report and no buttons, and a stranger nothing', async () => {
