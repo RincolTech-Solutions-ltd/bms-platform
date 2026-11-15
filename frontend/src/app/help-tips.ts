@@ -92,6 +92,11 @@ export const HELP_TIPS = {
     label: 'From posted journal lines only',
     text: 'These figures come from what is recorded in the books, not from what the loan schedules expect.',
   },
+  // Issue #933 (ticket 10 of the #336 audit): the word on Imports to sign off.
+  reconciliation: {
+    label: 'reconciliation',
+    text: 'Your own figures set beside what BMS now holds after the import. Every difference must be explained before you can sign.',
+  },
 } as const satisfies Record<string, HelpTipWords>;
 
 export type HelpTipKey = keyof typeof HELP_TIPS;

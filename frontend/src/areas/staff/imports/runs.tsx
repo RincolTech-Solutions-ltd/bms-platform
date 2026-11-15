@@ -49,7 +49,7 @@ export function ImportRuns() {
         </p>
       )}
       <Skeleton loading={runs.isPending} of="import-runs" rows={2}>
-        {runs.data && runs.data.length === 0 && <EmptyState text="No import yet." />}
+        {runs.data && runs.data.length === 0 && <EmptyState text="No import yet. Start a new import to bring in your first sheets." />}
         {runs.data && runs.data.length > 0 && (
           <div data-tour="import-runs-list">
             <RowList label="Imports">

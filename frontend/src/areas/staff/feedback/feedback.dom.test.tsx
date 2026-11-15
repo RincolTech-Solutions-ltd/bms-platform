@@ -115,8 +115,7 @@ describe('what the person sent', () => {
         SENT,
       ]);
     show(<FeedbackHistory load={load} />);
-    await screen.findByText('Test problem');
-    expect(screen.getByText('Read by the BMS team')).toBeTruthy();
+    await screen.findByText('Read by the BMS team, with a reply');
     expect(screen.getByText('Sent, not read yet')).toBeTruthy();
     expect(screen.getByText('Test reply: fixed tomorrow.')).toBeTruthy();
   });

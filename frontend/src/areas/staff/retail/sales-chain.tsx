@@ -19,9 +19,9 @@ import { Problem, money } from './ui';
 export type ChainFilter = Omit<SalesSummaryQuery, 'level' | 'chain' | 'from' | 'to' | 'sellerId' | 'categoryId' | 'itemId' | 'offset' | 'signal'>;
 
 /** The chain this user chose and the groups that are open; changing the chain closes everything. */
-export function useChainView(user: string, list: ChainList) {
+export function useChainView(user: string, list: ChainList, initialOpen?: OpenGroups) {
   const [chain, setChainState] = useState<ChainLevel[]>(() => readChain(user, list));
-  const [open, setOpen] = useState<OpenGroups>(new Map());
+  const [open, setOpen] = useState<OpenGroups>(() => initialOpen ?? new Map());
   return {
     chain,
     setChain: (next: ChainLevel[]) => {

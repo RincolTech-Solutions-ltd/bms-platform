@@ -89,9 +89,11 @@ export function PushToggle({ push = defaultPush }: { push?: ReturnType<typeof cr
   );
 }
 
-function Devices() {
+function Devices({ push }: { push: ReturnType<typeof createPush> }) {
   const queryClient = useQueryClient();
   const list = useQuery({ queryKey: ['push-devices'], queryFn: () => pushApi.list(), retry: false });
+  // The same read as the switch above (one cache entry): whether that switch can be turned on here.
+  const state = useQuery({ queryKey: ['push-state'], queryFn: () => push.state(), retry: false });
   const [error, setError] = useState<string | null>(null);
   const remove = useMutation({
     mutationFn: (device: PushDevice) => pushApi.remove(device.id ?? ''),
@@ -112,7 +114,11 @@ function Devices() {
         </p>
       )}
       {list.isError && <p role="alert">Could not load your devices.</p>}
-      {!list.isError && devices.length === 0 && <p className="hint">No device receives notifications for you yet.</p>}
+      {/* Said once the list and this device's state are both read, so it never changes under the eye. Off, it points to the switch
+          above; on, this device is not listed yet; blocked, unsupported or not offered, the card above says why. */}
+      {list.isSuccess && state.isSuccess && devices.length === 0 && (
+        <p className="hint">{state.data === 'off' ? 'No device yet: turn on Notifications on this device above to add this one.' : state.data === 'on' ? 'This device is not listed yet: turn the switch above off and on again to add it.' : 'No device receives notifications for you yet.'}</p>
+      )}
       {devices.length > 0 && (
         <ul className="stack">
           {devices.map((device) => (
@@ -179,7 +185,7 @@ export function NotificationsPage({ push = defaultPush }: { push?: ReturnType<ty
       </section>
       <section className="rt-card stack" aria-labelledby="devices-title" data-tour="notifications-devices">
         <h2 id="devices-title">Your devices</h2>
-        <Devices />
+        <Devices push={push} />
       </section>
     </main>
   );

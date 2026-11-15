@@ -153,9 +153,18 @@ function Screenshot({ id }: { id: string }) {
   return url ? <img src={url} alt="The picture you sent" style={{ maxWidth: '100%', borderRadius: 6 }} /> : <p className="hint">Loading</p>;
 }
 
+/** What you sent opens on the last ten, and Show more adds ten at a time (issue #933, rule 1 of docs/ui/ux-rules.md). */
+export const SENT_PAGE = 10;
+
+/** The first line of a message that has words on it, which its closed row shows. */
+const firstLine = (text: string | undefined) => (text ?? '').split('\n').find((line) => line.trim() !== '')?.trim() ?? '';
+
 export function FeedbackHistory({ load = myFeedback }: { load?: () => Promise<FeedbackItem[]> }) {
   const list = useQuery({ queryKey: ['feedback', 'mine'], queryFn: load });
-  const items = list.data ?? [];
+  const [shown, setShown] = useState(SENT_PAGE);
+  // Newest first, whatever order the list arrives in (the server sends its last 100 newest first).
+  const all = [...(list.data ?? [])].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''));
+  const items = all.slice(0, shown);
   return (
     <section className="rt-card stack" aria-labelledby="feedback-history-title" data-tour="feedback-history">
       <h2 id="feedback-history-title">What you sent</h2>
@@ -169,21 +178,36 @@ export function FeedbackHistory({ load = myFeedback }: { load?: () => Promise<Fe
       {items.length > 0 && (
         <ul className="stack">
           {items.map((item) => (
-            <li key={item.id} className="stack">
-              <span>
-                <strong>{KIND_WORDS[item.kind ?? ''] ?? item.kind}</strong>, <When iso={item.created_at} />.{' '}
-                <span className="hint">{STATUS_WORDS[(item.status ?? 'new') as FeedbackStatus]}</span>
-              </span>
-              <span style={{ whiteSpace: 'pre-wrap' }}>{item.message}</span>
-              {item.has_screenshot && item.id && <Screenshot id={item.id} />}
-              {item.reply_note && (
-                <p className="alert alert-info" style={{ whiteSpace: 'pre-wrap' }}>
-                  <strong>Reply from the BMS team:</strong> {item.reply_note}
-                </p>
-              )}
+            <li key={item.id}>
+              <details className="feedback-sent">
+                <summary>
+                  <span>
+                    <strong>{KIND_WORDS[item.kind ?? ''] ?? item.kind}</strong>, <When iso={item.created_at} />.{' '}
+                    <span className="hint">
+                      {STATUS_WORDS[(item.status ?? 'new') as FeedbackStatus]}
+                      {item.reply_note ? ', with a reply' : ''}
+                    </span>
+                  </span>
+                  <span className="feedback-first-line">{firstLine(item.message)}</span>
+                </summary>
+                <div className="stack">
+                  <span style={{ whiteSpace: 'pre-wrap' }}>{item.message}</span>
+                  {item.has_screenshot && item.id && <Screenshot id={item.id} />}
+                  {item.reply_note && (
+                    <p className="alert alert-info" style={{ whiteSpace: 'pre-wrap' }}>
+                      <strong>Reply from the BMS team:</strong> {item.reply_note}
+                    </p>
+                  )}
+                </div>
+              </details>
             </li>
           ))}
         </ul>
+      )}
+      {all.length > shown && (
+        <button type="button" onClick={() => setShown(shown + SENT_PAGE)}>
+          Show more
+        </button>
       )}
     </section>
   );

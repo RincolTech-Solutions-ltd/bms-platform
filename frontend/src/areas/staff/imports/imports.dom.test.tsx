@@ -8,6 +8,7 @@ import type { Reconciliation, SignOffRequest, SignOffRun } from '../../../api/im
 import { businessToday } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
 import { router as appRouter } from '../../../app/router';
+import { HELP_TIPS } from '../../../app/help-tips';
 import { StaffContext } from '../context';
 
 // Imports to sign off (issue #134, spec sections 3.9 and 3.10): the tenant admin opens an import, reads each section, ticks
@@ -130,7 +131,7 @@ vi.mock('../../../api/imports', async (original) => {
 });
 
 const { ImportsSignOff } = await import('./page');
-const { signOffPoll } = await import('./state');
+const { signOffPoll, signOffRefusal } = await import('./state');
 
 const pause = () => new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -178,6 +179,23 @@ async function signAll(today: string) {
 afterEach(() => cleanup());
 
 describe('imports to sign off', () => {
+  it('explains the word reconciliation with a help tip beside it (issue #933, rule 3)', async () => {
+    show(admin);
+    fireEvent.click(await screen.findByRole('button', { name: /Imported on 1 Oct 2026/ }));
+    const tip = await screen.findByRole('button', { name: 'More about reconciliation' });
+    expect(tip.closest('p')?.textContent).toContain('This reconciliation compares your sheet with what BMS now holds, check by check.');
+    // A space between the full stop and the tip's button, so the two never touch.
+    expect(tip.closest('.help-tip')?.previousSibling?.textContent).toBe(' ');
+    fireEvent.click(tip);
+    expect(await screen.findByText(/Your own figures set beside what BMS now holds after the import\. Every difference must be explained before you can sign\./)).toBeTruthy();
+  });
+
+  it('says in the tip what the refusal says: a difference that is not explained stops the sign-off (#874, #924)', () => {
+    const refusal = signOffRefusal({ kind: 'sign_off', state: 'failed', started_at: STARTED, failure_code: 'unitemised_difference' }) ?? '';
+    expect(refusal).toMatch(/^A difference is not explained, so nothing was signed\./);
+    expect(HELP_TIPS.reconciliation.text).toContain('Every difference must be explained before you can sign.');
+  });
+
   it('signs only once every section is ticked and the name and today are typed', async () => {
     show(admin);
     fireEvent.click(await screen.findByRole('button', { name: /Imported on 1 Oct 2026/ }));

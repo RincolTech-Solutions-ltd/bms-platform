@@ -55,7 +55,7 @@ export function OrdersReportPage() {
         {fees.data && (
           <>
             <p className="rt-total">{fees.data.orders} delivered, items {money(fees.data.items_minor ?? 0)}, delivery fees {money(fees.data.fees_minor ?? 0)}</p>
-            {(fees.data.rows ?? []).length === 0 ? <p className="empty-state">No orders delivered on these days.</p> : (
+            {(fees.data.rows ?? []).length === 0 ? <p className="empty-state">No orders delivered on these days. Choose other days above.</p> : (
               <div className="table-wrap"><table>
                 <thead><tr><th>{groupBy === 'day' ? 'Day' : groupBy === 'source' ? 'From' : 'Delivered by'}</th><th>Orders</th><th>Items</th><th>Delivery fees</th></tr></thead>
                 <tbody>
@@ -78,7 +78,7 @@ export function OrdersReportPage() {
             {(cancelled.data.by_source ?? []).length > 0 && (
               <p className="hint">{(cancelled.data.by_source ?? []).map((r) => `${r.label}: ${r.orders}`).join(', ')}</p>
             )}
-            {(cancelled.data.items ?? []).length === 0 ? <p className="empty-state">No orders cancelled on these days.</p> : (
+            {(cancelled.data.items ?? []).length === 0 ? <p className="empty-state">No orders cancelled on these days. Choose other days above.</p> : (
               <ul style={{ listStyle: 'none', padding: 0 }}>
                 {(cancelled.data.items ?? []).map((c) => (
                   <li key={c.id} className="rt-card">

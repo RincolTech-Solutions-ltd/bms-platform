@@ -121,9 +121,43 @@ describe('the devices', () => {
     await waitFor(() => expect(remove).toHaveBeenCalledWith('d1'));
   });
 
-  it('says so when no device is registered', async () => {
+  it('says so when no device is registered, and points to the switch above it (issue #933, rule 3)', async () => {
     await show(fakePush('off'));
-    expect(await screen.findByText(/No device receives notifications for you yet/)).toBeTruthy();
+    const line = await screen.findByText('No device yet: turn on Notifications on this device above to add this one.');
+    // The switch it names is on the page, above the line.
+    expect(toggle().compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('says this device is not listed yet when the switch is already on, never to turn it on', async () => {
+    await show(fakePush('on'));
+    expect(await screen.findByText('This device is not listed yet: turn the switch above off and on again to add it.')).toBeTruthy();
+    expect(screen.queryByText(/reload/i)).toBeNull();
+    expect(screen.queryByText(/turn on Notifications/)).toBeNull();
+  });
+
+  it('says nothing about devices until this device\'s state is read, so the line never flips', async () => {
+    const push = fakePush('off');
+    push.state.mockReturnValue(new Promise<PushState>(() => undefined));
+    await show(push);
+    await waitFor(() => expect(list).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText(/No device/)).toBeNull();
+  });
+
+  it('does not point to the switch where it cannot be used (unsupported or blocked)', async () => {
+    for (const state of ['unsupported', 'blocked'] as const) {
+      await show(fakePush(state));
+      expect(await screen.findByText('No device receives notifications for you yet.')).toBeTruthy();
+      expect(screen.queryByText(/turn on Notifications on this device above/)).toBeNull();
+      cleanup();
+    }
+  });
+
+  it('says nothing about devices while the list is still loading', async () => {
+    list.mockReturnValue(new Promise(() => undefined));
+    await show(fakePush('off'));
+    await waitFor(() => expect(ready(toggle())).toBe(true));
+    expect(screen.queryByText(/No device yet/)).toBeNull();
   });
 
   it('carries the anchors of the tour on the install control, the appearance choice, the switch and the list', async () => {

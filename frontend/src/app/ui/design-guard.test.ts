@@ -437,6 +437,46 @@ describe('design guard, the cross-cutting fixes of the 70-screen audit', () => {
     }
   });
 
+  // Issue #933: a Feedback row keeps its summary a list item, so the open and close triangle stays (review of 69a35ec).
+  it('keeps the What you sent rows on Feedback opening by a visible triangle', () => {
+    const rows = rulesFor(/\.feedback-sent > summary/);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.body).not.toMatch(/display\s*:/);
+    expect(rows[0]?.body).not.toMatch(/list-style\s*:\s*none/);
+    expect(rows[0]?.body).toMatch(/min-height: var\(--tap\)/);
+    // No rule anywhere hides a summary's triangle (reviews of 7b0dd8f and 6b3cd1d): no list-style none, no hidden marker, and
+    // no display but list-item on a summary, since a flex or grid summary loses the marker in Chrome and Firefox. The allowed
+    // ones are named by their exact selector: a summary drawn as a button needs no triangle, and four older rows wait on #935.
+    const ALLOWED: Record<string, string> = {
+      '.am-paste > summary': 'drawn as a button (className="btn")',
+      '.iv-table summary': '#935',
+      '.manual-key summary': '#935',
+      '.recon-items > summary': '#935',
+      '.rp-report > summary': '#935',
+    };
+    const hides = (sel: string, body: string) =>
+      (/summary/.test(sel) && /list-style(-type)?\s*:\s*none/.test(body)) ||
+      (/summary\s*$/.test(sel) && /(^|[;\s])display\s*:\s*(?!list-item\b)[\w-]+/.test(body)) ||
+      (/::-webkit-details-marker/.test(sel) && /display\s*:\s*none/.test(body)) ||
+      (/summary[^,]*::marker/.test(sel) && /(content\s*:\s*(none|''|""))|(display\s*:\s*none)|(font-size\s*:\s*0)/.test(body));
+    // Each selector of a group is its own case (a print rule lists several).
+    const hiding = rulesFor(/summary|details/)
+      .flatMap(({ file, sel, body }) => sel.split(',').map((part) => ({ file, sel: part.trim(), body })))
+      .filter(({ sel, body }) => hides(sel, body));
+    expect(hiding.filter(({ sel }) => !(sel in ALLOWED)).map(({ file, sel }) => `${file}: ${sel}`)).toEqual([]);
+    // Each allowed selector is still there, so a fixed one leaves the list.
+    for (const sel of Object.keys(ALLOWED)) expect(hiding.some((rule) => rule.sel === sel), sel).toBe(true);
+    // The check itself finds what it is for, and an exemption is the exact selector only.
+    expect(hides('summary', 'list-style: none;')).toBe(true);
+    expect(hides('.x > summary', 'display: flex;')).toBe(true);
+    expect(hides('.x > summary', 'display: grid; gap: 4px;')).toBe(true);
+    expect(hides('.x > summary', 'display: list-item;')).toBe(false);
+    expect(hides('.x > summary', 'min-height: var(--tap);')).toBe(false);
+    expect(hides('details > summary::-webkit-details-marker', 'display: none;')).toBe(true);
+    expect(hides('.x summary::marker', "content: '';")).toBe(true);
+    expect('.other .am-paste > summary' in ALLOWED).toBe(false);
+  });
+
   it('keeps every no-access line on the one NoAccess, which says who can give access and links Home', () => {
     for (const file of components.map((f) => relative(SRC, f))) {
       expect(code(file), file).not.toMatch(/<p className="empty-state">You do not have access/);

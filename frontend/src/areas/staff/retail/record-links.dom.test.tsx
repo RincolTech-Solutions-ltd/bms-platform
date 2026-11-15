@@ -258,18 +258,17 @@ describe('a sale number opens that sale (#336)', () => {
     expect(screen.getByRole('link', { name: 'S-900002' }).getAttribute('href')).toBe(`/staff/retail/sales/${SALE_2}`);
   });
 
-  it('opens the sale on All sales from the address, whichever branch is in use, and Back to the list clears it', async () => {
+  it('takes an old All sales address with ?sale= to the sale\'s own address, in place of the list entry (#933)', async () => {
     const router = show(<AllSales />, `/staff/retail/sales?sale=${SALE_2}`);
-    expect(await screen.findByRole('heading', { name: /Sale S-900002/ })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Back to the list' }));
-    await waitFor(() => expect(router.state.location.search).toEqual({}));
-    await waitFor(() => expect(screen.queryByRole('heading', { name: /Sale S-900002/ })).toBeNull());
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/staff/retail/sales/${SALE_2}`));
+    expect(router.state.location.search).toEqual({});
+    expect(router.history.length).toBe(1);
   });
 });
 
 // JUSTIFICATION-A3: new test cases the review of #797 asked for; no existing test covers these paths.
 describe('a sale from the address on load (review of #797)', () => {
-  it('stays open when the session\'s branch settles after the first render', async () => {
+  it('still reaches the sale\'s own address when the session\'s branch settles after the first render (#933)', async () => {
     const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: [`/staff/retail/sales?sale=${SALE_2}`] }) });
     // The staff layout starts with no branch and sets it once the profile and the stored choice are read.
     function Settling() {
@@ -282,10 +281,8 @@ describe('a sale from the address on load (review of #797)', () => {
         <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><Settling /></QueryClientProvider>
       </RouterContextProvider>,
     );
-    expect(await screen.findByRole('heading', { name: /Sale S-900002/ })).toBeTruthy();
     await new Promise((r) => setTimeout(r, 200));
-    expect(screen.getByRole('heading', { name: /Sale S-900002/ })).toBeTruthy();
-    expect(router.state.location.search).toEqual({ sale: SALE_2 });
+    expect(router.state.location.pathname).toBe(`/staff/retail/sales/${SALE_2}`);
   });
 
   it('opens on Credit sales from the address too', async () => {

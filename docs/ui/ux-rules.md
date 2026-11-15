@@ -47,7 +47,7 @@ is not there.
 | Address | Opens | Drawn by |
 |---|---|---|
 | `/staff/retail/sales/$saleId` | One sale at its own address | `SaleLink` |
-| `/staff/retail/sales?sale=<id>`, `/staff/retail/credit-sales?sale=<id>` | The list with that sale open in place (`credit-sales` for a person who reads only credit sales) | `SaleLink` with `credit` |
+| `/staff/retail/credit-sales?sale=<id>` | Credit sales with that sale open in place, for a person who reads only credit sales. An older `/staff/retail/sales?sale=<id>` is taken to `/staff/retail/sales/$saleId` (#933) | `SaleLink` with `credit` |
 | `/staff/retail/items/$productId?branch=<id>` | The item page, on that shop's movements when `branch` is given | `ItemLink`, `ToStock` with `item` |
 | `/staff/retail/branches/$branchId` | The branch page | `BranchLink`, `ToStock` with `branch` |
 | `/staff/retail/stock?item=<id>&branch=<id>` | Stock, showing that one item, switched to that branch once | `ScreenLink` with `search` |
