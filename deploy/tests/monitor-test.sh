@@ -131,10 +131,49 @@ check_drill; check_silent "recent quick drill sends nothing"
 fresh; printf '%s OK f seconds=8000 rto_ok=no\n' "$(stamp $(( NOW - 86400 )))" > "$MONITOR_STATE_DIR/last_restore_drill"
 check_drill; check "drill over the RTO" 'took 8000 seconds, over the 7200 second RTO'
 fresh; printf '%s OK f seconds=900\n' "$(stamp $(( NOW - 10 * 86400 )))" > "$MONITOR_STATE_DIR/last_restore_drill"
-check_drill; check "drill older than 9 days" 'the last good restore drill is 10 days old'
+check_drill; check "drill older than 9 days" 'the last good restore drill or backup check is 10 days old'
 fresh; printf '%s OK f seconds=900\n' "$(stamp $(( NOW - 86400 )))" > "$MONITOR_STATE_DIR/last_restore_drill"
 printf '%s FAILED seconds=40 decryption failed\n' "$(stamp $(( NOW - 60 )))" > "$MONITOR_STATE_DIR/last_restore_drill_error"
 check_drill; check "failed drill" 'the last restore drill failed: .*decryption failed'
+fresh; check_drill; check "no drill and no check ever" 'no good restore drill or backup check recorded on this host'
+
+# Age backups (ADR-129): the weekly result is the backup check; the full restore is the monthly offline drill in R2.
+# JUSTIFICATION-A3: new cases for the new weekly check and the monthly offline drill result.
+drill_at() { printf '%s OK f seconds=900\n' "$(stamp "$1")" > "$MONITOR_STATE_DIR/last_restore_drill"; }
+check_at() { printf '%s OK bms-test-x.dump.enc format=age bytes=90000\n' "$(stamp "$1")" > "$MONITOR_STATE_DIR/last_backup_check"; }
+# Called in a subshell, so each read is counted in a file.
+offline_drill_line() { echo "$R2_OFFLINE"; echo read >> "$WORK/offline-reads"; }
+offline_reads() { test "$(grep -c read "$WORK/offline-reads" 2> /dev/null)" = "$1"; }
+r2_on() { R2_BACKUP_BUCKET=bucket R2_ENDPOINT=https://r2.test R2_ACCESS_KEY_ID=k R2_SECRET_ACCESS_KEY=s RCLONE_IMAGE=rclone:test; }
+r2_off() { R2_BACKUP_BUCKET="" R2_ENDPOINT="" R2_ACCESS_KEY_ID="" R2_SECRET_ACCESS_KEY="" RCLONE_IMAGE=""; }
+R2_OFFLINE=""
+fresh; check_at $(( NOW - 86400 )); drill_at $(( NOW - 20 * 86400 )); check_drill
+check_silent "a fresh backup check and a full drill 20 days ago send nothing"
+fresh; check_at $(( NOW - 10 * 86400 )); drill_at $(( NOW - 20 * 86400 )); check_drill
+check "a backup check older than 9 days" 'the last good restore drill or backup check is 10 days old'
+fresh; check_at $(( NOW - 86400 ))
+printf '%s FAILED bms-test-x.dump.enc only 10 bytes\n' "$(stamp $(( NOW - 60 )))" > "$MONITOR_STATE_DIR/last_backup_check_error"
+drill_at $(( NOW - 20 * 86400 )); check_drill; check "a failed backup check" 'the last backup check failed: .*only 10 bytes'
+fresh; check_at $(( NOW - 86400 )); drill_at $(( NOW - 40 * 86400 )); check_drill
+check "no full restore in 35 days, R2 not configured" 'the last full restore drill is 40 days old \(limit 35\)'
+fresh; r2_on; check_at $(( NOW - 86400 )); R2_OFFLINE=""; check_drill
+check "no full restore anywhere" 'no full restore drill recorded on this host or by the offline drill'
+fresh; r2_on; check_at $(( NOW - 86400 )); R2_OFFLINE="$(stamp $(( NOW - 10 * 86400 ))) OK bms-test-x.dump.enc format=age seconds=600"
+check_drill; check_silent "an offline drill 10 days ago counts as the full restore"
+fresh; r2_on; check_at $(( NOW - 86400 )); R2_OFFLINE="$(stamp $(( NOW - 40 * 86400 ))) OK bms-test-x.dump.enc format=age"
+check_drill; check "an offline drill 40 days ago is stale" 'the last full restore drill is 40 days old \(limit 35\)'
+fresh; r2_on; check_at $(( NOW - 86400 )); drill_at $(( NOW - 20 * 86400 ))
+R2_OFFLINE="$(stamp $(( NOW - 3600 ))) FAILED bms-test-x.dump.enc format=age seconds=30 decryption failed"
+check_drill; check "a failed offline drill" 'the last offline restore drill failed: .*decryption failed'
+fresh; r2_on; check_at $(( NOW - 86400 )); rm -f "$WORK/offline-reads"
+R2_OFFLINE="$(stamp $(( NOW - 10 * 86400 ))) OK bms-test-x.dump.enc format=age"; check_drill
+R2_OFFLINE=""; NOW=$(( NOW + 5 * 3600 )); check_drill
+assert "R2 is read for the offline drill at most every 6 hours" offline_reads 1
+check_silent "the last answer from R2 is kept and still counts"
+NOW=$(( NOW + 3600 )); check_drill
+assert "R2 is read again after 6 hours" offline_reads 2
+NOW=1800000000
+r2_off
 
 # The newest backup name ignores future timestamps and names backup.sh never writes (ADR-063 review).
 NOW=1800000000   # 2027-01-15T08:00:00Z

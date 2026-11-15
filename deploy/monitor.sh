@@ -11,7 +11,10 @@
 #   tls     the certificate of the platform, callback and tenant hosts expiring within 14 days;
 #   backup  state/last_backup_error newer than the last good backup, the last good backup older
 #           than 26 hours, and once an hour the newest object under <environment>/daily/ in R2;
-#   drill   state/last_restore_drill_error, no good drill in 9 days, or a drill over the 2 hour RTO.
+#   drill   the weekly result: a full restore drill (state/last_restore_drill) or, once backups are age files, the
+#           backup check (state/last_backup_check, ADR-129); alerts on a failed one, none good in 9 days, or a drill
+#           over the 2 hour RTO; and the full restore: none good in 35 days on this host or by the monthly offline drill
+#           (<environment>/drill/last_offline_drill.txt in R2, read every 6 hours), or the last offline drill failed.
 #
 # A problem is sent once when it starts, again every MONITOR_REPEAT_HOURS (6) while it lasts, and
 # once when it clears; state/alerts/<check> remembers what was sent. A message that could not be sent
@@ -31,6 +34,7 @@ MONITOR_DISK_PATHS="${MONITOR_DISK_PATHS:-/ /opt/bms}"
 MONITOR_TLS_DAYS="${MONITOR_TLS_DAYS:-14}"
 MONITOR_BACKUP_HOURS="${MONITOR_BACKUP_HOURS:-26}"
 MONITOR_DRILL_DAYS="${MONITOR_DRILL_DAYS:-9}"
+MONITOR_FULL_DRILL_DAYS="${MONITOR_FULL_DRILL_DAYS:-35}"
 MONITOR_RTO_SECONDS="${MONITOR_RTO_SECONDS:-7200}"
 MONITOR_REPEAT_HOURS="${MONITOR_REPEAT_HOURS:-6}"
 MONITOR_STUCK_MINUTES="${MONITOR_STUCK_MINUTES:-30}"
@@ -72,7 +76,7 @@ pick_newest_backup() {
     done
     printf '%s\n' "$best"
 }
-newest_r2_backup() {
+r2_rclone() {
     local cgroup=()
     [[ "$BMS_ENVIRONMENT" == "staging" ]] && cgroup=(--cgroup-parent bms.slice)
     timeout 60 docker run --rm "${cgroup[@]}" --memory 64m \
@@ -82,7 +86,17 @@ newest_r2_backup() {
         --env RCLONE_CONFIG_R2_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID" \
         --env RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY" \
         --env RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true \
-        "$RCLONE_IMAGE" lsf --files-only "r2:${R2_BACKUP_BUCKET}/${BMS_ENVIRONMENT}/daily/" 2> /dev/null | pick_newest_backup "$(now)"
+        "$RCLONE_IMAGE" "$@"
+}
+newest_r2_backup() {
+    r2_rclone lsf --files-only "r2:${R2_BACKUP_BUCKET}/${BMS_ENVIRONMENT}/daily/" 2> /dev/null | pick_newest_backup "$(now)"
+}
+# The first line of the monthly offline drill's result (deploy/restore-drill-offline.sh, ADR-129), empty if none.
+offline_drill_line() {
+    r2_rclone cat "r2:${R2_BACKUP_BUCKET}/${BMS_ENVIRONMENT}/drill/last_offline_drill.txt" 2> /dev/null | head -n 1
+}
+r2_configured() {
+    [[ -n "${R2_BACKUP_BUCKET:-}" && -n "${R2_ENDPOINT:-}" && -n "${R2_ACCESS_KEY_ID:-}" && -n "${R2_SECRET_ACCESS_KEY:-}" && -n "${RCLONE_IMAGE:-}" ]]
 }
 # The token goes to curl on stdin, never on its command line, where any user of the host could read it.
 telegram_send() {
@@ -218,7 +232,7 @@ check_backup() {
         problems+=("the last good backup is $(( (t - ok) / 3600 )) hours old (limit ${MONITOR_BACKUP_HOURS})")
     fi
     # R2 is asked at most once an hour: a container start every five minutes is not worth it.
-    if [[ -n "${R2_BACKUP_BUCKET:-}" && -n "${R2_ENDPOINT:-}" && -n "${R2_ACCESS_KEY_ID:-}" && -n "${R2_SECRET_ACCESS_KEY:-}" && -n "${RCLONE_IMAGE:-}" ]]; then
+    if r2_configured; then
         local checked
         checked="$(cat "$STATE/monitor_r2_checked" 2> /dev/null || echo 0)"
         if (( t - checked >= 3600 )); then
@@ -239,20 +253,50 @@ check_backup() {
     report backup "$(join "${problems[@]}")"
 }
 
+# JUSTIFICATION-A3: the drill check now reads the weekly backup check and the monthly offline drill too (ADR-129).
 check_drill() {
-    local problems=() ok err t seconds
+    local problems=() t ok err chk chk_err weekly full line stamp checked seconds
     t="$(now)"
     ok="$(stamp_of "$STATE/last_restore_drill")" || ok=0
     err="$(stamp_of "$STATE/last_restore_drill_error")" || err=0
-    (( err > ok )) && problems+=("the last restore drill failed: $(head -c 300 "$STATE/last_restore_drill_error")")
-    if (( ok == 0 )); then
-        problems+=("no good restore drill recorded on this host")
-    elif (( t - ok > MONITOR_DRILL_DAYS * 86400 )); then
-        problems+=("the last good restore drill is $(( (t - ok) / 86400 )) days old (limit ${MONITOR_DRILL_DAYS})")
-    else
+    chk="$(stamp_of "$STATE/last_backup_check")" || chk=0
+    chk_err="$(stamp_of "$STATE/last_backup_check_error")" || chk_err=0
+    # The weekly result is a full drill while the newest backup is symmetric, a backup check once it is an age file.
+    weekly=$(( ok > chk ? ok : chk ))
+    (( err > weekly )) && problems+=("the last restore drill failed: $(head -c 300 "$STATE/last_restore_drill_error")")
+    (( chk_err > weekly )) && problems+=("the last backup check failed: $(head -c 300 "$STATE/last_backup_check_error")")
+    if (( weekly == 0 )); then
+        problems+=("no good restore drill or backup check recorded on this host")
+    elif (( t - weekly > MONITOR_DRILL_DAYS * 86400 )); then
+        problems+=("the last good restore drill or backup check is $(( (t - weekly) / 86400 )) days old (limit ${MONITOR_DRILL_DAYS})")
+    fi
+    if (( ok > 0 && t - ok <= MONITOR_DRILL_DAYS * 86400 )); then
         seconds="$(sed -nE 's/.* seconds=([0-9]+).*/\1/p' "$STATE/last_restore_drill")"
         if [[ -n "$seconds" ]] && (( seconds > MONITOR_RTO_SECONDS )); then
             problems+=("the last restore drill took ${seconds} seconds, over the ${MONITOR_RTO_SECONDS} second RTO")
+        fi
+    fi
+    # The full restore: this host's own drill, or the monthly offline drill on the key holder's Mac, read from R2.
+    full="$ok"
+    if r2_configured; then
+        checked="$(cat "$STATE/monitor_offline_checked" 2> /dev/null || echo 0)"
+        if (( t - checked >= 6 * 3600 )); then
+            line="$(offline_drill_line)"
+            [[ -n "$line" ]] && put_state "$STATE/monitor_offline_drill" "$line"
+            put_state "$STATE/monitor_offline_checked" "$t"
+        fi
+        line="$(head -n 1 "$STATE/monitor_offline_drill" 2> /dev/null)"
+        stamp="$(stamp_of "$STATE/monitor_offline_drill")" || stamp=0
+        case "$line" in
+            *" OK "*) (( stamp > full )) && full="$stamp" ;;
+            *" FAILED "*) (( stamp > ok )) && problems+=("the last offline restore drill failed: $(head -c 300 <<< "$line")") ;;
+        esac
+    fi
+    if (( weekly > 0 && t - full > MONITOR_FULL_DRILL_DAYS * 86400 )); then
+        if (( full == 0 )); then
+            problems+=("no full restore drill recorded on this host or by the offline drill (limit ${MONITOR_FULL_DRILL_DAYS} days)")
+        else
+            problems+=("the last full restore drill is $(( (t - full) / 86400 )) days old (limit ${MONITOR_FULL_DRILL_DAYS})")
         fi
     fi
     report drill "$(join "${problems[@]}")"
