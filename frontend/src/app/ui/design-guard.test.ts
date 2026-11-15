@@ -446,13 +446,10 @@ describe('design guard, the cross-cutting fixes of the 70-screen audit', () => {
     expect(rows[0]?.body).toMatch(/min-height: var\(--tap\)/);
     // No rule anywhere hides a summary's triangle (reviews of 7b0dd8f and 6b3cd1d): no list-style none, no hidden marker, and
     // no display but list-item on a summary, since a flex or grid summary loses the marker in Chrome and Firefox. The allowed
-    // ones are named by their exact selector: a summary drawn as a button needs no triangle, and four older rows wait on #935.
+    // ones are named by their exact selector: a summary drawn as a button needs no triangle. The four older rows of #935 are
+    // list items now, and layout/disclosure-markers.layout.test.ts checks each one draws its triangle at 412px.
     const ALLOWED: Record<string, string> = {
       '.am-paste > summary': 'drawn as a button (className="btn")',
-      '.iv-table summary': '#935',
-      '.manual-key summary': '#935',
-      '.recon-items > summary': '#935',
-      '.rp-report > summary': '#935',
     };
     const hides = (sel: string, body: string) =>
       (/summary/.test(sel) && /list-style(-type)?\s*:\s*none/.test(body)) ||

@@ -271,8 +271,10 @@ export function CatalogueList({
           {g.entries.map((e) => (
             <details key={e.key} className="card rp-report">
               <summary>
-                <span className="rp-report-title">{e.title}</span>
-                <span className="ln-muted rp-report-text">{e.description}</span>
+                <span className="rp-report-head">
+                  <span className="rp-report-title">{e.title}</span>
+                  <span className="ln-muted rp-report-text">{e.description}</span>
+                </span>
               </summary>
               <RunForm entry={e} branchIds={branchIds} onQueued={onQueued} />
             </details>

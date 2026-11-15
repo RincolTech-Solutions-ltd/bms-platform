@@ -289,10 +289,10 @@
   fill: var(--rt-grey-900);
 }
 
+/* The summary stays a list item so it keeps the browser's open and close triangle (issue #935). */
 .manual-key summary {
-  display: flex;
-  align-items: center;
   min-height: var(--tap);
+  padding-block: var(--space-3);
   color: var(--color-link);
   font-weight: var(--weight-semibold);
   cursor: pointer;
@@ -474,11 +474,11 @@
   overflow-wrap: anywhere;
 }
 
-/* The explained differences open under their own 48px line (rule 12). */
+/* The explained differences open under their own 48px line (rule 12). The summary stays a list item so it keeps the browser's
+   open and close triangle (issue #935). */
 .recon-items > summary {
-  display: flex;
-  align-items: center;
   min-height: var(--tap);
+  padding-block: var(--space-3);
   cursor: pointer;
 }
 

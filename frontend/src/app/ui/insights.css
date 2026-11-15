@@ -385,10 +385,10 @@ line.iv-grid {
   background: var(--viz-3);
 }
 
+/* The summary stays a list item so it keeps the browser's open and close triangle (issue #935). */
 .iv-table summary {
   min-height: var(--tap);
-  display: flex;
-  align-items: center;
+  padding-block: var(--space-3);
   color: var(--color-link);
   cursor: pointer;
   font-size: var(--text-sm);
@@ -436,13 +436,20 @@ line.iv-grid {
   box-shadow: none;
 }
 
+/* The summary stays a list item so it keeps its triangle (issue #935); the title and the text stack in the inner head, beside
+   the triangle. */
 .rp-report > summary {
   min-height: var(--tap);
-  display: grid;
-  gap: var(--space-1);
   padding: var(--space-3) var(--space-4);
   cursor: pointer;
   overflow-wrap: anywhere;
+}
+
+.rp-report-head {
+  display: inline-grid;
+  gap: var(--space-1);
+  width: calc(100% - 1.5em);
+  vertical-align: top;
 }
 
 .rp-report-title {
@@ -589,8 +596,7 @@ line.iv-grid {
 @media print {
   .staff-bar,
   .iv-noprint,
-  .iv-tip-btn,
-  .iv-table summary {
+  .iv-tip-btn {
     display: none;
   }
 
