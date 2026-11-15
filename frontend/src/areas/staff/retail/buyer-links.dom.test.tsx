@@ -225,30 +225,38 @@ describe('a buyer name opens the account (#936)', () => {
   });
 });
 
-describe('a person who may not open accounts sees the name as plain text (#936)', () => {
-  // Issue #940: the same screens for a person who may open accounts draw the name on a `.target-line`, so `noTargetLine`
-  // below cannot pass just because the class was renamed.
-  it('may open accounts: a list row, the saved sale and Orders put the name on a target line', async () => {
-    show(<><SaleList items={[sale(CUSTOMER, BUYER, 's1')]} today="2026-11-14" onOpen={() => undefined} /><Receipt sale={sale(CUSTOMER, BUYER)} /></>, OPENS);
-    expect(hrefs(BUYER)).toContain(ACCOUNT);
+describe('a person who may open accounts sees the name on a target line (#940, #945)', () => {
+  // The same screens the describe below checks with `noTargetLine`, each drawn alone, so that check cannot pass just
+  // because one screen renamed its `.target-line` class while another kept it.
+  it('a list row, the saved sale and Orders each put the name on a target line', async () => {
+    show(<SaleList items={[sale(CUSTOMER, BUYER, 's1')]} today="2026-11-14" onOpen={() => undefined} />, OPENS);
+    expect(hrefs(BUYER)).toEqual([ACCOUNT]);
+    onTargetLine(BUYER);
+    cleanup();
+    show(<Receipt sale={sale(CUSTOMER, BUYER)} />, OPENS);
+    expect(hrefs(BUYER)).toEqual([ACCOUNT]);
     onTargetLine(BUYER);
     cleanup();
     show(<OrdersPage />, OPENS);
     await screen.findByTestId(`order-${order(CUSTOMER, BUYER, 1).id ?? ''}`);
     onTargetLine(BUYER);
   });
+});
 
+describe('a person who may not open accounts sees the name as plain text (#936)', () => {
   for (const [who, me] of [['the feature off', ADMIN], ['no sales read', NO_SALES_READ]] as const) {
     it(`${who}: a sale, a list row, the saved sale and a cancelled order`, async () => {
       show(<SaleDetail sale={sale(CUSTOMER, BUYER)} today="2026-11-14" />, me);
       expect(screen.getByText(BUYER)).toBeTruthy();
       expect(hrefs(BUYER)).toEqual([]);
       cleanup();
-      show(<><SaleList items={[sale(CUSTOMER, BUYER, 's1')]} today="2026-11-14" onOpen={() => undefined} /><Receipt sale={sale(CUSTOMER, BUYER)} /></>, me);
-      shown(BUYER);
-      expect(hrefs(BUYER)).toEqual([]);
-      noTargetLine(BUYER);
-      cleanup();
+      for (const screenUi of [<SaleList items={[sale(CUSTOMER, BUYER, 's1')]} today="2026-11-14" onOpen={() => undefined} />, <Receipt sale={sale(CUSTOMER, BUYER)} />]) {
+        show(screenUi, me);
+        shown(BUYER);
+        expect(hrefs(BUYER)).toEqual([]);
+        noTargetLine(BUYER);
+        cleanup();
+      }
       show(<OrdersReportPage />, me);
       await screen.findByText('Test reason one', { exact: false });
       shown(BUYER);
