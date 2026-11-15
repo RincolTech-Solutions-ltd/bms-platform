@@ -185,6 +185,12 @@ fresh; drill_at $(( NOW - 20 * 86400 ))
 printf '%s OK bms-test-x.dump.enc format=age bytes=90000 recipient=unset\n' "$(stamp $(( NOW - 86400 )))" > "$MONITOR_STATE_DIR/last_backup_check"
 check_drill; check "a backup check with no recipient fingerprint is not a good check" \
     'the last backup check recorded no recipient fingerprint; the last good restore drill or backup check is 20 days old'
+# Review of 2b925fe, nice-to-have 5: setting aside a check without a fingerprint must not relax the counting rule.
+fresh; r2_on; drill_at $(( NOW - 40 * 86400 ))
+printf '%s OK bms-test-x.dump.enc format=age bytes=90000 recipient=unset\n' "$(stamp $(( NOW - 86400 )))" > "$MONITOR_STATE_DIR/last_backup_check"
+R2_OFFLINE="$(offline "$D10" $(( D10 - 8 * 3600 )) monthly openssl n/a)"
+check_drill; check "an old copy's offline OK still does not count when the host's check lacks a fingerprint" \
+    'the last full restore drill is 40 days old \(limit 35\)'
 fresh; r2_on; check_at $(( NOW - 86400 )); R2_OFFLINE="$(offline $(( NOW - 40 * 86400 )) $(( NOW - 40 * 86400 - 8 * 3600 )))"
 check_drill; check "an offline drill 40 days ago is stale" 'the last full restore drill is 40 days old \(limit 35\)'
 fresh; r2_on; check_at $(( NOW - 86400 )); drill_at $(( NOW - 20 * 86400 ))

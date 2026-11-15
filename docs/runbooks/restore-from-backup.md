@@ -505,7 +505,9 @@ staging and production. Everything below is done by hand by the operator; no pul
 Do it with the owner beside you, with no screen sharing or recording on, in one Terminal window that you close at the end.
 Turn Handoff off for the ceremony (System Settings, General, AirDrop & Handoff, Allow Handoff between this Mac and your
 iCloud devices: off), so Universal Clipboard does not copy the secret to a nearby iPhone or iPad in step 3; turn it back on
-at the end. The secret goes from `age-keygen` into a shell variable and from there into the Keychain, onto paper and into the
+at the end. Make sure nothing keeps a clipboard history either: quit any clipboard manager, and where macOS offers a
+clipboard history (Spotlight's, in its settings on recent releases), turn it off for the ceremony, or skip `pbcopy` in
+step 3 and type the line into the Passwords app from the screen. The secret goes from `age-keygen` into a shell variable and from there into the Keychain, onto paper and into the
 iCloud copy; it is never typed on a command line, and never in a file, unless you choose to print in step 4, whose print
 job step 4 purges and checks.
 
@@ -556,10 +558,21 @@ job step 4 purges and checks.
    sudo sh -c 'ls /private/var/spool/cups/d* 2> /dev/null | wc -l'   # 0: no job data left
    ```
 
-   If that last count is not 0, remove those files with `sudo rm -P /private/var/spool/cups/d*` and count again.
+   If that last count is not 0, remove the files as root, so root (who alone may list the `root:_lp 0710` spool folder)
+   expands the name, and count again until it is 0:
+
+   ```bash
+   sudo sh -c 'rm -f /private/var/spool/cups/d*'
+   sudo sh -c 'ls /private/var/spool/cups/d* 2> /dev/null | wc -l'   # 0
+   ```
+
+   Removing a file on the Mac's SSD does not overwrite it: its blocks can survive until the disk reuses them, and macOS has
+   no secure erase for a single file. FileVault, which encrypts the whole disk, is what protects those blocks, so it must be
+   on (8.1). That is one more reason to write the key by hand.
 
 5. **Check the paper by reading it back.** Type the `AGE-SECRET-KEY-1` line from the paper (not from the screen) into
-   (a handwritten 0 and O, 1 and I are the usual slips; after `AGE-SECRET-KEY-1` the key holds no 1, B, I or O):
+   `age-keygen -y`, as below. A handwritten 0 and O, or 1 and I, are the usual slips; after `AGE-SECRET-KEY-1` the key
+   holds no 1, B, I or O.
 
    ```bash
    age-keygen -y      # type the line, Enter, then Ctrl-D; it must print $PUB

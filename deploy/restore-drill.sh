@@ -638,6 +638,11 @@ IMAGE_TAG="$(cat state/current_tag)"
 INITDB="$PWD/releases/${IMAGE_TAG}/postgres/initdb"
 [[ -d "$INITDB" ]] || INITDB="$PWD/postgres/initdb"
 PREFIX="r2:${R2_BACKUP_BUCKET}/${BMS_ENVIRONMENT}"
+# The stack's compose command, the very line of backup.sh (deploy/tests/backup-test.sh keeps the two identical). On both
+# hosts the stack runs from /opt/bms/compose.yml: staging's puller installs compose.pi-staging.yml under that name
+# (pull-staging.sh COMPOSE_SOURCE, then the release's compose.yml, then /opt/bms/compose.yml), and the production deploy
+# copies deploy/compose.yml there (.github/actions/ssh-deploy/action.yml). Used by the age backup check only.
+COMPOSE=(docker compose --project-name bms --file compose.yml)
 DRILL="bms-restore-drill-$$"
 ENC="backups/drill-$$.dump.enc"
 DUMP="backups/drill-$$.dump"
@@ -747,7 +752,8 @@ age_header_problem() {
         echo "not a well formed age file: no header MAC"
     elif grep -q '^-> scrypt ' <<< "$header"; then
         echo "encrypted with a passphrase, not to the public key"
-    elif [[ "$(grep -Ec '^-> X25519 [A-Za-z0-9+/]{43}$' <<< "$header")" != 1 ]]; then
+    elif [[ "$(grep -Ec '^-> X25519 [A-Za-z0-9+/]{43}$' <<< "$header")" != 1 \
+        || "$(grep -c '^-> X25519' <<< "$header")" != 1 ]]; then
         echo "not encrypted to exactly one X25519 recipient"
     elif [[ "$(grep '^-> ' <<< "$header" | grep -v '^-> X25519 ' | grep -cv '^-> [^ ]*-grease')" != 0 ]]; then
         echo "encrypted to $(grep -c '^-> ' <<< "$header") recipients, not to the one public key"
@@ -779,7 +785,7 @@ check_age_backup() {
     live_ver="$(API_IMAGE="ghcr.io/rincoltech-solutions-ltd/bms-platform-api:${IMAGE_TAG}" \
         WEB_IMAGE="ghcr.io/rincoltech-solutions-ltd/bms-platform-web:${IMAGE_TAG}" \
         PROXY_IMAGE="ghcr.io/rincoltech-solutions-ltd/bms-platform-proxy:${IMAGE_TAG}" \
-        docker compose --project-name bms --file compose.yml exec -T postgres psql -U bms_owner -d bms -tAc \
+        "${COMPOSE[@]}" exec -T postgres psql -U bms_owner -d bms -tAc \
         "SELECT max(version::int) FROM flyway_schema_history WHERE success" 2> /dev/null)"
     [[ "$live_ver" =~ ^[0-9]+$ ]] \
         || check_fail "cannot read the live Flyway version through docker compose (project bms, service postgres): is the stack running?"

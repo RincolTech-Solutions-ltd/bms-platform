@@ -35,8 +35,8 @@ decrypt.
    backup are untouched. `age` is a Debian and Ubuntu package (`apt install age`); cloud-init installs it on new hosts.
 2. **The private key is made and kept offline.** The key ceremony is in `restore-from-backup.md` section 8: `age-keygen` on the
    operator's Mac, the secret line stored in the login Keychain (item `bms-backup-age-identity`, which the drill script reads with
-   `security`) and in the iCloud Keychain through the Passwords app, one printed copy checked by reading it back and sealed with
-   the owner, and only the public key in `/opt/bms/.env`. One key pair serves staging and production. The secret is never in
+   `security`) and in the iCloud Keychain through the Passwords app, one paper copy (written by hand by preference, printed
+   only as a fallback) checked by reading it back and sealed with the owner, and only the public key in `/opt/bms/.env`. One key pair serves staging and production. The secret is never in
    the repository, CI, a chat, an email or any server. Test keys in the repository are fabricated and say so.
 3. **Old symmetric backups stay readable until they age out.** The format is detected from the header: `age-encryption.org/v1`
    is decrypted with the Keychain identity, `Salted__` (openssl) with `BACKUP_ENCRYPTION_KEY`. That key leaves the host's `.env`
@@ -91,12 +91,19 @@ decrypt.
 - A restore needs the operator, or the owner with the sealed copy, and a Mac with Docker. That adds minutes to the two hour RTO,
   not hours; the quarterly drill measures it.
 - Losing both the Keychain copies and the envelope loses every backup made since the switch. The envelope is kept apart from the
-  Mac, and the ceremony checks the printed copy by reading it back.
+  Mac, and the ceremony checks the paper copy by reading it back.
 - Import rehearsals stop once the newest backup is an age file, until the owner decides decision 5.
 - The rollout is by hand and outside this change, and its order matters: the key ceremony, `age` and `BACKUP_AGE_RECIPIENT`
   on every host **before** the release reaches any host (the staging puller deploys within minutes of the merge, and the new
   `backup.sh` fails without them; the old one ignores the recipient). Then on each host `backup.sh` and the check by hand,
   the offline drill, and only then `BACKUP_ENCRYPTION_KEY` removed from the host's `.env` (`restore-from-backup.md`
   section 8.4).
-- The printed copy is a print job, which CUPS keeps on disk after printing; the ceremony prints to a USB printer and purges
-  and checks the spool (`restore-from-backup.md` section 8.2 step 4).
+- The paper copy is written by hand by preference: a print job is a file, which CUPS keeps on disk after printing, and a
+  removed file's blocks can survive on the SSD (FileVault is what protects them). When it is printed anyway, the ceremony
+  uses a USB printer, purges the job and checks the spool as root (`restore-from-backup.md` section 8.2 step 4).
+- **The host can forge the records that guard it.** The host's R2 token can write `drill/last_backup_check.txt` and
+  `drill/last_offline_drill.txt`, and `monitor.sh` runs on the host. A compromised host could therefore write a matching
+  fingerprint and a fresh offline OK and keep the mismatch and staleness alerts quiet. This decision does not defend against
+  that: the offline drill itself, run by the operator, still fails on a backup the Keychain key cannot open, and the
+  operator sees that on the Mac whatever the host reports. A record the host cannot write (a separate R2 token for `drill/`
+  held only by the Mac, and a check run off the host, which is #46 item 1) would close it.

@@ -185,6 +185,16 @@ same_header_check() {
         && [[ -n "$(sed -n '/^age_header_problem() {/,/^}/p' "$HERE/../backup.sh")" ]]
 }
 check "backup.sh and the weekly check in restore-drill.sh judge an age header by the one same function" same_header_check
+# Review of 2b925fe: the weekly check reaches the live database by backup.sh's own compose command.
+same_compose() {
+    [[ "$(grep -c '^COMPOSE=' "$HERE/../backup.sh")" == 1 \
+        && "$(grep '^COMPOSE=' "$HERE/../backup.sh")" == "$(grep '^COMPOSE=' "$HERE/../restore-drill.sh")" ]]
+}
+check "restore-drill.sh uses backup.sh's compose command, line for line" same_compose
+fake_host malformed-x25519
+FAKE_AGE_EXTRA="-> X25519 short" run_backup
+check "a second, malformed X25519 stanza is refused, not overlooked" \
+    eval '[[ "$STATUS" != 0 ]] && nothing_uploaded && error_says "not encrypted to exactly one X25519 recipient"'
 fake_host second-recipient
 FAKE_AGE_EXTRA="-> ssh-ed25519 fab RkFCUklDQVRFRGZhYnJpY2F0ZWRmYWJyaWNhdGVkMDA" run_backup
 check "an age file with a second recipient of another kind is not uploaded" \

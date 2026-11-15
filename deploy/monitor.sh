@@ -268,12 +268,17 @@ offline_counts() {
 
 # JUSTIFICATION-A3: the drill check now reads the weekly backup check and the monthly offline drill too (ADR-129).
 check_drill() {
-    local problems=() t ok err chk chk_err weekly full line stamp checked seconds
+    local problems=() t ok err chk chk_err switched weekly full line stamp checked seconds
     t="$(now)"
     ok="$(stamp_of "$STATE/last_restore_drill")" || ok=0
     err="$(stamp_of "$STATE/last_restore_drill_error")" || err=0
     chk="$(stamp_of "$STATE/last_backup_check")" || chk=0
     chk_err="$(stamp_of "$STATE/last_backup_check_error")" || chk_err=0
+    # The host has switched to age backups once any backup check, good, failed or without a fingerprint, is newer than its
+    # last full drill; decided before a check is set aside below, so setting one aside never relaxes the counting rule
+    # (review of 2b925fe).
+    switched=0
+    if (( chk > ok || chk_err > ok )); then switched=1; fi
     # A check without the recipient's fingerprint gives the offline drill nothing to compare: not a good check.
     if (( chk > 0 )) && ! grep -Eq ' recipient=[0-9a-f]{16}( |$)' "$STATE/last_backup_check"; then
         problems+=("the last backup check recorded no recipient fingerprint")
@@ -307,7 +312,7 @@ check_drill() {
         stamp="$(stamp_of "$STATE/monitor_offline_drill")" || stamp=0
         # Once this host checks age backups, only an offline restore that proves the current key resets the clock
         # (review of 667acd1, finding 1): see offline_counts.
-        if (( chk > ok )) && [[ "$line" == *" OK "* ]] && ! offline_counts "$line"; then
+        if (( switched )) && [[ "$line" == *" OK "* ]] && ! offline_counts "$line"; then
             line="not counted"
         fi
         case "$line" in

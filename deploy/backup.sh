@@ -81,7 +81,8 @@ age_header_problem() {
         echo "not a well formed age file: no header MAC"
     elif grep -q '^-> scrypt ' <<< "$header"; then
         echo "encrypted with a passphrase, not to the public key"
-    elif [[ "$(grep -Ec '^-> X25519 [A-Za-z0-9+/]{43}$' <<< "$header")" != 1 ]]; then
+    elif [[ "$(grep -Ec '^-> X25519 [A-Za-z0-9+/]{43}$' <<< "$header")" != 1 \
+        || "$(grep -c '^-> X25519' <<< "$header")" != 1 ]]; then
         echo "not encrypted to exactly one X25519 recipient"
     elif [[ "$(grep '^-> ' <<< "$header" | grep -v '^-> X25519 ' | grep -cv '^-> [^ ]*-grease')" != 0 ]]; then
         echo "encrypted to $(grep -c '^-> ' <<< "$header") recipients, not to the one public key"
