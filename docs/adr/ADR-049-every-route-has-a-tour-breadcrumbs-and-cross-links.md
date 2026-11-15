@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2026-10-20, issues #336 and #337; not yet accepted by the product owner). Builds on ADR-025 (first run and guided tours, tours are data), ADR-009 (one React PWA) and ADR-005 (docs live with the code). The number was checked on 2026-10-20: 043 is held by pull request #349 and 044 by the correction records (pull request #364 and main), 045 to 048 are taken or reserved by open work, so this record takes 049.
+Accepted (2026-11-15, by the product owner; proposed 2026-10-20, issues #336 and #337). Builds on ADR-025 (first run and guided tours, tours are data), ADR-009 (one React PWA) and ADR-005 (docs live with the code). The number was checked on 2026-10-20: 043 is held by pull request #349 and 044 by the correction records (pull request #364 and main), 045 to 048 are taken or reserved by open work, so this record takes 049.
 
 ## Context
 
