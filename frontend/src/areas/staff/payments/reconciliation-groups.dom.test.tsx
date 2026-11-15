@@ -91,7 +91,9 @@ describe('the differences by kind', () => {
     expect(kinds()[0]?.querySelectorAll('[data-testid="finding"]')).toHaveLength(2);
     // A kind counted past the first 500 says how many more are not listed, never hides them in silence.
     expect(kinds()[1]?.textContent).toContain('2 more are beyond the first 500 listed, shown once these are put right.');
-    expect(kinds()[2]?.textContent).toContain('4 more are beyond the first 500 listed, shown once these are put right.');
+    // Issue #940: a kind with none of its rows listed says so, not "more".
+    expect(kinds()[2]?.textContent).toContain('None of these 4 are in the first 500 listed. They show once those are put right.');
+    expect(kinds()[2]?.textContent).not.toContain('more');
     expect(document.body.textContent).not.toContain('listed here.');
   });
 

@@ -238,7 +238,9 @@ export function FindingGroup({ kind, count, rows, truncated }: { kind: string; c
               Show more
             </button>
           )}
-          {unlisted > 0 && <p className="hint">{unlisted === 1 ? '1 more is' : `${unlisted} more are`} beyond the first 500 listed, shown once these are put right.</p>}
+          {unlisted > 0 && rows.length > 0 && <p className="hint">{unlisted === 1 ? '1 more is' : `${unlisted} more are`} beyond the first 500 listed, shown once these are put right.</p>}
+          {/* Issue #940: a kind with no listed rows has no "more" to speak of. */}
+          {unlisted > 0 && rows.length === 0 && <p className="hint">{unlisted === 1 ? 'This 1 is not in the first 500 listed. It shows' : `None of these ${unlisted} are in the first 500 listed. They show`} once those are put right.</p>}
           {uncounted > 0 && <p className="hint">The count is {count}, and {rows.length} of them are listed here.</p>}
         </div>
       </details>
