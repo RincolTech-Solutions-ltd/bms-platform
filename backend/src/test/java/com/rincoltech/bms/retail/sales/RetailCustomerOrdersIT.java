@@ -614,7 +614,12 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         api.stockUp(hq, other, "4");
         UUID b = RetailTestSupport.id(order(body(hq, "instagram", 2_000, List.of(line(other, "1")))));
         deliver(b, Map.of("payment_method", "bank"));
-        UUID c = placed("1", 1_000);
+        // Issue #936: a buyer with a record; the report reads its customer_id from the row GET /orders/{id} answers
+        // with it.
+        Map<String, Object> withBuyer = body(hq, "whatsapp", 1_000, List.of(line(product, "1")));
+        UUID buyer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Buyer 36"), ADMIN));
+        withBuyer.put("customer_id", buyer);
+        UUID c = RetailTestSupport.id(order(withBuyer));
         api.post("/orders/" + c + "/cancel", Map.of("reason", "No answer on the phone"), ORDERS);
 
         JsonNode bySource =
@@ -635,6 +640,7 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         JsonNode cancelled = api.get("/orders/reports/cancellations", ORDERS).getBody();
         assertThat(cancelled.get("orders").asLong()).isEqualTo(1);
         assertThat(cancelled.get("items").get(0).get("reason").asString()).isEqualTo("No answer on the phone");
+        assertThat(cancelled.get("items").get(0).get("customer_id").asString()).isEqualTo(buyer.toString());
         assertThat(cancelled.get("by_source").get(0).get("label").asString()).isEqualTo("WhatsApp");
     }
 

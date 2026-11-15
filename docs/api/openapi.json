@@ -12868,6 +12868,10 @@
             "format" : "date",
             "type" : "string"
           },
+          "customer_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
           "customer_name" : {
             "type" : "string"
           },

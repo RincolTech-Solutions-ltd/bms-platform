@@ -320,6 +320,7 @@ final class CustomerOrdersApi {
             UUID branchId,
             LocalDate cancelledOn,
             String source,
+            @JsonInclude(JsonInclude.Include.NON_NULL) UUID customerId,
             String customerName,
             long itemsTotalMinor,
             String reason,

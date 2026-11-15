@@ -633,8 +633,8 @@ class CustomerOrdersRepository {
         params.put("to", Date.valueOf(to));
         params.put("limit", limit);
         return jdbc.sql("""
-                        SELECT id, order_no, branch_id, cancelled_on, source, customer_name, items_total_minor, cancel_reason,
-                               cancelled_by
+                        SELECT id, order_no, branch_id, cancelled_on, source, customer_id, customer_name, items_total_minor,
+                               cancel_reason, cancelled_by
                           FROM retail_customer_orders
                          WHERE status = 'cancelled' AND cancelled_on BETWEEN :from AND :to%s
                          ORDER BY cancelled_at DESC, id DESC
@@ -647,6 +647,7 @@ class CustomerOrdersRepository {
                         rs.getObject("branch_id", UUID.class),
                         rs.getDate("cancelled_on").toLocalDate(),
                         rs.getString("source"),
+                        rs.getObject("customer_id", UUID.class),
                         rs.getString("customer_name"),
                         rs.getLong("items_total_minor"),
                         rs.getString("cancel_reason"),

@@ -15242,6 +15242,8 @@ export interface components {
             cancelled_by?: string;
             /** Format: date */
             cancelled_on?: string;
+            /** Format: uuid */
+            customer_id?: string;
             customer_name?: string;
             /** Format: uuid */
             id?: string;
