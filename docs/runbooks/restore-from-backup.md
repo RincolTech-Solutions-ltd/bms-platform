@@ -159,8 +159,10 @@ the source; the trial balance of one tenant balances (sum of debits equals sum o
 **An age backup (after the switch).** The host holds only the public key, so it does not restore; it checks what it can
 see and says so in its log ("a backup check, not a restore"): the object exists, is at most 26 hours old
 (`BACKUP_CHECK_MAX_HOURS`), is a well formed age file (the version line, exactly one X25519 stanza, no passphrase stanza,
-the header MAC line), is at least 32 KiB (`BACKUP_CHECK_MIN_BYTES`) and not under half the size the previous check saw. It
-records one line
+no other recipient, grease stanzas allowed, the header MAC line: the same `age_header_problem` that `backup.sh` checks before
+it uploads), is at least 32 KiB (`BACKUP_CHECK_MIN_BYTES`) and not under half the size the previous check saw. It fails when
+`BACKUP_AGE_RECIPIENT` is not set on the host, or when `docker compose` (project `bms`, service `postgres`) cannot read the
+live Flyway version. It records one line
 
 ```
 <time> OK <file> format=age bytes=<n> hours=<n> stanzas=<n> recipient=<fingerprint> live_flyway=<v>
@@ -504,8 +506,8 @@ Do it with the owner beside you, with no screen sharing or recording on, in one 
 Turn Handoff off for the ceremony (System Settings, General, AirDrop & Handoff, Allow Handoff between this Mac and your
 iCloud devices: off), so Universal Clipboard does not copy the secret to a nearby iPhone or iPad in step 3; turn it back on
 at the end. The secret goes from `age-keygen` into a shell variable and from there into the Keychain, onto paper and into the
-iCloud copy; it is never typed on a command line, and the only file it is ever in is the print job of step 4, which step 4
-purges and checks.
+iCloud copy; it is never typed on a command line, and never in a file, unless you choose to print in step 4, whose print
+job step 4 purges and checks.
 
 1. Keep this window's commands out of the shell history and make the key in memory:
 
@@ -538,10 +540,13 @@ purges and checks.
 
    Open the entry on a second Apple device signed in to the same Apple Account and check the first and last six characters
    against the Mac's.
-4. **The printed copy.** A print job is a file: macOS's CUPS keeps each job's data in `/private/var/spool/cups` after it
-   prints (by default for up to a day, `PreserveJobFiles`), and many network printers keep jobs in their own memory or disk.
-   So print to a printer on **USB** with no job storage, never a network or cloud printer, then purge the job and check that
-   nothing is left:
+4. **The paper copy.** **Writing it by hand is the safer choice**: no file, spool or printer memory ever holds the key. Copy
+   the `AGE-SECRET-KEY-1` line (74 characters, in capitals) from the screen onto the page, with the date, the public key
+   and the line "Keep sealed. Opening it is recorded in docs/runbooks/restore-from-backup.md section 8.7.", and check it in
+   step 5. Print only if the handwriting would be hard to read back. A print job is a file: macOS's CUPS keeps each job's
+   data in `/private/var/spool/cups` after it prints (by default for up to a day, `PreserveJobFiles`), and many network
+   printers keep jobs in their own memory or disk. So, if you print, use a printer on **USB** with no job storage, never a
+   network or cloud printer, then purge the job and check that nothing is left:
 
    ```bash
    printf '%s\n' "BMS backup age key (ADR-129). Made $(date +%Y-%m-%d) by <operator>, witnessed by <owner>." "$key" \
@@ -551,17 +556,17 @@ purges and checks.
    sudo sh -c 'ls /private/var/spool/cups/d* 2> /dev/null | wc -l'   # 0: no job data left
    ```
 
-   If that last count is not 0, remove those files with `sudo rm -P /private/var/spool/cups/d*` and count again. With no USB
-   printer at hand, write the key by hand instead (the `AGE-SECRET-KEY-1` line, 74 characters, in capitals, with the date
-   and the public key) and check it in step 5 the same way.
+   If that last count is not 0, remove those files with `sudo rm -P /private/var/spool/cups/d*` and count again.
 
-5. **Check the paper by reading it back.** Type the `AGE-SECRET-KEY-1` line from the paper (not from the screen) into:
+5. **Check the paper by reading it back.** Type the `AGE-SECRET-KEY-1` line from the paper (not from the screen) into
+   (a handwritten 0 and O, 1 and I are the usual slips; after `AGE-SECRET-KEY-1` the key holds no 1, B, I or O):
 
    ```bash
    age-keygen -y      # type the line, Enter, then Ctrl-D; it must print $PUB
    ```
 
-   A typing error prints an error or another key: check the paper character by character, and reprint if the print is unclear.
+   A typing error prints an error or another key: check the paper character by character, and rewrite it (or reprint it)
+   if it is unclear.
    Then the owner seals the page in an envelope, signs across the seal with the date, and keeps it away from the Mac.
 6. **A round trip** through the Keychain copy:
 
@@ -642,11 +647,12 @@ compares the fingerprint of the Keychain key's public half with the `recipient=`
 `drill/last_backup_check.txt`, and fails if they differ or there is none. It starts a throwaway PostgreSQL in Docker with no
 network, created by the checkout's `deploy/postgres/initdb`, and streams the decryption (the Keychain key, or the old key for
 an old file) straight into `pg_restore`, so the decrypted dump is never in a file. It checks the Flyway version (not ahead of
-the checkout's newest migration), the counts of tenants, users and audit rows, and that `bms_app` reads at least one of a
-tenant's rows under row-level security. It records one line in `~/bms-restore-drills/history.log` and, for a drill of the
+the checkout's newest migration), the counts of tenants, users and audit rows, and that `bms_app` reads, under row-level
+security, at least one of a business's users and exactly as many as the owner role counts. It records one line in `~/bms-restore-drills/history.log` and, for a drill of the
 newest daily backup only, uploads it to `<environment>/drill/last_offline_drill.txt`. A drill of a named file or a monthly
-copy is kept on the Mac only, and once a host checks age backups `monitor.sh` counts only an offline restore of an age file
-from `daily/`: restoring an old backup proves nothing about the current key.
+copy is kept on the Mac only, and once a host checks age backups `monitor.sh` counts an offline OK only when it restored the
+then newest daily age backup (its name at most 26 hours before the drill) with `recipient=match`: restoring an old backup
+proves nothing about the current key. `bms_app` must read exactly as many of the business's users as the owner role counts.
 
 ```
 <time> OK <file> folder=daily format=age seconds=<n> rto_ok=yes flyway=<v> repo_flyway=<v> tenants=<n> users=<n> audit=<n> app_visible_users=<n> recipient=match
@@ -662,7 +668,7 @@ only. Exit 0 is a pass, 1 a failure (recorded and uploaded), 2 a usage error.
 | `the host encrypts to another public key` | Someone changed `BACKUP_AGE_RECIPIENT` on the host. Put the right public key back today; backups since the change open only with that other key's private half |
 | `no age key in the login Keychain item` | 8.2 step 2 on this Mac, from the iCloud copy |
 | `no good backup check with a recipient fingerprint from the host` | The host has no good weekly check in R2 yet, or its checks fail (see `drill/last_backup_check_error.txt` and the `drill` alert). Run the check on the host (8.4 step 4), put right what it reports, then the drill again |
-| `bms_app reads 0 users` | The restore's row-level security or grants hide every row from the application role: a finding to fix before the next release |
+| `bms_app reads 0 users` or `bms_app reads <n> users ..., the owner counts <m>` | The restore's row-level security or grants hide some or all of a business's rows from the application role: a finding to fix before the next release |
 | `ahead of this checkout's newest migration` | `git pull`, then run it again |
 | `COULD NOT UPLOAD the result` | Run the `rclone copyto` line it prints, or `monitor.sh` alerts after 35 days |
 
@@ -676,7 +682,7 @@ only. Exit 0 is a pass, 1 a failure (recorded and uploaded), 2 a usage error.
   (`security-incident.md`). Keep the exposed private key offline until those backups age out, then destroy it.
 - **Every copy is lost** (the Keychain, the iCloud copy and the envelope): the backups made since the switch cannot be read.
   Make a new key now (8.2, 8.3), take a backup at once, and record what was lost.
-- **Opening the envelope** is recorded in 8.7 with the reason; afterwards a new printed copy is made, checked (8.2 steps 4
+- **Opening the envelope** is recorded in 8.7 with the reason; afterwards a new paper copy is made, checked (8.2 steps 4
   and 5) and sealed.
 
 ### 8.7 Record

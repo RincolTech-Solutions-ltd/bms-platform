@@ -29,7 +29,8 @@ decrypt.
    The script checks the recipient's form and that `age` is installed before it dumps anything; when either is missing it fails
    loudly, writes `state/last_backup_error` (which `monitor.sh` reports at once) and uploads nothing. It never reads
    `BACKUP_ENCRYPTION_KEY`, so there is no path back to the symmetric key, silent or otherwise. Before upload it checks that the
-   file it made is an age file with one X25519 stanza. Object names do not change (`bms-<environment>-<stamp>.dump.enc`); the
+   file it made is an age file to one X25519 recipient, with the one function `age_header_problem` that the weekly host check
+   uses too (grease stanzas allowed, no passphrase, no other recipient, read to the header MAC line). Object names do not change (`bms-<environment>-<stamp>.dump.enc`); the
    format is told by the file's first bytes, so retention, the lock rules, `monitor.sh` and the drill's choice of the newest
    backup are untouched. `age` is a Debian and Ubuntu package (`apt install age`); cloud-init installs it on new hosts.
 2. **The private key is made and kept offline.** The key ceremony is in `restore-from-backup.md` section 8: `age-keygen` on the
@@ -45,9 +46,10 @@ decrypt.
 4. **The drill is split honestly between what the host can check and what only the key holder can prove.**
    - **Weekly, on the host** (`restore-drill.sh` with no argument, the same `bms-restore-drill.timer`, Sunday 03:30). When the
      newest backup is an age file, the host cannot decrypt it, so it runs a backup check instead: the newest object exists, is at
-     most 26 hours old, is a well formed age file (the version line, exactly one X25519 stanza, no passphrase stanza, the header
-     MAC line), is not smaller than `BACKUP_CHECK_MIN_BYTES` (32 KiB) and not under half the size the previous check saw. It
-     records `state/last_backup_check` and uploads the line to `<environment>/drill/last_backup_check.txt` with the SHA-256
+     most 26 hours old, is a well formed age file (`age_header_problem`, as in decision 1), is not smaller than
+     `BACKUP_CHECK_MIN_BYTES` (32 KiB) and not under half the size the previous check saw. It fails when
+     `BACKUP_AGE_RECIPIENT` is not set or the stack's postgres cannot be reached through `docker compose`. It records
+     `state/last_backup_check` and uploads the line to `<environment>/drill/last_backup_check.txt` with the SHA-256
      fingerprint of the host's `BACKUP_AGE_RECIPIENT` and the live Flyway version. A failed check goes to
      `state/last_backup_check_error` and `drill/last_backup_check_error.txt`, never over the last good check, so its
      fingerprint stays for the offline drill to compare. While the newest backup is still
@@ -58,13 +60,16 @@ decrypt.
      key's public half with the one in the host's last good check, and fails if they differ or there is none. It then
      streams the decryption with the Keychain key straight into `pg_restore` in a throwaway PostgreSQL container with no
      network, so the decrypted dump is never in a file, and checks the Flyway version (not ahead of the checkout's newest
-     migration), the row counts and that `bms_app` reads at least one of a tenant's rows under row-level security. It records
+     migration), the row counts and that `bms_app` reads, under row-level security, at least one of a business's users and as
+     many as the owner role counts. It records
      the result in `~/bms-restore-drills/history.log` and, for a drill of the newest daily backup only, uploads it to
      `<environment>/drill/last_offline_drill.txt`; a drill of a named file or a monthly copy stays on the Mac.
    - **`monitor.sh`** alerts when the last weekly drill or backup check failed, when neither succeeded in 9 days, when the last
      offline drill failed, and when no full restore (on the host or offline) succeeded in 35 days. It reads the offline result
-     from R2 every 6 hours. Once the host checks age backups it counts an offline OK as the full restore only for an age file
-     from `daily/`, so restoring an old-format or monthly copy never stands in for a proof of the current key.
+     from R2 every 6 hours. Once the host checks age backups it counts an offline OK as the full restore only when it restored
+     the then newest daily age backup (the backup's time at most 26 hours before the drill) with the Keychain key matched to
+     the host's fingerprint (`recipient=match`), so restoring an old-format, monthly or older daily copy never stands in for
+     a proof of the current key; and a host check without a recipient fingerprint is not a good check.
    An age file does not name its recipient (that is part of age's design), so the host check cannot prove that a backup was
    encrypted to the Keychain key. The monthly drill proves it by decrypting, and the fingerprint comparison catches a host
    whose `.env` recipient was changed after that.

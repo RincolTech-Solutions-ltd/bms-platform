@@ -430,12 +430,15 @@ deletion 90 days after closing), all Africa/Kampala (ADR-024).
    restore is the monthly offline drill, `deploy/restore-drill-offline.sh`, run on the operator's Mac
    with the Keychain key: the key's fingerprint compared with the host's last good check (no record
    is a failure), the decryption streamed into a throwaway PostgreSQL with no network, the Flyway
-   version checked against the checkout's newest migration, the row counts and at least one row read
-   under row-level security; its result goes to `~/bms-restore-drills/` and, for the newest daily
+   version checked against the checkout's newest migration, the row counts, and `bms_app` reading
+   under row-level security at least one and exactly the owner role's count of a business's users; its result goes to `~/bms-restore-drills/` and, for the newest daily
    backup only, to `<environment>/drill/last_offline_drill.txt`. `monitor.sh` takes the weekly result
    as the newer of the drill and the check (9 days) and alerts when no full restore, on the host or
    offline, succeeded in 35 days, or the last offline drill failed (read from R2 every 6 hours); once
-   the host checks age backups, only an offline restore of an age file from `daily/` counts. An age file does not name its recipient, so the host cannot prove a backup opens
+   the host checks age backups, only an offline restore of the then newest daily age backup with the
+   key matched to the host's (`recipient=match`) counts, and a check without a fingerprint is not good.
+   `backup.sh` and the weekly check judge an age header with one shared function; the check reaches
+   the live database through `docker compose` and fails when it cannot. An age file does not name its recipient, so the host cannot prove a backup opens
    with the Keychain key; the monthly drill proves it.
 7. `deploy/restore-drill.sh --rehearse-import <run id>` (issue #138, ADR-027 decision 9) is the same
    script's rehearsal mode, run by hand before a cutover; with no argument the script is the weekly
