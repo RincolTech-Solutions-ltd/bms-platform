@@ -229,7 +229,7 @@ export function FindingGroup({ kind, count, rows }: { kind: string; count: numbe
             ))}
           </ul>
           {rows.length > shown && <button type="button" onClick={() => setShown(shown + FINDINGS_PAGE)}>Show more</button>}
-          {unlisted > 0 && <p className="hint">{unlisted === 1 ? '1 more is' : `${unlisted} more are`} beyond the first 500 listed. They show once these are put right and it runs again.</p>}
+          {unlisted > 0 && <p className="hint">{unlisted === 1 ? '1 more is' : `${unlisted} more are`} beyond the first 500 listed, shown once these are put right.</p>}
         </div>
       </details>
     </li>
@@ -305,7 +305,7 @@ export function ReconciliationPage() {
             <FindingGroup key={g.kind} kind={g.kind} count={g.count} rows={g.rows} />
           ))}
         </ul>
-        {data?.findings_truncated && <p className="hint">Only the first 500 differences are listed, the most serious first; the count on each kind is complete.</p>}
+        {data?.findings_truncated && <p className="hint">Only the first 500 are listed, most serious first; each count is complete.</p>}
         {run.error && <p role="alert" className="alert alert-danger">{messageOf(run.error)}</p>}
         {manage && (
           <p>

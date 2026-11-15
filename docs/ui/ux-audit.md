@@ -40,7 +40,7 @@ Counted over the 148 work routes (the component kit is a review page, outside th
   `payments/unallocated-months.dom.test.tsx` and `payments/unallocated.dom.test.tsx`.
 - Payment reconciliation (ticket 3): the differences are one closed row per kind (a `details` whose summary keeps its open
   and close triangle on a 48px row) with the report's full count, the most serious kind first; opened, it says what to check
-  and lists 20 at a time, and a kind counted past the server's first 500 says how many more are not listed. A statement's
+  and lists 20 at a time, and a kind counted past the server's first 500 says how many more are not listed yet. A statement's
   lines show 50 at a time ("Showing 50 of 120 lines."), up to the first 1,000 the server sends, which it says; the
   statements uploaded before show 10 at a time. Upload and a line's Save are plain, so Run it now is the one brand button.
   The empty lines: "No statement yet. Export the merchant statement from your payment provider's dashboard as a CSV file and

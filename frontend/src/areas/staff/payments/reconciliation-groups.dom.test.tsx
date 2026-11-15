@@ -89,8 +89,8 @@ describe('the differences by kind', () => {
     expect(kinds().every((d) => !d.open && d.firstElementChild?.tagName === 'SUMMARY')).toBe(true);
     expect(kinds()[0]?.querySelectorAll('[data-testid="finding"]')).toHaveLength(2);
     // A kind counted past the first 500 says how many more are not listed, never hides them in silence.
-    expect(kinds()[1]?.textContent).toContain('2 more are beyond the first 500 listed.');
-    expect(kinds()[2]?.textContent).toContain('4 more are beyond the first 500 listed.');
+    expect(kinds()[1]?.textContent).toContain('2 more are beyond the first 500 listed, shown once these are put right.');
+    expect(kinds()[2]?.textContent).toContain('4 more are beyond the first 500 listed, shown once these are put right.');
   });
 
   it('lists 20 differences of a kind at a time when opened, and Show more adds the rest', async () => {
