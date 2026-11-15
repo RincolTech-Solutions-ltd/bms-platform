@@ -19,13 +19,16 @@ export function SalePageView({ saleId, onClose }: { saleId: string; onClose: () 
 
 const route = getRouteApi('/staff/retail/sales/$saleId');
 
-function SalePage() {
-  const { saleId } = route.useParams();
+/** The sale page's way back: Back when it was opened from All sales, so the list is found as it was left (issue #933). */
+export function useCloseSale(saleId: string) {
   const navigate = useNavigate();
   const router = useRouter();
-  // Opened from All sales: Back, so the list is found as it was left (issue #933). Otherwise the list from the start.
-  const close = () => (openedFromAllSales(saleId) ? router.history.back() : void navigate({ to: '/staff/retail/sales' }));
-  return <SalePageView saleId={saleId} onClose={close} />;
+  return () => (openedFromAllSales(saleId) ? router.history.back() : void navigate({ to: '/staff/retail/sales' }));
+}
+
+function SalePage() {
+  const { saleId } = route.useParams();
+  return <SalePageView saleId={saleId} onClose={useCloseSale(saleId)} />;
 }
 
 export const Route = createLazyRoute('/staff/retail/sales/$saleId')({ component: SalePage });

@@ -367,7 +367,7 @@ export function CreditSales() {
  * on (`entry`), so reaching All sales any other way, from the menu or a link, starts it fresh. In memory only: this tab, this
  * person, this branch choice and this chain of levels; the history entry carries no part of it.
  */
-interface AllSalesKept { entry: string; sale: string; user: string; key: string; chain: string; from: string; to: string; buyer: string; method: SalePayment | ''; item: string; productId: string; open: OpenGroups }
+interface AllSalesKept { entry: string; sale: string; day: string; user: string; key: string; chain: string; from: string; to: string; buyer: string; method: SalePayment | ''; item: string; productId: string; open: OpenGroups }
 let allSalesKept: AllSalesKept | null = null;
 
 /** Whether this sale's page was opened from All sales, so its way back is Back, which finds the list as it was. */
@@ -384,7 +384,8 @@ export function AllSales() {
   const entry = router?.state.location.state.__TSR_key;
   const [kept] = useState(() => {
     const k = allSalesKept;
-    return k && entry !== undefined && k.entry === entry && k.user === user && k.key === key && k.chain === JSON.stringify(readChain(user, 'all')) ? k : null;
+    // Never past the business day it was left on: a buyer search, the To date and the open groups are not kept over midnight.
+    return k && entry !== undefined && k.entry === entry && k.day === today && k.user === user && k.key === key && k.chain === JSON.stringify(readChain(user, 'all')) ? k : null;
   });
   useEffect(() => { allSalesKept = null; }, []);
   // Empty to start with: every year shows, grouped by the chain the person chose, with nothing open (issues #328, #341).
@@ -413,7 +414,7 @@ export function AllSales() {
   const openSale = (id: string) => {
     if (!router) return setOpen(id);
     const here = router.state.location.state.__TSR_key;
-    allSalesKept = here === undefined ? null : { entry: here, sale: id, user, key, chain: JSON.stringify(view.chain), from, to, buyer: search.text, method, item: itemBox.text, productId, open: view.open };
+    allSalesKept = here === undefined ? null : { entry: here, sale: id, day: today, user, key, chain: JSON.stringify(view.chain), from, to, buyer: search.text, method, item: itemBox.text, productId, open: view.open };
     void router.navigate({ to: '/staff/retail/sales/$saleId', params: { saleId: id } });
   };
   // Issue #384: the Size and colour level is offered once the business has an item with sizes and colours.

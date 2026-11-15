@@ -34,8 +34,8 @@ Counted over the 148 work routes (the component kit is a review page, outside th
   `/staff/retail/sales?sale=<id>` address is taken there in place of itself. Back to the list (the browser's, or the sale
   page's own way back, which is Back when the sale was opened from the list) finds the same groups open, the same days,
   searches and Paid by. Only Back: the list is kept for the history entry it was left on, so reaching All sales from the
-  menu or a link starts it fresh. It is kept in memory for this tab and this person, never in the address or the history
-  entry, since the buyer search can hold a name or a phone. The row stays a rule 2 gap only for the buyer names of ticket 5. Tested in
+  menu or a link starts it fresh, and so does Back on a later business day. It is kept in memory for this tab and this
+  person, never in the address or the history entry, since the buyer search can hold a name or a phone. The row stays a rule 2 gap only for the buyer names of ticket 5. Tested in
   `retail/sales-address.dom.test.tsx` and `retail/record-links.dom.test.tsx`.
 - Orders (ticket 4, rule 3): while a delivery is being recorded, New order and the new order's Save are plain buttons, so
   Save: delivered and paid is the one primary, and one delivery is recorded at a time (opening a second closes the first,
@@ -53,8 +53,9 @@ Counted over the 148 work routes (the component kit is a review page, outside th
 - Bring in your data (ticket 8): "No import yet. Start a new import to bring in your first sheets.", naming the one primary
   below it. Tested in `imports/runs.dom.test.tsx`.
 - Imports to sign off (ticket 10): the opening line says "This reconciliation compares your sheet with what BMS now holds,
-  check by check." with a help tip on reconciliation (`help-tips.ts`, held by the help tips guard). Tested in
-  `imports/imports.dom.test.tsx`.
+  check by check." with a help tip on reconciliation (`help-tips.ts`, held by the help tips guard): "... Every difference
+  must be explained before you can sign.", in the words of the refusal for a difference that is not explained
+  (`unitemised_difference`, #874). Tested in `imports/imports.dom.test.tsx`.
 
 **Closed by this change (rule 2).** A sale number, an item name and a branch name could not open their record, because the
 routes took no id (triage of 2 Nov 2026). Now:

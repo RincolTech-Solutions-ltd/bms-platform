@@ -31,6 +31,7 @@ vi.mock('../../../api/retail', async (original) => {
 });
 
 const { AllSales, openedFromAllSales } = await import('./sales');
+const { SalePageView, useCloseSale } = await import('./sale-page');
 
 const me = mockMe('admin');
 const SALE = '5eed0000-0000-4000-8000-000000000933';
@@ -89,6 +90,25 @@ async function openTheDay() {
   fireEvent.click(await screen.findByRole('button', { name: 'Show the sales of this day' }));
 }
 
+/** The sale page as its route draws it, with its own way back. */
+function SalePage() {
+  return <SalePageView saleId={SALE} onClose={useCloseSale(SALE)} />;
+}
+
+/** Draws the sale page on `router`, presses See all sales, and lets the router read where that went, as RouterProvider does. */
+async function back(router: ReturnType<typeof show>) {
+  render(
+    <RouterContextProvider router={router}>
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <StaffContext.Provider value={{ me, branch: ALL_BRANCHES }}><SalePage /></StaffContext.Provider>
+      </QueryClientProvider>
+    </RouterContextProvider>,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: 'See all sales' }));
+  await router.load();
+  cleanup();
+}
+
 describe('a sale opened from All sales', () => {
   it('goes to the sale\'s own address, and Back finds the same groups open and the same search', async () => {
     const router = show();
@@ -101,15 +121,33 @@ describe('a sale opened from All sales', () => {
     // The sale page's own way back is Back, since the sale was opened from the list.
     expect(openedFromAllSales(SALE)).toBe(true);
 
-    // Back, on the same history: the list's route comes back and its screen is drawn again, as the router does.
+    // The sale page, with its own way back, See all sales, on the same history.
     cleanup();
-    router.history.back();
-    // Outside a RouterProvider nothing listens to the history, so the router is told to read it, as the provider does.
-    await router.load();
+    await back(router);
     expect(router.state.location.pathname).toBe('/staff/retail/sales');
     show(router);
     expect(await trail()).toEqual(before);
     expect(buyerBox().value).toBe('Test');
+  });
+
+  it('keeps nothing past midnight: Back the next business day starts fresh', async () => {
+    const router = show();
+    fireEvent.change(buyerBox(), { target: { value: 'Test' } });
+    await openTheDay();
+    fireEvent.click(await screen.findByRole('button', { name: /^Open the sale of / }));
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/staff/retail/sales/${SALE}`));
+    cleanup();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + 24 * 60 * 60 * 1000);
+    try {
+      await back(router);
+      show(router);
+      expect(await head(/^Test Branch Gayaza /)).toBeTruthy();
+      expect(screen.queryByRole('navigation', { name: 'Where you are' })).toBeNull();
+      expect(buyerBox().value).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('starts fresh when All sales is reached any other way, such as from the menu after the sale', async () => {
