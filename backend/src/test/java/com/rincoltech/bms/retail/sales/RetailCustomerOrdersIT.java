@@ -621,7 +621,7 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         withBuyer.put("customer_id", buyer);
         UUID c = RetailTestSupport.id(order(withBuyer));
         api.post("/orders/" + c + "/cancel", Map.of("reason", "No answer on the phone"), ORDERS);
-        // A walk-in with no buyer record, cancelled last so it is listed first: no customer_id at all.
+        // A walk-in with no buyer record: no customer_id at all.
         UUID walkIn = placed("1", 500);
         api.post("/orders/" + walkIn + "/cancel", Map.of("reason", "Test walk in left"), ORDERS);
 
@@ -642,10 +642,14 @@ class RetailCustomerOrdersIT extends IntegrationTest {
 
         JsonNode cancelled = api.get("/orders/reports/cancellations", ORDERS).getBody();
         assertThat(cancelled.get("orders").asLong()).isEqualTo(2);
-        assertThat(cancelled.get("items").get(0).get("id").asString()).isEqualTo(walkIn.toString());
-        assertThat(cancelled.get("items").get(0).has("customer_id")).isFalse();
-        assertThat(cancelled.get("items").get(1).get("reason").asString()).isEqualTo("No answer on the phone");
-        assertThat(cancelled.get("items").get(1).get("customer_id").asString()).isEqualTo(buyer.toString());
+        // Issue #938: looked up by id, since two cancels in the same instant fall back to the order of their random
+        // ids.
+        Map<String, JsonNode> byId = new LinkedHashMap<>();
+        cancelled.get("items").forEach(i -> byId.put(i.get("id").asString(), i));
+        assertThat(byId).containsOnlyKeys(walkIn.toString(), c.toString());
+        assertThat(byId.get(walkIn.toString()).has("customer_id")).isFalse();
+        assertThat(byId.get(c.toString()).get("reason").asString()).isEqualTo("No answer on the phone");
+        assertThat(byId.get(c.toString()).get("customer_id").asString()).isEqualTo(buyer.toString());
         assertThat(cancelled.get("by_source").get(0).get("label").asString()).isEqualTo("WhatsApp");
     }
 

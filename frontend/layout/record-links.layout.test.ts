@@ -109,7 +109,11 @@ describe('record links at 412px (#336)', () => {
     const title = page.getByTestId('buyers').locator('p', { hasText: 'Test Walk In 37' }).first();
     const name = title.locator('strong').first();
     expect(await name.evaluate((el) => el.classList.contains('target-line'))).toBe(false);
-    const lineHeight = await title.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+    // A line height of 'normal' has no number, so it is taken as 1.2 times the font size (review of #937).
+    const lineHeight = await title.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return style.lineHeight === 'normal' ? parseFloat(style.fontSize) * 1.2 : parseFloat(style.lineHeight);
+    });
     // One line of text (the badge may add a pixel or two), far from a 48px target line.
     expect((await title.boundingBox())!.height).toBeLessThan(lineHeight * 1.5);
     const badge = (await title.locator('.badge').boundingBox())!;

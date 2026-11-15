@@ -61,7 +61,7 @@ export function ChartTable({ caption, series, points, kind, currency }: {
 }) {
   return (
     <details className="iv-table">
-      <summary>Show as table</summary>
+      <summary className="iv-noprint">Show as table</summary>
       <div className="table-wrap" role="region" aria-label={caption} tabIndex={0}>
         <table>
           <caption className="sr-only">{caption}</caption>
