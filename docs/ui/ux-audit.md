@@ -67,7 +67,9 @@ order) it keeps its text height (rule 12 of `docs/ui-rules.md`). Measured at 412
   list arrives in), each closed to its first line with its kind, date and status (and "with a reply" when there is one) on
   a 48px row that keeps its open and close triangle; Show more adds ten. Page tour `page-feedback` v2 says so. Tested in
   `feedback/feedback-history.dom.test.tsx`; the triangle is held by the design guard, which fails any rule that hides a
-  summary's marker (four older rows on other screens are listed there, waiting on #935).
+  summary's marker. The four older rows it listed (Insights tables, Cannot scan on two-step sign-in, the explained
+  differences of an import, a report card) are list items again since #935, and `layout/disclosure-markers.layout.test.ts`
+  checks at 412px that each draws its triangle, closed and open, on a 48px row.
 - Notifications and app (ticket 7, rule 3): with no device, the line is said once the list and this device's state are
   both read, so it never changes under the eye. With the switch off it is "No device yet: turn on Notifications on this
   device above to add this one."; with it on, "This device is not listed yet: turn the switch above off and on again to
