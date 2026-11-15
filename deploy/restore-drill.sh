@@ -13,6 +13,16 @@
 #      in R2, so the record outlives the host. monitor.sh alerts on a failed, late or slow drill.
 # Everything it created, including the decrypted dump, is removed whatever the outcome.
 #
+# Age backups (issue #46 item 3, ADR-129 decision 4). backup.sh now encrypts to an age public key whose private key is
+# offline, so this host cannot decrypt a new backup. When the newest backup is an age file the drill becomes a backup
+# check of what the host CAN see: the object exists, is at most BACKUP_CHECK_MAX_HOURS (26) old, is a well formed age file
+# to exactly one X25519 recipient with no passphrase stanza, is at least BACKUP_CHECK_MIN_BYTES (32 KiB) and not under
+# half the size the previous check saw. It records one line in state/last_backup_check or state/last_backup_check_error,
+# with the fingerprint of BACKUP_AGE_RECIPIENT and the live Flyway version, and uploads it to
+# <environment>/drill/last_backup_check.txt. The full restore of an age backup is the monthly offline drill on the
+# operator's Mac (deploy/restore-drill-offline.sh). A newest backup still in the old openssl format gets the full drill
+# below, unchanged; it needs BACKUP_ENCRYPTION_KEY, which is required only then.
+#
 # Schedule: bms-restore-drill.timer, Sunday 03:30 host time, as the deploy user (docs/runbooks/monitoring-and-alerts.md).
 # Reads /opt/bms/.env like backup.sh, plus POSTGRES_IMAGE.
 #
@@ -57,6 +67,18 @@ RH_JAVA_OPTS+=" -Xss512k -XX:+ExitOnOutOfMemoryError -Djava.security.egd=file:/d
 # The run's tables, in the order they are copied.
 RH_TABLES=(import_mappings import_runs import_batches import_rows import_issue_resolutions import_issues)
 RH_UUID='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+
+# backup_format <file>: age, openssl or unknown, from the file's first bytes (ADR-129 decision 3). Kept identical in
+# restore-drill.sh and restore-drill-offline.sh (deploy/tests/offline-drill-test.sh checks that).
+backup_format() {
+    local head
+    head="$(head -c 21 "$1" 2> /dev/null | tr -d '\0')"
+    case "$head" in
+        age-encryption.org/v1) echo age ;;
+        Salted__*) echo openssl ;;
+        *) echo unknown ;;
+    esac
+}
 
 rh_log() { echo "[rehearsal $(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
 rh_ms() { date -u +%s%3N; }
@@ -343,7 +365,7 @@ rehearse_import() {
     # shellcheck disable=SC1091
     . ./.env
     set +a
-    : "${BMS_ENVIRONMENT:?}" "${BACKUP_ENCRYPTION_KEY:?}" "${R2_ENDPOINT:?}" "${R2_ACCESS_KEY_ID:?}"
+    : "${BMS_ENVIRONMENT:?}" "${R2_ENDPOINT:?}" "${R2_ACCESS_KEY_ID:?}"
     : "${R2_SECRET_ACCESS_KEY:?}" "${R2_BACKUP_BUCKET:?}" "${RCLONE_IMAGE:?}" "${POSTGRES_IMAGE:?}"
     # Exactly staging or production (review of 305673f): any other value would skip staging's fabricated check and slice.
     [[ "$BMS_ENVIRONMENT" == "staging" || "$BMS_ENVIRONMENT" == "production" ]] \
@@ -428,6 +450,10 @@ rehearse_import() {
     rh_bg rh_rclone copyto "${prefix}/daily/${RH_NAME}" /work/backup.dump.enc > /dev/null 2>&1 \
         || rh_fail "download of ${RH_NAME} failed"
     [[ -s "$RH_TMP/backup.dump.enc" ]] || rh_fail "downloaded file is empty"
+    # An age backup needs the offline private key, which never comes to a server (ADR-129 decision 5).
+    [[ "$(backup_format "$RH_TMP/backup.dump.enc")" != age ]] \
+        || rh_refuse "${RH_NAME} is encrypted to the offline age key, which this host does not hold; a rehearsal on an age backup waits for the owner's decision on issue #46 (ADR-129 decision 5)"
+    [[ -n "${BACKUP_ENCRYPTION_KEY:-}" ]] || rh_fail "${RH_NAME} is in the old openssl format and BACKUP_ENCRYPTION_KEY is not set"
     openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_ENCRYPTION_KEY \
         -in "$RH_TMP/backup.dump.enc" -out "$RH_TMP/backup.dump" 2> /dev/null \
         || rh_fail "decryption failed (wrong BACKUP_ENCRYPTION_KEY or a corrupt file)"
@@ -604,7 +630,7 @@ set -a
 # shellcheck disable=SC1091
 . ./.env
 set +a
-: "${BMS_ENVIRONMENT:?}" "${BACKUP_ENCRYPTION_KEY:?}" "${R2_ENDPOINT:?}" "${R2_ACCESS_KEY_ID:?}"
+: "${BMS_ENVIRONMENT:?}" "${R2_ENDPOINT:?}" "${R2_ACCESS_KEY_ID:?}"
 : "${R2_SECRET_ACCESS_KEY:?}" "${R2_BACKUP_BUCKET:?}" "${RCLONE_IMAGE:?}" "${POSTGRES_IMAGE:?}"
 
 IMAGE_TAG="$(cat state/current_tag)"
@@ -620,8 +646,8 @@ STARTED="$(date -u +%s)"
 
 log() { echo "[drill $(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
 elapsed() { echo $(( $(date -u +%s) - STARTED )); }
-# record <state file> <line>: the line starts with the time, which monitor.sh reads.
-# Write-then-rename for the state file (ADR-018); the history and the log keep their last 200 lines.
+# record <state file> <line> [R2 object under drill/, default last_restore_drill.txt]: the line starts with the time,
+# which monitor.sh reads. Write-then-rename for the state file (ADR-018); the history and the log keep their last 200 lines.
 record() {
     printf '%s\n' "$2" > "$1.tmp.$$" && mv -f "$1.tmp.$$" "$1"
     printf '%s\n' "$2" >> state/restore-drill-history.log
@@ -629,7 +655,7 @@ record() {
     trim state/restore-drill.log
     printf '%s\n' "$2" > "backups/drill-result-$$.txt"
     if declare -F rclone > /dev/null; then
-        rclone copyto "/backups/drill-result-$$.txt" "${PREFIX}/drill/last_restore_drill.txt" > /dev/null 2>&1 \
+        rclone copyto "/backups/drill-result-$$.txt" "${PREFIX}/drill/${3:-last_restore_drill.txt}" > /dev/null 2>&1 \
             || log "could not upload the result to ${PREFIX}/drill/"
     fi
     rm -f "backups/drill-result-$$.txt"
@@ -698,6 +724,55 @@ log "newest backup: ${NAME}"
 rclone copyto "${PREFIX}/daily/${NAME}" "/backups/$(basename "$ENC")" > /dev/null 2>&1 || fail "download of ${NAME} failed"
 [[ -s "$ENC" ]] || fail "downloaded file is empty"
 
+# An age backup: the host holds only the public key, so it checks what it can and leaves the restore to the monthly
+# offline drill (ADR-129 decision 4). Its own state files, so a check is never read as a restore.
+# JUSTIFICATION-A3: the weekly check of an age backup is the new host half of the drill split D121 asks for (#46 item 3).
+check_fail() {
+    log "FAILED: $*"
+    record state/last_backup_check_error "$(date -u +%Y-%m-%dT%H:%M:%SZ) FAILED ${NAME} $*" last_backup_check.txt
+    exit 1
+}
+check_age_backup() {
+    local header stanzas bytes min prev stamp hours fp live_ver
+    header="$(head -c 4096 "$ENC" | LC_ALL=C sed -n '1,/^--- /p' | tr -d '\0')"
+    [[ "$(head -n 1 <<< "$header")" == "age-encryption.org/v1" ]] || check_fail "not an age file: no version line"
+    [[ "$(tail -n 1 <<< "$header")" =~ ^---\ [A-Za-z0-9+/]{43}$ ]] || check_fail "not a well formed age file: no header MAC"
+    grep -q '^-> scrypt ' <<< "$header" && check_fail "encrypted with a passphrase, not to the public key"
+    [[ "$(grep -Ec '^-> X25519 [A-Za-z0-9+/]{43}$' <<< "$header")" == 1 ]] \
+        || check_fail "not encrypted to exactly one X25519 recipient"
+    # age may add grease stanzas, which no key opens; any other stanza is a recipient this design does not have.
+    stanzas="$(grep -c '^-> ' <<< "$header")"
+    [[ "$(grep '^-> ' <<< "$header" | grep -v '^-> X25519 ' | grep -cv '^-> [^ ]*-grease')" == 0 ]] \
+        || check_fail "encrypted to ${stanzas} recipients, not to the one public key"
+    bytes="$(stat -c %s "$ENC")"
+    min="${BACKUP_CHECK_MIN_BYTES:-32768}"
+    (( bytes >= min )) || check_fail "only ${bytes} bytes, under the ${min} byte floor"
+    prev="$(sed -nE 's/.* bytes=([0-9]+).*/\1/p' state/last_backup_check 2> /dev/null)"
+    if [[ -n "$prev" ]] && (( bytes * 2 < prev )); then
+        check_fail "${bytes} bytes, under half the ${prev} bytes of the last checked backup"
+    fi
+    stamp="$(sed -nE 's/.*-([0-9]{8})T([0-9]{2})([0-9]{2})([0-9]{2})Z\.dump\.enc$/\1 \2:\3:\4/p' <<< "$NAME")"
+    stamp="$(date -u -d "${stamp:-none}" +%s 2> /dev/null)" || check_fail "no time in its name"
+    hours=$(( ($(date -u +%s) - stamp) / 3600 ))
+    (( hours <= ${BACKUP_CHECK_MAX_HOURS:-26} )) || check_fail "${hours} hours old (limit ${BACKUP_CHECK_MAX_HOURS:-26})"
+    # The fingerprint of the public key this host encrypts to; the offline drill compares it with the Keychain key's.
+    fp="unset"
+    [[ -z "${BACKUP_AGE_RECIPIENT:-}" ]] || fp="$(printf '%s' "$BACKUP_AGE_RECIPIENT" | sha256sum | cut -c1-16)"
+    live_ver="$(docker exec bms-postgres-1 psql -U bms_owner -d bms -tAc \
+        "SELECT max(version::int) FROM flyway_schema_history WHERE success" 2> /dev/null)"
+    record state/last_backup_check "$(printf '%s OK %s format=age bytes=%s hours=%s stanzas=%s recipient=%s live_flyway=%s' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$NAME" "$bytes" "$hours" "$stanzas" "$fp" "${live_ver:-unknown}")" last_backup_check.txt
+    rm -f state/last_backup_check_error
+    log "OK (a backup check, not a restore: the restore is the monthly offline drill): $(cat state/last_backup_check)"
+    exit 0
+}
+if [[ "$(backup_format "$ENC")" == age ]]; then
+    log "${NAME} is an age file; this host holds no private key, so it checks the backup instead of restoring it"
+    check_age_backup
+fi
+
+[[ -n "${BACKUP_ENCRYPTION_KEY:-}" ]] \
+    || fail "${NAME} is in the old openssl format and BACKUP_ENCRYPTION_KEY is not set on this host"
 openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_ENCRYPTION_KEY -in "$ENC" -out "$DUMP" 2> /dev/null \
     || fail "decryption failed (wrong BACKUP_ENCRYPTION_KEY or a corrupt file)"
 [[ -s "$DUMP" ]] || fail "decrypted dump is empty"
