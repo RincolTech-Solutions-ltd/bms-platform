@@ -3,7 +3,8 @@ import { RouterContextProvider } from '@tanstack/react-router';
 import { createRoot } from 'react-dom/client';
 import type { Me } from '../src/api/client';
 import type { ItemStock } from '../src/api/item-page';
-import type { Order } from '../src/api/retail-orders';
+import type { CancelledOrder, Order } from '../src/api/retail-orders';
+import { CancelledRow } from '../src/areas/staff/retail/orders-report';
 import { businessToday, type GoodsReceipt, type InFlightTransfer, type Quotation, type Sale, type SaleReturn, type StockByLocation, type StockMovement, type Transfer } from '../src/api/retail';
 import type { Evaluation, StockHealth } from '../src/api/retail-analytics';
 import { mockMe } from '../src/api/retail-mock';
@@ -30,18 +31,19 @@ import { layoutRouter } from './router';
 // health and Business evaluation. Names inside a sentence: the items named on the move on the way, the branch in the hint line
 // of a Goods received row and a Customer returns row, the shop of an item page movement. Buyer names (issue #936): alone in the
 // sale's Buyer fact, on the title line of an All sales row, a quotation and an order, and on the saved sale's own line; inside
-// the Customer returns row's sentence. Every name and figure is invented.
+// the sentences of a Customer returns row and a cancelled order; and a walk-in row whose name opens nothing. Every name and
+// figure is invented.
 
-// The staff profile with its tours dismissed, as every layout page sets it (`tours` is not part of the Me contract), and with
-// customer accounts on, so a buyer's name opens the account (issue #936).
-const me = { ...mockMe('admin'), module_capabilities: { retail: ['customer_accounts'] }, tours: { 'tours-off': { status: 'dismissed', version: 1 } } } as unknown as Me;
+/** A fixture checked against the API type `T`. */
+const as = <T,>(value: T): T => value;
+// The staff profile with its tours dismissed, as every layout page sets it (`tours` is not part of the Me contract, so it is
+// added beside the checked profile), and with customer accounts on, so a buyer's name opens the account (issue #936).
+const me = Object.assign(as<Me>({ ...mockMe('admin'), module_capabilities: { retail: ['customer_accounts'] } }), { tours: { 'tours-off': { status: 'dismissed', version: 1 } } });
 const BUYER = '00000000-0000-4000-8000-0000000d0936';
 const [a, b] = me.branches ?? [];
 const A = a?.id ?? '';
 const B = b?.id ?? '';
 const nameOf = (id: string | undefined) => (id === A ? (a?.name ?? '') : (b?.name ?? ''));
-/** A fixture checked against the API type `T`. */
-const as = <T,>(value: T): T => value;
 const today = businessToday();
 
 const moves = [
@@ -76,6 +78,10 @@ const health = as<StockHealth>({
   slow_movers: { days: 90, slow_months: 4, min_sold: 0, items: [], total: 0 },
   shrinkage: [{ branch_id: A, used_reports: 1, damaged_reports: 0, short_lines: 0 }, { branch_id: B, used_reports: 0, damaged_reports: 1, short_lines: 0 }],
 });
+const walkIn = as<Sale>({ ...sale, id: 's2', sale_no: 'S-0002', customer_id: undefined, buyer_name: 'Test Walk In 37' });
+const cancelledOrder = as<CancelledOrder>({
+  id: 'o2', order_no: 'OR000937', branch_id: A, cancelled_on: today, source: 'phone', customer_id: BUYER, customer_name: 'Test Buyer 36', items_total_minor: 3000, reason: 'Test reason',
+});
 const quotation = as<Quotation>({ id: 'q1', number: 'QT-0001', branch_id: A, quote_date: today, valid_until: today, customer_id: BUYER, buyer_name: 'Test Buyer 36', buyer_contact: '0700 000 936', currency: 'UGX', total_minor: 3000, status: 'open', lines: [] });
 const order = as<Order>({
   id: 'o1', order_no: 'OR000936', branch_id: A, ordered_on: today, source: 'phone', customer_id: BUYER, customer_name: 'Test Buyer 36', customer_phone: '0700 000 936',
@@ -100,11 +106,12 @@ createRoot(document.getElementById('root') as HTMLElement).render(
           <section data-testid="health"><StockHealthView data={health} nameOf={nameOf} /></section>
           <section data-testid="evaluation"><EvaluationView data={evaluation} nameOf={nameOf} /></section>
           <section data-testid="buyers">
-            <SaleList items={[sale]} today={today} onOpen={() => undefined} />
+            <SaleList items={[sale, walkIn]} today={today} onOpen={() => undefined} />
             <ul style={{ listStyle: 'none', padding: 0 }}><QuotationCard q={quotation} branchName={a?.name} /></ul>
             <div className="rt-card"><OrderSummary order={order} branchName={a?.name} /></div>
           </section>
           <section data-testid="saved"><Receipt sale={sale} /></section>
+          <ul data-testid="cancelled" style={{ listStyle: 'none', padding: 0 }}><CancelledRow c={cancelledOrder} /></ul>
           <ul data-testid="rows" style={{ listStyle: 'none', padding: 0 }}>
             <ReceiptRow row={receiptRow} branchName={b?.name} />
             <ReturnRow row={credit} branchName={b?.name} />

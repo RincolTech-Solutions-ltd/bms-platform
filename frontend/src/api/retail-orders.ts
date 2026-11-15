@@ -20,6 +20,7 @@ export type Delivered = S['RetailOrderDelivered'];
 export type CustomerLookup = S['RetailOrderCustomerLookup'];
 export type FeesReport = S['RetailOrderFeesReport'];
 export type CancellationsReport = S['RetailOrderCancellationsReport'];
+export type CancelledOrder = S['RetailCancelledOrder'];
 
 export type OrderSource = 'whatsapp' | 'instagram' | 'facebook' | 'phone' | 'walk_in' | 'other';
 export type OrderStatus = 'ordered' | 'packed' | 'out_for_delivery' | 'delivered' | 'cancelled';

@@ -1,6 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Link, createLazyRoute, useRouter } from '@tanstack/react-router';
-import { BranchLink, BuyerLink, ItemLink, useAddress } from './screen-link';
+import { BranchLink, BuyerLink, ItemLink, useAddress, useBuyerOpens } from './screen-link';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Highlight, NoResults, SearchBox } from '../../../app/ui/SearchBox';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
@@ -70,6 +70,7 @@ export function SaleList({ items, today, onOpen, credit, branchOf, term = '', ac
    */
   action?: (sale: Sale) => ReactNode;
 }) {
+  const opens = useBuyerOpens();
   if (items.length === 0) return <p className="empty-state">{credit ? 'No credit sales found.' : 'No sales found.'}</p>;
   return (
     <ul style={{ listStyle: 'none', padding: 0 }}>
@@ -79,7 +80,7 @@ export function SaleList({ items, today, onOpen, credit, branchOf, term = '', ac
         return (
           <li key={s.id} className="rt-card">
             <p>
-              <strong className="target-line">{s.buyer_name ? <BuyerLink customerId={s.customer_id}><Highlight text={s.buyer_name} term={term} /></BuyerLink> : isCredit ? 'No buyer name' : methodLabel(s.payment_method)}</strong>{' '}
+              <strong className={s.buyer_name && opens(s.customer_id) ? 'target-line' : undefined}>{s.buyer_name ? <BuyerLink customerId={s.customer_id}><Highlight text={s.buyer_name} term={term} /></BuyerLink> : isCredit ? 'No buyer name' : methodLabel(s.payment_method)}</strong>{' '}
               <span className={`badge badge-${state.tone}`}>{state.label}</span>
             </p>
             <p>{showDate(s.sale_date)}, <strong>{money(s.total_minor ?? 0)}</strong></p>

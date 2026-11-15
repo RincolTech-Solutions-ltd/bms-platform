@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
-import { cleanup, configure, render, screen } from '@testing-library/react';
+import { cleanup, configure, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../../api/client';
@@ -10,6 +10,9 @@ import { mockMe } from '../../../api/retail-mock';
 import type { CancellationsReport, FeesReport, Order, OrderBoard, OrderPage as OrdersList } from '../../../api/retail-orders';
 import { router as appRouter } from '../../../app/router';
 import { StaffContext } from '../context';
+import { showDate } from './maths';
+import { sourceLabel } from './orders-state';
+import { money } from './ui';
 
 // Issue #936, ticket 5 of docs/ui/ux-audit.md (rule 2): a buyer's name opens the buyer's account through one shared
 // `BuyerLink`, on every place the ticket lists. A buyer with no customer record stays plain text, and so does every name for
@@ -49,6 +52,12 @@ const order = (customer: string | undefined, name: string, n = 1): Order =>
     lines: [{ line_no: 1, product_id: 'p1', description: 'Test Romper', qty: '1', unit: 'piece', unit_price_minor: 10000, line_total_minor: 10000, base_qty: '1' }],
   });
 
+const row = (customer: string | undefined, name: string, id: string): SaleReturn =>
+  as<SaleReturn>({ id, credit_note_no: `CN-HQ-${id}`, sale_id: 's1', sale_no: 'S-000936', branch_id: BRANCH, customer_id: customer, customer_name: name, returned_on: '2026-11-14', currency: 'UGX', total_minor: 5000 });
+
+const q = (customer: string | undefined, name: string, id: string): Quotation =>
+  as<Quotation>({ id, number: `QT-HQ-${id}`, branch_id: BRANCH, quote_date: '2026-11-14', valid_until: '2026-11-28', customer_id: customer, buyer_name: name, currency: 'UGX', total_minor: 9000, status: 'open', lines: [] });
+
 const cancelled = as<CancellationsReport>({
   from: '2026-11-08', to: '2026-11-14', currency: 'UGX', orders: 2, items_minor: 20000, by_source: [],
   items: [
@@ -87,6 +96,7 @@ afterEach(() => {
 });
 beforeEach(() => vi.spyOn(retail, 'getSale').mockResolvedValue(sale(CUSTOMER, BUYER)));
 
+/** Draws `ui` for `me` under the app's route tree and returns the router, so a tap can be followed to where it leads. */
 function show(ui: ReactElement, me: Me = OPENS) {
   const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff'] }) });
   render(
@@ -96,6 +106,7 @@ function show(ui: ReactElement, me: Me = OPENS) {
       </QueryClientProvider>
     </RouterContextProvider>,
   );
+  return router;
 }
 
 const hrefs = (name: string) => screen.queryAllByRole('link', { name }).map((a) => a.getAttribute('href'));
@@ -117,6 +128,13 @@ describe('a buyer name opens the account (#936)', () => {
     expect(link?.parentElement?.tagName).toBe('TD');
   });
 
+  it('the sale page: a walk-in buyer with no record is plain text', async () => {
+    vi.spyOn(retail, 'getSale').mockResolvedValue(sale(undefined, WALK_IN));
+    show(<SalePageView saleId="5eed0000-0000-4000-8000-000000000936" onClose={() => undefined} />);
+    expect(await screen.findByText(WALK_IN)).toBeTruthy();
+    expect(hrefs(WALK_IN)).toEqual([]);
+  });
+
   it('a sale opened from a list: the same Buyer fact, plain for a sale with no buyer record', () => {
     show(<SaleDetail sale={sale(undefined, WALK_IN)} today="2026-11-14" />);
     expect(hrefs(WALK_IN)).toEqual([]);
@@ -128,13 +146,21 @@ describe('a buyer name opens the account (#936)', () => {
       show(<SaleList items={[sale(CUSTOMER, BUYER, 's1'), sale(undefined, WALK_IN, 's2')]} today="2026-11-14" credit={credit} onOpen={() => undefined} />);
       opensOnlyTheRecord();
       expect(screen.getByRole('link', { name: BUYER }).parentElement?.classList.contains('target-line')).toBe(true);
+      // The walk-in's title line holds no target, so it is no 48px line.
+      expect(screen.getByText(WALK_IN).closest('strong')?.classList.contains('target-line')).toBe(false);
       cleanup();
     }
   });
 
+  it('one tap on a row buyer opens only the account, not the sale (the row has no click of its own, sales.tsx:80)', async () => {
+    const onOpen = vi.fn();
+    const router = show(<SaleList items={[sale(CUSTOMER, BUYER, 's1')]} today="2026-11-14" onOpen={onOpen} />);
+    fireEvent.click(screen.getByRole('link', { name: BUYER }));
+    await waitFor(() => expect(router.history.location.pathname).toBe(ACCOUNT));
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
   it('Customer returns: the name inside the hint sentence keeps its text height', () => {
-    const row = (customer: string | undefined, name: string, id: string) =>
-      as<SaleReturn>({ id, credit_note_no: `CN-HQ-${id}`, sale_id: 's1', sale_no: 'S-000936', branch_id: BRANCH, customer_id: customer, customer_name: name, returned_on: '2026-11-14', currency: 'UGX', total_minor: 5000 });
     show(<><ReturnRow row={row(CUSTOMER, BUYER, '000001')} /><ReturnRow row={row(undefined, WALK_IN, '000002')} /></>);
     opensOnlyTheRecord();
     const link = screen.getByRole('link', { name: BUYER });
@@ -143,17 +169,20 @@ describe('a buyer name opens the account (#936)', () => {
   });
 
   it('Quotations', () => {
-    const q = (customer: string | undefined, name: string, id: string) =>
-      as<Quotation>({ id, number: `QT-HQ-${id}`, branch_id: BRANCH, quote_date: '2026-11-14', valid_until: '2026-11-28', customer_id: customer, buyer_name: name, currency: 'UGX', total_minor: 9000, status: 'open', lines: [] });
     show(<><QuotationCard q={q(CUSTOMER, BUYER, '000001')} /><QuotationCard q={q(undefined, WALK_IN, '000002')} /></>);
     opensOnlyTheRecord();
     expect(screen.getByRole('link', { name: BUYER }).parentElement?.classList.contains('target-line')).toBe(true);
+    expect(screen.getByText(WALK_IN).classList.contains('target-line')).toBe(false);
   });
 
-  it('Orders', async () => {
-    show(<OrdersPage />);
-    await screen.findAllByRole('link', { name: BUYER });
+  it('Orders: the name on the card line of its own, one tap opens only the account (the card has no click, orders.tsx:219)', async () => {
+    const router = show(<OrdersPage />);
+    const link = await screen.findByRole('link', { name: BUYER });
     opensOnlyTheRecord();
+    expect(link.parentElement?.classList.contains('target-line')).toBe(true);
+    expect(screen.getByText(WALK_IN).closest('p')?.classList.contains('target-line')).toBe(false);
+    fireEvent.click(link);
+    await waitFor(() => expect(router.history.location.pathname).toBe(ACCOUNT));
   });
 
   it('an Order', async () => {
@@ -163,10 +192,14 @@ describe('a buyer name opens the account (#936)', () => {
     expect(link?.parentElement?.classList.contains('target-line')).toBe(true);
   });
 
-  it('Delivery fees and cancellations: a cancelled order', async () => {
+  it('Delivery fees and cancellations: a cancelled order, the name inside its sentence', async () => {
     show(<OrdersReportPage />);
-    await screen.findAllByRole('link', { name: BUYER });
+    const link = await screen.findByRole('link', { name: BUYER });
     opensOnlyTheRecord();
+    expect(link.closest('.target-line, td, th, h2')).toBeNull();
+    const [withRecord, walkIn] = screen.getAllByText(/Why:/).map((why) => why.closest('li')?.textContent ?? '');
+    expect(withRecord).toBe(`OR000941, ${showDate('2026-11-13')}, ${BUYER}, ${money(10000)}, from ${sourceLabel('phone')}Why: Test reason one`);
+    expect(walkIn).toBe(`OR000942, ${showDate('2026-11-12')}, ${WALK_IN}, ${money(10000)}, from ${sourceLabel('phone')}Why: Test reason two`);
   });
 
   it('Record a sale: the saved sale, the buyer on a line of its own', () => {
@@ -176,6 +209,7 @@ describe('a buyer name opens the account (#936)', () => {
     cleanup();
     show(<Receipt sale={sale(undefined, WALK_IN)} />);
     expect(hrefs(WALK_IN)).toEqual([]);
+    expect(screen.getByText(/^Buyer:/).classList.contains('target-line')).toBe(false);
     shown(WALK_IN);
   });
 });
@@ -193,6 +227,18 @@ describe('a person who may not open accounts sees the name as plain text (#936)'
       cleanup();
       show(<OrdersReportPage />, me);
       await screen.findByText('Test reason one', { exact: false });
+      shown(BUYER);
+      expect(hrefs(BUYER)).toEqual([]);
+    });
+
+    it(`${who}: Customer returns, Quotations and Orders`, async () => {
+      show(<><ReturnRow row={row(CUSTOMER, BUYER, '000001')} /><ul><QuotationCard q={q(CUSTOMER, BUYER, '000003')} /></ul></>, me);
+      shown(BUYER);
+      expect(hrefs(BUYER)).toEqual([]);
+      expect(document.querySelector('.target-line')).toBeNull();
+      cleanup();
+      show(<OrdersPage />, me);
+      await screen.findByTestId(`order-${order(CUSTOMER, BUYER, 1).id ?? ''}`);
       shown(BUYER);
       expect(hrefs(BUYER)).toEqual([]);
     });

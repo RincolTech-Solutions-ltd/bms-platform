@@ -615,12 +615,15 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         UUID b = RetailTestSupport.id(order(body(hq, "instagram", 2_000, List.of(line(other, "1")))));
         deliver(b, Map.of("payment_method", "bank"));
         // Issue #936: a buyer with a record; the report reads its customer_id from the row GET /orders/{id} answers
-        // with it.
+        // with it. Its item comes from the 10 this test stocked at hq above (a takes 1, this 1, the walk-in 1).
         Map<String, Object> withBuyer = body(hq, "whatsapp", 1_000, List.of(line(product, "1")));
         UUID buyer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Buyer 36"), ADMIN));
         withBuyer.put("customer_id", buyer);
         UUID c = RetailTestSupport.id(order(withBuyer));
         api.post("/orders/" + c + "/cancel", Map.of("reason", "No answer on the phone"), ORDERS);
+        // A walk-in with no buyer record, cancelled last so it is listed first: no customer_id at all.
+        UUID walkIn = placed("1", 500);
+        api.post("/orders/" + walkIn + "/cancel", Map.of("reason", "Test walk in left"), ORDERS);
 
         JsonNode bySource =
                 api.get("/orders/reports/delivery-fees?group_by=source", ORDERS).getBody();
@@ -638,9 +641,11 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         assertThat(riders).containsExactlyInAnyOrder("Test Rider 02", "Collected at the shop");
 
         JsonNode cancelled = api.get("/orders/reports/cancellations", ORDERS).getBody();
-        assertThat(cancelled.get("orders").asLong()).isEqualTo(1);
-        assertThat(cancelled.get("items").get(0).get("reason").asString()).isEqualTo("No answer on the phone");
-        assertThat(cancelled.get("items").get(0).get("customer_id").asString()).isEqualTo(buyer.toString());
+        assertThat(cancelled.get("orders").asLong()).isEqualTo(2);
+        assertThat(cancelled.get("items").get(0).get("id").asString()).isEqualTo(walkIn.toString());
+        assertThat(cancelled.get("items").get(0).has("customer_id")).isFalse();
+        assertThat(cancelled.get("items").get(1).get("reason").asString()).isEqualTo("No answer on the phone");
+        assertThat(cancelled.get("items").get(1).get("customer_id").asString()).isEqualTo(buyer.toString());
         assertThat(cancelled.get("by_source").get(0).get("label").asString()).isEqualTo("WhatsApp");
     }
 

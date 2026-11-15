@@ -43,10 +43,15 @@ export function SaleLink({ saleId, credit = false, children }: { saleId: string 
  * A buyer with no record, a session that may not, or a render outside a router: the name as plain text.
  */
 export function BuyerLink({ customerId, children }: { customerId: string | undefined; children: ReactNode }) {
+  if (!useBuyerOpens()(customerId) || !customerId) return <>{children}</>;
+  return <Link className="figure-link" to="/staff/retail/accounts/$customerId" params={{ customerId }}>{children}</Link>;
+}
+
+/** Whether `BuyerLink` draws a link for a buyer here, so a line is a `.target-line` only while it holds a target (issue #936). */
+export function useBuyerOpens(): (customerId: string | undefined) => boolean {
   const me = useOptionalStaff()?.me;
   const router = useRouter({ warn: false });
-  if (!customerId || !me || !router || !canOpenAccount(me)) return <>{children}</>;
-  return <Link className="figure-link" to="/staff/retail/accounts/$customerId" params={{ customerId }}>{children}</Link>;
+  return (customerId) => Boolean(customerId && me && router && canOpenAccount(me));
 }
 
 /**

@@ -2,7 +2,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Link, createLazyRoute } from '@tanstack/react-router';
 import { useState } from 'react';
 import { businessToday, daysBefore } from '../../../api/retail';
-import { retailOrders } from '../../../api/retail-orders';
+import { retailOrders, type CancelledOrder } from '../../../api/retail-orders';
 import { showDate } from './maths';
 import { sourceLabel } from './orders-state';
 import { BuyerLink } from './screen-link';
@@ -81,18 +81,23 @@ export function OrdersReportPage() {
             )}
             {(cancelled.data.items ?? []).length === 0 ? <p className="empty-state">No orders cancelled on these days. Choose other days above.</p> : (
               <ul style={{ listStyle: 'none', padding: 0 }}>
-                {(cancelled.data.items ?? []).map((c) => (
-                  <li key={c.id} className="rt-card">
-                    <Link to="/staff/retail/orders/$orderId" params={{ orderId: c.id ?? '' }}>{c.order_no}</Link>, {showDate(c.cancelled_on)}, <BuyerLink customerId={c.customer_id}>{c.customer_name}</BuyerLink>,{money(c.items_total_minor ?? 0)}, from {sourceLabel(c.source)}{all ? `, ${nameOf(c.branch_id)}` : ''}
-                    <p className="hint">Why: {c.reason}</p>
-                  </li>
-                ))}
+                {(cancelled.data.items ?? []).map((c) => <CancelledRow key={c.id} c={c} branchName={all ? nameOf(c.branch_id) : undefined} />)}
               </ul>
             )}
           </>
         )}
       </section>
     </Gate>
+  );
+}
+
+/** A cancelled order: its number opens it, and the customer's name, inside the sentence, opens the account (issue #936). */
+export function CancelledRow({ c, branchName }: { c: CancelledOrder; branchName?: string }) {
+  return (
+    <li className="rt-card">
+      <Link to="/staff/retail/orders/$orderId" params={{ orderId: c.id ?? '' }}>{c.order_no}</Link>, {showDate(c.cancelled_on)}, <BuyerLink customerId={c.customer_id}>{c.customer_name}</BuyerLink>{', '}{money(c.items_total_minor ?? 0)}, from {sourceLabel(c.source)}{branchName ? `, ${branchName}` : ''}
+      <p className="hint">Why: {c.reason}</p>
+    </li>
   );
 }
 
