@@ -482,6 +482,13 @@
   cursor: pointer;
 }
 
+/* Payment reconciliation's differences, one closed 48px row per kind (issue #941, rule 1), keeping the list item triangle. */
+.recon-kind > summary {
+  min-height: var(--tap);
+  padding-block: var(--space-3);
+  cursor: pointer;
+}
+
 .recon-items li {
   overflow-wrap: anywhere;
 }

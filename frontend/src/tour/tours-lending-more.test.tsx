@@ -111,7 +111,7 @@ function seed(client: QueryClient, me: Me): void {
   client.setQueryData(['approvals', branch], {
     items: [{ id: 'ap1', action_type: 'refund', amount_minor: 50000, currency: 'UGX', requested_by: 'u9', requested_by_name: 'Test Clerk 09', requested_at: '2026-10-01T08:00:00Z', can_decide: true, can_cancel: false }],
   });
-  client.setQueryData(['payments', 'unallocated', 'open'], { items: [] });
+  client.setQueryData(['payments', 'unallocated', 'open'], { pages: [{ items: [] }], pageParams: [''] });
   client.setQueryData(['payments', 'reconciliation'], { run: null, findings: [] });
   client.setQueryData(['payments', 'account'], { status: 'failed', credentials_saved: true, key_hint: 'ab12', last_checked_at: null, failure_reason: 'invalid_credentials', host_ready: true });
   client.setQueryData(['reports', 'catalogue'], [{ key: 'portfolio', title: 'Portfolio report', description: 'The loan book', permission: 'lending.reports.portfolio', formats: ['pdf', 'xlsx'], params: [] }]);

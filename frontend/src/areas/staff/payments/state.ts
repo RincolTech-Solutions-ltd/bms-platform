@@ -143,6 +143,30 @@ export const FINDING_WORDS: Record<string, { title: string; help: string }> = {
 
 export const findingWords = (kind: string | undefined) => (kind && FINDING_WORDS[kind]) || { title: 'A difference', help: 'Look at it with the person on call.' };
 
+/** The kinds most serious first, as the server orders the report (`ReconciliationService.SEVERITY`). */
+export const FINDING_SEVERITY = [
+  'reversed_after_refund', 'reversal_blocked', 'manual_receipt_duplicate', 'completed_not_booked', 'paid_differs', 'amount_mismatch',
+  'currency_mismatch', 'in_provider_not_in_bms', 'in_bms_not_in_provider', 'reversed_awaiting_review', 'reversal_handed_over',
+  'ambiguous_statement_row', 'pending_over_24h',
+];
+
+/**
+ * The differences by kind (issue #941, rule 1): one group per kind, the most serious first and a kind the list does not know
+ * last, listed or only counted alike. `count` is the report's full count of that kind, never less than the rows listed; a kind
+ * with neither a count nor a row has no group.
+ */
+export function findingGroups<T extends { kind?: string }>(findings: T[], counts: Record<string, number> = {}): { kind: string; count: number; rows: T[] }[] {
+  const rank = (kind: string) => (FINDING_SEVERITY.includes(kind) ? FINDING_SEVERITY.indexOf(kind) : FINDING_SEVERITY.length);
+  const kinds = [...new Set([...findings.map((f) => f.kind ?? ''), ...Object.keys(counts)])];
+  return kinds
+    .map((kind) => {
+      const rows = findings.filter((f) => (f.kind ?? '') === kind);
+      return { kind, count: Math.max(counts[kind] ?? 0, rows.length), rows };
+    })
+    .filter((g) => g.count > 0)
+    .sort((a, b) => rank(a.kind) - rank(b.kind));
+}
+
 export const MATCH_WORDS: Record<string, string> = {
   matched: 'Matches',
   amount_mismatch: 'Different amount',

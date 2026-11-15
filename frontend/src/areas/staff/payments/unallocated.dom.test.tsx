@@ -3,10 +3,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { UnallocatedReceipt } from '../../../api/payments';
+import type { UnallocatedReceipt, UnallocatedReceiptPage } from '../../../api/payments';
 import { mockMe } from '../../../api/retail-mock';
 import { router as appRouter } from '../../../app/router';
 import { StaffContext } from '../context';
+
+const as = <T,>(value: T): T => value;
 
 // The "Unallocated payments" screen in a browser (extras slice A5, issue #224), with the API client replaced: the queue shows what
 // waits and why in plain words, a cashier can ask to put a payment on a loan or record a refund (each needs a reason and the right
@@ -79,10 +81,14 @@ describe('the queue', () => {
     expect(document.body.textContent).not.toMatch(/\+?2567\d{8}|0700/);
   });
 
-  it('says so when nothing is waiting', async () => {
-    api.list.mockResolvedValue({ items: [] });
+  it('says where a payment comes from when nothing is waiting, and to choose another when a filter is empty (issue #941)', async () => {
+    api.list.mockResolvedValue(as<UnallocatedReceiptPage>({ items: [] }));
     shell(CASHIER);
-    expect(await screen.findByText('Nothing is waiting.')).toBeTruthy();
+    expect((await screen.findByText(/^Nothing is waiting\./)).textContent).toBe(
+      'Nothing is waiting. A payment comes here when a member pays by mobile money or card and the loan or account it was meant for will not take it.',
+    );
+    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'refunded' } });
+    expect(await screen.findByText('None of these yet. Choose another under Show above.')).toBeTruthy();
   });
 
   it('offers no buttons to someone who may only read, and nothing to someone who may not read', async () => {

@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PaymentReconciliation } from '../../../api/payments';
 import { mockMe } from '../../../api/retail-mock';
 import { router as appRouter } from '../../../app/router';
 import { StaffContext } from '../context';
@@ -22,7 +23,9 @@ vi.mock('../../../api/payments', async (original) => {
 const { FormError } = await import('../../../api/lending-forms');
 const { ReconciliationPage } = await import('./reconciliation');
 
-const report = {
+const as = <T,>(value: T): T => value;
+
+const report = as<PaymentReconciliation>({
   run: { id: 'r1', created_at: '2026-10-19T01:10:00Z', ran_on: '2026-10-19', trigger: 'job', window_from: '2026-06-21', intents_examined: 12, statements_used: 1, finding_count: 2 },
   counts_by_kind: { completed_not_booked: 1, manual_receipt_duplicate: 1 },
   findings: [
@@ -30,7 +33,7 @@ const report = {
     { id: 'f2', kind: 'manual_receipt_duplicate', confirmation_code: 'CONF-TEST-2', bms_amount_minor: 310000, provider_amount_minor: 310000, currency: 'UGX' },
   ],
   findings_truncated: false,
-};
+});
 
 function shell(permissions: string[], allBranches = true) {
   const me = { ...mockMe('admin'), permissions, all_branches: allBranches };
@@ -67,8 +70,8 @@ describe('the report', () => {
     expect(screen.getByText('Entered by hand and also paid online')).toBeTruthy();
     expect(screen.getByText(/CONF-TEST-1/)).toBeTruthy();
     expect(screen.getAllByTestId('finding')).toHaveLength(2);
-    // The counts of every kind are shown, so a difference beyond the first 500 rows is never out of sight.
-    expect(screen.getByRole('list', { name: 'How many of each' }).textContent).toContain('Paid but not recorded: 1');
+    // Each kind is a closed row with its full count, so a difference beyond the first 500 rows is never out of sight (#941).
+    expect(screen.getByRole('list', { name: 'Differences by kind' }).textContent).toContain('Paid but not recorded: 1');
   });
 
   it('names the receipt entered by hand to reverse, and offers no upload or run to a manager of some branches only', async () => {
@@ -94,9 +97,12 @@ describe('the report', () => {
     shell(MANAGER);
     expect(await screen.findByText('Nothing differs.')).toBeTruthy();
     cleanup();
-    reconciliation.latest.mockResolvedValue({ findings: [], counts_by_kind: {}, findings_truncated: false });
+    reconciliation.latest.mockResolvedValue(as<PaymentReconciliation>({ findings: [], counts_by_kind: {}, findings_truncated: false }));
     shell(MANAGER);
-    expect(await screen.findByText('No reconciliation has run yet.')).toBeTruthy();
+    expect(await screen.findByText('No reconciliation has run yet. It runs every night, or tap Run it now below.')).toBeTruthy();
+    cleanup();
+    shell(['core.payments.read']);
+    expect(await screen.findByText('No reconciliation has run yet. It runs every night.')).toBeTruthy();
   });
 
   it('shows a reader the report and no buttons, and a stranger nothing', async () => {
@@ -110,7 +116,7 @@ describe('the report', () => {
   });
 
   it('runs the reconciliation on request and shows the new report', async () => {
-    reconciliation.run.mockResolvedValue({ ...report, findings: [report.findings[0]] });
+    reconciliation.run.mockResolvedValue({ ...report, findings: (report.findings ?? []).slice(0, 1) });
     shell(MANAGER);
     fireEvent.click(await screen.findByRole('button', { name: 'Run it now' }));
     await waitFor(() => expect(reconciliation.run).toHaveBeenCalledTimes(1));
