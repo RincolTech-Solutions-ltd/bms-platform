@@ -38,7 +38,11 @@ import { layoutRouter } from './router';
 const as = <T,>(value: T): T => value;
 // The staff profile with its tours dismissed, as every layout page sets it (`tours` is not part of the Me contract, so it is
 // added beside the checked profile), and with customer accounts on, so a buyer's name opens the account (issue #936).
-const me = Object.assign(as<Me>({ ...mockMe('admin'), module_capabilities: { retail: ['customer_accounts'] } }), { tours: { 'tours-off': { status: 'dismissed', version: 1 } } });
+const admin = mockMe('admin');
+const me = Object.assign(
+  as<Me>({ ...admin, module_capabilities: { ...admin.module_capabilities, retail: [...(admin.module_capabilities?.retail ?? []), 'customer_accounts'] } }),
+  { tours: { 'tours-off': { status: 'dismissed', version: 1 } } },
+);
 const BUYER = '00000000-0000-4000-8000-0000000d0936';
 const [a, b] = me.branches ?? [];
 const A = a?.id ?? '';
