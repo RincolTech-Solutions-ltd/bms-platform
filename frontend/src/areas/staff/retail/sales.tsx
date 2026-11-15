@@ -1,6 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Link, createLazyRoute, useRouter } from '@tanstack/react-router';
-import { BranchLink, ItemLink, useAddress } from './screen-link';
+import { BranchLink, BuyerLink, ItemLink, useAddress } from './screen-link';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Highlight, NoResults, SearchBox } from '../../../app/ui/SearchBox';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
@@ -79,7 +79,7 @@ export function SaleList({ items, today, onOpen, credit, branchOf, term = '', ac
         return (
           <li key={s.id} className="rt-card">
             <p>
-              <strong>{s.buyer_name ? <Highlight text={s.buyer_name} term={term} /> : isCredit ? 'No buyer name' : methodLabel(s.payment_method)}</strong>{' '}
+              <strong className="target-line">{s.buyer_name ? <BuyerLink customerId={s.customer_id}><Highlight text={s.buyer_name} term={term} /></BuyerLink> : isCredit ? 'No buyer name' : methodLabel(s.payment_method)}</strong>{' '}
               <span className={`badge badge-${state.tone}`}>{state.label}</span>
             </p>
             <p>{showDate(s.sale_date)}, <strong>{money(s.total_minor ?? 0)}</strong></p>
@@ -114,7 +114,7 @@ export function SaleDetail({ sale, today, branchName }: { sale: Sale; today: str
     ['Date', showDate(sale.sale_date)],
     ...(branchName ? [['Branch', <BranchLink key="branch" branchId={sale.branch_id}>{branchName}</BranchLink>] as [string, ReactNode]] : []),
     ['Paid by', methodLabel(sale.payment_method)],
-    ...(sale.buyer_name ? [['Buyer', sale.buyer_name] as [string, string]] : []),
+    ...(sale.buyer_name ? [['Buyer', <BuyerLink key="buyer" customerId={sale.customer_id}>{sale.buyer_name}</BuyerLink>] as [string, ReactNode]] : []),
     ...(sale.buyer_contact ? [['Contact', sale.buyer_contact] as [string, string]] : []),
     ...(sale.due_date ? [['Due', showDate(sale.due_date)] as [string, string]] : []),
     ...(sale.status === 'voided' && sale.void_reason ? [['Deleted because', sale.void_reason] as [string, string]] : []),

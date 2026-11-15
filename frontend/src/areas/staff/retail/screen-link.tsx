@@ -3,7 +3,7 @@ import { useCallback, useEffect, useSyncExternalStore, type ReactNode } from 're
 import type { Me } from '../../../api/client';
 import type { ChoiceAdd } from '../../../app/ui/EmptyChoice';
 import { useOptionalStaff, useStaff } from '../context';
-import { canUse, type RetailScreen } from './permissions';
+import { canOpenAccount, canUse, type RetailScreen } from './permissions';
 import { RowChevron } from '../../../app/ui/ListRow';
 
 // A link to another retail screen, drawn only for a session that may open it (issue #336). `to` is a route of the retail area,
@@ -35,6 +35,18 @@ export function SaleLink({ saleId, credit = false, children }: { saleId: string 
   if (canUse(me, 'salesHistory')) return <Link className="figure-link" to="/staff/retail/sales/$saleId" params={{ saleId }}>{children}</Link>;
   if (credit && canUse(me, 'creditSales')) return <Link className="figure-link" to="/staff/retail/credit-sales" search={{ sale: saleId } as never}>{children}</Link>;
   return <>{children}</>;
+}
+
+/**
+ * A buyer's name that opens the buyer's account `/staff/retail/accounts/<id>` (issue #936): only for a buyer with a customer
+ * record and a session that may open accounts (`canOpenAccount`, the account page's own test, so it never leads to a refusal).
+ * A buyer with no record, a session that may not, or a render outside a router: the name as plain text.
+ */
+export function BuyerLink({ customerId, children }: { customerId: string | undefined; children: ReactNode }) {
+  const me = useOptionalStaff()?.me;
+  const router = useRouter({ warn: false });
+  if (!customerId || !me || !router || !canOpenAccount(me)) return <>{children}</>;
+  return <Link className="figure-link" to="/staff/retail/accounts/$customerId" params={{ customerId }}>{children}</Link>;
 }
 
 /**

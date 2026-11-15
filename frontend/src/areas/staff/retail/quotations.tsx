@@ -17,7 +17,7 @@ import { CustomerPicker } from './customer-picker';
 import { Gate, Note, Problem, ProductPicker, money, useBranchName, useBranchView, useSingleBranch } from './ui';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { Hint } from '../../../app/ui/Hint';
-import { BranchLink, ItemLink, SaleLink } from './screen-link';
+import { BranchLink, BuyerLink, ItemLink, SaleLink } from './screen-link';
 import { ContactLinks } from './contact-links';
 
 // Quotations (documents capability, ADR-033, issue #197): prices offered to a buyer until a date. A quotation reserves no stock and
@@ -112,7 +112,7 @@ export function QuotationCard({ q, branchName }: { q: Quotation; branchName?: st
       <p>
         <strong>{q.number}</strong> <span className={`badge badge-${state.tone}`}>{state.label}</span>
       </p>
-      <p>{q.buyer_name}{q.buyer_contact ? `, ${q.buyer_contact}` : ''}</p>
+      <p className="target-line"><BuyerLink customerId={q.customer_id}>{q.buyer_name}</BuyerLink>{q.buyer_contact ? `, ${q.buyer_contact}` : ''}</p>
       <ContactLinks contact={q.buyer_contact} name={q.buyer_name} />
       <p className="hint">
         {showDate(q.quote_date)}, valid until <strong>{showDate(q.valid_until)}</strong>, <strong>{money(q.total_minor ?? 0)}</strong>{branchName ? <>, <BranchLink branchId={q.branch_id}>{branchName}</BranchLink></> : ''}

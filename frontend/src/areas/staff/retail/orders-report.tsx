@@ -5,6 +5,7 @@ import { businessToday, daysBefore } from '../../../api/retail';
 import { retailOrders } from '../../../api/retail-orders';
 import { showDate } from './maths';
 import { sourceLabel } from './orders-state';
+import { BuyerLink } from './screen-link';
 import { Gate, Problem, money, useBranchName, useBranchView } from './ui';
 import { PeriodPicker } from '../../../app/ui/PeriodPicker';
 import { RowChevron } from '../../../app/ui/ListRow';
@@ -82,7 +83,7 @@ export function OrdersReportPage() {
               <ul style={{ listStyle: 'none', padding: 0 }}>
                 {(cancelled.data.items ?? []).map((c) => (
                   <li key={c.id} className="rt-card">
-                    <Link to="/staff/retail/orders/$orderId" params={{ orderId: c.id ?? '' }}>{c.order_no}</Link>, {showDate(c.cancelled_on)}, {c.customer_name}, {money(c.items_total_minor ?? 0)}, from {sourceLabel(c.source)}{all ? `, ${nameOf(c.branch_id)}` : ''}
+                    <Link to="/staff/retail/orders/$orderId" params={{ orderId: c.id ?? '' }}>{c.order_no}</Link>, {showDate(c.cancelled_on)}, <BuyerLink customerId={c.customer_id}>{c.customer_name}</BuyerLink>,{money(c.items_total_minor ?? 0)}, from {sourceLabel(c.source)}{all ? `, ${nameOf(c.branch_id)}` : ''}
                     <p className="hint">Why: {c.reason}</p>
                   </li>
                 ))}

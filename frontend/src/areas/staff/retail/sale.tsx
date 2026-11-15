@@ -42,7 +42,7 @@ import { entryWarnings, type EntryWarning } from './entry-checks-state';
 import { useEntryChecks, useEntryNorms } from './entry-checks';
 import { FirstItemsCard, useNoItemsYet } from './first-items';
 import { EmptyChoice, showsEmptyChoice } from '../../../app/ui/EmptyChoice';
-import { ScreenLink, addOn } from './screen-link';
+import { BuyerLink, ScreenLink, addOn } from './screen-link';
 import { CustomerPicker } from './customer-picker';
 import { CashCustomerName } from './cash-customer';
 import { dropWords } from './stocktake';
@@ -84,7 +84,7 @@ export function Receipt({ sale, received }: { sale: Sale; /** Cash the customer 
       <h2>Sale saved</h2>
       <p>
         Paid by {METHODS.find((m) => m.value === sale.payment_method)?.label ?? sale.payment_method} on {showDate(sale.sale_date)}
-        {sale.buyer_name ? `, buyer ${sale.buyer_name}` : ''}
+        {sale.buyer_name ? <>, buyer <BuyerLink customerId={sale.customer_id}>{sale.buyer_name}</BuyerLink></> : ''}
       </p>
       <div className="table-wrap" tabIndex={0}><table>
         <thead>
