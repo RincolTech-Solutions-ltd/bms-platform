@@ -681,7 +681,7 @@ export const paymentsPage: Tour = {
 // JUSTIFICATION-A3: ADR-049 asks one page tour per staff route; this is the tour of the new Payment reconciliation route (#317).
 export const reconciliationPage: Tour = {
   id: 'page-reconciliation',
-  version: 1,
+  version: 2,
   title: 'This page: payment reconciliation',
   audience: (me) => held(me, PAYMENTS_READ),
   autoStart: false,
@@ -705,7 +705,7 @@ export const reconciliationPage: Tour = {
       id: 'report',
       target: 'reconciliation-report',
       title: 'The differences',
-      body: 'Each difference says what to check. It goes away on the next run once its cause is put right.',
+      body: 'Each kind of difference is a row with how many there are. Tap it to see what to check and each one. A difference goes away on the next run once its cause is put right.',
     },
     {
       id: 'run',
@@ -721,7 +721,7 @@ export const reconciliationPage: Tour = {
 // JUSTIFICATION-A3: ADR-049 asks one page tour per staff route; this is the tour of the new Unallocated payments route (#224).
 export const unallocatedPage: Tour = {
   id: 'page-unallocated',
-  version: 1,
+  version: 2,
   title: 'This page: unallocated payments',
   audience: (me) => held(me, PAYMENTS_READ),
   autoStart: false,
@@ -743,7 +743,7 @@ export const unallocatedPage: Tour = {
       id: 'ask',
       target: 'unallocated-list',
       title: 'Put it where it belongs',
-      body: 'Ask to put a payment on a loan or savings account, or record that it was sent back. A second person approves it before anything changes.',
+      body: 'Payments sit under the month they were paid, with how many and how much, the oldest first; Show more brings the next. Ask to put a payment on a loan or savings account, or record that it was sent back. A second person approves it before anything changes.',
     },
   ],
 };

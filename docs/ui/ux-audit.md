@@ -24,9 +24,30 @@ Counted over the 148 work routes (the component kit is a review page, outside th
 
 | Rule | Meets | Gap |
 |---|---|---|
-| 1 Progressive disclosure | 146 of 148 | 2: Payment reconciliation, Unallocated payments |
+| 1 Progressive disclosure | 148 of 148 | None since #941 |
 | 2 Cross links | 147 of 148 | 1: the buyer name on Documents, since the documents list does not carry the buyer's record (#936). Every other sale number, item name, branch name and buyer name opens its record |
-| 3 No training needed | 146 of 148 | 2: Payment reconciliation, Unallocated payments |
+| 3 No training needed | 148 of 148 | None since #941 |
+
+**Closed by #941 (tickets 2 and 3, rules 1 and 3).** Frontend only, no endpoint and no migration:
+
+- Unallocated payments (ticket 2): the receipts sit under one header per month of their value date (`GroupedCards`, as on
+  Stock moves), each with how many and how much, open only while the loaded list is short (`OPEN_UP_TO`). The list is the
+  server's own pages, 50 receipts oldest first under the same `core.payments.read`; Show more asks for the next with its
+  `next_cursor`, and the last month says "so far" while another page exists. The row buttons are plain and one form opens at
+  a time, so its Ask for approval is the one brand button. With nothing waiting the line says where a payment comes from:
+  "Nothing is waiting. A payment comes here when a member pays by mobile money or card and the loan or account it was meant
+  for will not take it."; another filter says "None of these yet. Choose another under Show above." Tested in
+  `payments/unallocated-months.dom.test.tsx` and `payments/unallocated.dom.test.tsx`.
+- Payment reconciliation (ticket 3): the differences are one closed row per kind (a `details` whose summary keeps its open
+  and close triangle on a 48px row) with the report's full count, the most serious kind first; opened, it says what to check
+  and lists 20 at a time, and a kind counted past the server's first 500 says how many more are not listed. A statement's
+  lines show 50 at a time ("Showing 50 of 120 lines."), up to the first 1,000 the server sends, which it says; the
+  statements uploaded before show 10 at a time. Upload and a line's Save are plain, so Run it now is the one brand button.
+  The empty lines: "No statement yet. Export the merchant statement from your payment provider's dashboard as a CSV file and
+  upload it above." and "No reconciliation has run yet. It runs every night, or tap Run it now below." (without the last
+  part for someone who may not run it). Tested in `payments/reconciliation-groups.dom.test.tsx` and
+  `payments/reconciliation.dom.test.tsx`.
+- Page tours `page-unallocated` and `page-reconciliation` are v2 and say so.
 
 **Closed by #936 (ticket 5, rule 2).** A buyer's name opens the buyer's account `/staff/retail/accounts/$customerId`
 through one shared `BuyerLink` beside `SaleLink` (`retail/screen-link.tsx`), on the sale page and a sale opened from a list
@@ -170,8 +191,8 @@ No backend change: every record already had its id endpoint (`GET /retail/sales/
 | `/staff/more` | More | `page-more` v2 | meets: links grouped by section | meets | meets |
 | `/staff/notifications` | Notifications and app | `page-notifications` v3 | meets: four short cards | meets: no record shown | meets: the empty device line points to the switch above it (#933) |
 | `/staff/payments` | Receive payments | `page-payments` v1 | meets | meets | meets: one primary per state (#798) |
-| `/staff/payments/reconciliation` | Payment reconciliation | `page-reconciliation` v1 | gap: up to 1,000 statement lines and 500 findings shown flat; past statements not limited | meets: no sale, item or branch shown | gap: Upload, each row's Save and Run it now are all brand buttons; "No statement has been uploaded yet." names no next step |
-| `/staff/payments/unallocated` | Unallocated payments | `page-unallocated` v1 | gap: every receipt shown as a full card, no paging or dates | meets: no sale, item or branch shown | gap: a brand button on every row; "Nothing is waiting." names no next step |
+| `/staff/payments/reconciliation` | Payment reconciliation | `page-reconciliation` v2 | meets: one closed row per kind of difference with its full count, 20 differences at a time when opened; statement lines 50 at a time, past statements 10 at a time (#941) | meets: no sale, item or branch shown | meets: Run it now is the one brand button (Upload and Save are plain); the empty lines say what to upload and that it runs every night; the opening line says what it compares (#941) |
+| `/staff/payments/unallocated` | Unallocated payments | `page-unallocated` v2 | meets: the receipts under one header per month with how many and how much, open only while short; the server's next page behind Show more (#941) | meets: no sale, item or branch shown | meets: the row buttons are plain and one form opens at a time, so its Ask for approval is the one brand button; the empty line says where a payment comes from (#941) |
 | `/staff/reports` | Reports | `page-reports` v2 | meets: a list of reports | meets: each report opens | meets |
 | `/staff/retail` | Retail | `page-retail-home` v5 | meets: summary cards | meets: each shop row opens the branch page (this change) | meets |
 | `/staff/retail/accounts` | Customer accounts | `page-accounts` v1 | meets: paged | meets: each buyer opens the account | meets |
@@ -287,7 +308,8 @@ read in the code on 2026-11-14 for this audit.
 ## Screen tickets, in order
 
 Each is one screen ticket, most valuable first: the gaps that a new person meets on a daily screen come before the rare
-ones. Tickets 1, 4 and 6 to 10 are done (#933), and ticket 5 (#936) but for the buyer name on Documents; 2 and 3 are open.
+ones. Tickets 1, 4 and 6 to 10 are done (#933), tickets 2 and 3 (#941), and ticket 5 (#936) but for the buyer name on
+Documents.
 
 1. All sales: a sale opened from the list goes to `/staff/retail/sales/$saleId`, so the address is the record (rule 2).
 2. Unallocated payments: page the receipts by month with Show more, one brand button per view, and an empty line that says where a payment comes from (rules 1 and 3).
