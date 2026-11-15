@@ -2,6 +2,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import type { Me } from '../api/client';
 import type { Investment, InvestmentCertificate, InvestmentProduct } from '../api/investments';
+import type { PaymentReconciliation } from '../api/payments';
 import { mockMe } from '../api/retail-mock';
 import type { SmsSettings, SmsTemplate } from '../api/sms';
 import type { SavingsAccount } from '../api/savings';
@@ -39,6 +40,9 @@ import { LENDING_MORE_TOURS } from './tours-lending-more';
 // The page tours of lending savings and investments and the remaining staff pages (issue #337): each page is rendered as the
 // users its tour is written for, and every step's data-tour anchor must be in the markup. Pages that read their id from the
 // address are drawn through their body component with a fabricated id. All names, numbers and amounts are fabricated.
+
+/** A fixture checked against the API type `T`: an object literal passed here gets TypeScript's excess property check. */
+const as = <T,>(value: T): T => value;
 
 const BRANCH = '00000000-0000-4000-8000-0000000000a1';
 const branches = mockMe('sales').branches;
@@ -112,7 +116,8 @@ function seed(client: QueryClient, me: Me): void {
     items: [{ id: 'ap1', action_type: 'refund', amount_minor: 50000, currency: 'UGX', requested_by: 'u9', requested_by_name: 'Test Clerk 09', requested_at: '2026-10-01T08:00:00Z', can_decide: true, can_cancel: false }],
   });
   client.setQueryData(['payments', 'unallocated', 'open'], { pages: [{ items: [] }], pageParams: [''] });
-  client.setQueryData(['payments', 'reconciliation'], { run: null, findings: [] });
+  // Issue #940: typed as the report before the first run, which has no `run` (the contract has it optional, not null).
+  client.setQueryData(['payments', 'reconciliation'], as<PaymentReconciliation>({ counts_by_kind: {}, findings: [], findings_truncated: false }));
   client.setQueryData(['payments', 'account'], { status: 'failed', credentials_saved: true, key_hint: 'ab12', last_checked_at: null, failure_reason: 'invalid_credentials', host_ready: true });
   client.setQueryData(['reports', 'catalogue'], [{ key: 'portfolio', title: 'Portfolio report', description: 'The loan book', permission: 'lending.reports.portfolio', formats: ['pdf', 'xlsx'], params: [] }]);
   client.setQueryData(['reports', 'runs'], []);
