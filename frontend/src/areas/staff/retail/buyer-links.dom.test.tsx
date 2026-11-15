@@ -33,7 +33,7 @@ const ACCOUNT = `/staff/retail/accounts/${CUSTOMER}`;
 const BUYER = 'Test Buyer 36';
 const WALK_IN = 'Test Walk In 37';
 /** The customer accounts feature on: an administrator may open accounts. */
-const OPENS: Me = { ...ADMIN, module_capabilities: { retail: ['customer_accounts'] } };
+const OPENS: Me = { ...ADMIN, module_capabilities: { ...ADMIN.module_capabilities, retail: [...(ADMIN.module_capabilities?.retail ?? []), 'customer_accounts'] } };
 /** The feature on, but no sales read: the account page would refuse, so no name links. */
 const NO_SALES_READ: Me = { ...OPENS, permissions: (ADMIN.permissions ?? []).filter((p) => p !== 'retail.sale.read') };
 
@@ -112,6 +112,12 @@ function show(ui: ReactElement, me: Me = OPENS) {
 const hrefs = (name: string) => screen.queryAllByRole('link', { name }).map((a) => a.getAttribute('href'));
 /** The name is on the screen, whether alone in an element or inside a sentence. */
 const shown = (name: string) => expect(document.body.textContent).toContain(name);
+/** Every line that holds the name is plain: none is drawn as a 48px target line (review of #937). */
+function noTargetLine(name: string) {
+  const lines = [...document.body.querySelectorAll('*')].filter((el) => el.textContent?.includes(name) && ![...el.children].some((c) => c.textContent?.includes(name)));
+  expect(lines.length).toBeGreaterThan(0);
+  for (const line of lines) expect(line.closest('.target-line'), line.outerHTML).toBeNull();
+}
 
 /** The buyer with a record opens the account; the buyer with none is plain text that is still shown. */
 function opensOnlyTheRecord() {
@@ -224,11 +230,13 @@ describe('a person who may not open accounts sees the name as plain text (#936)'
       show(<><SaleList items={[sale(CUSTOMER, BUYER, 's1')]} today="2026-11-14" onOpen={() => undefined} /><Receipt sale={sale(CUSTOMER, BUYER)} /></>, me);
       shown(BUYER);
       expect(hrefs(BUYER)).toEqual([]);
+      noTargetLine(BUYER);
       cleanup();
       show(<OrdersReportPage />, me);
       await screen.findByText('Test reason one', { exact: false });
       shown(BUYER);
       expect(hrefs(BUYER)).toEqual([]);
+      noTargetLine(BUYER);
     });
 
     it(`${who}: Customer returns, Quotations and Orders`, async () => {
@@ -241,6 +249,7 @@ describe('a person who may not open accounts sees the name as plain text (#936)'
       await screen.findByTestId(`order-${order(CUSTOMER, BUYER, 1).id ?? ''}`);
       shown(BUYER);
       expect(hrefs(BUYER)).toEqual([]);
+      noTargetLine(BUYER);
     });
   }
 });
