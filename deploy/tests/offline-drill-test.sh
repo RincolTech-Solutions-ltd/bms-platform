@@ -89,7 +89,7 @@ case "$1" in
                 exit 0 ;;
             *flyway_schema_history*) echo "${FAKE_FLYWAY:-145}" ;;
             *"count(*) FROM tenants"*) echo 2 ;;
-            *set_config*) printf '%s\n%s\n' 0b5e7a2c-0000-4000-8000-00000000a001 3 ;;
+            *set_config*) printf '%s\n%s\n' 0b5e7a2c-0000-4000-8000-00000000a001 "${FAKE_APP_USERS:-3}" ;;
             *"count(*) FROM users"*) echo 5 ;;
             *"count(*) FROM audit_log"*) echo 40 ;;
             *"SELECT id FROM tenants"*) echo 0b5e7a2c-0000-4000-8000-00000000a001 ;;
@@ -102,7 +102,7 @@ STUB
     cat > "$BIN/age" <<'STUB'
 #!/usr/bin/env bash
 printf 'age %s\n' "$*" >> "$FAKE/calls.log"
-out=""
+out=/dev/stdout
 while (( $# )); do [[ "$1" == --output ]] && out="$2"; shift; done
 [[ "$(cat)" == "$FAKE_SECRET" ]] || { echo "age: error: no identity matched any of the recipients" >&2; exit 1; }
 printf '%s\n' "$PLAIN" > "$out"
@@ -116,7 +116,7 @@ STUB
     cat > "$BIN/openssl" <<'STUB'
 #!/usr/bin/env bash
 printf 'openssl %s\n' "$*" >> "$FAKE/calls.log"
-out=""
+out=/dev/stdout
 while (( $# )); do [[ "$1" == -out ]] && out="$2"; shift; done
 [[ "${BACKUP_ENCRYPTION_KEY:-}" == "$OLD_KEY" ]] || exit 1
 printf '%s\n' "$PLAIN" > "$out"
@@ -171,27 +171,42 @@ check "the Keychain key is read from the login Keychain item" \
 check "the key is never shown, recorded, uploaded or passed on a command line" no_secret_shown
 check "the temp dir with the dump and the container are removed" nothing_left
 check "the throwaway postgres has no network" grep -q "docker run --detach --name bms-offline-drill-[0-9]* --network none" "$FAKE/calls.log"
+check "the dump is streamed into pg_restore, never written to a file by age" eval '! grep -q -- "--output" "$FAKE/calls.log"'
 
+# Review of 667acd1, finding 1: only a drill of the newest daily backup counts for monitor.sh.
 fake_mac age-monthly; age_backup
 drill --folder monthly --file bms-production-20261101T011500Z.dump.enc --environment staging
 check "--file and --folder restore the named copy" \
     eval '[[ "$STATUS" == 0 ]] && grep -q "copyto fake-r2:fake-bucket/staging/monthly/bms-production-20261101T011500Z.dump.enc" "$FAKE/calls.log" && ! grep -q "rclone lsf" "$FAKE/calls.log"'
+check "a drill of a named or monthly copy is recorded on the Mac but never uploaded" \
+    eval 'recorded "OK bms-production-20261101T011500Z.dump.enc folder=monthly" && [[ ! -e "$FAKE/r2/last_offline_drill.txt" ]]'
+fake_mac age-named-daily; age_backup
+drill --file bms-production-20261110T011500Z.dump.enc
+check "a named daily file is not uploaded either" eval '[[ "$STATUS" == 0 && ! -e "$FAKE/r2/last_offline_drill.txt" ]]'
 
 fake_mac no-upload; age_backup
 drill --no-upload
 check "--no-upload records on the Mac only" eval '[[ "$STATUS" == 0 ]] && recorded "OK " && [[ ! -e "$FAKE/r2/last_offline_drill.txt" ]]'
 
+# Review of 667acd1, finding 2: no fingerprint to compare is a failure, never a pass.
 fake_mac unchecked; age_backup; rm "$FAKE/host_check"
 drill
-check "with no host backup check yet the recipient is recorded as unchecked" \
-    eval '[[ "$STATUS" == 0 ]] && recorded "recipient=unchecked"'
+check "with no host backup check in R2 the drill fails and nothing is restored" \
+    eval 'failed_with "no good backup check with a recipient fingerprint" && [[ ! -e "$FAKE/restored" ]]'
+fake_mac check-failed; age_backup
+printf '2026-11-15T03:30:00Z FAILED bms-production-x.dump.enc only 10 bytes, under the 32768 byte floor\n' > "$FAKE/host_check"
+drill
+check "a host check line with no fingerprint (a failed check) fails the drill" failed_with "no good backup check with a recipient fingerprint"
 
 # --- the key ---
 fake_mac wrong-key; age_backup; printf '%s' "$OTHER_SECRET" > "$FAKE/keychain/bms-backup-age-identity"
+# The host's record matches this other key, so the drill gets as far as decrypting, which must fail.
+printf '2026-11-15T03:30:00Z OK x format=age recipient=%s\n' \
+    "$(fp_of age1zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz)" > "$FAKE/host_check"
 drill
 check "a Keychain key the backup was not encrypted to fails, and is recorded" failed_with "decryption failed"
 check "the wrong key is never shown either" eval '! grep -qF -- "$OTHER_SECRET" <<< "$OUTPUT"'
-check "nothing is restored with a wrong key" test ! -e "$FAKE/restored"
+check "nothing is restored with a wrong key" test ! -s "$FAKE/restored"
 
 fake_mac no-key; age_backup; rm "$FAKE/keychain/bms-backup-age-identity"
 drill
@@ -214,6 +229,9 @@ check "an old backup with no old key in the Keychain fails" failed_with "no key 
 fake_mac unknown; printf 'PGDMP not encrypted at all\n' > "$FAKE/backup"
 drill
 check "a file in neither format fails and is never restored" eval 'failed_with "neither an age file" && [[ ! -e "$FAKE/restored" ]]'
+fake_mac old-wrong-key; old_backup; printf '%s' "not-the-old-key" > "$FAKE/keychain/bms-backup-symmetric-key"
+drill
+check "an old backup with a wrong old key fails as a decryption failure" eval 'failed_with "decryption failed: a wrong key" && [[ ! -s "$FAKE/restored" ]]'
 
 # --- the restore and its checks ---
 fake_mac restore-fails; age_backup
@@ -224,6 +242,10 @@ check "the pg_restore error is shown on screen but never recorded or uploaded" \
 fake_mac ahead; age_backup
 FAKE_FLYWAY=147 drill
 check "a restore ahead of the checkout's migrations fails" failed_with "ahead of this checkout's newest migration 146"
+# Review of 667acd1, finding 7: a row-level security that hides every row is not a pass.
+fake_mac rls-hides; age_backup
+FAKE_APP_USERS=0 drill
+check "bms_app reading no rows of the tenant fails" failed_with "bms_app reads 0 users"
 
 # --- usage ---
 fake_mac usage; age_backup
@@ -258,7 +280,15 @@ if REAL_AGE="$(command -v age)" && REAL_KEYGEN="$(command -v age-keygen)"; then
     : > "$FAKE/r2/last_offline_drill.txt"
     rm -f "$FAKE/restored"
     drill
-    check "real age: another key fails and nothing is restored" eval 'failed_with "decryption failed" && [[ ! -e "$FAKE/restored" ]]'
+    check "real age: another Keychain key than the host's fails before anything is restored" \
+        eval 'failed_with "the host encrypts to another public key" && [[ ! -e "$FAKE/restored" ]]'
+    # The host's record names that other key too, so the drill decrypts, which must fail.
+    printf '2026-11-15T03:30:00Z OK x format=age recipient=%s\n' \
+        "$(fp_of "$("$REAL_KEYGEN" -y < "$FAKE/keychain/bms-backup-age-identity")")" > "$FAKE/host_check"
+    : > "$FAKE/r2/last_offline_drill.txt"
+    drill
+    check "real age: a key the backup was not encrypted to fails and nothing is restored" \
+        eval 'failed_with "decryption failed" && [[ ! -s "$FAKE/restored" ]]'
 else
     echo "skip the real age cases: age is not installed on this machine"
 fi

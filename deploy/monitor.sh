@@ -287,6 +287,11 @@ check_drill() {
         fi
         line="$(head -n 1 "$STATE/monitor_offline_drill" 2> /dev/null)"
         stamp="$(stamp_of "$STATE/monitor_offline_drill")" || stamp=0
+        # Once this host checks age backups, only an offline restore of an age file from daily/ proves the current key;
+        # a restore of an old-format or monthly copy does not reset the clock (review of 667acd1, finding 1).
+        if (( chk > ok )) && [[ "$line" == *" OK "* && "$line" != *" folder=daily format=age "* ]]; then
+            line="not counted"
+        fi
         case "$line" in
             *" OK "*) (( stamp > full )) && full="$stamp" ;;
             *" FAILED "*) (( stamp > ok )) && problems+=("the last offline restore drill failed: $(head -c 300 <<< "$line")") ;;

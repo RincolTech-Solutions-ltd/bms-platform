@@ -68,10 +68,13 @@ log "dumping and encrypting to backups/${NAME} for the age recipient in BACKUP_A
 "${COMPOSE[@]}" exec -T postgres pg_dump --username bms_owner --dbname bms --format custom --compress 6 \
     | age --encrypt --recipient "$BACKUP_AGE_RECIPIENT" > "backups/${NAME}" \
     || fail "pg_dump or age failed; nothing was uploaded"
-# What leaves the host must be an age file to one X25519 recipient, never anything else.
-header="$(head -c 512 "backups/${NAME}" | LC_ALL=C sed -n '1,/^--- /p' | tr -d '\0')"
+# What leaves the host must be an age file to one X25519 recipient, never anything else: the same rules as the weekly
+# check in restore-drill.sh (grease stanzas, which no key opens, allowed; no passphrase; no other recipient).
+header="$(head -c 4096 "backups/${NAME}" | LC_ALL=C sed -n '1,/^--- /p' | tr -d '\0')"
 [[ "$(head -n 1 <<< "$header")" == "age-encryption.org/v1" \
-    && "$(grep -c '^-> X25519 ' <<< "$header")" == 1 && "$(grep -c '^-> ' <<< "$header")" == 1 ]] \
+    && "$(tail -n 1 <<< "$header")" =~ ^---\ [A-Za-z0-9+/]{43}$ \
+    && "$(grep -Ec '^-> X25519 [A-Za-z0-9+/]{43}$' <<< "$header")" == 1 \
+    && "$(grep '^-> ' <<< "$header" | grep -v '^-> X25519 ' | grep -cv '^-> [^ ]*-grease')" == 0 ]] \
     || fail "the encrypted file is not an age file to one X25519 recipient; nothing was uploaded"
 
 # ADR-018 finding L5: bms.slice is the hard memory cap for the whole staging stack; this run was

@@ -5,18 +5,21 @@
 #
 #   1. picks the newest backup under <environment>/<folder>/ in R2 (or the one --file names) and downloads it into a
 #      mode-0700 temp dir;
-#   2. tells its format from its first bytes: an age file is decrypted with the age key in the login Keychain (item
-#      bms-backup-age-identity); an old openssl file, until those age out, with the old key from the Keychain item
+#   2. tells its format from its first bytes: an age file needs the age key in the login Keychain (item
+#      bms-backup-age-identity), and the fingerprint of that key's public half must be the one the host's last good
+#      backup check recorded in drill/last_backup_check.txt (the host's BACKUP_AGE_RECIPIENT); with no such record the
+#      drill fails. An old openssl file, until those age out, needs the old key from the Keychain item
 #      bms-backup-symmetric-key. The keys go from the Keychain to the tool on a pipe or in its environment, never on a
 #      command line or in a file;
 #   3. starts a throwaway PostgreSQL in Docker with no network, created by this checkout's deploy/postgres/initdb, and
-#      pg_restores into it;
+#      streams the decryption straight into pg_restore there: the decrypted dump is never written to a file;
 #   4. checks the Flyway version (present, and not ahead of this checkout's newest migration), the row counts, and that
-#      bms_app reads a tenant's rows under row-level security; for an age file, that the fingerprint of the Keychain
-#      key's public half is the one the host recorded in drill/last_backup_check.txt (the host's BACKUP_AGE_RECIPIENT);
+#      bms_app reads at least one of a tenant's rows under row-level security;
 #   5. records one line, OK or FAILED, with its time in seconds against the 2 hour RTO, in ~/bms-restore-drills/history.log
-#      and uploads it to <environment>/drill/last_offline_drill.txt, which monitor.sh reads (a full restore every 35 days).
-# The decrypted dump, the temp dir and the container are removed whatever the outcome. A pg_restore error can quote row
+#      and, for a drill of the newest daily backup only, uploads it to <environment>/drill/last_offline_drill.txt, which
+#      monitor.sh reads (a full restore every 35 days). A drill of a named file (--file) or of a monthly copy proves
+#      nothing about the current key, so it is kept on the Mac only.
+# The downloaded file, the temp dir and the container are removed whatever the outcome. A pg_restore error can quote row
 # values, so it is shown on this screen only and never recorded or uploaded.
 #
 # Usage: deploy/restore-drill-offline.sh [--environment production|staging] [--folder daily|monthly] [--file <name>]
@@ -57,6 +60,12 @@ done
 [[ "$ENVIRONMENT" == production || "$ENVIRONMENT" == staging ]] || usage
 [[ "$FOLDER" == daily || "$FOLDER" == monthly ]] || usage
 [[ -z "$FILE" || "$FILE" =~ $NAME_RE ]] || usage
+# Only a drill of the newest daily backup is what monitor.sh counts as the month's full restore: a named file or a
+# monthly copy (an old-format one, say) proves nothing about the current key, so it is kept on this Mac only
+# (review of 667acd1, finding 1).
+if [[ -n "$FILE" || "$FOLDER" != daily ]]; then
+    UPLOAD=no
+fi
 
 REMOTE="${BMS_DRILL_REMOTE:-}"
 RECORD_DIR="${BMS_DRILL_RECORD_DIR:-$HOME/bms-restore-drills}"
@@ -149,7 +158,6 @@ REPO_VER="$(find "$MIGRATIONS" -maxdepth 1 -name 'V*__*.sql' 2> /dev/null | sed 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/bms-offline-drill.XXXXXX")" || fail "cannot make a temp dir"
 chmod 700 "$WORK"
 ENC="$WORK/backup.dump.enc"
-DUMP="$WORK/backup.dump"
 
 # 1. The backup.
 if [[ -z "$FILE" ]]; then
@@ -160,9 +168,11 @@ log "backup: ${ENVIRONMENT}/${FOLDER}/${NAME}"
 rclone copyto "${REMOTE}/${ENVIRONMENT}/${FOLDER}/${NAME}" "$ENC" > /dev/null 2>&1 || fail "download of ${NAME} failed"
 [[ -s "$ENC" ]] || fail "downloaded file is empty"
 
-# 2. Its format and the key it needs.
+# 2. Its format and the key it needs; nothing is decrypted yet.
 FORMAT="$(backup_format "$ENC")"
 RECIPIENT=n/a
+identity=""
+key=""
 case "$FORMAT" in
     age)
         identity="$(keychain "$KEYCHAIN_AGE")"
@@ -170,36 +180,36 @@ case "$FORMAT" in
             || fail "no age key in the login Keychain item ${KEYCHAIN_AGE} (restore-from-backup.md section 8.2)"
         public="$(printf '%s\n' "$identity" | age-keygen -y 2> /dev/null)" \
             || fail "the Keychain item ${KEYCHAIN_AGE} does not hold a valid age key"
-        log "decrypting with the Keychain key whose public half is ${public}"
-        printf '%s\n' "$identity" | age --decrypt --identity - --output "$DUMP" "$ENC" 2> /dev/null \
-            || fail "decryption failed: the Keychain key is not the one this backup was encrypted to, or the file is corrupt"
-        unset identity
-        # The host's backup check records the fingerprint of the public key it encrypts to.
+        # The host's last good backup check holds the fingerprint of the public key it encrypts to. A failed check is
+        # uploaded elsewhere, so this object keeps it; with none, the comparison cannot be made and the drill fails
+        # rather than count the month (review of 667acd1, finding 2).
         host_fp="$(rclone cat "${REMOTE}/${ENVIRONMENT}/drill/last_backup_check.txt" 2> /dev/null | head -n 1 \
-            | sed -nE 's/.* recipient=([^ ]+).*/\1/p')"
+            | sed -nE 's/.* recipient=([0-9a-f]{16})( .*)?$/\1/p')"
         mine="$(printf '%s' "$public" | fingerprint)"
-        if [[ -z "$host_fp" ]]; then
-            RECIPIENT=unchecked
-            log "no backup check from the host in R2 yet: the host's BACKUP_AGE_RECIPIENT is not compared"
-        elif [[ "$host_fp" == "$mine" ]]; then
-            RECIPIENT=match
-        else
-            fail "the host encrypts to another public key (fingerprint ${host_fp}) than this Keychain key (${mine}): check BACKUP_AGE_RECIPIENT on the host now, newer backups may be unreadable"
-        fi ;;
+        [[ -n "$host_fp" ]] \
+            || fail "no good backup check with a recipient fingerprint from the host in R2 (drill/last_backup_check.txt): run the weekly check on the host first (restore-from-backup.md section 8.4 step 4)"
+        [[ "$host_fp" == "$mine" ]] \
+            || fail "the host encrypts to another public key (fingerprint ${host_fp}) than this Keychain key (${mine}): check BACKUP_AGE_RECIPIENT on the host now, newer backups may be unreadable"
+        RECIPIENT=match
+        log "the Keychain key's public half is ${public}, the one the host encrypts to" ;;
     openssl)
         key="$(keychain "$KEYCHAIN_OLD")"
         [[ -n "$key" ]] || fail "an old openssl-format backup, and no key in the login Keychain item ${KEYCHAIN_OLD}"
-        log "an old openssl-format backup: decrypting with the old key from the Keychain"
-        BACKUP_ENCRYPTION_KEY="$key" "$OPENSSL" enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_ENCRYPTION_KEY \
-            -in "$ENC" -out "$DUMP" 2> /dev/null \
-            || fail "decryption failed: a wrong key, a corrupt file, or an openssl without -pbkdf2 (set OPENSSL to Homebrew's openssl@3)"
-        unset key ;;
+        log "an old openssl-format backup: it is decrypted with the old key from the Keychain" ;;
     *) fail "neither an age file nor the old openssl format" ;;
 esac
-rm -f "$ENC"
-[[ -s "$DUMP" ]] || fail "decrypted dump is empty"
 
-# 3. A throwaway PostgreSQL with no network, and the restore.
+# decrypt_stream: the dump on standard output, never in a file (review of 667acd1, finding 8). The key goes to the
+# tool on a pipe or in its environment, never on a command line.
+decrypt_stream() {
+    case "$FORMAT" in
+        age) printf '%s\n' "$identity" | age --decrypt --identity - "$ENC" ;;
+        openssl) BACKUP_ENCRYPTION_KEY="$key" "$OPENSSL" enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+                -pass env:BACKUP_ENCRYPTION_KEY -in "$ENC" ;;
+    esac
+}
+
+# 3. A throwaway PostgreSQL with no network, and the restore streamed into it.
 log "starting a throwaway postgres (${DB})"
 docker run --detach --name "$DB" --network none --memory 2g \
     --env POSTGRES_PASSWORD="$(random_hex)" --env POSTGRES_DB=bms \
@@ -216,12 +226,23 @@ for _ in $(seq 1 90); do
     sleep 2
 done
 [[ "$ready" == 1 ]] || fail "the throwaway postgres did not become ready"
-log "restoring"
-if ! docker exec -i "$DB" pg_restore -U bms_owner -d bms --exit-on-error < "$DUMP" > /dev/null 2> "$WORK/pg_restore.err"; then
+log "decrypting and restoring"
+decrypt_stream 2> /dev/null | docker exec -i "$DB" pg_restore -U bms_owner -d bms --exit-on-error > /dev/null 2> "$WORK/pg_restore.err"
+statuses=("${PIPESTATUS[@]}")
+identity=""
+key=""
+rm -f "$ENC"
+# A decryption that failed (not one cut short by pg_restore stopping first, 141) is the key's or the file's fault.
+if [[ "${statuses[0]}" != 0 && "${statuses[0]}" != 141 ]]; then
+    if [[ "$FORMAT" == age ]]; then
+        fail "decryption failed: the Keychain key is not the one this backup was encrypted to, or the file is corrupt"
+    fi
+    fail "decryption failed: a wrong key, a corrupt file, or an openssl without -pbkdf2 (set OPENSSL to Homebrew's openssl@3)"
+fi
+if [[ "${statuses[1]}" != 0 ]]; then
     log "pg_restore said (on this screen only, never recorded): $(head -c 2000 "$WORK/pg_restore.err" | tr '\n' ' ')"
     fail "pg_restore failed"
 fi
-rm -f "$DUMP"
 
 # 4. The checks.
 q() { docker exec "$DB" psql -U bms_owner -d bms -tAc "$1"; }
@@ -235,7 +256,9 @@ audit="$(q "SELECT count(*) FROM audit_log")"
 [[ "$tenants" =~ ^[1-9][0-9]*$ ]] || fail "the restore holds no tenants"
 first_tenant="$(q "SELECT id FROM tenants ORDER BY created_at LIMIT 1")"
 app_users="$(docker exec "$DB" psql -U bms_app -d bms -tAc "SELECT set_config('app.tenant_id', '${first_tenant}', false); SELECT count(*) FROM users" 2> /dev/null | tail -n 1)"
-[[ "$app_users" =~ ^[0-9]+$ ]] || fail "bms_app cannot read users under row-level security"
+# At least one row: a policy or grant that hides every row is a failure, not a pass (review of 667acd1, finding 7).
+[[ "$app_users" =~ ^[1-9][0-9]*$ ]] \
+    || fail "bms_app reads ${app_users:-nothing} users of business ${first_tenant} under row-level security; it must read at least one"
 
 # 5. The record.
 seconds="$(elapsed)"

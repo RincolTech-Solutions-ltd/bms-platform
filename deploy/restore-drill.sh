@@ -727,9 +727,11 @@ rclone copyto "${PREFIX}/daily/${NAME}" "/backups/$(basename "$ENC")" > /dev/nul
 # An age backup: the host holds only the public key, so it checks what it can and leaves the restore to the monthly
 # offline drill (ADR-129 decision 4). Its own state files, so a check is never read as a restore.
 # JUSTIFICATION-A3: the weekly check of an age backup is the new host half of the drill split D121 asks for (#46 item 3).
+# A failure goes to its own object, so drill/last_backup_check.txt keeps the last good check and its recipient
+# fingerprint, which the offline drill compares (review of 667acd1, finding 2).
 check_fail() {
     log "FAILED: $*"
-    record state/last_backup_check_error "$(date -u +%Y-%m-%dT%H:%M:%SZ) FAILED ${NAME} $*" last_backup_check.txt
+    record state/last_backup_check_error "$(date -u +%Y-%m-%dT%H:%M:%SZ) FAILED ${NAME} $*" last_backup_check_error.txt
     exit 1
 }
 check_age_backup() {
@@ -758,8 +760,10 @@ check_age_backup() {
     # The fingerprint of the public key this host encrypts to; the offline drill compares it with the Keychain key's.
     fp="unset"
     [[ -z "${BACKUP_AGE_RECIPIENT:-}" ]] || fp="$(printf '%s' "$BACKUP_AGE_RECIPIENT" | sha256sum | cut -c1-16)"
+    # The live database by the same container name the full drill's live() uses.
     live_ver="$(docker exec bms-postgres-1 psql -U bms_owner -d bms -tAc \
         "SELECT max(version::int) FROM flyway_schema_history WHERE success" 2> /dev/null)"
+    [[ -n "$live_ver" ]] || log "could not read the live Flyway version from bms-postgres-1; recorded as unknown"
     record state/last_backup_check "$(printf '%s OK %s format=age bytes=%s hours=%s stanzas=%s recipient=%s live_flyway=%s' \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$NAME" "$bytes" "$hours" "$stanzas" "$fp" "${live_ver:-unknown}")" last_backup_check.txt
     rm -f state/last_backup_check_error

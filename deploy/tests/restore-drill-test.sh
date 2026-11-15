@@ -120,10 +120,12 @@ restored_nothing() {
 nothing_left() { [[ -z "$(find "$HOST/backups" -mindepth 1 -print -quit)" ]]; }
 check_says() { grep -q -- "$1" "$HOST/state/$2"; }
 uploaded_check() { grep -q 'copyto /backups/drill-result-[0-9]*.txt r2:fake-bucket/staging/drill/last_backup_check.txt' "$FAKE/calls.log"; }
+uploaded_error() { grep -q 'copyto /backups/drill-result-[0-9]*.txt r2:fake-bucket/staging/drill/last_backup_check_error.txt' "$FAKE/calls.log"; }
+# A failure is uploaded to its own object and never over last_backup_check.txt, which keeps the last good fingerprint.
 failed_check() {
     [[ "$STATUS" == 1 ]] && check_says "$1" last_backup_check_error \
         && ! grep -qs 'OK bms-staging-20261024T011500Z' "$HOST/state/last_backup_check" \
-        && restored_nothing && nothing_left && uploaded_check
+        && restored_nothing && nothing_left && uploaded_error && ! uploaded_check
 }
 
 fake_age_file "$WORK/age-ok.age"

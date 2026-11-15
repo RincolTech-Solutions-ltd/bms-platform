@@ -23,7 +23,7 @@ FAKE_SECRET="AGE-SECRET-KEY-1QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ
 # The tools backup.sh may use besides the stubs, linked into a directory of their own.
 SYSBIN="$WORK/sysbin"
 mkdir -p "$SYSBIN"
-for tool in bash cat cp date mkdir rm head sed tr grep dirname env; do
+for tool in bash cat cp date mkdir rm head tail sed tr grep dirname env; do
     ln -s "$(command -v "$tool")" "$SYSBIN/$tool"
 done
 
@@ -74,8 +74,11 @@ if [[ -n "${FAKE_AGE_BAD:-}" ]]; then
     printf 'Salted__not-an-age-file\n'
     exit 0
 fi
-printf '%s\n' 'age-encryption.org/v1' '-> X25519 RkFCUklDQVRFRGZhYnJpY2F0ZWRmYWJyaWNhdGVkMDAw' \
-    'RkFCUklDQVRFRGZhYnJpY2F0ZWRmYWJyaWNhdGVkMDAw' '--- RkFCUklDQVRFRGZhYnJpY2F0ZWRmYWJyaWNhdGVkMDAw'
+b43=RkFCUklDQVRFRGZhYnJpY2F0ZWRmYWJyaWNhdGVkMDA
+printf '%s\n' 'age-encryption.org/v1' "-> X25519 ${b43}" "$b43"
+# FAKE_AGE_EXTRA: one more stanza line (a grease stanza, or another recipient).
+if [[ -n "${FAKE_AGE_EXTRA:-}" ]]; then printf '%s\n' "$FAKE_AGE_EXTRA" "$b43"; fi
+printf '%s\n' "--- ${b43}"
 printf 'fabricated ciphertext\n'
 STUB
     # An openssl that only records that it was called: the backup must never use it.
@@ -165,7 +168,20 @@ check "a failed pg_dump uploads nothing and leaves nothing" \
 
 fake_host notage
 FAKE_AGE_BAD=1 run_backup
-check "an encrypted file that is not age to one X25519 recipient is not uploaded" \
+check "an encrypted file that is not age is not uploaded" \
+    eval '[[ "$STATUS" != 0 ]] && nothing_uploaded && nothing_left && error_says "not an age file"'
+
+# Review of 667acd1, finding 5: the same header rules as the weekly host check.
+fake_host grease
+FAKE_AGE_EXTRA="-> 9x-grease fab" run_backup
+check "an age file with a grease stanza beside the one X25519 stanza is uploaded" eval '[[ "$STATUS" == 0 ]] && uploads_are_age'
+fake_host second-recipient
+FAKE_AGE_EXTRA="-> ssh-ed25519 fab RkFCUklDQVRFRGZhYnJpY2F0ZWRmYWJyaWNhdGVkMDA" run_backup
+check "an age file with a second recipient of another kind is not uploaded" \
+    eval '[[ "$STATUS" != 0 ]] && nothing_uploaded && error_says "not an age file"'
+fake_host scrypt
+FAKE_AGE_EXTRA="-> scrypt RkFCUklDQVRFRGZhYnJpY2F0ZWRmYWJyaWNhdGVkMDA 18" run_backup
+check "an age file with a passphrase stanza is not uploaded" \
     eval '[[ "$STATUS" != 0 ]] && nothing_uploaded && nothing_left && error_says "not an age file"'
 
 # --- with the real age, when this machine has it: the upload decrypts with the matching key ---

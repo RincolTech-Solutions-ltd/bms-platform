@@ -158,15 +158,20 @@ fresh; check_at $(( NOW - 86400 )); drill_at $(( NOW - 40 * 86400 )); check_dril
 check "no full restore in 35 days, R2 not configured" 'the last full restore drill is 40 days old \(limit 35\)'
 fresh; r2_on; check_at $(( NOW - 86400 )); R2_OFFLINE=""; check_drill
 check "no full restore anywhere" 'no full restore drill recorded on this host or by the offline drill'
-fresh; r2_on; check_at $(( NOW - 86400 )); R2_OFFLINE="$(stamp $(( NOW - 10 * 86400 ))) OK bms-test-x.dump.enc format=age seconds=600"
+fresh; r2_on; check_at $(( NOW - 86400 )); R2_OFFLINE="$(stamp $(( NOW - 10 * 86400 ))) OK bms-test-x.dump.enc folder=daily format=age seconds=600"
 check_drill; check_silent "an offline drill 10 days ago counts as the full restore"
-fresh; r2_on; check_at $(( NOW - 86400 )); R2_OFFLINE="$(stamp $(( NOW - 40 * 86400 ))) OK bms-test-x.dump.enc format=age"
+fresh; r2_on; check_at $(( NOW - 86400 )); R2_OFFLINE="$(stamp $(( NOW - 10 * 86400 ))) OK bms-test-x.dump.enc folder=daily format=openssl seconds=600"
+check_drill; check "an offline restore of an old-format backup does not count once the host checks age backups" \
+    'no full restore drill recorded on this host or by the offline drill'
+fresh; r2_on; check_at $(( NOW - 86400 )); R2_OFFLINE="$(stamp $(( NOW - 10 * 86400 ))) OK bms-test-x.dump.enc folder=monthly format=age seconds=600"
+check_drill; check "an offline restore of a monthly copy does not count either" 'no full restore drill recorded'
+fresh; r2_on; check_at $(( NOW - 86400 )); R2_OFFLINE="$(stamp $(( NOW - 40 * 86400 ))) OK bms-test-x.dump.enc folder=daily format=age seconds=600"
 check_drill; check "an offline drill 40 days ago is stale" 'the last full restore drill is 40 days old \(limit 35\)'
 fresh; r2_on; check_at $(( NOW - 86400 )); drill_at $(( NOW - 20 * 86400 ))
-R2_OFFLINE="$(stamp $(( NOW - 3600 ))) FAILED bms-test-x.dump.enc format=age seconds=30 decryption failed"
+R2_OFFLINE="$(stamp $(( NOW - 3600 ))) FAILED bms-test-x.dump.enc folder=daily format=age seconds=30 decryption failed"
 check_drill; check "a failed offline drill" 'the last offline restore drill failed: .*decryption failed'
 fresh; r2_on; check_at $(( NOW - 86400 )); rm -f "$WORK/offline-reads"
-R2_OFFLINE="$(stamp $(( NOW - 10 * 86400 ))) OK bms-test-x.dump.enc format=age"; check_drill
+R2_OFFLINE="$(stamp $(( NOW - 10 * 86400 ))) OK bms-test-x.dump.enc folder=daily format=age seconds=600"; check_drill
 R2_OFFLINE=""; NOW=$(( NOW + 5 * 3600 )); check_drill
 assert "R2 is read for the offline drill at most every 6 hours" offline_reads 1
 check_silent "the last answer from R2 is kept and still counts"
