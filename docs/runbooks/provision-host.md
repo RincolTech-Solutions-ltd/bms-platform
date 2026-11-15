@@ -57,8 +57,11 @@ differ per environment. Set `BMS_ENVIRONMENT=production`,
 values `R2_DOCUMENTS_BUCKET`, `R2_DOCUMENTS_ACCESS_KEY_ID` and `R2_DOCUMENTS_SECRET_ACCESS_KEY` (a
 private bucket per environment and a second token scoped to it only; the API refuses to start
 without them, chapter 12 section 12.5) and
-`BMS_OPENAPI_ENABLED` (`true` on staging, `false` on production). Put a copy of
-`BACKUP_ENCRYPTION_KEY` in the offline store the dev lead keeps (chapter 8 section 8.7).
+`BMS_OPENAPI_ENABLED` (`true` on staging, `false` on production). The backup key is a public key:
+`BACKUP_AGE_RECIPIENT` from the key ceremony, and `sudo apt install age` on the host
+(`docs/runbooks/restore-from-backup.md` sections 8.2 and 8.3, ADR-129); its private key never comes
+to a host. A new host has no `BACKUP_ENCRYPTION_KEY`: that old key is kept offline only, for the
+backups made before the switch.
 
 Add the sign-in keys (ADR-014): run the API image once with the `keys` command and paste its three
 lines into `/opt/bms/.env`:
@@ -73,7 +76,7 @@ docker run --rm ghcr.io/<owner>/bms-platform-api:<tag> keys
 
 The API refuses to start without them. Generate them per environment and never copy them between
 staging and production; losing `BMS_DATA_KEY` makes every enrolled TOTP secret unreadable, so keep
-a copy with the backup key in the offline store.
+a copy in the offline store.
 
 ## 5. GitHub
 
@@ -210,7 +213,7 @@ POSTGRES_IMAGE=postgres:16.15-alpine
 RCLONE_IMAGE=rclone/rclone:1.75.1
 CLOUDFLARED_IMAGE=cloudflare/cloudflared:2026.9.3
 CLOUDFLARE_TUNNEL_TOKEN=<connector token from 8.2>
-# passwords (openssl rand -base64 32 each), the three sign-in keys (section 4), the backup key
+# passwords (openssl rand -base64 32 each), the three sign-in keys (section 4), BACKUP_AGE_RECIPIENT (the public key)
 # and the R2 values (prefix staging/), exactly as for any environment, plus the staging documents
 # bucket and its own scoped token: R2_DOCUMENTS_BUCKET, R2_DOCUMENTS_ACCESS_KEY_ID,
 # R2_DOCUMENTS_SECRET_ACCESS_KEY (the API refuses to start without them)

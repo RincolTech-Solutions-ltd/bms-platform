@@ -23,7 +23,8 @@ One person may hold two roles; the incident lead is never also the only person i
 Start this runbook, and tell the incident lead at once, for any of:
 
 - one tenant's data seen by another tenant's user, a member, or the public (ADR-003: always a breach);
-- a leaked secret: the host `.env`, `BMS_DATA_KEY`, `BMS_TOKEN_SIGNING_JWK`, `BACKUP_ENCRYPTION_KEY`, the R2, Cloudflare, Pesapal,
+- a leaked secret: the host `.env`, `BMS_DATA_KEY`, `BMS_TOKEN_SIGNING_JWK`, the backup age private key (on the operator's Mac
+  and in the owner's envelope; `restore-from-backup.md` section 8.6), the old `BACKUP_ENCRYPTION_KEY`, the R2, Cloudflare, Pesapal,
   SMS, SMTP or Telegram credentials, the cosign key, a GitHub token, an operator's password or authenticator;
 - someone else in a host, a platform operator account, a tenant admin account, the Cloudflare or GitHub account;
 - personal data sent to the wrong person (an SMS or email to the wrong number or address, an export shared by mistake);

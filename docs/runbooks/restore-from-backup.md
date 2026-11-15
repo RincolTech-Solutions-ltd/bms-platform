@@ -7,28 +7,58 @@ Backups are encrypted `pg_dump` custom-format files in
 production is a decision for the dev lead; this runbook is also the quarterly drill
 (NFR-BAK-04), which restores onto a fresh VM and is timed against the two hour RTO.
 
-## 1. Get the file
+Since the switch to a public key (issue #46 item 3, owner decision D121, ADR-129), `backup.sh` encrypts each dump to an
+age public key, and the private key is never on a server: it is in the operator's Mac Keychain, its iCloud Keychain copy
+and a sealed printed copy kept by the owner (section 8). So a backup is decrypted **on the operator's Mac** and the dump
+is streamed over SSH straight into `pg_restore` on the host; it is never written to a server's disk. Backups made before
+the switch are in the old openssl format and still open with the old `BACKUP_ENCRYPTION_KEY`, kept offline, until they
+age out. The names are the same; the first bytes tell the two apart.
 
-On the host that will be restored (a fresh VM provisioned with
-`docs/runbooks/provision-host.md`, with its `.env` holding the same `BACKUP_ENCRYPTION_KEY` and R2
-credentials):
+## 1. Get the file (on the operator's Mac)
+
+With the tools and the rclone remote of section 8.1:
 
 ```bash
-cd /opt/bms
-set -a; . ./.env; set +a
-rc() { docker run --rm -v "$PWD/backups:/backups" \
-  -e RCLONE_CONFIG_R2_TYPE=s3 -e RCLONE_CONFIG_R2_PROVIDER=Cloudflare \
-  -e RCLONE_CONFIG_R2_ENDPOINT="$R2_ENDPOINT" -e RCLONE_CONFIG_R2_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID" \
-  -e RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY" "$RCLONE_IMAGE" "$@"; }
-rc ls "r2:${R2_BACKUP_BUCKET}/${BMS_ENVIRONMENT}/daily/" | sort -k2 | tail -n 3
-rc copy "r2:${R2_BACKUP_BUCKET}/${BMS_ENVIRONMENT}/daily/<file>.dump.enc" /backups/
+export BMS_DRILL_REMOTE=bms-r2:<backup bucket>
+ENVIRONMENT=production            # or staging
+rclone lsf "$BMS_DRILL_REMOTE/$ENVIRONMENT/daily/" | sort | tail -n 3
+FILE=<the backup's name>
+mkdir -p ~/bms-restore && chmod 700 ~/bms-restore
+rclone copyto "$BMS_DRILL_REMOTE/$ENVIRONMENT/daily/$FILE" ~/bms-restore/"$FILE"
 ```
 
-## 2. Decrypt
+## 2. Decrypt, by its format (on the operator's Mac)
+
+`decrypt` writes the dump to its standard output, for section 3 to send straight into the database. The key goes from the
+Keychain to the tool on a pipe or in its environment, never on a command line or in a file:
 
 ```bash
-openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_ENCRYPTION_KEY \
-  -in backups/<file>.dump.enc -out backups/restore.dump
+head -c 21 ~/bms-restore/"$FILE"; echo   # age-encryption.org/v1 for a new backup, Salted__ and bytes for an old one
+decrypt() {
+  case "$(head -c 8 "$1")" in
+    age-encr) security find-generic-password -a bms-backups -s bms-backup-age-identity -w \
+                | age --decrypt --identity - "$1" ;;
+    Salted__) BACKUP_ENCRYPTION_KEY="$(security find-generic-password -a bms-backups -s bms-backup-symmetric-key -w)" \
+                openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_ENCRYPTION_KEY -in "$1" ;;
+    *) echo "neither an age file nor the old openssl format" >&2; return 1 ;;
+  esac
+}
+decrypt ~/bms-restore/"$FILE" | head -c 5; echo   # PGDMP: the key opens it
+```
+
+If macOS's own `openssl` refuses `-pbkdf2` on an old backup, use Homebrew's (`brew install openssl@3`, then
+`"$(brew --prefix openssl@3)/bin/openssl"` in place of `openssl`).
+
+`pg_restore_on_host <database>` (on the Mac) runs `pg_restore` in the host's postgres container, reading the dump from the
+SSH connection. `HOST` is an account that may use sudo on the host (`ops` on production); `DEPLOY_USER` runs the stack
+(`bms` on staging, the deploy user on production). `exec` only needs the three image variables set, not resolved:
+
+```bash
+HOST=<you>@<host>; DEPLOY_USER=<bms or the deploy user>
+pg_restore_on_host() {
+  ssh "$HOST" "cd /opt/bms && sudo -u $DEPLOY_USER env API_IMAGE=unused WEB_IMAGE=unused PROXY_IMAGE=unused \
+    docker compose --project-name bms -f compose.yml exec -T postgres pg_restore -U bms_owner -d $1 --exit-on-error"
+}
 ```
 
 ## 3. Restore
@@ -37,8 +67,8 @@ The roles must exist before `pg_restore`, with the same names: the postgres cont
 start creates them (`postgres/initdb/01-roles.sh`). The dump carries the schema, the data, the
 Flyway history and every grant to `bms_app`.
 
-**Fresh VM (drill, or the old host is lost).** Start only PostgreSQL, restore into the empty
-`bms` database, then deploy:
+**Fresh VM (drill, or the old host is lost).** Start only PostgreSQL on the host, restore into the empty
+`bms` database from the Mac, then deploy. On the host:
 
 ```bash
 # compose.yml names its application images by API_IMAGE, WEB_IMAGE and PROXY_IMAGE (ADR-018
@@ -49,13 +79,17 @@ export API_IMAGE="ghcr.io/rincoltech-solutions-ltd/bms-platform-api:${IMAGE_TAG}
 export WEB_IMAGE="ghcr.io/rincoltech-solutions-ltd/bms-platform-web:${IMAGE_TAG}"
 export PROXY_IMAGE="ghcr.io/rincoltech-solutions-ltd/bms-platform-proxy:${IMAGE_TAG}"
 docker compose --project-name bms -f compose.yml up --detach --wait postgres
-docker compose --project-name bms -f compose.yml exec -T postgres \
-  pg_restore -U bms_owner -d bms --exit-on-error < backups/restore.dump
+```
+
+Then on the Mac:
+
+```bash
+decrypt ~/bms-restore/"$FILE" | pg_restore_on_host bms
 ```
 
 **Existing host (data damaged, host healthy).** Restore next to the live database, then swap
 names while the application is stopped. Nothing is dropped; the damaged copy is kept for
-investigation until the dev lead decides otherwise.
+investigation until the dev lead decides otherwise. On the host:
 
 ```bash
 export IMAGE_TAG="$(cat state/current_tag)"
@@ -64,7 +98,11 @@ export WEB_IMAGE="ghcr.io/rincoltech-solutions-ltd/bms-platform-web:${IMAGE_TAG}
 export PROXY_IMAGE="ghcr.io/rincoltech-solutions-ltd/bms-platform-proxy:${IMAGE_TAG}"
 C=(docker compose --project-name bms -f compose.yml)
 "${C[@]}" exec -T postgres psql -U postgres -d postgres -c "CREATE DATABASE bms_restored OWNER bms_owner"
-"${C[@]}" exec -T postgres pg_restore -U bms_owner -d bms_restored --exit-on-error < backups/restore.dump
+```
+
+On the Mac: `decrypt ~/bms-restore/"$FILE" | pg_restore_on_host bms_restored`. Then on the host again:
+
+```bash
 "${C[@]}" stop api proxy
 "${C[@]}" exec -T postgres psql -U postgres -d postgres \
   -c "ALTER DATABASE bms RENAME TO bms_damaged_$(date -u +%Y%m%d)" \
@@ -97,10 +135,39 @@ the source; the trial balance of one tenant balances (sum of debits equals sum o
 
 ## 5. The weekly drill and the backup alert
 
+### 5.0 What runs where (ADR-129)
+
+| What | Where | When | Key it uses | Proves |
+|---|---|---|---|---|
+| `backup.sh` | Each host, cron | Nightly 01:15 | The public key `BACKUP_AGE_RECIPIENT` only | A backup was made, encrypted, uploaded |
+| `restore-drill.sh` (no argument), newest backup an **age** file | Each host, `bms-restore-drill.timer` | Weekly, Sunday 03:30 | None (it cannot decrypt) | The newest backup exists, is fresh, is a well formed age file to one public key, and its size is sane (section 5.1) |
+| `restore-drill.sh` (no argument), newest backup in the **old** format | Each host, the same timer | Weekly, until the first age backup | The old `BACKUP_ENCRYPTION_KEY`, while it is still in `.env` | A full restore, as before (section 5.1) |
+| `restore-drill-offline.sh` | **The operator's Mac**, by hand | Monthly | The age private key in the Mac Keychain | A full restore of the newest backup, and that the host encrypts to that key (section 8.5) |
+| The quarterly drill onto a fresh VM | The Mac decrypts, the new VM restores | Quarterly | The age private key in the Mac Keychain | The two hour RTO (sections 1 to 4 and 6) |
+| `monitor.sh` | Each host, `bms-monitor.timer` | Every five minutes | None | Alerts on all of the above (section 5.1) |
+
 ### 5.1 The weekly drill
 
 `deploy/restore-drill.sh` (`bms-restore-drill.timer`, Sunday 03:30 host time, as the deploy user; installed with
-`docs/runbooks/monitoring-and-alerts.md` section 2) does steps 1 to 4 for you without touching the live database: it fetches the
+`docs/runbooks/monitoring-and-alerts.md` section 2) first looks at the newest `daily/` backup's first bytes.
+
+**An age backup (after the switch).** The host holds only the public key, so it does not restore; it checks what it can
+see and says so in its log ("a backup check, not a restore"): the object exists, is at most 26 hours old
+(`BACKUP_CHECK_MAX_HOURS`), is a well formed age file (the version line, exactly one X25519 stanza, no passphrase stanza,
+the header MAC line), is at least 32 KiB (`BACKUP_CHECK_MIN_BYTES`) and not under half the size the previous check saw. It
+records one line
+
+```
+<time> OK <file> format=age bytes=<n> hours=<n> stanzas=<n> recipient=<fingerprint> live_flyway=<v>
+<time> FAILED <file> <reason>
+```
+
+in `state/last_backup_check` or `state/last_backup_check_error`, appended to `state/restore-drill-history.log`, and uploads it to
+`r2:<bucket>/<environment>/drill/last_backup_check.txt`. `recipient` is the first 16 hex characters of the SHA-256 of
+`BACKUP_AGE_RECIPIENT`; the offline drill compares it with the Keychain key's (section 8.5). An age file does not name its
+recipient, so this check cannot prove the backup opens with the Keychain key: the monthly offline drill proves that.
+
+**A backup in the old format (before the switch).** It does steps 1 to 4 for you without touching the live database: it fetches the
 newest `daily/` dump, decrypts it, restores it into a throwaway PostgreSQL (no network, 384 MB, inside `bms.slice` on staging; on production the 384 MB and 64 MB container caps apply, and the drill reads the init scripts from `/opt/bms/postgres/initdb`, on staging from `releases/<tag>/postgres/initdb`) and
 checks the Flyway history, the row counts and the application role's row-level-security access. It removes the throwaway
 database and the decrypted dump whatever the outcome, and records one line, timed from its start:
@@ -112,16 +179,21 @@ database and the decrypted dump whatever the outcome, and records one line, time
 
 in `state/last_restore_drill` or `state/last_restore_drill_error`, appended to `state/restore-drill-history.log`, and uploaded to
 `r2:<bucket>/<environment>/drill/last_restore_drill.txt` so the record survives the host. A failed pg_restore is recorded as the fixed text "pg_restore failed, see state/restore-drill.log": the error itself can quote row values, so it stays on the host. Its output is in
-`state/restore-drill.log`. Run it by hand with `sudo systemctl start bms-restore-drill.service` after changing the backup key or the
-R2 credentials.
+`state/restore-drill.log`. This full drill needs `BACKUP_ENCRYPTION_KEY` in `.env`; once the newest backup is an age file the
+key leaves the host (section 8.4) and an old-format newest backup without it fails with "BACKUP_ENCRYPTION_KEY is not set on
+this host". Run it by hand with `sudo systemctl start bms-restore-drill.service` after changing the backup key or the R2
+credentials.
 
-`deploy/monitor.sh` alerts in the operator chat when the last drill failed, when no drill succeeded in 9 days, when a drill took
-longer than the 2 hour RTO, when `backup.sh` failed, and when the newest backup on the host or in R2 is older than 26 hours. The
+`deploy/monitor.sh` alerts in the operator chat when the last drill or backup check failed, when neither succeeded in 9 days, when a
+drill took longer than the 2 hour RTO, when no full restore (a drill on the host or the offline drill) succeeded in 35 days, when
+the last offline drill failed (read from `drill/last_offline_drill.txt` in R2 every 6 hours), when `backup.sh` failed (with its
+reason, for example "BACKUP_AGE_RECIPIENT is not set"), and when the newest backup on the host or in R2 is older than 26 hours. The
 external heartbeat (`monitoring-and-alerts.md` section 1) alerts when the host stops reporting at all; it replaces the
 workstation watchdog this section used to describe.
 
-The weekly drill proves the data and the grants restore and gives a lower bound on the time. It does not prove the two hour RTO
-for a lost host; that stays the quarterly drill onto a fresh VM (sections 1 to 4, recorded as in section 6).
+The full drill (weekly on the host before the switch, monthly on the Mac after it) proves the data and the grants restore and
+gives a lower bound on the time. It does not prove the two hour RTO for a lost host; that stays the quarterly drill onto a fresh
+VM (sections 1 to 4, recorded as in section 6).
 
 ### 5.2 Rehearsing an import on last night's backup (`--rehearse-import`)
 
@@ -134,7 +206,12 @@ cd /opt/bms && ./restore-drill.sh --rehearse-import <run id>
 ```
 
 Run it by hand as the user that runs the drill (`bms` on staging, `deploy` on production), never from the timer or
-cron: those run the script with no argument, which is the weekly drill above, unchanged. What it does, in order:
+cron: those run the script with no argument, which is the weekly drill above, unchanged.
+
+**It refuses an age backup** (exit 3, "encrypted to the offline age key, which this host does not hold"): a rehearsal
+restores last night's backup on the host, which would need the private key there (ADR-129 decision 5). Until the owner
+decides on issue #46 whether a rehearsal should restore a fresh dump of the live database instead, a rehearsal runs only
+while the newest backup is still in the old format, that is before the switch of section 8.4. What it does, in order:
 
 1. Reads the run on the live database as `bms_owner`, read only: it must be a run of the import screens (origin
    `framework`), in review or ready, and on staging marked fabricated by its uploader (`import_runs.fabricated`).
@@ -313,8 +390,11 @@ explained by what the stack did meanwhile (a sign-in, a scheduled job) or the ch
 
 ## 6. Clean up and record
 
+On the Mac, and on the host if an old guide left anything there:
+
 ```bash
-rm -f backups/restore.dump backups/*.dump.enc
+rm -rf ~/bms-restore                                  # the Mac
+rm -f /opt/bms/backups/restore.dump /opt/bms/backups/*.dump.enc   # the host
 ```
 
 Record the quarterly drill in `docs/meetings/<date>/restore-drill.md`, with fabricated or no tenant figures (counts only):
@@ -324,7 +404,8 @@ Record the quarterly drill in `docs/meetings/<date>/restore-drill.md`, with fabr
 
 - Environment restored: production backup onto a fresh VM (<provider, size, region>)
 - Run by: <name> · Signed off by: <Hillary>
-- Backup file: bms-production-<stamp>.dump.enc (age at the decision: <h> hours)
+- Backup file: bms-production-<stamp>.dump.enc (age at the decision: <h> hours; format age or old openssl)
+- Decrypted on: <whose Mac>, with the Keychain key (or the sealed copy: say why)
 - Decision to restore: <HH:MM UTC> · /readyz UP: <HH:MM UTC> · Total: <minutes> (RTO 120)
 - Checks: tenants <n>, lending_members <n>, journal_entries <n> match the source: yes/no; one trial balance balances: yes/no
 - Problems found and their issues: <none, or #NNN>
@@ -390,3 +471,190 @@ the R2 documentation pages "Bucket locks" and "Object lifecycles" and note the d
 
 An erasure request that must reach backups (audit item S11) cannot shorten a lock; the copy ages out at the end of its window.
 Record that in the request's reply.
+
+## 8. The backup key: a public key on the hosts, the private key offline (ADR-129)
+
+Owner decision D121 (2 November 2026): the hosts encrypt with an age public key only. The private key is made on the
+operator's Mac and kept in two places: the Mac Keychain (with its iCloud Keychain copy) and a printed copy in a sealed
+envelope kept by the owner. It never goes to a server, the repository, CI, a chat, an email or a ticket. One key pair serves
+staging and production. Everything below is done by hand by the operator; no pull request changes a host.
+
+### 8.1 The operator's Mac, once
+
+- `brew install age rclone`, and Docker Desktop (or another Docker engine) running. `age --version` must be 1.1 or newer
+  (it reads the key from standard input). The system bash is enough for the drill script.
+- A checkout of this repository, kept up to date (`git pull` before each drill: the drill compares the restored Flyway
+  version with the checkout's newest migration).
+- An rclone remote for the backup bucket: `rclone config`, a new remote `bms-r2` of type `s3`, provider `Cloudflare`, with an
+  R2 token of the operator's own (Object Read & Write on the backup bucket only; it writes only `drill/` in practice, and the
+  lock rules of section 7 refuse deletes under `daily/` and `monthly/`), the account's R2 endpoint, and
+  `no_check_bucket = true`. Choose to encrypt the rclone config when `rclone config` offers it. Check:
+  `rclone lsf bms-r2:<backup bucket>/production/daily/ | tail -n 3`.
+- The Mac's disk is encrypted (FileVault on), and the Mac locks itself when left.
+
+### 8.2 The key ceremony (the operator's Mac, once, with the owner)
+
+Do it with the owner beside you, with no screen sharing or recording on, in one Terminal window that you close at the end. The
+secret goes from `age-keygen` into a shell variable and from there into the Keychain, onto paper and into the iCloud copy; it is
+never written to a file and never typed on a command line.
+
+1. Keep this window's commands out of the shell history and make the key in memory:
+
+   ```bash
+   unset HISTFILE
+   key="$(age-keygen 2> /dev/null)"
+   PUB="$(printf '%s\n' "$key" | sed -n 's/^# public key: //p')"; echo "$PUB"
+   printf '%s' "$PUB" | shasum -a 256 | cut -c1-16       # the fingerprint: write it in the table of section 8.7
+   ```
+
+2. **The login Keychain**, which the drill script reads. `security -i` takes the command on its standard input, so the secret
+   is never in a process list:
+
+   ```bash
+   printf 'add-generic-password -U -a bms-backups -s bms-backup-age-identity -l "BMS backup age key" -w %s\n' \
+     "$(printf '%s\n' "$key" | grep '^AGE-SECRET-KEY-1')" | security -i
+   security find-generic-password -a bms-backups -s bms-backup-age-identity -w | age-keygen -y   # prints $PUB
+   ```
+
+   macOS asks to let `security` read the item: choose **Allow**, not Always Allow, so every later read asks again.
+3. **The iCloud Keychain copy** (D121). The `security` command reads only the login keychain, so the synced copy is made in
+   the Passwords app (or Keychain Access, the iCloud keychain): a new password named "BMS backup age key", user name
+   `bms-backups`, the password pasted from the clipboard, then the clipboard cleared:
+
+   ```bash
+   printf '%s' "$(printf '%s\n' "$key" | grep '^AGE-SECRET-KEY-1')" | pbcopy
+   # paste it into the new entry, save, then:
+   pbcopy < /dev/null
+   ```
+
+   Open the entry on a second Apple device signed in to the same Apple Account and check the first and last six characters
+   against the Mac's.
+4. **The printed copy.** Print to a printer on USB or the local network, never a cloud print service (CUPS deletes its spool
+   file once printed):
+
+   ```bash
+   printf '%s\n' "BMS backup age key (ADR-129). Made $(date +%Y-%m-%d) by <operator>, witnessed by <owner>." "$key" \
+     "Keep sealed. Opening it is recorded in docs/runbooks/restore-from-backup.md section 8.7." | lpr -o cpi=12
+   ```
+
+5. **Check the paper by reading it back.** Type the `AGE-SECRET-KEY-1` line from the paper (not from the screen) into:
+
+   ```bash
+   age-keygen -y      # type the line, Enter, then Ctrl-D; it must print $PUB
+   ```
+
+   A typing error prints an error or another key: check the paper character by character, and reprint if the print is unclear.
+   Then the owner seals the page in an envelope, signs across the seal with the date, and keeps it away from the Mac.
+6. **A round trip** through the Keychain copy:
+
+   ```bash
+   printf 'round trip\n' | age --recipient "$PUB" > ~/bms-round-trip.age
+   security find-generic-password -a bms-backups -s bms-backup-age-identity -w \
+     | age --decrypt --identity - ~/bms-round-trip.age            # prints: round trip
+   rm ~/bms-round-trip.age
+   ```
+
+7. **The old key, for the backups made before the switch.** Take `BACKUP_ENCRYPTION_KEY` from the offline store and put it
+   in the login Keychain the same way (`security -i`, item `bms-backup-symmetric-key`, account `bms-backups`), typed or pasted
+   into a `read -rs OLD` prompt rather than a command line:
+
+   ```bash
+   read -rs OLD; printf 'add-generic-password -U -a bms-backups -s bms-backup-symmetric-key -l "BMS old backup key" -w %s\n' "$OLD" | security -i; unset OLD
+   ```
+
+8. `unset key PUB`, close the window, and fill in the table of section 8.7.
+
+### 8.3 The public key on each host
+
+On each host, staging first:
+
+```bash
+sudo apt install age && age --version                     # cloud-init installs it on hosts built by infra/production
+sudoedit /opt/bms/.env                                    # add BACKUP_AGE_RECIPIENT=age1... (the public key, one line)
+sudo grep -c '^BACKUP_AGE_RECIPIENT=age1' /opt/bms/.env   # 1
+sudo sh -c '. /opt/bms/.env; printf "%s" "$BACKUP_AGE_RECIPIENT"' | sha256sum | cut -c1-16   # the fingerprint of 8.2 step 1
+```
+
+Only the public key goes on a host. If anything starting `AGE-SECRET-KEY-1` was ever pasted into a host's `.env`, that key is
+exposed: section 8.6.
+
+### 8.4 The switch, by hand (staging, then production)
+
+1. The release with this change is live on the host (`restore-drill.sh` and `backup.sh` arrive with releases).
+2. Section 8.3 on the host.
+3. A backup now, as the deploy user: `sudo -u <deploy user> /opt/bms/backup.sh` (on staging the cron user is `bms`). Its log
+   says "for the age recipient in BACKUP_AGE_RECIPIENT"; without the recipient it fails at once, writes
+   `state/last_backup_error` with the reason, uploads nothing, and `monitor.sh` reports it.
+4. The weekly check now: `sudo systemctl start bms-restore-drill.service`, then `cat /opt/bms/state/last_backup_check`: an
+   `OK ... format=age` line whose `recipient=` is the fingerprint of 8.2 step 1.
+5. The offline drill on the Mac on that backup (section 8.5). It must pass before step 6.
+6. Remove `BACKUP_ENCRYPTION_KEY` from `/opt/bms/.env` (`sudoedit`); `sudo grep -c BACKUP_ENCRYPTION_KEY /opt/bms/.env` prints
+   0. It stays in the offline store and the Mac Keychain for the old backups.
+7. Record the date of the switch in section 8.7. From now on an import rehearsal is refused (section 5.2).
+8. **A year later**, when `rclone lsf bms-r2:<bucket>/<environment>/monthly/` lists no backup from before the switch, destroy
+   the old key: `security delete-generic-password -a bms-backups -s bms-backup-symmetric-key`, and its copy in the offline
+   store. Record it.
+
+If `backup.sh` fails after the switch and cannot be put right the same day, do not edit scripts on the host: fix
+`BACKUP_AGE_RECIPIENT` or install `age`, or deploy the previous release, whose `backup.sh` still uses the old key (put the
+key back in `.env` for that time only and record it).
+
+### 8.5 The monthly offline drill (the operator's Mac)
+
+Once a month (a calendar reminder; `monitor.sh` alerts when no full restore succeeded in 35 days), and after any change to the
+key or to `BACKUP_AGE_RECIPIENT`:
+
+```bash
+cd <the checkout> && git pull
+export BMS_DRILL_REMOTE=bms-r2:<backup bucket> POSTGRES_IMAGE=<the hosts' POSTGRES_IMAGE, for example postgres:16.15-alpine>
+deploy/restore-drill-offline.sh --environment production
+deploy/restore-drill-offline.sh --environment staging                     # when staging holds anything worth it
+deploy/restore-drill-offline.sh --folder monthly --file <name>            # a monthly copy, or an old-format backup
+```
+
+It downloads the newest backup into a mode-0700 temp dir, tells its format from its first bytes, decrypts an age file with the
+Keychain key (an old one with the old key), restores it into a throwaway PostgreSQL in Docker with no network, created by the
+checkout's `deploy/postgres/initdb`, and checks the Flyway version (not ahead of the checkout's newest migration), the counts
+of tenants, users and audit rows, and that `bms_app` reads a tenant's rows under row-level security. For an age file it also
+compares the fingerprint of the Keychain key's public half with the `recipient=` the host recorded in
+`drill/last_backup_check.txt`. It records one line in `~/bms-restore-drills/history.log` and uploads it to
+`<environment>/drill/last_offline_drill.txt`:
+
+```
+<time> OK <file> folder=daily format=age seconds=<n> rto_ok=yes flyway=<v> repo_flyway=<v> tenants=<n> users=<n> audit=<n> app_visible_users=<n> recipient=match
+<time> FAILED <file> folder=daily format=age seconds=<n> <reason>
+```
+
+It removes the temp dir, the decrypted dump and the container whatever the outcome. A pg_restore error is shown on the screen
+only. Exit 0 is a pass, 1 a failure (recorded and uploaded), 2 a usage error.
+
+| It says | Do |
+|---|---|
+| `decryption failed: the Keychain key is not the one this backup was encrypted to` | The host encrypts to another key, or the Keychain item is wrong. Compare `recipient=` on the host (8.3) with the Keychain key's fingerprint; if the Keychain item is wrong, restore it from the iCloud copy or the envelope (8.6) |
+| `the host encrypts to another public key` | Someone changed `BACKUP_AGE_RECIPIENT` on the host. Put the right public key back today; backups since the change open only with that other key's private half |
+| `no age key in the login Keychain item` | 8.2 step 2 on this Mac, from the iCloud copy |
+| `recipient=unchecked` | The host has made no backup check yet (8.4 step 4); run it and the drill again |
+| `ahead of this checkout's newest migration` | `git pull`, then run it again |
+| `COULD NOT UPLOAD the result` | Run the `rclone copyto` line it prints, or `monitor.sh` alerts after 35 days |
+
+### 8.6 A lost or exposed key
+
+- **The Mac is lost or replaced, the key is not exposed** (FileVault on, the Mac locked): on the new Mac, 8.1, then put the
+  key from the iCloud copy into the login Keychain (8.2 step 2, with `read -rs` as in step 7) and run the drill.
+- **The private key may be exposed** (a stolen unlocked Mac, the secret pasted into a chat, a ticket, a host or a file): a
+  new ceremony now (8.2), the new public key on every host (8.3) and a backup and a drill at once (8.4 steps 3 to 5). Backups
+  made with the exposed key stay readable by whoever has it until they age out: treat it as a security incident
+  (`security-incident.md`). Keep the exposed private key offline until those backups age out, then destroy it.
+- **Every copy is lost** (the Keychain, the iCloud copy and the envelope): the backups made since the switch cannot be read.
+  Make a new key now (8.2, 8.3), take a backup at once, and record what was lost.
+- **Opening the envelope** is recorded in 8.7 with the reason; afterwards a new printed copy is made, checked (8.2 steps 4
+  and 5) and sealed.
+
+### 8.7 Record
+
+| Event | Date | By | Witness | Public key fingerprint | Notes |
+|---|---|---|---|---|---|
+| Key ceremony (8.2) | not yet | | | | |
+| Switch on staging (8.4) | not yet | | | | |
+| Switch on production (8.4) | not yet | | | | |
+| Old key destroyed (8.4 step 8) | not yet | | | | |

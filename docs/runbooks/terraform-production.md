@@ -226,7 +226,7 @@ Then wait for cloud-init: `ssh ops@<ipv4> cloud-init status --wait` should end i
 ## 7. The host's `.env` (the steps that carry secrets)
 
 1. As `ops`, start from the repository's `.env.example` and fill everything Terraform does not know, per
-   `provision-host.md` section 4: the database passwords, `BACKUP_ENCRYPTION_KEY`, the sign-in keys, SMTP (required in production,
+   `provision-host.md` section 4: the database passwords, `BACKUP_AGE_RECIPIENT` (the public key only, ADR-129), the sign-in keys, SMTP (required in production,
    ADR-059), the Telegram pair, `BMS_ENVIRONMENT=production` and the host names. Delete from it the lines `host_env` provides.
    Install it as `sudo install -o bms -g bms -m 600 <file> /opt/bms/.env` and remove the copy.
 2. Add the lines Terraform knows, straight from the Mac to the host without writing them to a file:
@@ -237,7 +237,8 @@ Then wait for cloud-init: `ssh ops@<ipv4> cloud-init status --wait` should end i
 
    They are the R2 endpoint, bucket and keys of the backup and documents tokens, `BACKUP_RETENTION_ON_HOST=false` and the
    DNS-01 `CLOUDFLARE_API_TOKEN`.
-3. Keep `BACKUP_ENCRYPTION_KEY` and `BMS_DATA_KEY` in the offline store (chapter 8 section 8.7).
+3. Keep `BMS_DATA_KEY` in the offline store (chapter 8 section 8.7). The backup private key is already offline, on the
+   operator's Mac and in the owner's sealed envelope (`restore-from-backup.md` section 8); it never comes to this host.
 4. `cosign.pub`, outside any release: `scp deploy/cosign.pub ops@<ipv4>:/tmp/ && ssh ops@<ipv4> 'sudo install -o bms -g bms -m 644 /tmp/cosign.pub /opt/bms/cosign.pub'`.
 5. The registry login, once, as `bms`, with a token scoped to `read:packages` only (`provision-host.md` section 8.1a).
 
@@ -336,8 +337,11 @@ Follow `monitoring-and-alerts.md` sections 1 and 2, with one difference: on this
 ```sh
 sudo systemctl enable --now bms-monitor.timer bms-restore-drill.timer
 sudo systemctl start bms-restore-drill.service      # the first drill now, not next Sunday
-sudo tail -20 /opt/bms/state/restore-drill.log; sudo cat /opt/bms/state/last_restore_drill
+sudo tail -20 /opt/bms/state/restore-drill.log; sudo cat /opt/bms/state/last_backup_check
 ```
+
+The backups of this host are age files (ADR-129), so the host's run is a backup check, not a restore. The first full
+restore is the offline drill on the operator's Mac (`restore-from-backup.md` section 8.5), run the same day.
 
 The drill must finish under the 2 hour RTO before any tenant's real data moves (`customer-data-cutover.md`).
 
