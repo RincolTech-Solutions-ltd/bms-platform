@@ -184,6 +184,8 @@ describe('imports to sign off', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Imported on 1 Oct 2026/ }));
     const tip = await screen.findByRole('button', { name: 'More about reconciliation' });
     expect(tip.closest('p')?.textContent).toContain('This reconciliation compares your sheet with what BMS now holds, check by check.');
+    // A space between the full stop and the tip's button, so the two never touch.
+    expect(tip.closest('.help-tip')?.previousSibling?.textContent).toBe(' ');
     fireEvent.click(tip);
     expect(await screen.findByText(/Your own figures set beside what BMS now holds after the import\. Every difference must be explained before you can sign\./)).toBeTruthy();
   });

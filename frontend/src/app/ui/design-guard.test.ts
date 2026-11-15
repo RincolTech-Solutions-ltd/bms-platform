@@ -444,6 +444,18 @@ describe('design guard, the cross-cutting fixes of the 70-screen audit', () => {
     expect(rows[0]?.body).not.toMatch(/display\s*:/);
     expect(rows[0]?.body).not.toMatch(/list-style\s*:\s*none/);
     expect(rows[0]?.body).toMatch(/min-height: var\(--tap\)/);
+    // No rule anywhere hides a summary's triangle (review of 7b0dd8f), but a summary drawn as a button, which needs none.
+    const DRAWN_AS_A_BUTTON = ['.am-paste > summary'];
+    const hides = (sel: string, body: string) =>
+      (/summary/.test(sel) && /list-style(-type)?\s*:\s*none/.test(body)) ||
+      (/::-webkit-details-marker/.test(sel) && /display\s*:\s*none/.test(body)) ||
+      (/summary[^,]*::marker/.test(sel) && /(content\s*:\s*(none|''|""))|(display\s*:\s*none)|(font-size\s*:\s*0)/.test(body));
+    const hiding = rulesFor(/summary|details/).filter(({ sel, body }) => hides(sel, body)).map(({ file, sel }) => `${file}: ${sel}`);
+    expect(hiding.filter((rule) => !DRAWN_AS_A_BUTTON.some((sel) => rule.endsWith(sel)))).toEqual([]);
+    // The check itself finds what it is for.
+    expect(hides('summary', 'list-style: none;')).toBe(true);
+    expect(hides('details > summary::-webkit-details-marker', 'display: none;')).toBe(true);
+    expect(hides('.x summary::marker', "content: '';")).toBe(true);
   });
 
   it('keeps every no-access line on the one NoAccess, which says who can give access and links Home', () => {

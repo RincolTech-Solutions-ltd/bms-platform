@@ -94,7 +94,6 @@ function Devices({ push }: { push: ReturnType<typeof createPush> }) {
   const list = useQuery({ queryKey: ['push-devices'], queryFn: () => pushApi.list(), retry: false });
   // The same read as the switch above (one cache entry): whether that switch can be turned on here.
   const state = useQuery({ queryKey: ['push-state'], queryFn: () => push.state(), retry: false });
-  const switchable = state.data === 'on' || state.data === 'off';
   const [error, setError] = useState<string | null>(null);
   const remove = useMutation({
     mutationFn: (device: PushDevice) => pushApi.remove(device.id ?? ''),
@@ -115,12 +114,11 @@ function Devices({ push }: { push: ReturnType<typeof createPush> }) {
         </p>
       )}
       {list.isError && <p role="alert">Could not load your devices.</p>}
-      {/* It points to the switch only while the switch can be used; blocked, unsupported or not offered, the card above says why. */}
-      {list.isSuccess && devices.length === 0 && (switchable ? (
-        <p className="hint">No device yet: turn on Notifications on this device above to add this one.</p>
-      ) : (
-        <p className="hint">No device receives notifications for you yet.</p>
-      ))}
+      {/* Said once the list and this device's state are both read, so it never changes under the eye. Off, it points to the switch
+          above; on, this device is not listed yet; blocked, unsupported or not offered, the card above says why. */}
+      {list.isSuccess && state.isSuccess && devices.length === 0 && (
+        <p className="hint">{state.data === 'off' ? 'No device yet: turn on Notifications on this device above to add this one.' : state.data === 'on' ? 'No device listed yet: reload the page to see this one.' : 'No device receives notifications for you yet.'}</p>
+      )}
       {devices.length > 0 && (
         <ul className="stack">
           {devices.map((device) => (

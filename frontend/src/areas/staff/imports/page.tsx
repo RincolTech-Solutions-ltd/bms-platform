@@ -211,7 +211,7 @@ function ReconciliationScreen({ runId, onBack }: { runId: string; onBack: () => 
     <main className="stack">
       <h1>Sign off the import</h1>
       <p data-tour="imports-about">
-        Version {r.version}, as at {showDate(r.as_at)}. This reconciliation compares your sheet with what BMS now holds, check by check.
+        Version {r.version}, as at {showDate(r.as_at)}. This reconciliation compares your sheet with what BMS now holds, check by check.{' '}
         <HelpTip tip="reconciliation" />
       </p>
       {signed ? (

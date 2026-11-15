@@ -128,6 +128,21 @@ describe('the devices', () => {
     expect(toggle().compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it('says this device is not listed yet when the switch is already on, never to turn it on', async () => {
+    await show(fakePush('on'));
+    expect(await screen.findByText('No device listed yet: reload the page to see this one.')).toBeTruthy();
+    expect(screen.queryByText(/turn on Notifications/)).toBeNull();
+  });
+
+  it('says nothing about devices until this device\'s state is read, so the line never flips', async () => {
+    const push = fakePush('off');
+    push.state.mockReturnValue(new Promise<PushState>(() => undefined));
+    await show(push);
+    await waitFor(() => expect(list).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText(/No device/)).toBeNull();
+  });
+
   it('does not point to the switch where it cannot be used (unsupported or blocked)', async () => {
     for (const state of ['unsupported', 'blocked'] as const) {
       await show(fakePush(state));

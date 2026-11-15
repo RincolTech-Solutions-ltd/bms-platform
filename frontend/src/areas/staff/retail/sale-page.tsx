@@ -1,5 +1,5 @@
 import { createLazyRoute, getRouteApi, useNavigate, useRouter } from '@tanstack/react-router';
-import { OpenSale, openedFromAllSales } from './sales';
+import { OpenSale, keepAllSalesForNext, openedFromAllSales } from './sales';
 import { Gate } from './ui';
 
 // One sale at its own address, /staff/retail/sales/<id> (issue #336): what a sale number on another screen opens (`SaleLink`).
@@ -19,11 +19,18 @@ export function SalePageView({ saleId, onClose }: { saleId: string; onClose: () 
 
 const route = getRouteApi('/staff/retail/sales/$saleId');
 
-/** The sale page's way back: Back when it was opened from All sales, so the list is found as it was left (issue #933). */
+/**
+ * The sale page's way back (issue #933): Back, when this is the very entry All sales opened and the list is the entry before
+ * it, so the list is found as it was left. Otherwise All sales is opened, with what it kept when that is still today's.
+ */
 export function useCloseSale(saleId: string) {
   const navigate = useNavigate();
   const router = useRouter();
-  return () => (openedFromAllSales(saleId) ? router.history.back() : void navigate({ to: '/staff/retail/sales' }));
+  return () => {
+    if (openedFromAllSales(saleId, router.state.location.state)) return router.history.back();
+    keepAllSalesForNext();
+    void navigate({ to: '/staff/retail/sales' });
+  };
 }
 
 function SalePage() {

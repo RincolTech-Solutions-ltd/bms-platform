@@ -119,7 +119,7 @@ describe('a sale opened from All sales', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe(`/staff/retail/sales/${SALE}`));
     expect(router.state.location.search).toEqual({});
     // The sale page's own way back is Back, since the sale was opened from the list.
-    expect(openedFromAllSales(SALE)).toBe(true);
+    await waitFor(() => expect(openedFromAllSales(SALE, router.state.location.state)).toBe(true));
 
     // The sale page, with its own way back, See all sales, on the same history.
     cleanup();
@@ -164,6 +164,6 @@ describe('a sale opened from All sales', () => {
     expect(await head(/^Test Branch Gayaza /)).toBeTruthy();
     expect(screen.queryByRole('navigation', { name: 'Where you are' })).toBeNull();
     expect(buyerBox().value).toBe('');
-    expect(openedFromAllSales(SALE)).toBe(false);
+    expect(openedFromAllSales(SALE, router.state.location.state)).toBe(false);
   });
 });
