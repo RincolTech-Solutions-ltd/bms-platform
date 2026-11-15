@@ -152,7 +152,7 @@ describe('a buyer name opens the account (#936)', () => {
     }
   });
 
-  it('one tap on a row buyer opens only the account, not the sale (the row has no click of its own, sales.tsx:80)', async () => {
+  it('one tap on a row buyer opens only the account, not the sale (the row has no click of its own, sales.tsx:81)', async () => {
     const onOpen = vi.fn();
     const router = show(<SaleList items={[sale(CUSTOMER, BUYER, 's1')]} today="2026-11-14" onOpen={onOpen} />);
     fireEvent.click(screen.getByRole('link', { name: BUYER }));
