@@ -30,19 +30,22 @@ Counted over the 148 work routes (the component kit is a review page, outside th
 
 **Closed by #941 (tickets 2 and 3, rules 1 and 3).** Frontend only, no endpoint and no migration:
 
-- Unallocated payments (ticket 2): the receipts sit under one header per month of their value date (`GroupedCards`, as on
-  Stock moves), each with how many and how much, open only while the loaded list is short (`OPEN_UP_TO`). The list is the
-  server's own pages, 50 receipts oldest first under the same `core.payments.read`; Show more asks for the next with its
-  `next_cursor`, and the last month says "so far" while another page exists. The row buttons are plain and one form opens at
+- Unallocated payments (ticket 2): the receipts sit under one header per month they came in (`GroupedCards`, as on Stock
+  moves), each with how many and how much, one total per currency, open only while the loaded list is short
+  (`OPEN_UP_TO`). The list is the server's own pages, 50 receipts oldest first under the same `core.payments.read`, ordered
+  by the time they came in (`ReceiptStore.page`), which is why the months follow it: Show more asks for the next page with
+  its `next_cursor`, only the last month can still grow, and it says "so far" while another page exists. The row buttons are plain and one form opens at
   a time, so its Ask for approval is the one brand button. With nothing waiting the line says where a payment comes from:
   "Nothing is waiting. A payment comes here when a member pays by mobile money or card and the loan or account it was meant
   for will not take it."; another filter says "None of these yet. Choose another under Show above." Tested in
   `payments/unallocated-months.dom.test.tsx` and `payments/unallocated.dom.test.tsx`.
 - Payment reconciliation (ticket 3): the differences are one closed row per kind (a `details` whose summary keeps its open
-  and close triangle on a 48px row) with the report's full count, the most serious kind first; opened, it says what to check
-  and lists 20 at a time, and a kind counted past the server's first 500 says how many more are not listed yet. A statement's
-  lines show 50 at a time ("Showing 50 of 120 lines."), up to the first 1,000 the server sends, which it says; the
-  statements uploaded before show 10 at a time. Upload and a line's Save are plain, so Run it now is the one brand button.
+  and close triangle on a 48px row) with the report's full count, the most serious kind first in the server's own order
+  (`ReconciliationService.SEVERITY`), listed or only counted, and no row for a kind counted zero; opened, it says what to
+  check and lists 20 at a time, and only when the server cut the list at its first 500 does a kind say how many more are not
+  listed yet. A statement's lines show 50 at a time ("Showing 50 of 120 lines.", or "of the first 1,000" when the server cut
+  them), starting again for each statement opened; the statements uploaded before show 10 at a time. Upload and a line's
+  Save are plain, so Run it now is the one brand button.
   The empty lines: "No statement yet. Export the merchant statement from your payment provider's dashboard as a CSV file and
   upload it above." and "No reconciliation has run yet. It runs every night, or tap Run it now below." (without the last
   part for someone who may not run it). Tested in `payments/reconciliation-groups.dom.test.tsx` and

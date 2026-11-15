@@ -2,7 +2,7 @@ import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-q
 import { createLazyRoute } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
 import { type ReceiptStatusFilter, type UnallocatedReceipt, receipts } from '../../../api/payments';
-import { businessZone } from '../../../api/retail';
+import { businessToday, businessZone } from '../../../api/retail';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { NoAccess } from '../../../app/ui/EmptyState';
 import { Hint } from '../../../app/ui/Hint';
@@ -37,13 +37,20 @@ function when(iso: string | undefined): string {
 
 type Action = 'allocate' | 'refund';
 
-/** The day a receipt counts on: its value date, else the business day it was paid (issue #941). */
+/**
+ * The business day a receipt came into the queue (issue #941). The months follow it because the server pages by it
+ * (`ReceiptStore.page`: ORDER BY created_at, id), so only the last month can still grow with the next page.
+ */
 export function receiptDay(r: UnallocatedReceipt): string {
-  if (r.value_date) return r.value_date;
-  const iso = r.paid_at ?? r.created_at;
-  if (!iso) return '';
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-CA', { timeZone: businessZone() });
+  const d = new Date(r.created_at ?? '');
+  return Number.isNaN(d.getTime()) ? '' : businessToday(d, businessZone());
+}
+
+/** How much a month holds, one total per currency, so amounts in different currencies are never added together. */
+export function monthTotal(rows: UnallocatedReceipt[]): string {
+  const sums = new Map<string, number>();
+  for (const r of rows) sums.set(r.currency ?? '', (sums.get(r.currency ?? '') ?? 0) + (r.amount_minor ?? 0));
+  return [...sums].map(([currency, minor]) => money(minor, currency || undefined)).join(' and ');
 }
 
 /** The words of the empty list: where a payment comes from when nothing waits, else how to see the rest (rule 3). */
@@ -191,8 +198,7 @@ export function UnallocatedPage() {
   const query = useInfiniteQuery({ queryKey: ['payments', 'unallocated', status], queryFn: ({ pageParam }) => receipts.list(status, pageParam || undefined), initialPageParam: '', getNextPageParam: (last) => last.next_cursor || undefined, enabled: allowed });
   const items = query.data?.pages.flatMap((p) => p.items ?? []) ?? [];
   // One header per month with how many and how much (rule 1), open while the loaded list is short; the last says "so far" while more exist.
-  const total = (rows: UnallocatedReceipt[]) => money(rows.reduce((sum, r) => sum + (r.amount_minor ?? 0), 0), rows[0]?.currency);
-  const months = useCategoryGroups({ screen: 'unallocated', items, categoryOf: (r) => monthLabel(receiptDay(r)) || 'No date', subtotalOf: total, resetKey: status, searching: false, keepOrder: true, noun: ['payment', 'payments'], more: query.hasNextPage });
+  const months = useCategoryGroups({ screen: 'unallocated', items, categoryOf: (r) => monthLabel(receiptDay(r)) || 'No date', subtotalOf: monthTotal, resetKey: status, searching: false, keepOrder: true, noun: ['payment', 'payments'], more: query.hasNextPage });
   if (!allowed) {
     return (
       <main className="rt ln">

@@ -743,7 +743,7 @@ export const unallocatedPage: Tour = {
       id: 'ask',
       target: 'unallocated-list',
       title: 'Put it where it belongs',
-      body: 'Payments sit under the month they were paid, with how many and how much, the oldest first; Show more brings the next. Ask to put a payment on a loan or savings account, or record that it was sent back. A second person approves it before anything changes.',
+      body: 'Payments sit under the month they came in, with how many and how much, the oldest first; Show more brings the next. Ask to put a payment on a loan or savings account, or record that it was sent back. A second person approves it before anything changes.',
     },
   ],
 };

@@ -85,6 +85,24 @@ describe('Unallocated payments by month', () => {
     expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
   });
 
+  it('draws Show more as a plain button', async () => {
+    list.mockResolvedValue(as<UnallocatedReceiptPage>({ items: [on(1, '2026-10-03', 100000)], next_cursor: 'cursor-test-2' }));
+    shell();
+    // Only BusyButton's busy-button class, which holds its spinner's room and draws no fill (buttons.css).
+    expect((await screen.findByRole('button', { name: 'Show more' })).className).toBe('busy-button');
+  });
+
+  it('groups by the day a receipt came in, the server\'s paging order, and keeps one total per currency', async () => {
+    // ReceiptStore.page orders by created_at: a receipt dated 31 October that came in on 1 November is November's, so a later
+    // page can never add to an earlier month.
+    const late = as<UnallocatedReceipt>({ ...on(2, '2026-11-01', 20000), value_date: '2026-10-31', created_at: '2026-11-01T10:00:00Z' });
+    const dollars = as<UnallocatedReceipt>({ ...on(3, '2026-11-03', 500), currency: 'USD' });
+    list.mockResolvedValue(as<UnallocatedReceiptPage>({ items: [on(1, '2026-10-30', 10000), late, dollars] }));
+    shell();
+    await screen.findByText('CONF-TEST-3');
+    expect(heads()).toEqual([`October 20261 payment, ${money(10000, 'UGX')}`, `November 20262 payments, ${money(20000, 'UGX')} and ${money(500, 'USD')}`]);
+  });
+
   it('keeps a long month closed until its header is tapped', async () => {
     list.mockResolvedValue(as<UnallocatedReceiptPage>({ items: Array.from({ length: 31 }, (_, i) => on(i + 1, '2026-10-05', 1000)) }));
     shell();
@@ -109,5 +127,8 @@ describe('Unallocated payments by month', () => {
     expect(cards[0]?.querySelector('form')).toBeNull();
     expect(cards[1]?.querySelector('form')).not.toBeNull();
     expect(cards[1]?.querySelector('.rt-primary')?.textContent).toBe('Ask for approval');
+    // The other buttons carry no class at all, so they draw the plain surface style of a bare <button> (buttons.css): only
+    // .btn-primary, .btn-brand and .rt-primary are brand filled.
+    expect(screen.getByRole('button', { name: 'Put on a loan or account' }).className).toBe('');
   });
 });

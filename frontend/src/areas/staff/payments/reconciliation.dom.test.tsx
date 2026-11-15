@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PaymentReconciliation } from '../../../api/payments';
 import { mockMe } from '../../../api/retail-mock';
 import { router as appRouter } from '../../../app/router';
 import { StaffContext } from '../context';
@@ -22,7 +23,9 @@ vi.mock('../../../api/payments', async (original) => {
 const { FormError } = await import('../../../api/lending-forms');
 const { ReconciliationPage } = await import('./reconciliation');
 
-const report = {
+const as = <T,>(value: T): T => value;
+
+const report = as<PaymentReconciliation>({
   run: { id: 'r1', created_at: '2026-10-19T01:10:00Z', ran_on: '2026-10-19', trigger: 'job', window_from: '2026-06-21', intents_examined: 12, statements_used: 1, finding_count: 2 },
   counts_by_kind: { completed_not_booked: 1, manual_receipt_duplicate: 1 },
   findings: [
@@ -30,7 +33,7 @@ const report = {
     { id: 'f2', kind: 'manual_receipt_duplicate', confirmation_code: 'CONF-TEST-2', bms_amount_minor: 310000, provider_amount_minor: 310000, currency: 'UGX' },
   ],
   findings_truncated: false,
-};
+});
 
 function shell(permissions: string[], allBranches = true) {
   const me = { ...mockMe('admin'), permissions, all_branches: allBranches };
@@ -94,7 +97,7 @@ describe('the report', () => {
     shell(MANAGER);
     expect(await screen.findByText('Nothing differs.')).toBeTruthy();
     cleanup();
-    reconciliation.latest.mockResolvedValue({ findings: [], counts_by_kind: {}, findings_truncated: false });
+    reconciliation.latest.mockResolvedValue(as<PaymentReconciliation>({ findings: [], counts_by_kind: {}, findings_truncated: false }));
     shell(MANAGER);
     expect(await screen.findByText('No reconciliation has run yet. It runs every night, or tap Run it now below.')).toBeTruthy();
     cleanup();
@@ -113,7 +116,7 @@ describe('the report', () => {
   });
 
   it('runs the reconciliation on request and shows the new report', async () => {
-    reconciliation.run.mockResolvedValue({ ...report, findings: [report.findings[0]] });
+    reconciliation.run.mockResolvedValue({ ...report, findings: (report.findings ?? []).slice(0, 1) });
     shell(MANAGER);
     fireEvent.click(await screen.findByRole('button', { name: 'Run it now' }));
     await waitFor(() => expect(reconciliation.run).toHaveBeenCalledTimes(1));

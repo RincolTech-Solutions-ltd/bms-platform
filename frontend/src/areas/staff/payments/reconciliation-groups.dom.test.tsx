@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../../api/client';
 import type { PaymentReconciliation, PaymentStatement, PaymentStatementDetail, PaymentStatementRow, ReconciliationFinding } from '../../../api/payments';
 import { mockMe } from '../../../api/retail-mock';
+import type { components } from '../../../api/schema';
 import { router as appRouter } from '../../../app/router';
 import { StaffContext } from '../context';
 
@@ -28,7 +29,7 @@ const as = <T,>(value: T): T => value;
 const finding = (n: number, kind: string) =>
   as<ReconciliationFinding>({ id: `f${n}`, kind, confirmation_code: `CONF-TEST-${n}`, bms_amount_minor: 1000 * n, currency: 'UGX' });
 
-const RUN = { id: 'r1', created_at: '2026-10-19T01:10:00Z', ran_on: '2026-10-19', trigger: 'job' as const, window_from: '2026-06-21', finding_count: 30 };
+const RUN = as<components['schemas']['PaymentReconciliationRun']>({ id: 'r1', created_at: '2026-10-19T01:10:00Z', ran_on: '2026-10-19', trigger: 'job', window_from: '2026-06-21', finding_count: 30 });
 
 const line = (n: number, match: PaymentStatementRow['match_status'] = 'matched') =>
   as<PaymentStatementRow>({ row_no: n, confirmation_code: `CONF-LINE-${n}`, amount_minor: 1000, fee_minor: 10, match_status: match, fee_status: 'posted' });
@@ -100,10 +101,42 @@ describe('the differences by kind', () => {
     await screen.findByText('Paid a different amount');
     const group = kinds()[0] as HTMLDetailsElement;
     expect(group.querySelectorAll('[data-testid="finding"]')).toHaveLength(20);
-    fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
+    // Each kind's Show more is named after its kind, so two open kinds never share a name; it is a plain button.
+    const more = screen.getByRole('button', { name: 'Show more: Paid a different amount' });
+    expect(more.className).toBe('');
+    fireEvent.click(more);
     expect(group.querySelectorAll('[data-testid="finding"]')).toHaveLength(25);
-    expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Show more/ })).toBeNull();
     expect(group.textContent).not.toContain('beyond the first 500');
+  });
+
+  it('says nothing of unlisted differences unless the server cut the list', async () => {
+    const two = [finding(1, 'paid_differs'), finding(2, 'paid_differs')];
+    reconciliation.latest.mockResolvedValue(as<PaymentReconciliation>({ run: RUN, counts_by_kind: { paid_differs: 3 }, findings: two, findings_truncated: false }));
+    shell();
+    await screen.findByText('Paid a different amount');
+    expect(kinds()[0]?.querySelector('summary')?.textContent).toBe('Paid a different amount: 3');
+    expect(document.body.textContent).not.toMatch(/beyond the first 500|Only the first 500/);
+  });
+
+  it('draws no row for a kind counted zero', async () => {
+    const zeros = { paid_differs: 0, amount_mismatch: 0 };
+    reconciliation.latest.mockResolvedValue(as<PaymentReconciliation>({ run: { ...RUN, finding_count: 0 }, counts_by_kind: zeros, findings: [], findings_truncated: false }));
+    shell();
+    expect(await screen.findByText('Nothing differs.')).toBeTruthy();
+    expect(screen.queryAllByTestId('finding-kind')).toHaveLength(0);
+  });
+
+  it('puts the most serious kind first, listed or only counted, as the server does', async () => {
+    const counts = { pending_over_24h: 1, paid_differs: 1, reversed_after_refund: 2 };
+    reconciliation.latest.mockResolvedValue(as<PaymentReconciliation>({ run: RUN, counts_by_kind: counts, findings: [finding(1, 'paid_differs')], findings_truncated: true }));
+    shell();
+    await screen.findByText('Paid a different amount');
+    expect(kinds().map((d) => d.querySelector('summary strong')?.textContent)).toEqual([
+      'Reversed after it was already sent back',
+      'Paid a different amount',
+      'Still unpaid after a day',
+    ]);
   });
 });
 
@@ -116,12 +149,30 @@ describe('the statement and the past statements', () => {
     shell();
     fireEvent.click(await screen.findByRole('button', { name: 'Open' }));
     await waitFor(() => expect(document.querySelectorAll('tbody tr')).toHaveLength(50));
-    expect(screen.getByText('Showing 50 of 120 lines.')).toBeTruthy();
+    expect(screen.getByText(/^Showing 50 of/).textContent).toBe('Showing 50 of 120 lines.');
     fireEvent.click(screen.getByRole('button', { name: 'Show more lines' }));
     expect(document.querySelectorAll('tbody tr')).toHaveLength(100);
     fireEvent.click(screen.getByRole('button', { name: 'Show more lines' }));
     expect(document.querySelectorAll('tbody tr')).toHaveLength(120);
     expect(screen.queryByRole('button', { name: 'Show more lines' })).toBeNull();
+  });
+
+  it('starts another statement on its first 50 lines, and says when the lines are only the first 1,000', async () => {
+    reconciliation.latest.mockResolvedValue(as<PaymentReconciliation>({ run: RUN, counts_by_kind: {}, findings: [], findings_truncated: false }));
+    const first = statement(Array.from({ length: 120 }, (_, i) => line(i + 1)), 's1');
+    const cut = as<PaymentStatementDetail>({ ...statement(Array.from({ length: 1000 }, (_, i) => line(i + 1)), 's2'), rows_truncated: true });
+    statements.list.mockResolvedValue([first.statement, cut.statement]);
+    statements.get.mockImplementation((id: string) => Promise.resolve(id === 's1' ? first : cut));
+    shell();
+    const [openFirst, openCut] = await screen.findAllByRole('button', { name: 'Open' });
+    fireEvent.click(openFirst as HTMLElement);
+    await waitFor(() => expect(document.querySelectorAll('tbody tr')).toHaveLength(50));
+    fireEvent.click(screen.getByRole('button', { name: 'Show more lines' }));
+    expect(document.querySelectorAll('tbody tr')).toHaveLength(100);
+    fireEvent.click(openCut as HTMLElement);
+    await screen.findByText('Statement s2.csv');
+    expect(document.querySelectorAll('tbody tr')).toHaveLength(50);
+    expect(screen.getByText(/^Showing 50 of/).textContent).toBe('Showing 50 of the first 1,000 lines.');
   });
 
   it('lists ten past statements at a time', async () => {
@@ -155,7 +206,10 @@ describe('one primary', () => {
     fireEvent.change(screen.getByLabelText('Statement file (CSV)'), { target: { files: [new File(['a'], 'statement.csv', { type: 'text/csv' })] } });
     fireEvent.click(await screen.findByRole('button', { name: 'Open' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Not ours' }));
-    expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy();
     expect(brand()).toEqual(['Run it now']);
+    // Upload and Save carry only BusyButton's own busy-button class (its spinner's room, no fill), so they draw a bare
+    // <button>'s plain surface (buttons.css); only .btn-primary, .btn-brand and .rt-primary are brand filled.
+    expect(screen.getByRole('button', { name: 'Upload' }).className).toBe('busy-button');
+    expect(screen.getByRole('button', { name: 'Save' }).className).toBe('busy-button');
   });
 });

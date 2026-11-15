@@ -163,7 +163,10 @@ export function StatementView({ detail, canMark }: { detail: PaymentStatementDet
       </table>
       {rows.length > shown && (
         <p className="cluster">
-          <span className="hint">Showing {shown} of {rows.length} lines.</span>
+          <span className="hint">
+            Showing {shown.toLocaleString('en-GB')} of {detail.rows_truncated ? 'the first ' : ''}
+            {rows.length.toLocaleString('en-GB')} lines.
+          </span>
           <button type="button" onClick={() => setShown(shown + LINES_PAGE)}>Show more lines</button>
         </p>
       )}
@@ -204,10 +207,11 @@ export function PastStatements({ onOpen }: { onOpen: (detail: PaymentStatementDe
 }
 
 /** One kind of difference: a closed row with its count; open, what to do and its differences, 20 at a time. */
-export function FindingGroup({ kind, count, rows }: { kind: string; count: number; rows: ReconciliationFinding[] }) {
+export function FindingGroup({ kind, count, rows, truncated }: { kind: string; count: number; rows: ReconciliationFinding[]; truncated: boolean }) {
   const [shown, setShown] = useState(FINDINGS_PAGE);
   const words = findingWords(kind);
-  const unlisted = count - rows.length;
+  // Said only when the server cut the list at its first 500 (`findings_truncated`), never from the counts alone.
+  const unlisted = truncated ? count - rows.length : 0;
   return (
     <li>
       <details className="recon-kind" data-testid="finding-kind">
@@ -228,7 +232,11 @@ export function FindingGroup({ kind, count, rows }: { kind: string; count: numbe
               </li>
             ))}
           </ul>
-          {rows.length > shown && <button type="button" onClick={() => setShown(shown + FINDINGS_PAGE)}>Show more</button>}
+          {rows.length > shown && (
+            <button type="button" aria-label={`Show more: ${words.title}`} onClick={() => setShown(shown + FINDINGS_PAGE)}>
+              Show more
+            </button>
+          )}
           {unlisted > 0 && <p className="hint">{unlisted === 1 ? '1 more is' : `${unlisted} more are`} beyond the first 500 listed, shown once these are put right.</p>}
         </div>
       </details>
@@ -280,7 +288,7 @@ export function ReconciliationPage() {
           This file was uploaded before, so nothing new was recorded. Its statement is shown below.
         </p>
       )}
-      {uploaded && <StatementView detail={uploaded.detail} canMark={manage} />}
+      {uploaded && <StatementView key={uploaded.detail.statement?.id} detail={uploaded.detail} canMark={manage} />}
       {manage && <PastStatements onOpen={(detail) => setUploaded({ detail, replayed: false })} />}
       <section className="rt-card stack" aria-labelledby="recon-report" data-tour="reconciliation-report">
         <h2 id="recon-report">Differences</h2>
@@ -302,7 +310,7 @@ export function ReconciliationPage() {
         {/* One closed row per kind with its full count; a tap opens what to do and the differences (issue #941, rule 1). */}
         <ul className="stack list-plain" aria-label="Differences by kind">
           {findingGroups(findings, data?.counts_by_kind).map((g) => (
-            <FindingGroup key={g.kind} kind={g.kind} count={g.count} rows={g.rows} />
+            <FindingGroup key={g.kind} kind={g.kind} count={g.count} rows={g.rows} truncated={data?.findings_truncated === true} />
           ))}
         </ul>
         {data?.findings_truncated && <p className="hint">Only the first 500 are listed, most serious first; each count is complete.</p>}
