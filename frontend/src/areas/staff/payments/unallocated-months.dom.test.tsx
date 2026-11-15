@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../../api/client';
 import type { UnallocatedReceipt, UnallocatedReceiptPage } from '../../../api/payments';
@@ -131,15 +131,18 @@ describe('Unallocated payments by month', () => {
       .mockResolvedValueOnce(as<UnallocatedReceiptPage>({ items: Array.from({ length: 30 }, (_, i) => on(i + 1, '2026-10-05', 1000)), next_cursor: 'cursor-test-2' }))
       .mockResolvedValueOnce(as<UnallocatedReceiptPage>({ items: [on(31, '2026-10-06', 1000)] }));
     shell();
-    await screen.findByText('CONF-TEST-1');
-    fireEvent.click(screen.getAllByRole('button', { name: 'Put on a loan or account' })[0] as HTMLElement);
-    fireEvent.change(screen.getByLabelText('Why'), { target: { value: 'Test reason for receipt one' } });
+    // Issue #945: every check is scoped to the receipt holding CONF-TEST-1, not to its place in the list.
+    const first = async () => (await screen.findByText('CONF-TEST-1')).closest<HTMLElement>('[data-testid="receipt"]') as HTMLElement;
+    fireEvent.click(within(await first()).getByRole('button', { name: 'Put on a loan or account' }));
+    fireEvent.change(within(await first()).getByLabelText('Why'), { target: { value: 'Test reason for receipt one' } });
     fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
     await screen.findByText('CONF-TEST-31');
     expect(screen.getByRole('button', { name: /^October 2026/ }).getAttribute('aria-expanded')).toBe('true');
-    const form = screen.getAllByTestId('receipt')[0]?.querySelector('form');
-    expect(form).not.toBeNull();
-    expect((screen.getByLabelText('Why') as HTMLTextAreaElement).value).toBe('Test reason for receipt one');
+    const receipt = await first();
+    expect(receipt.querySelector('form')).not.toBeNull();
+    expect((within(receipt).getByLabelText('Why') as HTMLTextAreaElement).value).toBe('Test reason for receipt one');
+    // The form stayed on that receipt: no other receipt holds one.
+    expect(screen.getAllByTestId('receipt').filter((r) => r.querySelector('form'))).toEqual([receipt]);
     expect(brand()).toHaveLength(1);
   });
 

@@ -97,6 +97,19 @@ describe('the differences by kind', () => {
     expect(document.body.textContent).not.toContain('listed here.');
   });
 
+  it('says "This 1" for a kind of one difference with none of it listed (#945)', async () => {
+    reconciliation.latest.mockResolvedValue(
+      as<PaymentReconciliation>({ run: RUN, counts_by_kind: { completed_not_booked: 1, pending_over_24h: 1 }, findings: [finding(1, 'completed_not_booked')], findings_truncated: true }),
+    );
+    shell();
+    await screen.findByText('Still unpaid after a day');
+    const unlisted = kinds().find((d) => d.querySelector('summary')?.textContent === 'Still unpaid after a day: 1');
+    expect(unlisted?.querySelectorAll('[data-testid="finding"]')).toHaveLength(0);
+    // The first hint is the kind's help; the line after it is the one about the unlisted difference.
+    expect([...(unlisted?.querySelectorAll('.hint') ?? [])].at(-1)?.textContent).toBe('This 1 is not in the first 500 listed. It shows once those are put right.');
+    expect(unlisted?.textContent).not.toMatch(/None of these|more/);
+  });
+
   it('lists 20 differences of a kind at a time when opened, and Show more adds the rest', async () => {
     const many = Array.from({ length: 25 }, (_, i) => finding(i + 1, 'paid_differs'));
     reconciliation.latest.mockResolvedValue(as<PaymentReconciliation>({ run: RUN, counts_by_kind: { paid_differs: 25 }, findings: many, findings_truncated: false }));
