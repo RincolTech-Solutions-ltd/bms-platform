@@ -172,6 +172,17 @@ printf '%s\n' 'age-encryption.org/v1' "-> X25519 ${B43}" > "$WORK/age-cut.age"
 age_drill age-cut BACKUP_CHECK_MAX_HOURS=72
 expect "an age file cut off in its header fails the check" failed_check "no header MAC"
 
+# Review of 667acd1, finding 9: the live database is reached through the stack's compose project, and not finding it fails.
+expect "the check reads the live Flyway version through docker compose" \
+    grep -q '^compose --project-name bms --file compose.yml exec -T postgres psql' "$WORK/age-ok/fake/calls.log"
+fake_age_file "$WORK/age-nodb.age"
+FAKE_NO_LIVE_DB=1 age_drill age-nodb BACKUP_CHECK_MAX_HOURS=72
+expect "an age backup check with no live postgres to ask fails" failed_check "cannot read the live Flyway version through docker compose"
+# Finding 2: a check without the host's public key has no fingerprint to record, so it fails.
+fake_age_file "$WORK/age-norecipient.age"
+age_drill age-norecipient BACKUP_CHECK_MAX_HOURS=72 BACKUP_AGE_RECIPIENT=
+expect "an age backup check on a host with no BACKUP_AGE_RECIPIENT fails" failed_check "BACKUP_AGE_RECIPIENT is not set on this host"
+
 # The newest backup still in the old format, on a host whose .env no longer has the symmetric key.
 printf 'Salted__fabricated-old-format-bytes\n' > "$WORK/old-format.age"
 age_drill old-format

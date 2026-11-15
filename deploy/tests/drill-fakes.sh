@@ -23,7 +23,8 @@
 #   FAKE_LIVE_HANG_ADVANCE_TO=<epoch> it jumps there while the live read of the run hangs;
 #   FAKE_WRITE_SIGNAL=<sig> the live write sends the script that signal once the row is stored;
 #   FAKE_LIVE_SILENT=1      the live database does not answer the read-back of the rehearsal's row;
-#   FAKE_BACKUP_FILE=<path> the backup rclone downloads from daily/ is a copy of that file (ADR-129: an age file).
+#   FAKE_BACKUP_FILE=<path> the backup rclone downloads from daily/ is a copy of that file (ADR-129: an age file);
+#   FAKE_NO_LIVE_DB=1       docker compose finds no running postgres service.
 # JUSTIFICATION-A2: the fake host is shared by two test files and is not a tiny helper.
 
 FAKE_EPOCH=1793000000
@@ -180,6 +181,10 @@ case "$1" in
                 fi ;;
         esac ;;
     logs) echo "PostgreSQL init process complete; ready for start up." ;;
+    compose)
+        # docker compose ... exec -T postgres psql ...: the live database through the stack (the age backup check).
+        [[ -n "${FAKE_NO_LIVE_DB:-}" ]] && { echo "service \"postgres\" is not running" >&2; exit 1; }
+        [[ "$*" == *flyway_schema_history* ]] && echo 145 ;;
     ps)
         if [[ "$*" == *"com.docker.compose.service=api"* ]]; then
             echo "bms-api-1"

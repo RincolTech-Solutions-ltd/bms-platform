@@ -734,18 +734,33 @@ check_fail() {
     record state/last_backup_check_error "$(date -u +%Y-%m-%dT%H:%M:%SZ) FAILED ${NAME} $*" last_backup_check_error.txt
     exit 1
 }
+# age_header_problem <file>: nothing when its header is age's to exactly one X25519 recipient (grease stanzas, which no
+# key opens, allowed; no passphrase; no other recipient), else what is wrong. It reads up to the header MAC line within the
+# first 64 KiB. Kept identical in backup.sh and restore-drill.sh (deploy/tests/backup-test.sh checks that), so what leaves
+# the host and what the weekly check accepts are the same thing.
+age_header_problem() {
+    local header
+    header="$(head -c 65536 "$1" 2> /dev/null | LC_ALL=C sed -n '1,/^--- /p' | tr -d '\0')"
+    if [[ "$(head -n 1 <<< "$header")" != "age-encryption.org/v1" ]]; then
+        echo "not an age file: no version line"
+    elif [[ ! "$(tail -n 1 <<< "$header")" =~ ^---\ [A-Za-z0-9+/]{43}$ ]]; then
+        echo "not a well formed age file: no header MAC"
+    elif grep -q '^-> scrypt ' <<< "$header"; then
+        echo "encrypted with a passphrase, not to the public key"
+    elif [[ "$(grep -Ec '^-> X25519 [A-Za-z0-9+/]{43}$' <<< "$header")" != 1 ]]; then
+        echo "not encrypted to exactly one X25519 recipient"
+    elif [[ "$(grep '^-> ' <<< "$header" | grep -v '^-> X25519 ' | grep -cv '^-> [^ ]*-grease')" != 0 ]]; then
+        echo "encrypted to $(grep -c '^-> ' <<< "$header") recipients, not to the one public key"
+    fi
+}
 check_age_backup() {
-    local header stanzas bytes min prev stamp hours fp live_ver
-    header="$(head -c 4096 "$ENC" | LC_ALL=C sed -n '1,/^--- /p' | tr -d '\0')"
-    [[ "$(head -n 1 <<< "$header")" == "age-encryption.org/v1" ]] || check_fail "not an age file: no version line"
-    [[ "$(tail -n 1 <<< "$header")" =~ ^---\ [A-Za-z0-9+/]{43}$ ]] || check_fail "not a well formed age file: no header MAC"
-    grep -q '^-> scrypt ' <<< "$header" && check_fail "encrypted with a passphrase, not to the public key"
-    [[ "$(grep -Ec '^-> X25519 [A-Za-z0-9+/]{43}$' <<< "$header")" == 1 ]] \
-        || check_fail "not encrypted to exactly one X25519 recipient"
-    # age may add grease stanzas, which no key opens; any other stanza is a recipient this design does not have.
-    stanzas="$(grep -c '^-> ' <<< "$header")"
-    [[ "$(grep '^-> ' <<< "$header" | grep -v '^-> X25519 ' | grep -cv '^-> [^ ]*-grease')" == 0 ]] \
-        || check_fail "encrypted to ${stanzas} recipients, not to the one public key"
+    local problem stanzas bytes min prev stamp hours fp live_ver
+    problem="$(age_header_problem "$ENC")"
+    [[ -z "$problem" ]] || check_fail "$problem"
+    stanzas="$(head -c 65536 "$ENC" | LC_ALL=C sed -n '1,/^--- /p' | tr -d '\0' | grep -c '^-> ')"
+    # The public key this host encrypts to must be set: its fingerprint is what the offline drill compares (review of
+    # 667acd1, finding 2).
+    [[ -n "${BACKUP_AGE_RECIPIENT:-}" ]] || check_fail "BACKUP_AGE_RECIPIENT is not set on this host"
     bytes="$(stat -c %s "$ENC")"
     min="${BACKUP_CHECK_MIN_BYTES:-32768}"
     (( bytes >= min )) || check_fail "only ${bytes} bytes, under the ${min} byte floor"
@@ -758,14 +773,18 @@ check_age_backup() {
     hours=$(( ($(date -u +%s) - stamp) / 3600 ))
     (( hours <= ${BACKUP_CHECK_MAX_HOURS:-26} )) || check_fail "${hours} hours old (limit ${BACKUP_CHECK_MAX_HOURS:-26})"
     # The fingerprint of the public key this host encrypts to; the offline drill compares it with the Keychain key's.
-    fp="unset"
-    [[ -z "${BACKUP_AGE_RECIPIENT:-}" ]] || fp="$(printf '%s' "$BACKUP_AGE_RECIPIENT" | sha256sum | cut -c1-16)"
-    # The live database by the same container name the full drill's live() uses.
-    live_ver="$(docker exec bms-postgres-1 psql -U bms_owner -d bms -tAc \
+    fp="$(printf '%s' "$BACKUP_AGE_RECIPIENT" | sha256sum | cut -c1-16)"
+    # The live database through the stack's own compose project, as backup.sh reaches it; no container is a failure
+    # (review of 667acd1, finding 9). exec only needs the image variables set.
+    live_ver="$(API_IMAGE="ghcr.io/rincoltech-solutions-ltd/bms-platform-api:${IMAGE_TAG}" \
+        WEB_IMAGE="ghcr.io/rincoltech-solutions-ltd/bms-platform-web:${IMAGE_TAG}" \
+        PROXY_IMAGE="ghcr.io/rincoltech-solutions-ltd/bms-platform-proxy:${IMAGE_TAG}" \
+        docker compose --project-name bms --file compose.yml exec -T postgres psql -U bms_owner -d bms -tAc \
         "SELECT max(version::int) FROM flyway_schema_history WHERE success" 2> /dev/null)"
-    [[ -n "$live_ver" ]] || log "could not read the live Flyway version from bms-postgres-1; recorded as unknown"
+    [[ "$live_ver" =~ ^[0-9]+$ ]] \
+        || check_fail "cannot read the live Flyway version through docker compose (project bms, service postgres): is the stack running?"
     record state/last_backup_check "$(printf '%s OK %s format=age bytes=%s hours=%s stanzas=%s recipient=%s live_flyway=%s' \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$NAME" "$bytes" "$hours" "$stanzas" "$fp" "${live_ver:-unknown}")" last_backup_check.txt
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$NAME" "$bytes" "$hours" "$stanzas" "$fp" "$live_ver")" last_backup_check.txt
     rm -f state/last_backup_check_error
     log "OK (a backup check, not a restore: the restore is the monthly offline drill): $(cat state/last_backup_check)"
     exit 0

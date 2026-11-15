@@ -90,6 +90,7 @@ case "$1" in
             *flyway_schema_history*) echo "${FAKE_FLYWAY:-145}" ;;
             *"count(*) FROM tenants"*) echo 2 ;;
             *set_config*) printf '%s\n%s\n' 0b5e7a2c-0000-4000-8000-00000000a001 "${FAKE_APP_USERS:-3}" ;;
+            *"FROM users WHERE tenant_id"*) echo "${FAKE_OWNER_USERS:-3}" ;;
             *"count(*) FROM users"*) echo 5 ;;
             *"count(*) FROM audit_log"*) echo 40 ;;
             *"SELECT id FROM tenants"*) echo 0b5e7a2c-0000-4000-8000-00000000a001 ;;
@@ -103,8 +104,11 @@ STUB
 #!/usr/bin/env bash
 printf 'age %s\n' "$*" >> "$FAKE/calls.log"
 out=/dev/stdout
+in="${!#}"
 while (( $# )); do [[ "$1" == --output ]] && out="$2"; shift; done
 [[ "$(cat)" == "$FAKE_SECRET" ]] || { echo "age: error: no identity matched any of the recipients" >&2; exit 1; }
+# A backup encrypted to another public key than FAKE_PUBLIC opens with no Keychain key.
+grep -q to-another-key "$in" && { echo "age: error: no identity matched any of the recipients" >&2; exit 1; }
 printf '%s\n' "$PLAIN" > "$out"
 STUB
     cat > "$BIN/age-keygen" <<'STUB'
@@ -198,6 +202,14 @@ printf '2026-11-15T03:30:00Z FAILED bms-production-x.dump.enc only 10 bytes, und
 drill
 check "a host check line with no fingerprint (a failed check) fails the drill" failed_with "no good backup check with a recipient fingerprint"
 
+# The reviewer's scenario: BACKUP_AGE_RECIPIENT on the host was changed to a wrong key, and that week's check failed (a
+# stale backup), so drill/last_backup_check.txt still holds the last good check with the Keychain key's fingerprint. The
+# newest backup, encrypted to the wrong key, does not open: the month is a failure, never a pass.
+fake_mac wrong-host-key; age_backup; printf 'fabricated ciphertext to-another-key\n' >> "$FAKE/backup"
+drill
+check "a newest backup encrypted to another key than the Keychain's fails though the last good check matches" \
+    eval 'failed_with "decryption failed" && ! recorded " OK " && uploaded "FAILED"'
+
 # --- the key ---
 fake_mac wrong-key; age_backup; printf '%s' "$OTHER_SECRET" > "$FAKE/keychain/bms-backup-age-identity"
 # The host's record matches this other key, so the drill gets as far as decrypting, which must fail.
@@ -246,6 +258,9 @@ check "a restore ahead of the checkout's migrations fails" failed_with "ahead of
 fake_mac rls-hides; age_backup
 FAKE_APP_USERS=0 drill
 check "bms_app reading no rows of the tenant fails" failed_with "bms_app reads 0 users"
+fake_mac rls-partial; age_backup
+FAKE_OWNER_USERS=4 drill
+check "bms_app reading fewer of the tenant's rows than the owner counts fails" failed_with "bms_app reads 3 users of business .* the owner counts 4"
 
 # --- usage ---
 fake_mac usage; age_backup

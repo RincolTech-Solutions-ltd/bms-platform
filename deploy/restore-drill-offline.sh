@@ -256,9 +256,13 @@ audit="$(q "SELECT count(*) FROM audit_log")"
 [[ "$tenants" =~ ^[1-9][0-9]*$ ]] || fail "the restore holds no tenants"
 first_tenant="$(q "SELECT id FROM tenants ORDER BY created_at LIMIT 1")"
 app_users="$(docker exec "$DB" psql -U bms_app -d bms -tAc "SELECT set_config('app.tenant_id', '${first_tenant}', false); SELECT count(*) FROM users" 2> /dev/null | tail -n 1)"
-# At least one row: a policy or grant that hides every row is a failure, not a pass (review of 667acd1, finding 7).
+# At least one row, and exactly the business's own rows as the owner role counts them: a policy or grant that hides some
+# or all of them is a failure, not a pass (review of 667acd1, finding 7).
+owner_users="$(q "SELECT count(*) FROM users WHERE tenant_id = '${first_tenant}'")"
 [[ "$app_users" =~ ^[1-9][0-9]*$ ]] \
     || fail "bms_app reads ${app_users:-nothing} users of business ${first_tenant} under row-level security; it must read at least one"
+[[ "$app_users" == "$owner_users" ]] \
+    || fail "bms_app reads ${app_users} users of business ${first_tenant} under row-level security, the owner counts ${owner_users:-nothing}"
 
 # 5. The record.
 seconds="$(elapsed)"

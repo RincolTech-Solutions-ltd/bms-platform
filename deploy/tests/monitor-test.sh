@@ -140,7 +140,15 @@ fresh; check_drill; check "no drill and no check ever" 'no good restore drill or
 # Age backups (ADR-129): the weekly result is the backup check; the full restore is the monthly offline drill in R2.
 # JUSTIFICATION-A3: new cases for the new weekly check and the monthly offline drill result.
 drill_at() { printf '%s OK f seconds=900\n' "$(stamp "$1")" > "$MONITOR_STATE_DIR/last_restore_drill"; }
-check_at() { printf '%s OK bms-test-x.dump.enc format=age bytes=90000\n' "$(stamp "$1")" > "$MONITOR_STATE_DIR/last_backup_check"; }
+check_at() {
+    printf '%s OK bms-test-x.dump.enc format=age bytes=90000 hours=2 stanzas=1 recipient=0123456789abcdef live_flyway=145\n' \
+        "$(stamp "$1")" > "$MONITOR_STATE_DIR/last_backup_check"
+}
+# offline <drill epoch> <backup epoch> [folder] [format] [recipient]: an offline drill's OK line, as the Mac writes it.
+offline() {
+    printf '%s OK bms-test-%s.dump.enc folder=%s format=%s seconds=600 rto_ok=yes flyway=145 repo_flyway=146 tenants=2 users=5 audit=40 app_visible_users=3 recipient=%s' \
+        "$(stamp "$1")" "$(date -u -d "@$2" +%Y%m%dT%H%M%SZ)" "${3:-daily}" "${4:-age}" "${5:-match}"
+}
 # Called in a subshell, so each read is counted in a file.
 offline_drill_line() { echo "$R2_OFFLINE"; echo read >> "$WORK/offline-reads"; }
 offline_reads() { test "$(grep -c read "$WORK/offline-reads" 2> /dev/null)" = "$1"; }
@@ -158,20 +166,32 @@ fresh; check_at $(( NOW - 86400 )); drill_at $(( NOW - 40 * 86400 )); check_dril
 check "no full restore in 35 days, R2 not configured" 'the last full restore drill is 40 days old \(limit 35\)'
 fresh; r2_on; check_at $(( NOW - 86400 )); R2_OFFLINE=""; check_drill
 check "no full restore anywhere" 'no full restore drill recorded on this host or by the offline drill'
-fresh; r2_on; check_at $(( NOW - 86400 )); R2_OFFLINE="$(stamp $(( NOW - 10 * 86400 ))) OK bms-test-x.dump.enc folder=daily format=age seconds=600"
-check_drill; check_silent "an offline drill 10 days ago counts as the full restore"
-fresh; r2_on; check_at $(( NOW - 86400 )); R2_OFFLINE="$(stamp $(( NOW - 10 * 86400 ))) OK bms-test-x.dump.enc folder=daily format=openssl seconds=600"
-check_drill; check "an offline restore of an old-format backup does not count once the host checks age backups" \
+D10=$(( NOW - 10 * 86400 ))
+fresh; r2_on; check_at $(( NOW - 86400 )); R2_OFFLINE="$(offline "$D10" $(( D10 - 8 * 3600 )))"
+check_drill; check_silent "an offline drill 10 days ago of the then newest daily age backup counts as the full restore"
+# Review of 667acd1, finding 1, and the Lead: only the newest daily age backup, its key matched, resets the clock.
+fresh; r2_on; check_at $(( NOW - 86400 )); R2_OFFLINE="$(offline "$D10" $(( D10 - 8 * 3600 )) daily openssl n/a)"
+check_drill; check "an offline restore of an old openssl copy does not count once the host checks age backups" \
     'no full restore drill recorded on this host or by the offline drill'
-fresh; r2_on; check_at $(( NOW - 86400 )); R2_OFFLINE="$(stamp $(( NOW - 10 * 86400 ))) OK bms-test-x.dump.enc folder=monthly format=age seconds=600"
+fresh; r2_on; check_at $(( NOW - 86400 )); R2_OFFLINE="$(offline "$D10" $(( D10 - 20 * 86400 )))"
+check_drill; check "an offline restore of an old age copy (20 days older than the drill) does not count" \
+    'no full restore drill recorded on this host or by the offline drill'
+fresh; r2_on; check_at $(( NOW - 86400 )); R2_OFFLINE="$(offline "$D10" $(( D10 - 8 * 3600 )) monthly)"
 check_drill; check "an offline restore of a monthly copy does not count either" 'no full restore drill recorded'
-fresh; r2_on; check_at $(( NOW - 86400 )); R2_OFFLINE="$(stamp $(( NOW - 40 * 86400 ))) OK bms-test-x.dump.enc folder=daily format=age seconds=600"
+# Finding 2: a missing fingerprint is not OK, in the offline line and in the host's check.
+fresh; r2_on; check_at $(( NOW - 86400 )); R2_OFFLINE="$(offline "$D10" $(( D10 - 8 * 3600 )) daily age unchecked)"
+check_drill; check "an offline OK whose key was not compared with the host's does not count" 'no full restore drill recorded'
+fresh; drill_at $(( NOW - 20 * 86400 ))
+printf '%s OK bms-test-x.dump.enc format=age bytes=90000 recipient=unset\n' "$(stamp $(( NOW - 86400 )))" > "$MONITOR_STATE_DIR/last_backup_check"
+check_drill; check "a backup check with no recipient fingerprint is not a good check" \
+    'the last backup check recorded no recipient fingerprint; the last good restore drill or backup check is 20 days old'
+fresh; r2_on; check_at $(( NOW - 86400 )); R2_OFFLINE="$(offline $(( NOW - 40 * 86400 )) $(( NOW - 40 * 86400 - 8 * 3600 )))"
 check_drill; check "an offline drill 40 days ago is stale" 'the last full restore drill is 40 days old \(limit 35\)'
 fresh; r2_on; check_at $(( NOW - 86400 )); drill_at $(( NOW - 20 * 86400 ))
 R2_OFFLINE="$(stamp $(( NOW - 3600 ))) FAILED bms-test-x.dump.enc folder=daily format=age seconds=30 decryption failed"
 check_drill; check "a failed offline drill" 'the last offline restore drill failed: .*decryption failed'
 fresh; r2_on; check_at $(( NOW - 86400 )); rm -f "$WORK/offline-reads"
-R2_OFFLINE="$(stamp $(( NOW - 10 * 86400 ))) OK bms-test-x.dump.enc folder=daily format=age seconds=600"; check_drill
+R2_OFFLINE="$(offline "$D10" $(( D10 - 8 * 3600 )))"; check_drill
 R2_OFFLINE=""; NOW=$(( NOW + 5 * 3600 )); check_drill
 assert "R2 is read for the offline drill at most every 6 hours" offline_reads 1
 check_silent "the last answer from R2 is kept and still counts"

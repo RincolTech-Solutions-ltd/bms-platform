@@ -253,6 +253,19 @@ check_backup() {
     report backup "$(join "${problems[@]}")"
 }
 
+# offline_counts <offline OK line>: whether it proves the current key (ADR-129, review of 667acd1): an age file from
+# daily/, the Keychain key's fingerprint matched to the host's (recipient=match), and the newest backup when it ran, its
+# name's time at most MONITOR_BACKUP_HOURS before the drill (backups are nightly). A drill of an old-format copy, a monthly
+# copy or an old daily copy does not count.
+offline_counts() {
+    local drill_at backup_at stamp
+    [[ "$1" == *" folder=daily format=age "* && "$1" == *" recipient=match"* ]] || return 1
+    drill_at="$(to_epoch "$(awk '{ print $1 }' <<< "$1")")" || return 1
+    stamp="$(sed -nE 's/^[^ ]+ OK bms-[a-z0-9-]+-([0-9]{8})T([0-9]{2})([0-9]{2})([0-9]{2})Z\.dump\.enc .*/\1 \2:\3:\4/p' <<< "$1")"
+    backup_at="$(to_epoch "${stamp:-none}")" || return 1
+    (( drill_at - backup_at <= MONITOR_BACKUP_HOURS * 3600 && backup_at - drill_at <= 3600 ))
+}
+
 # JUSTIFICATION-A3: the drill check now reads the weekly backup check and the monthly offline drill too (ADR-129).
 check_drill() {
     local problems=() t ok err chk chk_err weekly full line stamp checked seconds
@@ -261,6 +274,11 @@ check_drill() {
     err="$(stamp_of "$STATE/last_restore_drill_error")" || err=0
     chk="$(stamp_of "$STATE/last_backup_check")" || chk=0
     chk_err="$(stamp_of "$STATE/last_backup_check_error")" || chk_err=0
+    # A check without the recipient's fingerprint gives the offline drill nothing to compare: not a good check.
+    if (( chk > 0 )) && ! grep -Eq ' recipient=[0-9a-f]{16}( |$)' "$STATE/last_backup_check"; then
+        problems+=("the last backup check recorded no recipient fingerprint")
+        chk=0
+    fi
     # The weekly result is a full drill while the newest backup is symmetric, a backup check once it is an age file.
     weekly=$(( ok > chk ? ok : chk ))
     (( err > weekly )) && problems+=("the last restore drill failed: $(head -c 300 "$STATE/last_restore_drill_error")")
@@ -287,9 +305,9 @@ check_drill() {
         fi
         line="$(head -n 1 "$STATE/monitor_offline_drill" 2> /dev/null)"
         stamp="$(stamp_of "$STATE/monitor_offline_drill")" || stamp=0
-        # Once this host checks age backups, only an offline restore of an age file from daily/ proves the current key;
-        # a restore of an old-format or monthly copy does not reset the clock (review of 667acd1, finding 1).
-        if (( chk > ok )) && [[ "$line" == *" OK "* && "$line" != *" folder=daily format=age "* ]]; then
+        # Once this host checks age backups, only an offline restore that proves the current key resets the clock
+        # (review of 667acd1, finding 1): see offline_counts.
+        if (( chk > ok )) && [[ "$line" == *" OK "* ]] && ! offline_counts "$line"; then
             line="not counted"
         fi
         case "$line" in

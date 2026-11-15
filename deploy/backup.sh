@@ -68,14 +68,28 @@ log "dumping and encrypting to backups/${NAME} for the age recipient in BACKUP_A
 "${COMPOSE[@]}" exec -T postgres pg_dump --username bms_owner --dbname bms --format custom --compress 6 \
     | age --encrypt --recipient "$BACKUP_AGE_RECIPIENT" > "backups/${NAME}" \
     || fail "pg_dump or age failed; nothing was uploaded"
-# What leaves the host must be an age file to one X25519 recipient, never anything else: the same rules as the weekly
-# check in restore-drill.sh (grease stanzas, which no key opens, allowed; no passphrase; no other recipient).
-header="$(head -c 4096 "backups/${NAME}" | LC_ALL=C sed -n '1,/^--- /p' | tr -d '\0')"
-[[ "$(head -n 1 <<< "$header")" == "age-encryption.org/v1" \
-    && "$(tail -n 1 <<< "$header")" =~ ^---\ [A-Za-z0-9+/]{43}$ \
-    && "$(grep -Ec '^-> X25519 [A-Za-z0-9+/]{43}$' <<< "$header")" == 1 \
-    && "$(grep '^-> ' <<< "$header" | grep -v '^-> X25519 ' | grep -cv '^-> [^ ]*-grease')" == 0 ]] \
-    || fail "the encrypted file is not an age file to one X25519 recipient; nothing was uploaded"
+# age_header_problem <file>: nothing when its header is age's to exactly one X25519 recipient (grease stanzas, which no
+# key opens, allowed; no passphrase; no other recipient), else what is wrong. It reads up to the header MAC line within the
+# first 64 KiB. Kept identical in backup.sh and restore-drill.sh (deploy/tests/backup-test.sh checks that), so what leaves
+# the host and what the weekly check accepts are the same thing.
+age_header_problem() {
+    local header
+    header="$(head -c 65536 "$1" 2> /dev/null | LC_ALL=C sed -n '1,/^--- /p' | tr -d '\0')"
+    if [[ "$(head -n 1 <<< "$header")" != "age-encryption.org/v1" ]]; then
+        echo "not an age file: no version line"
+    elif [[ ! "$(tail -n 1 <<< "$header")" =~ ^---\ [A-Za-z0-9+/]{43}$ ]]; then
+        echo "not a well formed age file: no header MAC"
+    elif grep -q '^-> scrypt ' <<< "$header"; then
+        echo "encrypted with a passphrase, not to the public key"
+    elif [[ "$(grep -Ec '^-> X25519 [A-Za-z0-9+/]{43}$' <<< "$header")" != 1 ]]; then
+        echo "not encrypted to exactly one X25519 recipient"
+    elif [[ "$(grep '^-> ' <<< "$header" | grep -v '^-> X25519 ' | grep -cv '^-> [^ ]*-grease')" != 0 ]]; then
+        echo "encrypted to $(grep -c '^-> ' <<< "$header") recipients, not to the one public key"
+    fi
+}
+# What leaves the host must be an age file to one X25519 recipient, never anything else.
+problem="$(age_header_problem "backups/${NAME}")"
+[[ -z "$problem" ]] || fail "the encrypted file is not an age file to one X25519 recipient (${problem}); nothing was uploaded"
 
 # ADR-018 finding L5: bms.slice is the hard memory cap for the whole staging stack; this run was
 # outside it, so a large upload could take memory from the containers the slice is meant to

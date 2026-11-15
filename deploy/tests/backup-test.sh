@@ -175,6 +175,16 @@ check "an encrypted file that is not age is not uploaded" \
 fake_host grease
 FAKE_AGE_EXTRA="-> 9x-grease fab" run_backup
 check "an age file with a grease stanza beside the one X25519 stanza is uploaded" eval '[[ "$STATUS" == 0 ]] && uploads_are_age'
+fake_host long-grease
+FAKE_AGE_EXTRA="-> 9x-grease $(head -c 1500 /dev/zero | tr '\0' 'g')" run_backup
+check "a header longer than 512 bytes (a long grease stanza) is read to its MAC line and uploaded" \
+    eval '[[ "$STATUS" == 0 ]] && uploads_are_age'
+same_header_check() {
+    diff <(sed -n '/^age_header_problem() {/,/^}/p' "$HERE/../backup.sh") \
+         <(sed -n '/^age_header_problem() {/,/^}/p' "$HERE/../restore-drill.sh") > /dev/null \
+        && [[ -n "$(sed -n '/^age_header_problem() {/,/^}/p' "$HERE/../backup.sh")" ]]
+}
+check "backup.sh and the weekly check in restore-drill.sh judge an age header by the one same function" same_header_check
 fake_host second-recipient
 FAKE_AGE_EXTRA="-> ssh-ed25519 fab RkFCUklDQVRFRGZhYnJpY2F0ZWRmYWJyaWNhdGVkMDA" run_backup
 check "an age file with a second recipient of another kind is not uploaded" \
