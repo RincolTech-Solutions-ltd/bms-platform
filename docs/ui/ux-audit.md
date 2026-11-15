@@ -42,8 +42,9 @@ Counted over the 148 work routes (the component kit is a review page, outside th
 - Payment reconciliation (ticket 3): the differences are one closed row per kind (a `details` whose summary keeps its open
   and close triangle on a 48px row) with the report's full count, the most serious kind first in the server's own order
   (`ReconciliationService.SEVERITY`), listed or only counted, and no row for a kind counted zero; opened, it says what to
-  check and lists 20 at a time, and only when the server cut the list at its first 500 does a kind say how many more are not
-  listed yet. A statement's lines show 50 at a time ("Showing 50 of 120 lines.", or "of the first 1,000" when the server cut
+  check and lists 20 at a time; only when the server cut the list at its first 500 does a kind say how many more are not
+  listed yet, and a count that differs from the rows otherwise is said plainly ("The count is 3, and 2 of them are listed
+  here."). A statement's lines show 50 at a time ("Showing 50 of 120 lines.", or "of the first 1,000" when the server cut
   them), starting again for each statement opened; the statements uploaded before show 10 at a time. Upload and a line's
   Save are plain, so Run it now is the one brand button.
   The empty lines: "No statement yet. Export the merchant statement from your payment provider's dashboard as a CSV file and

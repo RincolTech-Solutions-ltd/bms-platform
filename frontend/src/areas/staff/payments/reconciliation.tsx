@@ -210,8 +210,9 @@ export function PastStatements({ onOpen }: { onOpen: (detail: PaymentStatementDe
 export function FindingGroup({ kind, count, rows, truncated }: { kind: string; count: number; rows: ReconciliationFinding[]; truncated: boolean }) {
   const [shown, setShown] = useState(FINDINGS_PAGE);
   const words = findingWords(kind);
-  // Said only when the server cut the list at its first 500 (`findings_truncated`), never from the counts alone.
+  // "Beyond the first 500" only when the server cut the list (`findings_truncated`); a count that differs otherwise is said plainly.
   const unlisted = truncated ? count - rows.length : 0;
+  const uncounted = truncated ? 0 : count - rows.length;
   return (
     <li>
       <details className="recon-kind" data-testid="finding-kind">
@@ -238,6 +239,7 @@ export function FindingGroup({ kind, count, rows, truncated }: { kind: string; c
             </button>
           )}
           {unlisted > 0 && <p className="hint">{unlisted === 1 ? '1 more is' : `${unlisted} more are`} beyond the first 500 listed, shown once these are put right.</p>}
+          {uncounted > 0 && <p className="hint">The count is {count}, and {rows.length} of them are listed here.</p>}
         </div>
       </details>
     </li>

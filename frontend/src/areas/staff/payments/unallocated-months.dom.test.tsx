@@ -103,6 +103,18 @@ describe('Unallocated payments by month', () => {
     expect(heads()).toEqual([`October 20261 payment, ${money(10000, 'UGX')}`, `November 20262 payments, ${money(20000, 'UGX')} and ${money(500, 'USD')}`]);
   });
 
+  it('says "so far" on a month split across pages until its next page is in, and on no earlier month', async () => {
+    list
+      .mockResolvedValueOnce(as<UnallocatedReceiptPage>({ items: [on(1, '2026-09-20', 1000), on(2, '2026-10-02', 2000)], next_cursor: 'cursor-test-2' }))
+      .mockResolvedValueOnce(as<UnallocatedReceiptPage>({ items: [on(3, '2026-10-25', 3000)] }));
+    shell();
+    await screen.findByText('CONF-TEST-2');
+    expect(heads()).toEqual([`September 20261 payment, ${money(1000, 'UGX')}`, `October 20261 payment so far, ${money(2000, 'UGX')}`]);
+    fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
+    await screen.findByText('CONF-TEST-3');
+    expect(heads()).toEqual([`September 20261 payment, ${money(1000, 'UGX')}`, `October 20262 payments, ${money(5000, 'UGX')}`]);
+  });
+
   it('keeps a long month closed until its header is tapped', async () => {
     list.mockResolvedValue(as<UnallocatedReceiptPage>({ items: Array.from({ length: 31 }, (_, i) => on(i + 1, '2026-10-05', 1000)) }));
     shell();

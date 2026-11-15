@@ -92,6 +92,7 @@ describe('the differences by kind', () => {
     // A kind counted past the first 500 says how many more are not listed, never hides them in silence.
     expect(kinds()[1]?.textContent).toContain('2 more are beyond the first 500 listed, shown once these are put right.');
     expect(kinds()[2]?.textContent).toContain('4 more are beyond the first 500 listed, shown once these are put right.');
+    expect(document.body.textContent).not.toContain('listed here.');
   });
 
   it('lists 20 differences of a kind at a time when opened, and Show more adds the rest', async () => {
@@ -117,6 +118,8 @@ describe('the differences by kind', () => {
     await screen.findByText('Paid a different amount');
     expect(kinds()[0]?.querySelector('summary')?.textContent).toBe('Paid a different amount: 3');
     expect(document.body.textContent).not.toMatch(/beyond the first 500|Only the first 500/);
+    // The difference is said in neutral words instead.
+    expect(kinds()[0]?.textContent).toContain('The count is 3, and 2 of them are listed here.');
   });
 
   it('draws no row for a kind counted zero', async () => {
