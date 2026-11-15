@@ -7,7 +7,6 @@ import type { UnallocatedReceipt, UnallocatedReceiptPage } from '../../../api/pa
 import { mockMe } from '../../../api/retail-mock';
 import { router as appRouter } from '../../../app/router';
 import { StaffContext } from '../context';
-import { money } from '../lending/loan-state';
 
 const as = <T,>(value: T): T => value;
 
