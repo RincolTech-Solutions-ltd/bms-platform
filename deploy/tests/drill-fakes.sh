@@ -24,7 +24,8 @@
 #   FAKE_WRITE_SIGNAL=<sig> the live write sends the script that signal once the row is stored;
 #   FAKE_LIVE_SILENT=1      the live database does not answer the read-back of the rehearsal's row;
 #   FAKE_BACKUP_FILE=<path> the backup rclone downloads from daily/ is a copy of that file (ADR-129: an age file);
-#   FAKE_NO_LIVE_DB=1       docker compose finds no running postgres service.
+#   FAKE_NO_LIVE_DB=1       docker compose finds no running postgres service;
+#   FAKE_PS_FAIL=1          docker ps cannot reach the engine (issue #951).
 # JUSTIFICATION-A2: the fake host is shared by two test files and is not a tiny helper.
 
 FAKE_EPOCH=1793000000
@@ -186,6 +187,7 @@ case "$1" in
         [[ -n "${FAKE_NO_LIVE_DB:-}" ]] && { echo "service \"postgres\" is not running" >&2; exit 1; }
         [[ "$*" == *flyway_schema_history* ]] && echo 145 ;;
     ps)
+        [[ -n "${FAKE_PS_FAIL:-}" ]] && { echo "Cannot connect to the Docker daemon" >&2; exit 1; }
         if [[ "$*" == *"com.docker.compose.service=api"* ]]; then
             echo "bms-api-1"
         else

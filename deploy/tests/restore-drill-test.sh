@@ -7,8 +7,9 @@
 # deploy/tests/golden/restore-drill-no-args.txt is the transcript of the drill as it was before the rehearsal mode (main
 # at 0da2f17), made with UPDATE_GOLDEN=1 against that script: a success on staging and on production, a failed
 # decryption and a failed pg_restore. The current script must print the same transcript byte for byte, its PID aside.
-# One call was added since, by hand and on purpose: `ps --all --format {{.Names}}` before the throwaway database starts,
-# the check that no remote offline drill's database is on the host (issue #949, review of 7a1faf9, finding 4).
+# One call was added since, by hand and on purpose: `ps --all --format {{.Names}}`, the check that no remote offline
+# drill's database is on the host (issue #949, review of 7a1faf9, finding 4). Issue #951 moved it, by hand, to the first
+# call, before anything is downloaded or decrypted, so it now opens all four transcripts.
 # Run: bash deploy/tests/restore-drill-test.sh
 # The age checks at the end are strings and functions run through expect and eval, expanded only when they run.
 # shellcheck disable=SC2016,SC2317
@@ -198,4 +199,12 @@ printf '%s\n' 'bms-offline-drill-4242||none' > "$FAKE/containers"
 run_script
 expect "the weekly drill fails, and starts nothing, while a remote offline drill's database is on the host" \
     eval '[[ "$STATUS" == 1 ]] && grep -q "a remote offline drill.s database (bms-offline-drill-\*) is on this host" "$HOST/state/last_restore_drill_error" && ! grep -q "^run --detach" "$FAKE/calls.log" && nothing_left'
+# Issue #951, item 2: the refusal comes before the download and the decryption, and a docker ps that errors refuses too.
+downloaded_nothing() { ! grep -q 'copyto r2:fake-bucket/staging/daily/' "$FAKE/calls.log" && [[ ! -s "$FAKE/decrypt-dirs" ]]; }
+expect "the weekly drill refuses before it downloads or decrypts anything" downloaded_nothing
+fake_host "$WORK/offline-drill-ps-fails"
+# shellcheck disable=SC2119 # the drill is run with no argument on purpose.
+FAKE_PS_FAIL=1 run_script
+expect "the weekly drill fails closed, downloading and starting nothing, when docker ps errors" \
+    eval '[[ "$STATUS" == 1 ]] && grep -q "cannot list the containers to look for a remote offline drill.s database" "$HOST/state/last_restore_drill_error" && downloaded_nothing && ! grep -q "^run --detach" "$FAKE/calls.log" && nothing_left'
 exit "$failures"

@@ -6,9 +6,9 @@ exit 0
 [drill 2026-10-26T07:33:20Z] restoring
 [drill 2026-10-26T07:33:20Z] OK: 2026-10-26T07:33:20Z OK bms-staging-20261024T011500Z.dump.enc seconds=0 rto_ok=yes flyway=145 live_flyway=145 tenants=2 users=5 audit=40 app_visible_users=3
 -- docker calls
+ps --all --format {{.Names}}
 run --rm --cgroup-parent bms.slice --memory 64m --volume WORK/ok-staging/opt/backups:/backups --env RCLONE_CONFIG_R2_TYPE=s3 --env RCLONE_CONFIG_R2_PROVIDER=Cloudflare --env RCLONE_CONFIG_R2_ENDPOINT=https://fake-r2.invalid --env RCLONE_CONFIG_R2_ACCESS_KEY_ID=fake-access --env RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=fake-secret --env RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true rclone/rclone:fake lsf --files-only r2:fake-bucket/staging/daily/
 run --rm --cgroup-parent bms.slice --memory 64m --volume WORK/ok-staging/opt/backups:/backups --env RCLONE_CONFIG_R2_TYPE=s3 --env RCLONE_CONFIG_R2_PROVIDER=Cloudflare --env RCLONE_CONFIG_R2_ENDPOINT=https://fake-r2.invalid --env RCLONE_CONFIG_R2_ACCESS_KEY_ID=fake-access --env RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=fake-secret --env RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true rclone/rclone:fake copyto r2:fake-bucket/staging/daily/bms-staging-20261024T011500Z.dump.enc /backups/drill-PID.dump.enc
-ps --all --format {{.Names}}
 run --detach --name bms-restore-drill-PID --cgroup-parent bms.slice --memory 384m --network none --env POSTGRES_PASSWORD=ZmFicmljYXRlZHJhbmRvbXBhc3M --env POSTGRES_DB=bms --env BMS_OWNER_PASSWORD=ZmFicmljYXRlZHJhbmRvbXBhc3M --env BMS_APP_PASSWORD=ZmFicmljYXRlZHJhbmRvbXBhc3M --volume WORK/ok-staging/opt/postgres/initdb:/docker-entrypoint-initdb.d:ro postgres:fake
 logs bms-restore-drill-PID
 exec bms-restore-drill-PID pg_isready -U bms_owner -d bms
@@ -36,9 +36,9 @@ exit 0
 [drill 2026-10-26T07:33:20Z] restoring
 [drill 2026-10-26T07:33:20Z] OK: 2026-10-26T07:33:20Z OK bms-staging-20261024T011500Z.dump.enc seconds=0 rto_ok=yes flyway=145 live_flyway=145 tenants=2 users=5 audit=40 app_visible_users=3
 -- docker calls
+ps --all --format {{.Names}}
 run --rm --memory 64m --volume WORK/ok-production/opt/backups:/backups --env RCLONE_CONFIG_R2_TYPE=s3 --env RCLONE_CONFIG_R2_PROVIDER=Cloudflare --env RCLONE_CONFIG_R2_ENDPOINT=https://fake-r2.invalid --env RCLONE_CONFIG_R2_ACCESS_KEY_ID=fake-access --env RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=fake-secret --env RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true rclone/rclone:fake lsf --files-only r2:fake-bucket/production/daily/
 run --rm --memory 64m --volume WORK/ok-production/opt/backups:/backups --env RCLONE_CONFIG_R2_TYPE=s3 --env RCLONE_CONFIG_R2_PROVIDER=Cloudflare --env RCLONE_CONFIG_R2_ENDPOINT=https://fake-r2.invalid --env RCLONE_CONFIG_R2_ACCESS_KEY_ID=fake-access --env RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=fake-secret --env RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true rclone/rclone:fake copyto r2:fake-bucket/production/daily/bms-staging-20261024T011500Z.dump.enc /backups/drill-PID.dump.enc
-ps --all --format {{.Names}}
 run --detach --name bms-restore-drill-PID --memory 384m --network none --env POSTGRES_PASSWORD=ZmFicmljYXRlZHJhbmRvbXBhc3M --env POSTGRES_DB=bms --env BMS_OWNER_PASSWORD=ZmFicmljYXRlZHJhbmRvbXBhc3M --env BMS_APP_PASSWORD=ZmFicmljYXRlZHJhbmRvbXBhc3M --volume WORK/ok-production/opt/postgres/initdb:/docker-entrypoint-initdb.d:ro postgres:fake
 logs bms-restore-drill-PID
 exec bms-restore-drill-PID pg_isready -U bms_owner -d bms
@@ -64,6 +64,7 @@ exit 1
 [drill 2026-10-26T07:33:20Z] newest backup: bms-staging-20261024T011500Z.dump.enc
 [drill 2026-10-26T07:33:20Z] FAILED: decryption failed (wrong BACKUP_ENCRYPTION_KEY or a corrupt file)
 -- docker calls
+ps --all --format {{.Names}}
 run --rm --cgroup-parent bms.slice --memory 64m --volume WORK/decryption-fails/opt/backups:/backups --env RCLONE_CONFIG_R2_TYPE=s3 --env RCLONE_CONFIG_R2_PROVIDER=Cloudflare --env RCLONE_CONFIG_R2_ENDPOINT=https://fake-r2.invalid --env RCLONE_CONFIG_R2_ACCESS_KEY_ID=fake-access --env RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=fake-secret --env RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true rclone/rclone:fake lsf --files-only r2:fake-bucket/staging/daily/
 run --rm --cgroup-parent bms.slice --memory 64m --volume WORK/decryption-fails/opt/backups:/backups --env RCLONE_CONFIG_R2_TYPE=s3 --env RCLONE_CONFIG_R2_PROVIDER=Cloudflare --env RCLONE_CONFIG_R2_ENDPOINT=https://fake-r2.invalid --env RCLONE_CONFIG_R2_ACCESS_KEY_ID=fake-access --env RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=fake-secret --env RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true rclone/rclone:fake copyto r2:fake-bucket/staging/daily/bms-staging-20261024T011500Z.dump.enc /backups/drill-PID.dump.enc
 run --rm --cgroup-parent bms.slice --memory 64m --volume WORK/decryption-fails/opt/backups:/backups --env RCLONE_CONFIG_R2_TYPE=s3 --env RCLONE_CONFIG_R2_PROVIDER=Cloudflare --env RCLONE_CONFIG_R2_ENDPOINT=https://fake-r2.invalid --env RCLONE_CONFIG_R2_ACCESS_KEY_ID=fake-access --env RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=fake-secret --env RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true rclone/rclone:fake copyto /backups/drill-result-PID.txt r2:fake-bucket/staging/drill/last_restore_drill.txt
@@ -83,9 +84,9 @@ exit 1
 [drill 2026-10-26T07:33:20Z] pg_restore stderr (host only, never sent or uploaded): pg_restore: error: fabricated failure 
 [drill 2026-10-26T07:33:20Z] FAILED: pg_restore failed, see state/restore-drill.log
 -- docker calls
+ps --all --format {{.Names}}
 run --rm --cgroup-parent bms.slice --memory 64m --volume WORK/pg-restore-fails/opt/backups:/backups --env RCLONE_CONFIG_R2_TYPE=s3 --env RCLONE_CONFIG_R2_PROVIDER=Cloudflare --env RCLONE_CONFIG_R2_ENDPOINT=https://fake-r2.invalid --env RCLONE_CONFIG_R2_ACCESS_KEY_ID=fake-access --env RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=fake-secret --env RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true rclone/rclone:fake lsf --files-only r2:fake-bucket/staging/daily/
 run --rm --cgroup-parent bms.slice --memory 64m --volume WORK/pg-restore-fails/opt/backups:/backups --env RCLONE_CONFIG_R2_TYPE=s3 --env RCLONE_CONFIG_R2_PROVIDER=Cloudflare --env RCLONE_CONFIG_R2_ENDPOINT=https://fake-r2.invalid --env RCLONE_CONFIG_R2_ACCESS_KEY_ID=fake-access --env RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=fake-secret --env RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true rclone/rclone:fake copyto r2:fake-bucket/staging/daily/bms-staging-20261024T011500Z.dump.enc /backups/drill-PID.dump.enc
-ps --all --format {{.Names}}
 run --detach --name bms-restore-drill-PID --cgroup-parent bms.slice --memory 384m --network none --env POSTGRES_PASSWORD=ZmFicmljYXRlZHJhbmRvbXBhc3M --env POSTGRES_DB=bms --env BMS_OWNER_PASSWORD=ZmFicmljYXRlZHJhbmRvbXBhc3M --env BMS_APP_PASSWORD=ZmFicmljYXRlZHJhbmRvbXBhc3M --volume WORK/pg-restore-fails/opt/postgres/initdb:/docker-entrypoint-initdb.d:ro postgres:fake
 logs bms-restore-drill-PID
 exec bms-restore-drill-PID pg_isready -U bms_owner -d bms
