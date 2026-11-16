@@ -250,11 +250,14 @@ switch of section 8.4, with neither `BACKUP_ENCRYPTION_KEY` nor the R2 settings 
    container; the refusal says how much it found and needed: wait until no heavy job runs. On production it starts
    nothing unless the host has that much and 256 MB more available (`MemAvailable`).
 4. Starts the throwaway PostgreSQL (`bms-rehearsal-db-<pid>`, that cap with no swap, 1 CPU, inside `bms.slice` on
-   staging) with no network (`--network none`), as the remote offline drill keeps its own (section 8.5): its data and
-   WAL on a tmpfs inside the cap (`PGDATA` set to it), no log driver, `--oom-score-adj 1000` (on a host short of memory
-   the kernel kills it before the live stack), no volume. It refuses to go on unless it is provably not the live
-   database: another name, another container, another cluster (`pg_control_system()`'s identifier), this rehearsal's
-   label, no network, and its data directory the tmpfs (`SHOW data_directory`). It asks again before the commit.
+   staging) as the remote offline drill keeps its own (section 8.5): its data and WAL on a tmpfs inside the cap
+   (`PGDATA` set to it), no log driver, `--oom-score-adj 1000` (on a host short of memory the kernel kills it before
+   the live stack), no volume. Where the offline drill's database has no network, this one is on an internal Docker
+   network of its own (`bms-rehearsal-net-<pid>`): no route out, and only it, the migrate container and the rehearsal
+   API on it, never a live container. That meets the intent of "no network" (approved by the Lead, review of 9e0c501):
+   the two containers must reach it. It refuses to go on unless it is provably not the live database: another name,
+   another container, another cluster (`pg_control_system()`'s identifier), this rehearsal's label, this network only,
+   and its data directory the tmpfs (`SHOW data_directory`). It asks again before the commit.
    Then it streams the live database into it: `pg_dump` as `bms_owner` in the live container, in pg_dump's own
    consistent read-only snapshot, uncompressed, piped straight into `pg_restore` in the throwaway one, so the dump is
    never a file on the host. pg_dump runs at nice 19 and the lowest best-effort I/O priority, and its server process
@@ -281,20 +284,19 @@ switch of section 8.4, with neither `BACKUP_ENCRYPTION_KEY` nor the R2 settings 
 6. Runs `rehearse-import` in a short-lived API container (`bms-rehearsal-api-<pid>`, 448 MB, 1 CPU, the staging api's
    224 MB heap) with the live API's image and settings, the database switched to the throwaway one, the scheduler and
    the clean-ups off, no import key, every key of an outside service (object storage, mail, SMS, payments, push, AI,
-   chat) replaced by a placeholder (the data and signing keys stay: the application needs them to start), in the
-   throwaway database's network namespace only (`--network container:bms-rehearsal-db-<pid>`, the database at
-   `localhost`), which has no network; the migrate container of step 5 runs the same way. A placeholder has the shape its setting is checked for at start, and its address is on
+   chat) replaced by a placeholder (the data and signing keys stay: the application needs them to start), on the
+   internal network only. A placeholder has the shape its setting is checked for at start, and its address is on
    `.invalid`, which no resolver answers (the storage endpoint is `http://rehearsal-storage.invalid`, issue #889); a
    value empty on the live API stays empty, so a service off there stays off; push is off. The Resend and AI URLs are
    always set to `.invalid`, since empty means the provider's real host. Base URLs the startup guards hold to the
-   provider's own host (SMS, payments, Ask BMS) are kept, with placeholder keys, and rely on there being no network,
+   provider's own host (SMS, payments, Ask BMS) are kept, with placeholder keys, and rely on the internal network,
    which `rehearse-import-test.sh` checks. CI starts the application with exactly these settings
    (`RehearsalSettingsIT`). It moves the run back to review there, takes the dry run again on the restored state and
    this build, makes the run ready and commits it with the real commit. The stored rehearsal's `backup` names the live
    snapshot it started from, `live-bms-postgres-1-<UTC stamp>`.
 7. Stores the rehearsal on the live run: one `import_rehearsals` row, inserted as `bms_app` under the business's
    row-level security. It is the only write the rehearsal makes on the live database.
-8. Removes the containers and the temp dir on success, on failure, on Ctrl-C (INT) and on
+8. Removes the containers, the network and the temp dir on success, on failure, on Ctrl-C (INT) and on
    TERM, and says so in its last line. The streamed restore, the migrations and the commit run in the background while the
    script waits, so a Ctrl-C or a stop removes their container at once rather than after they end. A KILL (or a power
    loss) leaves them behind: see below.
@@ -323,7 +325,7 @@ If the host loses power during a rehearsal, remove what is left (names all start
 
 ```
 docker rm -f -v $(docker ps -aq --filter name=bms-rehearsal-) 2> /dev/null
-# Only a rehearsal from before issue #953 made a volume and a network; neither is made now.
+# Only a rehearsal from before issue #953 made a volume; none is made now.
 docker volume rm $(docker volume ls -q --filter name=bms-rehearsal-) 2> /dev/null
 docker network rm $(docker network ls -q --filter name=bms-rehearsal-) 2> /dev/null
 rm -rf /opt/bms/backups/rehearsal.*

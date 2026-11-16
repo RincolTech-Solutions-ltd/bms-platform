@@ -99,8 +99,10 @@ decrypt.
    deadline: 5 minutes and 2 seconds a MB of live data, an hour at most, by `timeout -s KILL` and the session name;
    `--lock-wait-timeout` keeps pg_dump itself from queueing behind a lock. The throwaway database is kept as the remote
    drill keeps its own (decision 7): its data and WAL on a tmpfs inside its memory cap (`PGDATA` set to it and checked),
-   no swap, no log driver, `--oom-score-adj 1000`, and no network (`--network none`); the migrate and API containers
-   join its network namespace and reach it on `localhost`, so none of the three has any network. Its cap is the
+   no swap, no log driver, `--oom-score-adj 1000`. In place of the remote drill's "no network" it is on an `--internal`
+   Docker network of its own, which only it, the migrate container and the rehearsal API join: no route out, and no
+   live container on it. The migrate and API containers must reach it, and the Lead approved this network as meeting
+   the intent of "no network" (review of 9e0c501, point 3). Its cap is the
    server's 192 MB, 64 MB of WAL (`wal_level=minimal`, `max_wal_size=32MB`) and one and a half times the live
    database's size (at least 96 MB); `BMS_REHEARSAL_DB_MEMORY_MB` may raise it, never lower it, and nothing is ever put
    on a disk. On staging it sits in `bms.slice` and the rehearsal starts only while the slice has room
