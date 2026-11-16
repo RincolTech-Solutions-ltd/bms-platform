@@ -23,9 +23,18 @@
 #   FAKE_LIVE_HANG_ADVANCE_TO=<epoch> it jumps there while the live read of the run hangs;
 #   FAKE_WRITE_SIGNAL=<sig> the live write sends the script that signal once the row is stored;
 #   FAKE_LIVE_SILENT=1      the live database does not answer the read-back of the rehearsal's row;
-#   FAKE_BACKUP_FILE=<path> the backup rclone downloads from daily/ is a copy of that file (ADR-129: an age file);
+#   FAKE_BACKUP_FILE=<path> the newest backup under daily/ is a copy of that file (ADR-129: an age file); the weekly
+#                           drill downloads it with rclone, the rehearsal never reads it;
 #   FAKE_NO_LIVE_DB=1       docker compose finds no running postgres service;
-#   FAKE_PS_FAIL=1          docker ps cannot reach the engine (issue #951).
+#   FAKE_PS_FAIL=1          docker ps cannot reach the engine (issue #951);
+#   FAKE_LIVE_DB_MB=<n>     the live database's size in MB (default 40);
+#   FAKE_DUMP_FAIL=1        the rehearsal's pg_dump of the live database fails part way;
+#   FAKE_DATA_DIRECTORY=<p> the throwaway database's data directory (default its tmpfs, /var/lib/postgresql/data);
+#   FAKE_DATA_FS=<type>     the file system mounted there (default tmpfs);
+#   FAKE_RENICE_NOT_DUMP=1  the pid found for the live dump is no longer the dump's when it is reniced (its title or
+#                           its start time does not match, so the check in the live container exits 3).
+# The rehearsal's pg_restore records what it read in $FAKE/restored, the files under the host at that moment in
+# $FAKE/files-during-restore and any file holding the dump in $FAKE/dump-on-disk.
 # JUSTIFICATION-A2: the fake host is shared by two test files and is not a tiny helper.
 
 FAKE_EPOCH=1793000000
@@ -128,7 +137,7 @@ case "$1" in
                 --label) label="$2"; shift ;;
                 --env-file) envfile="$2"; shift ;;
                 --volume) mounts["${2#*:}"]="${2%%:*}"; mounts["${2#*:}"]="${mounts["${2#*:}"]%:ro}"; shift ;;
-                --cgroup-parent|--memory|--memory-swap|--cpus|--env|--user) shift ;;
+                --cgroup-parent|--memory|--memory-swap|--cpus|--env|--user|--tmpfs|--log-driver|--oom-score-adj) shift ;;
                 -*) ;;
                 *) image="$1"; shift; break ;;
             esac
@@ -154,6 +163,7 @@ case "$1" in
                 fi
                 exit 0 ;;
             postgres:*)
+                [[ -n "$envfile" ]] && cp "$envfile" "$FAKE/db-env.seen"
                 echo "$name|${label#bms.rehearsal=}|$network" >> "$FAKE/containers"
                 echo "container-id-$name" ;;
             *)
@@ -223,7 +233,7 @@ case "$1" in
         while [[ "$1" == -* ]]; do
             case "$1" in
                 -i) interactive=1 ;;
-                -e | --env) shift ;;
+                -e | --env | -u | --user) shift ;;
             esac
             shift
         done
@@ -231,8 +241,29 @@ case "$1" in
         sql="$*"
         case "$sql" in
             pg_isready*) exit 0 ;;
+            # The renice, checked and done in one exec on the live container: 3 when the pid is not the dump's.
+            "sh -c p="*"rh-renice "*) [[ -n "${FAKE_RENICE_NOT_DUMP:-}" ]] && exit 3; exit 0 ;;
+            "awk -v d="*/proc/mounts) echo "${FAKE_DATA_FS:-tmpfs}"; exit 0 ;;
+            *pg_dump*)
+                # The rehearsal's dump of the live database, to stdout only.
+                echo "fabricated dump of the live database"
+                [[ -n "${FAKE_DUMP_FAIL:-}" ]] && { echo "pg_dump: error: fabricated failure part way" >&2; exit 1; }
+                exit 0 ;;
             pg_restore*)
-                cat > /dev/null
+                if [[ "$container" == bms-rehearsal-db-* ]]; then
+                    # A stream long enough for the rehearsal to lower the live dump's priority and ask for the pid
+                    # again (its second query), as a real one is, and then to say so.
+                    for _ in $(seq 50); do
+                        (( $(grep -c "backend_start))::bigint FROM pg_stat_activity" "$FAKE/calls.log") >= 2 )) && break
+                        "$REAL_SLEEP" 0.1
+                    done
+                    "$REAL_SLEEP" 0.5
+                    cat > "$FAKE/restored"
+                    find "$FAKE_HOST" -type f | sort > "$FAKE/files-during-restore"
+                    grep -rl "fabricated dump" "$FAKE_HOST" > "$FAKE/dump-on-disk"
+                else
+                    cat > /dev/null
+                fi
                 [[ -n "${FAKE_RESTORE_FAIL:-}" ]] && { echo "pg_restore: error: fabricated failure" >&2; exit 1; }
                 exit 0 ;;
         esac
@@ -281,6 +312,9 @@ case "$1" in
                 # The run's rows in a table, live and copied: the same unless a test says the copy lost some.
                 if [[ -n "${FAKE_COUNT_MISMATCH:-}" && "$container" != "$live_db" ]]; then echo "2:0f0f"; else echo "3:0f0f"; fi ;;
             *pg_terminate_backend*) echo 0 ;;
+            *"SELECT pid || ' ' || floor(extract(epoch FROM backend_start))::bigint FROM pg_stat_activity"*) echo "4242 1793000001" ;;
+            *"SHOW data_directory"*) echo "${FAKE_DATA_DIRECTORY:-/var/lib/postgresql/data}" ;;
+            *pg_database_size*) echo "${FAKE_LIVE_DB_MB:-40}" ;;
             *"SELECT id FROM import_rehearsals"*) echo "0b5e7a2c-0000-4000-8000-00000000d001" ;;
             *pg_control_system*)
                 if [[ "$container" == "$live_db" || -n "${FAKE_SAME_SYSID:-}" ]]; then echo "$FAKE_LIVE_SYSID"; else echo "7400000000000000999"; fi ;;

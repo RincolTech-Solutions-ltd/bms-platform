@@ -1440,10 +1440,10 @@ expand only:
   opens (`ImportRuns.open(createdBy, fabricated)`), that its files hold fabricated data only; staging rehearses only such a
   run. The trigger `import_runs_fabricated_fixed` (`BEFORE UPDATE OF fabricated`) refuses any change after.
 - **`import_rehearsals`** (V146, #138; RLS forced, `SELECT, INSERT`, append-only by `reject_mutation`): one row per
-  rehearsal of a run on last night's backup (chapter 13 section 13.14.1, 12/16), written by the `rehearse-import` command
+  rehearsal of a run on a copy of the live database (on last night's backup before issue #953; chapter 13 section 13.14.1, 12/16), written by the `rehearse-import` command
   in the throwaway database and copied onto the live run by `deploy/restore-drill.sh --rehearse-import` as `bms_app`:
   `id`, `tenant_id`, `run_id` (FK `(tenant_id, run_id)`), `created_at`, `backup varchar(200)` (the restored object's
-  name), `build varchar(300)` (the API build that committed), `outcome` (`committed`, `halted` or `failed`), `failure
+  name; since issue #953 the rehearsal starts from the live database and it holds `live-bms-postgres-1-<UTC stamp>`), `build varchar(300)` (the API build that committed), `outcome` (`committed`, `halted` or `failed`), `failure
   varchar(300)` (a code or the kind of failure, never a message; set exactly when not committed, the CHECK
   `import_rehearsals_failure_named`), `report jsonb` (the commit's `CommitReport`, or the rehearsal's dry run's when the
   commit did not start), `reconciliation jsonb` (the newest reconciliation the commit made: version, as-at day, SHA-256,

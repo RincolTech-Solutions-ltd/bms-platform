@@ -104,9 +104,9 @@ REMOTE_STATE="${BMS_DRILL_REMOTE_STATE:-/opt/bms/state}"
 # the container, and the 64 MB maintenance_work_mem the server takes for each index it builds, pinned with -c below;
 # issue #951, item 4), plus the tmpfs that holds the data directory, the rest. The WAL lives in that tmpfs too, about
 # WAL_MB with max_wal_size 64 MB (review of 7a1faf9, finding 2). 640 MB inside staging's bms.slice (MemoryHigh 1500M,
-# MemoryMax 1600M; 288 MB of tmpfs, about 192 MB of data; under the 704 MB a rehearsal's database and API take), 1280 MB
-# on the 4 GB production VM (928 MB of tmpfs, about 832 MB of data), 2048 MB on this Mac (--local; 1696 MB of tmpfs,
-# about 1600 MB of data). Lead on the review of e7cc8e6: raise the cap so both fit.
+# MemoryMax 1600M; 288 MB of tmpfs, about 192 MB of data; under the 800 MB or more a rehearsal's database and API take,
+# issue #953), 1280 MB on the 4 GB production VM (928 MB of tmpfs, about 832 MB of data), 2048 MB on this Mac (--local;
+# 1696 MB of tmpfs, about 1600 MB of data). Lead on the review of e7cc8e6: raise the cap so both fit.
 SERVER_MB=256
 RESTORE_MB=96
 WAL_MB=96
