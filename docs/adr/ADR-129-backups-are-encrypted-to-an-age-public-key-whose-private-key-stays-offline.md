@@ -94,12 +94,12 @@ decrypt.
    server, 96 MB for the restore that runs in the same cgroup, `pg_restore` itself and the server's
    `maintenance_work_mem` pinned at 64 MB (issue #951), plus the data: 640 MB inside `bms.slice` on staging, as the
    weekly host drill is kept in it; 1280 MB on production, which has no slice; `BMS_DRILL_MEMORY_MB`), its data
-   directory on a tmpfs inside that cap
-   (the cap less 352 MB, WAL included, kept small with `max_wal_size=64MB`; autovacuum off, so no worker takes memory
-   beyond that budget), no log driver and `--oom-score-adj 1000` (on a host short of memory the kernel kills it before
-   the live stack), is created by the host's own `/opt/bms/postgres/initdb` roles script, and is removed on every
-   exit path: the Mac's exit trap removes it over ssh, and its label `bms.offline-drill.expires` (6 hours after the start)
-   lets the host's `monitor.sh` remove it if the Mac dies mid-run. The key never crosses ssh; only the decrypted stream
+   directory on a tmpfs inside that cap (the cap less 352 MB, WAL included, kept small with `max_wal_size=64MB`;
+   autovacuum off, so no worker takes memory beyond that budget), no log driver and `--oom-score-adj 1000` (on a host
+   short of memory the kernel kills it before the live stack), is created by the host's own `/opt/bms/postgres/initdb`
+   roles script, and is removed on every exit path: the Mac's exit trap removes it over ssh, and its label
+   `bms.offline-drill.expires` (6 hours after the start) lets the host's `monitor.sh` remove it if the Mac dies mid-run.
+   The key never crosses ssh; only the decrypted stream
    does, to a host that already holds the same live data. The decrypted dump is never written to a file on the Mac or the
    host, and a `pg_restore` error (which can quote rows) is held in the Mac's memory and shown on its screen only. The
    restored rows live only in the container's memory (the tmpfs, no swap), and a server error that quotes a row is never
@@ -112,7 +112,9 @@ decrypt.
    it cannot list the containers) and a rehearsal refuse while one is there. On staging it holds the puller's
    `pull.lock` and `deploy.sh`'s `deploy.lock` for its whole run (a small container of the same image takes them with
    `flock` on the host's state folder and carries the same expiry label, so the exit trap or `monitor.sh` releases them),
-   so no deploy runs beside it in the slice, and the puller, finding its lock held, says why once (issue #951). It also
+   so no deploy runs beside it in the slice, and the puller, finding its lock held, says why once per drill (issue #951);
+   it waits up to 30 seconds for `pull.lock`, which the puller holds briefly every two minutes, never for `deploy.lock`,
+   and `monitor.sh` reaps an expired holder as it reaps the database. It also
    refuses unless `bms.slice` has the whole cap free below its `MemoryHigh`, asked once the locks are held and again
    just before the database starts, and unless the slice's own oom count is readable; a container the slice's limit
    killed is reported as that, never as a cap to raise. A failed restore asks the tmpfs how full it is and whether the

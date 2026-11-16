@@ -40,7 +40,7 @@ systemctl list-timers bms-pull.timer
   anyway). Fix forward with a new merge (a new tag is tried at once), or retry the same one with
   `rm /opt/bms/state/last_failed_tag`. `releases/<tag>/` on the host keeps that release's files for
   inspection until the next successful deploy cleans it up.
-- The log says `an offline restore drill (bms-offline-drill-<n> ...) is on this host; deploying on a
+- The log says `an offline restore drill (bms-offline-drill-<n>) is on this host; deploying on a
   later run`, once per drill: the operator's monthly drill (`restore-from-backup.md` section 8.5) is
   running in `bms.slice` and holds `state/pull.lock` and `state/deploy.lock`, so neither the puller
   nor a `./deploy.sh` by hand runs until it ends; the release deploys on the first run after its
