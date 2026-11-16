@@ -119,13 +119,14 @@ check "while it streams, no file on the host holds the dump; the temp dir holds 
         && [[ "$(grep "/backups/" "$FAKE/files-during-restore" | sed -E "s#.*/backups/rehearsal\.[A-Za-z0-9]{6}/##")" == db.env ]]'
 check "the live dump's server process, found by its own name, is reniced as postgres (no CAP_SYS_NICE in a container)" \
     eval 'renice_line="$(grep "^exec --user postgres bms-postgres-1 sh -c " "$FAKE/calls.log")" \
-        && [[ "$renice_line" == *" rh-renice 4242" ]] \
+        && [[ "$renice_line" == *" rh-renice 4242 1793000001" ]] \
         && grep -qF "renice -n 19 -p \"\$p\" > /dev/null && ionice -c 2 -n 7 -p \"\$p\"" <<< "$renice_line" \
         && grep -q "application_name = .bms-rehearsal-[0-9]*-dump. AND usename = .bms_owner. AND backend_type = .client backend." "$FAKE/calls.log" \
         && said "server process 4242 runs at nice 19"'
-# Review of 708d02b, point 1: the pid is checked in the same exec, immediately before the change, and nothing else is.
-check "... and only after its process title, in that same exec, shows a local bms_owner backend on bms" \
-    eval 'grep -qF "case \"\$t\" in \"postgres: \"*\"bms_owner bms [local]\"*) ;; *) exit 3 ;; esac; renice" "$FAKE/calls.log" \
+# Review of 708d02b, point 1, and the Lead on it: the pid is checked in the same exec, immediately before the change, by
+# its process title and its start time against the session's backend_start, and nothing else is ever reniced.
+check "... and only after, in that same exec, its title shows a local bms_owner backend and it started with the session" \
+    eval '[[ "$(grep "^exec --user postgres bms-postgres-1 sh -c " "$FAKE/calls.log")" == *"case \"\$t\" in \"postgres: \"*\"bms_owner bms [local]\"*) ;; *) exit 3 ;; esac;"*"d=\$((b + \${22} / 100 - s)); [ \"\$d\" -ge -2 ] && [ \"\$d\" -le 2 ] || exit 3; renice -n 19"* ]] \
         && ! grep -Eq "^exec .*bms-postgres-1 (renice|ionice) " "$FAKE/calls.log"'
 FAKE_RENICE_NOT_DUMP=1 rehearse renice-pid-gone
 check "a pid that is no longer the dump's when it is reniced is left as it is, and the rehearsal goes on (0)" \

@@ -229,23 +229,25 @@ rh_stream_live() {
 # nice 19 can still hold a lightweight lock others wait on, which the bound on the stream keeps short). The backend runs
 # as postgres, and a container has no CAP_SYS_NICE, so renice and ionice run as postgres too (review of 9e0c501,
 # point 1). It is the one client backend named ${RH_APP}-dump. A process at nice 19 cannot be put back, so the pid is
-# checked in the same exec immediately before the change (review of 708d02b, point 1): its process title must still be
-# a backend of bms_owner on bms over the local socket, as pg_dump's is and a live API connection (bms_app over TCP)
-# never is; otherwise nothing is changed. The pid is asked again afterwards, for the log only. Found within 30 seconds,
-# or left as it is. ionice takes effect only under an I/O scheduler that honours priorities (BFQ), not none or
-# mq-deadline. The bytes of the stream also pass through dockerd and containerd-shim, which run at their own priority.
-# shellcheck disable=SC2016 # run by sh -c in the live container, with the pid as $1.
-RH_RENICE_SH='p=$1; t=$(tr "\0" " " < "/proc/$p/cmdline" 2> /dev/null); case "$t" in "postgres: "*"bms_owner bms [local]"*) ;; *) exit 3 ;; esac; renice -n 19 -p "$p" > /dev/null && ionice -c 2 -n 7 -p "$p" > /dev/null'
+# checked in the same exec immediately before the change (review of 708d02b, point 1, and the Lead on it): its process
+# title must still be a backend of bms_owner on bms over the local socket, as pg_dump's is and a live API connection
+# (bms_app over TCP) never is, and the process must have started within 2 seconds of the session's backend_start (the
+# kernel's start time in clock ticks, 100 a second, after the boot time in /proc/stat); otherwise nothing is changed
+# (exit 3). The pid is asked again afterwards, for the log only. Found within 30 seconds, or left as it is. ionice takes
+# effect only under an I/O scheduler that honours priorities (BFQ), not none or mq-deadline. The bytes of the stream
+# also pass through dockerd and containerd-shim, which run at their own priority.
+# shellcheck disable=SC2016 # run by sh -c in the live container, with the pid as $1 and backend_start's epoch as $2.
+RH_RENICE_SH='p=$1; s=$2; t=$(tr "\0" " " < "/proc/$p/cmdline" 2> /dev/null); case "$t" in "postgres: "*"bms_owner bms [local]"*) ;; *) exit 3 ;; esac; b=; while read -r k v; do [ "$k" = btime ] && b=$v; done < /proc/stat; set -- $(cat "/proc/$p/stat" 2> /dev/null); [ -n "$b" ] && [ -n "${22:-}" ] || exit 3; d=$((b + ${22} / 100 - s)); [ "$d" -ge -2 ] && [ "$d" -le 2 ] || exit 3; renice -n 19 -p "$p" > /dev/null && ionice -c 2 -n 7 -p "$p" > /dev/null'
 rh_renice_live_dump() {
     local pid query again status
     trap - EXIT INT TERM USR1
     exec 7>&- 8>&- 9>&-
-    query="SELECT pid || ' ' || backend_start FROM pg_stat_activity WHERE application_name = '${RH_APP}-dump'"
+    query="SELECT pid || ' ' || floor(extract(epoch FROM backend_start))::bigint FROM pg_stat_activity WHERE application_name = '${RH_APP}-dump'"
     query+=" AND usename = 'bms_owner' AND backend_type = 'client backend' AND backend_start >= to_timestamp(${RH_STARTED_EPOCH})"
     for _ in $(seq 1 30); do
         pid="$(rh_live "$query" 2> /dev/null)"
-        if [[ "$pid" =~ ^[0-9]+\  ]]; then
-            docker exec --user postgres "$RH_LIVE_DB" sh -c "$RH_RENICE_SH" rh-renice "${pid%% *}" > /dev/null 2>&1
+        if [[ "$pid" =~ ^[0-9]+\ [0-9]+$ ]]; then
+            docker exec --user postgres "$RH_LIVE_DB" sh -c "$RH_RENICE_SH" rh-renice "${pid%% *}" "${pid##* }" > /dev/null 2>&1
             status=$?
             case "$status" in
                 0)
