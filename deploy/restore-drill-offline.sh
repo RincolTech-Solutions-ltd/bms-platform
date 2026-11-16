@@ -11,23 +11,32 @@
 #      drill fails. An old openssl file, until those age out, needs the old key from the Keychain item
 #      bms-backup-symmetric-key. The keys go from the Keychain to the tool on a pipe or in its environment, never on a
 #      command line or in a file;
-#   3. starts a throwaway PostgreSQL in Docker with no network, created by this checkout's deploy/postgres/initdb, and
-#      streams the decryption straight into pg_restore there: the decrypted dump is never written to a file;
+#   3. starts a throwaway PostgreSQL with no network and streams the decryption straight into pg_restore there: the
+#      decrypted dump is never written to a file. With --remote <ssh target> (the default mode, owner constraint of
+#      16 November 2026: no Docker engine on the Mac) the container runs on that host, which already holds the same live
+#      data: memory capped (inside bms.slice on staging), created by the host's own /opt/bms/postgres/initdb, and the Mac
+#      decrypts and pipes the plaintext over ssh into it. Only the decrypted stream crosses ssh, never the key. With
+#      --local the container runs in a Docker engine on this Mac, created by this checkout's deploy/postgres/initdb;
 #   4. checks the Flyway version (present, and not ahead of this checkout's newest migration), the row counts, and that
 #      bms_app reads at least one of a tenant's rows under row-level security;
 #   5. records one line, OK or FAILED, with its time in seconds against the 2 hour RTO, in ~/bms-restore-drills/history.log
 #      and, for a drill of the newest daily backup only, uploads it to <environment>/drill/last_offline_drill.txt, which
 #      monitor.sh reads (a full restore every 35 days). A drill of a named file (--file) or of a monthly copy proves
 #      nothing about the current key, so it is kept on the Mac only.
-# The downloaded file, the temp dir and the container are removed whatever the outcome. A pg_restore error can quote row
-# values, so it is shown on this screen only and never recorded or uploaded.
+# The downloaded file, the temp dir and the container are removed whatever the outcome: on a remote host by the Mac's exit
+# trap over ssh and, should the Mac die mid-run, by the host's monitor.sh once the time in the container's label
+# bms.offline-drill.expires (4 hours after the start) has passed. A pg_restore error can quote row values, so it is held
+# in memory, shown on this screen only and never written, recorded or uploaded.
 #
-# Usage: deploy/restore-drill-offline.sh [--environment production|staging] [--folder daily|monthly] [--file <name>]
-#                                        [--no-upload]
-# Needs on the Mac: age, age-keygen, rclone, docker, security (macOS), and openssl with -pbkdf2 for old backups only. The
-# system bash 3.2 is enough. In the environment:
+# Usage: deploy/restore-drill-offline.sh [--remote <ssh target> | --local] [--environment production|staging]
+#                                        [--folder daily|monthly] [--file <name>] [--no-upload]
+# Needs on the Mac: age, age-keygen, rclone, security (macOS), ssh for --remote or docker for --local, and openssl with
+# -pbkdf2 for old backups only. The system bash 3.2 is enough. In the environment:
 #   BMS_DRILL_REMOTE      the rclone remote and bucket of the backups, for example bms-r2:bms-backups (rclone config, once);
-#   POSTGRES_IMAGE        the hosts' POSTGRES_IMAGE, for example postgres:16.15-alpine;
+#   POSTGRES_IMAGE        the hosts' POSTGRES_IMAGE, for example postgres:16.15-alpine (already pulled on a remote host);
+#   BMS_DRILL_SSH         the ssh target when --remote is not given, for example bms-production (an ~/.ssh/config host);
+#   BMS_DRILL_REMOTE_DOCKER  the docker command on the remote host (default: sudo -n -u bms docker);
+#   BMS_DRILL_REMOTE_INITDB  the roles script folder on the remote host (default: /opt/bms/postgres/initdb);
 #   BMS_DRILL_RECORD_DIR  where the results are kept (default ~/bms-restore-drills);
 #   OPENSSL               an openssl that has -pbkdf2, for old backups (default openssl).
 # Exit status: 0 restored and checked, 1 failed (recorded), 2 usage.
@@ -42,13 +51,18 @@ KEYCHAIN_ACCOUNT=bms-backups
 KEYCHAIN_AGE=bms-backup-age-identity
 KEYCHAIN_OLD=bms-backup-symmetric-key
 NAME_RE='^bms-[a-z0-9-]+-([0-9]{8}T[0-9]{6}Z)\.dump\.enc$'
+# An ssh host or user@host, never anything ssh could read as an option.
+TARGET_RE='^[A-Za-z0-9][A-Za-z0-9._@-]*$'
+TARGET="${BMS_DRILL_SSH:-}"
 
 usage() {
-    echo "usage: restore-drill-offline.sh [--environment production|staging] [--folder daily|monthly] [--file <name>] [--no-upload]" >&2
+    echo "usage: restore-drill-offline.sh [--remote <ssh target> | --local] [--environment production|staging] [--folder daily|monthly] [--file <name>] [--no-upload]" >&2
     exit 2
 }
 while (( $# > 0 )); do
     case "$1" in
+        --remote) (( $# >= 2 )) || usage; TARGET="$2"; shift ;;
+        --local) TARGET="" ;;
         --environment) (( $# >= 2 )) || usage; ENVIRONMENT="$2"; shift ;;
         --folder) (( $# >= 2 )) || usage; FOLDER="$2"; shift ;;
         --file) (( $# >= 2 )) || usage; FILE="$2"; shift ;;
@@ -60,6 +74,7 @@ done
 [[ "$ENVIRONMENT" == production || "$ENVIRONMENT" == staging ]] || usage
 [[ "$FOLDER" == daily || "$FOLDER" == monthly ]] || usage
 [[ -z "$FILE" || "$FILE" =~ $NAME_RE ]] || usage
+[[ -z "$TARGET" || "$TARGET" =~ $TARGET_RE ]] || usage
 # Only a drill of the newest daily backup is what monitor.sh counts as the month's full restore: a named file or a
 # monthly copy (an old-format one, say) proves nothing about the current key, so it is kept on this Mac only
 # (review of 667acd1, finding 1).
@@ -72,11 +87,16 @@ RECORD_DIR="${BMS_DRILL_RECORD_DIR:-$HOME/bms-restore-drills}"
 OPENSSL="${OPENSSL:-openssl}"
 INITDB="$HERE/postgres/initdb"
 MIGRATIONS="$HERE/../backend/src/main/resources/db/migration"
+REMOTE_DOCKER="${BMS_DRILL_REMOTE_DOCKER:-sudo -n -u bms docker}"
+REMOTE_INITDB="${BMS_DRILL_REMOTE_INITDB:-/opt/bms/postgres/initdb}"
 DB="bms-offline-drill-$$"
 STARTED="$(date -u +%s)"
+# After this time the host's monitor.sh removes the container, should this Mac die before its exit trap runs.
+EXPIRES=$(( STARTED + 4 * 3600 ))
 WORK=""
 NAME="${FILE:-none}"
 FORMAT=unknown
+DB_STARTED=no
 umask 077
 
 log() { echo "[offline drill $(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
@@ -108,8 +128,22 @@ fail() {
     record "$(date -u +%Y-%m-%dT%H:%M:%SZ) FAILED ${NAME} folder=${FOLDER} format=${FORMAT} seconds=$(elapsed) $*"
     exit 1
 }
+# dk <docker args...>: docker on this Mac (--local), or on the remote host over ssh: one command string for the remote
+# shell, the configured prefix and then each argument quoted. Standard input crosses ssh only for `exec -i` (the restore).
+dk() {
+    if [[ -z "$TARGET" ]]; then
+        docker "$@"
+    elif [[ "$1 ${2:-}" == "exec -i" ]]; then
+        ssh -o BatchMode=yes -o ConnectTimeout=20 "$TARGET" "${REMOTE_DOCKER} $(printf '%q ' "$@")"
+    else
+        ssh -n -o BatchMode=yes -o ConnectTimeout=20 "$TARGET" "${REMOTE_DOCKER} $(printf '%q ' "$@")"
+    fi
+}
 cleanup() {
-    docker rm -f -v "$DB" > /dev/null 2>&1 || true
+    if [[ "$DB_STARTED" == yes ]] && ! dk rm -f -v "$DB" > /dev/null 2>&1 && [[ -n "$TARGET" ]]; then
+        log "COULD NOT REMOVE ${DB} on ${TARGET}: the host's monitor.sh removes it after $(stamp_of "$EXPIRES"), or now by hand:"
+        log "  ssh ${TARGET} '${REMOTE_DOCKER} rm -f -v ${DB}'"
+    fi
     if [[ -n "$WORK" && -d "$WORK" ]]; then rm -rf "$WORK"; fi
 }
 trap cleanup EXIT
@@ -146,12 +180,21 @@ pick_newest() {
 keychain() { security find-generic-password -a "$KEYCHAIN_ACCOUNT" -s "$1" -w 2> /dev/null; }
 random_hex() { head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 
-for tool in age age-keygen rclone docker security; do
+RUNNER=docker
+[[ -n "$TARGET" ]] && RUNNER=ssh
+for tool in age age-keygen rclone "$RUNNER" security; do
     command -v "$tool" > /dev/null || fail "${tool} is not installed on this Mac (restore-from-backup.md section 8.1)"
 done
 [[ -n "$REMOTE" ]] || fail "BMS_DRILL_REMOTE is not set: the rclone remote and bucket, for example bms-r2:bms-backups"
 [[ -n "${POSTGRES_IMAGE:-}" ]] || fail "POSTGRES_IMAGE is not set: the hosts' image, for example postgres:16.15-alpine"
-[[ -d "$INITDB" ]] || fail "no initdb folder at ${INITDB}: run this from a checkout of the repository"
+if [[ -n "$TARGET" ]]; then
+    # Before anything is downloaded or decrypted: the host answers, its docker runs as configured, and it has the image.
+    dk image inspect --format '{{.Id}}' "$POSTGRES_IMAGE" > /dev/null 2>&1 \
+        || fail "cannot run '${REMOTE_DOCKER} image inspect ${POSTGRES_IMAGE}' on ${TARGET} over ssh: check the ssh target, BMS_DRILL_REMOTE_DOCKER and POSTGRES_IMAGE (restore-from-backup.md section 8.5)"
+    log "restoring on ${TARGET}: the backup is decrypted on this Mac and only the decrypted stream crosses ssh"
+else
+    [[ -d "$INITDB" ]] || fail "no initdb folder at ${INITDB}: run this from a checkout of the repository"
+fi
 REPO_VER="$(find "$MIGRATIONS" -maxdepth 1 -name 'V*__*.sql' 2> /dev/null | sed -nE 's|.*/V([0-9]+)__.*|\1|p' | sort -n | tail -n 1)"
 [[ -n "$REPO_VER" ]] || fail "no migrations at ${MIGRATIONS}: run this from a checkout of the repository"
 
@@ -209,26 +252,42 @@ decrypt_stream() {
     esac
 }
 
-# 3. A throwaway PostgreSQL with no network, and the restore streamed into it.
-log "starting a throwaway postgres (${DB})"
-docker run --detach --name "$DB" --network none --memory 2g \
+# 3. A throwaway PostgreSQL with no network, and the restore streamed into it. On a remote host: the host's own roles
+# script (--mount fails when the folder is missing, where --volume would mount an empty one), the memory cap of the host
+# drill, inside bms.slice on staging (restore-drill.sh), and the label monitor.sh removes a left-behind container by.
+if [[ -n "$TARGET" ]]; then
+    PLACE=(--memory 384m --memory-swap 384m
+        --mount "type=bind,source=${REMOTE_INITDB},target=/docker-entrypoint-initdb.d,readonly")
+    [[ "$ENVIRONMENT" == staging ]] && PLACE+=(--cgroup-parent bms.slice)
+    WHERE=" on ${TARGET}"
+else
+    PLACE=(--memory 2g --volume "${INITDB}:/docker-entrypoint-initdb.d:ro")
+    WHERE=""
+fi
+log "starting a throwaway postgres (${DB})${WHERE}"
+DB_STARTED=yes
+dk run --detach --name "$DB" --network none "${PLACE[@]}" --label "bms.offline-drill.expires=${EXPIRES}" \
     --env POSTGRES_PASSWORD="$(random_hex)" --env POSTGRES_DB=bms \
     --env BMS_OWNER_PASSWORD="$(random_hex)" --env BMS_APP_PASSWORD="$(random_hex)" \
-    --volume "${INITDB}:/docker-entrypoint-initdb.d:ro" \
-    "$POSTGRES_IMAGE" > /dev/null || fail "could not start the throwaway postgres"
+    "$POSTGRES_IMAGE" > /dev/null || fail "could not start the throwaway postgres${WHERE}"
 ready=0
 for _ in $(seq 1 90); do
-    if docker logs "$DB" 2>&1 | grep -q "init process complete" \
-        && docker exec "$DB" pg_isready -U bms_owner -d bms > /dev/null 2>&1; then
+    if dk logs "$DB" 2>&1 | grep -q "init process complete" \
+        && dk exec "$DB" pg_isready -U bms_owner -d bms > /dev/null 2>&1; then
         ready=1
         break
     fi
     sleep 2
 done
-[[ "$ready" == 1 ]] || fail "the throwaway postgres did not become ready"
-log "decrypting and restoring"
-decrypt_stream 2> /dev/null | docker exec -i "$DB" pg_restore -U bms_owner -d bms --exit-on-error > /dev/null 2> "$WORK/pg_restore.err"
-statuses=("${PIPESTATUS[@]}")
+[[ "$ready" == 1 ]] || fail "the throwaway postgres did not become ready${WHERE}"
+log "decrypting on this Mac and restoring${WHERE}"
+# pg_restore's error output is held in memory, never in a file: it can quote row values. The last line carries the
+# pipeline's statuses.
+restore_out="$( { decrypt_stream 2> /dev/null \
+    | dk exec -i "$DB" pg_restore -U bms_owner -d bms --exit-on-error 2>&1 > /dev/null; echo "statuses ${PIPESTATUS[*]}"; } )"
+read -r -a statuses <<< "${restore_out##*statuses }"
+restore_err="${restore_out%statuses *}"
+restore_out=""
 identity=""
 key=""
 rm -f "$ENC"
@@ -239,13 +298,17 @@ if [[ "${statuses[0]}" != 0 && "${statuses[0]}" != 141 ]]; then
     fi
     fail "decryption failed: a wrong key, a corrupt file, or an openssl without -pbkdf2 (set OPENSSL to Homebrew's openssl@3)"
 fi
+if [[ -n "$TARGET" && "${statuses[1]}" == 255 ]]; then
+    fail "the ssh connection to ${TARGET} failed during the restore"
+fi
 if [[ "${statuses[1]}" != 0 ]]; then
-    log "pg_restore said (on this screen only, never recorded): $(head -c 2000 "$WORK/pg_restore.err" | tr '\n' ' ')"
+    log "pg_restore said (on this screen only, never recorded): $(printf '%s' "$restore_err" | head -c 2000 | tr '\n' ' ')"
     fail "pg_restore failed"
 fi
+restore_err=""
 
-# 4. The checks.
-q() { docker exec "$DB" psql -U bms_owner -d bms -tAc "$1"; }
+# 4. The checks, in the throwaway database wherever it runs.
+q() { dk exec "$DB" psql -U bms_owner -d bms -tAc "$1"; }
 flyway="$(q "SELECT max(version::int) FROM flyway_schema_history WHERE success")" || fail "no Flyway history in the restore"
 [[ "$flyway" =~ ^[0-9]+$ ]] || fail "empty Flyway history in the restore"
 (( flyway <= REPO_VER )) \
@@ -255,7 +318,7 @@ users="$(q "SELECT count(*) FROM users")"
 audit="$(q "SELECT count(*) FROM audit_log")"
 [[ "$tenants" =~ ^[1-9][0-9]*$ ]] || fail "the restore holds no tenants"
 first_tenant="$(q "SELECT id FROM tenants ORDER BY created_at LIMIT 1")"
-app_users="$(docker exec "$DB" psql -U bms_app -d bms -tAc "SELECT set_config('app.tenant_id', '${first_tenant}', false); SELECT count(*) FROM users" 2> /dev/null | tail -n 1)"
+app_users="$(dk exec "$DB" psql -U bms_app -d bms -tAc "SELECT set_config('app.tenant_id', '${first_tenant}', false); SELECT count(*) FROM users" 2> /dev/null | tail -n 1)"
 # At least one row, and exactly the business's own rows as the owner role counts them: a policy or grant that hides some
 # or all of them is a failure, not a pass (review of 667acd1, finding 7).
 owner_users="$(q "SELECT count(*) FROM users WHERE tenant_id = '${first_tenant}'")"
@@ -268,8 +331,9 @@ owner_users="$(q "SELECT count(*) FROM users WHERE tenant_id = '${first_tenant}'
 seconds="$(elapsed)"
 rto_ok=yes
 (( seconds <= 7200 )) || rto_ok=no
-line="$(printf '%s OK %s folder=%s format=%s seconds=%s rto_ok=%s flyway=%s repo_flyway=%s tenants=%s users=%s audit=%s app_visible_users=%s recipient=%s' \
+# restored_on= comes last, so monitor.sh's reading of the line (offline_counts) is unchanged.
+line="$(printf '%s OK %s folder=%s format=%s seconds=%s rto_ok=%s flyway=%s repo_flyway=%s tenants=%s users=%s audit=%s app_visible_users=%s recipient=%s restored_on=%s' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$NAME" "$FOLDER" "$FORMAT" "$seconds" "$rto_ok" "$flyway" "$REPO_VER" "$tenants" \
-    "$users" "$audit" "$app_users" "$RECIPIENT")"
+    "$users" "$audit" "$app_users" "$RECIPIENT" "${TARGET:-mac}")"
 log "OK: ${line}"
 record "$line" || exit 1
