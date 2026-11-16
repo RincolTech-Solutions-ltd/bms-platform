@@ -252,6 +252,10 @@ docker() { echo "permission denied while trying to connect to the Docker daemon 
 reap_status="$(reap_offline_drills 2> "$WORK/reap.log"; echo $?)"
 assert "a docker that cannot be listed is logged, and the run goes on" test "$reap_status" = 0
 assert "the failed listing is in the log" grep -q "could not list the containers.*permission denied" "$WORK/reap.log"
+# Lead on the review of e7cc8e6: the sweep can never end a run before the checks, whatever it returns.
+sweep_lines="$(sed -n '/^main() {/,/^}/p' "$HERE/../monitor.sh" | grep -E 'reap_offline_drills|check_site' | tr -s ' ' | tr '\n' '|')"
+assert "main runs the sweep with || true, before the first check" \
+    test "$sweep_lines" = " reap_offline_drills || true| check_site|"
 unset -f docker
 
 if (( FAILURES > 0 )); then

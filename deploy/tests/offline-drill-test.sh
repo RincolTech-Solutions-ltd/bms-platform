@@ -130,6 +130,7 @@ case "$1" in
             pg_restore*)
                 cat > "$FAKE/restored"
                 [[ -n "${FAKE_RESTORE_FAIL:-}" ]] && { echo "pg_restore: error: row (Fabricated Customer, 0700000000)" >&2; exit 1; }
+                [[ -n "${FAKE_RESTORE_NOSPACE:-}" ]] && { echo "pg_restore: error: could not extend file: No space left on device" >&2; exit 1; }
                 exit 0 ;;
             *flyway_schema_history*) echo "${FAKE_FLYWAY:-145}" ;;
             *"count(*) FROM tenants"*) echo 2 ;;
@@ -328,10 +329,10 @@ check "remote: only the decrypted stream crosses ssh, never the key" \
 check "remote: the Mac's docker is never called, every host docker call goes through the prefix" \
     eval '! grep -q "^mac-docker" "$FAKE/calls.log" && [[ "$(grep -c "^docker " "$FAKE/calls.log")" == "$(grep -c "^${HOST_DOCKER} " "$FAKE/calls.log")" ]]'
 check "remote: the throwaway postgres has no network, a memory cap, the host's roles script and the expiry label" \
-    eval 'host_run | grep -q -- "--name bms-offline-drill-[0-9]* --network none --memory 1024m --memory-swap 1024m --mount type=bind,source=/opt/bms/postgres/initdb,target=/docker-entrypoint-initdb.d,readonly .*--label bms.offline-drill.expires=[0-9]*"'
+    eval 'host_run | grep -q -- "--name bms-offline-drill-[0-9]* --network none --memory 1280m --memory-swap 1280m --mount type=bind,source=/opt/bms/postgres/initdb,target=/docker-entrypoint-initdb.d,readonly .*--label bms.offline-drill.expires=[0-9]*"'
 # Review of e7cc8e6, finding 1: nothing restored reaches the host's disk.
 check "remote: its data directory is a tmpfs inside the cap, with no swap and no container log" \
-    eval 'host_run | grep -q -- "--memory-swap 1024m .*--tmpfs /var/lib/postgresql/data:rw,size=896m,mode=0700 --log-driver none .*--env PGDATA=/var/lib/postgresql/data/pgdata"'
+    eval 'host_run | grep -q -- "--memory-swap 1280m .*--tmpfs /var/lib/postgresql/data:rw,size=1024m,mode=0700 --log-driver none .*--env PGDATA=/var/lib/postgresql/data/pgdata"'
 check "remote: readiness is the final server on TCP, never a log read" \
     eval 'grep -q "^docker exec bms-offline-drill-[0-9]* pg_isready -h 127.0.0.1 " "$FAKE/calls.log" && ! grep -q "^docker logs" "$FAKE/calls.log"'
 check "remote: production is not put in bms.slice" eval '! host_run | grep -q -- --cgroup-parent'
@@ -357,8 +358,8 @@ check "remote: monitor.sh counts the uploaded line as the month's full restore" 
 
 fake_remote remote-staging; age_backup
 BMS_DRILL_SSH=bms-staging drill --environment staging
-check "remote: BMS_DRILL_SSH names the host, and staging's container runs inside bms.slice with 384 MB in all" \
-    eval '[[ "$STATUS" == 0 ]] && grep -q "^ssh .* bms-staging " "$FAKE/calls.log" && host_run | grep -q -- "--memory 384m --memory-swap 384m .*--cgroup-parent bms.slice --tmpfs /var/lib/postgresql/data:rw,size=256m,"'
+check "remote: BMS_DRILL_SSH names the host, and staging's container runs inside bms.slice with 512 MB in all" \
+    eval '[[ "$STATUS" == 0 ]] && grep -q "^ssh .* bms-staging " "$FAKE/calls.log" && host_run | grep -q -- "--memory 512m --memory-swap 512m .*--cgroup-parent bms.slice --tmpfs /var/lib/postgresql/data:rw,size=256m,"'
 
 fake_remote remote-prefix; age_backup
 BMS_DRILL_REMOTE_DOCKER=docker BMS_DRILL_REMOTE_INITDB=/srv/bms/initdb drill --remote deploy@bms-staging
@@ -370,7 +371,7 @@ BMS_DRILL_SSH=bms-staging drill --local
 check "--local runs the container in the Mac's docker even with BMS_DRILL_SSH set" \
     eval '[[ "$STATUS" == 0 ]] && ! grep -q "^ssh" "$FAKE/calls.log" && grep -q "^docker run " "$FAKE/calls.log"'
 check "--local keeps its data in memory too: 2 GB, a tmpfs, no container log" \
-    eval 'grep -q -- "^docker run .*--memory 2048m --memory-swap 2048m .*--tmpfs /var/lib/postgresql/data:rw,size=1920m,mode=0700 --log-driver none " "$FAKE/calls.log"'
+    eval 'grep -q -- "^docker run .*--memory 2048m --memory-swap 2048m .*--tmpfs /var/lib/postgresql/data:rw,size=1792m,mode=0700 --log-driver none " "$FAKE/calls.log"'
 
 # Review of e7cc8e6, finding 2: no value from the environment can inject a command or an option on the host.
 # JUSTIFICATION-A3: one case per finding of the review; they reuse the existing fakes and helpers.
@@ -387,12 +388,17 @@ check "remote: an initdb path that is not absolute is a usage error" test "$STAT
 POSTGRES_IMAGE='--privileged' drill --remote bms-production
 check "remote: an image docker could read as an option is a usage error" \
     eval '[[ "$STATUS" == 2 && ! -s "$FAKE/calls.log" ]]'
-BMS_DRILL_MEMORY_MB=100 drill --remote bms-production
-check "remote: a memory below 256 MB is a usage error" test "$STATUS" = 2
+BMS_DRILL_MEMORY_MB=511 drill --remote bms-production
+check "remote: a memory below 512 MB (PostgreSQL's 256 and at least 256 of data) is a usage error" test "$STATUS" = 2
 fake_remote remote-quotes; age_backup
-BMS_DRILL_MEMORY_MB=512 drill --remote bms-production
+BMS_DRILL_MEMORY_MB=3000 drill --remote bms-production
 check "remote: SQL with quotes reaches the host's sh word for word, and BMS_DRILL_MEMORY_MB sets the cap" \
-    eval '[[ "$STATUS" == 0 ]] && grep -qF "SELECT set_config('"'"'app.tenant_id'"'"', '"'"'0b5e7a2c-0000-4000-8000-00000000a001'"'"', false)" "$FAKE/calls.log" && host_run | grep -q -- "--memory 512m --memory-swap 512m .*size=384m,"'
+    eval '[[ "$STATUS" == 0 ]] && grep -qF "SELECT set_config('"'"'app.tenant_id'"'"', '"'"'0b5e7a2c-0000-4000-8000-00000000a001'"'"', false)" "$FAKE/calls.log" && host_run | grep -q -- "--memory 3000m --memory-swap 3000m .*size=2744m,"'
+# Lead on the review of e7cc8e6: a dump too big for the cap fails plainly and never falls back to a disk volume.
+fake_remote remote-too-big; age_backup
+FAKE_RESTORE_NOSPACE=1 drill --remote bms-staging --environment staging
+check "remote: a restore that outgrows the tmpfs fails plainly, naming the cap and the setting" \
+    eval 'failed_with "the restore did not fit in the container.s 512 MB (256 MB for the data): set BMS_DRILL_MEMORY_MB higher" && [[ "$(grep -c "^docker run " "$FAKE/calls.log")" == 1 ]] && ! grep -q -- "--volume\|type=volume" "$FAKE/calls.log"'
 
 # Review of e7cc8e6, finding 11: never beside another drill's or a rehearsal's database.
 fake_remote remote-busy; age_backup; printf '%s\n' bms-api-1 bms-restore-drill-4242 > "$FAKE/host_containers"

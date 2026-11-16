@@ -39,8 +39,8 @@
 #   BMS_DRILL_SSH         the ssh target when --remote is not given, for example bms-production (an ~/.ssh/config host);
 #   BMS_DRILL_REMOTE_DOCKER  the docker command on the remote host (default: sudo -n -u bms docker);
 #   BMS_DRILL_REMOTE_INITDB  the roles script folder on the remote host (default: /opt/bms/postgres/initdb);
-#   BMS_DRILL_MEMORY_MB   the container's memory, its tmpfs data directory included (default 384 on staging, 1024 on
-#                         production, 2048 with --local);
+#   BMS_DRILL_MEMORY_MB   the container's memory, 256 MB for PostgreSQL and the rest the tmpfs data directory (default
+#                         512 on staging, 1280 on production, 2048 with --local; at least 512);
 #   BMS_DRILL_RECORD_DIR  where the results are kept (default ~/bms-restore-drills);
 #   OPENSSL               an openssl that has -pbkdf2, for old backups (default openssl).
 # Exit status: 0 restored and checked, 1 failed (recorded), 2 usage.
@@ -93,11 +93,14 @@ INITDB="$HERE/postgres/initdb"
 MIGRATIONS="$HERE/../backend/src/main/resources/db/migration"
 REMOTE_DOCKER="${BMS_DRILL_REMOTE_DOCKER:-sudo -n -u bms docker}"
 REMOTE_INITDB="${BMS_DRILL_REMOTE_INITDB:-/opt/bms/postgres/initdb}"
-# The container's whole memory, its data directory (a tmpfs) included: 384 MB inside staging's 900 MB bms.slice, 1 GB on
-# the 4 GB production VM, 2 GB on this Mac (--local).
+# The container's whole memory: PostgreSQL's own 256 MB (its default 128 MB of shared buffers, which the cgroup counts,
+# and its processes) plus the tmpfs that holds the data directory, the rest. 512 MB inside staging's 900 MB bms.slice
+# (256 MB of data, the rehearsal's database and API fit the same room), 1280 MB on the 4 GB production VM (1 GB of
+# data), 2048 MB on this Mac (--local). Lead on the review of e7cc8e6: raise the cap so both fit.
+SERVER_MB=256
 MEMORY_MB="${BMS_DRILL_MEMORY_MB:-2048}"
-[[ -n "$TARGET" ]] && MEMORY_MB="${BMS_DRILL_MEMORY_MB:-1024}"
-[[ -n "$TARGET" && "$ENVIRONMENT" == staging ]] && MEMORY_MB="${BMS_DRILL_MEMORY_MB:-384}"
+[[ -n "$TARGET" ]] && MEMORY_MB="${BMS_DRILL_MEMORY_MB:-1280}"
+[[ -n "$TARGET" && "$ENVIRONMENT" == staging ]] && MEMORY_MB="${BMS_DRILL_MEMORY_MB:-512}"
 # Every value that reaches the host's shell or docker's options is checked here, before anything runs (review of
 # e7cc8e6, finding 2): the prefix word by word, an absolute initdb path with no comma (a --mount option separator), an
 # image reference that docker cannot read as an option.
@@ -108,7 +111,8 @@ for word in "${DOCKER_WORDS[@]}"; do
 done
 [[ "$REMOTE_INITDB" =~ ^/[A-Za-z0-9_./-]*$ ]] || usage
 [[ -z "${POSTGRES_IMAGE:-}" || "$POSTGRES_IMAGE" =~ ^[A-Za-z0-9][A-Za-z0-9._/:@-]*$ ]] || usage
-if ! [[ "$MEMORY_MB" =~ ^[1-9][0-9]{2,4}$ ]] || (( MEMORY_MB < 256 )); then usage; fi
+if ! [[ "$MEMORY_MB" =~ ^[1-9][0-9]{2,4}$ ]] || (( MEMORY_MB < SERVER_MB + 256 )); then usage; fi
+DATA_MB=$(( MEMORY_MB - SERVER_MB ))
 DB="bms-offline-drill-$$"
 STARTED="$(date -u +%s)"
 # After this time the host's monitor.sh removes the container, should this Mac die before its exit trap runs.
@@ -302,11 +306,12 @@ else
 fi
 # Nothing restored reaches a disk (review of e7cc8e6, finding 1): the data directory is a tmpfs inside the container's
 # memory cap, no swap (--memory-swap equal to --memory), and no log driver, so a server error that quotes a row is never
-# written to the engine's log file. The tmpfs takes all but 128 MB of the cap; a dump too big for it fails the drill.
-log "starting a throwaway postgres (${DB})${WHERE}, ${MEMORY_MB} MB in memory only"
+# written to the engine's log file. The tmpfs takes all but SERVER_MB of the cap; a dump too big for it fails the drill
+# plainly, and never falls back to a disk volume.
+log "starting a throwaway postgres (${DB})${WHERE}: ${MEMORY_MB} MB in memory only, ${DATA_MB} MB of it for the data"
 DB_STARTED=yes
 dk run --detach --name "$DB" --network none --memory "${MEMORY_MB}m" --memory-swap "${MEMORY_MB}m" "${PLACE[@]}" \
-    --tmpfs "/var/lib/postgresql/data:rw,size=$(( MEMORY_MB - 128 ))m,mode=0700" --log-driver none \
+    --tmpfs "/var/lib/postgresql/data:rw,size=${DATA_MB}m,mode=0700" --log-driver none \
     --label "bms.offline-drill.expires=${EXPIRES}" --env PGDATA=/var/lib/postgresql/data/pgdata \
     --env POSTGRES_PASSWORD="$(random_hex)" --env POSTGRES_DB=bms \
     --env BMS_OWNER_PASSWORD="$(random_hex)" --env BMS_APP_PASSWORD="$(random_hex)" \
@@ -345,6 +350,11 @@ if [[ -n "$TARGET" && "${statuses[1]}" == 255 ]]; then
 fi
 if [[ "${statuses[1]}" != 0 ]]; then
     log "pg_restore said (on this screen only, never recorded): $(printf '%s' "$restore_err" | head -c 2000 | tr '\n' ' ')"
+    # The data outgrew the tmpfs (no space) or the server outgrew the cap (killed, 137): said plainly, never retried on
+    # a disk volume (Lead on the review of e7cc8e6).
+    if [[ "${statuses[1]}" == 137 ]] || grep -qiE 'no space left on device|could not extend file|server closed the connection unexpectedly|out of memory' <<< "$restore_err"; then
+        fail "the restore did not fit in the container's ${MEMORY_MB} MB (${DATA_MB} MB for the data): set BMS_DRILL_MEMORY_MB higher (restore-from-backup.md section 8.5); it never falls back to disk"
+    fi
     fail "pg_restore failed"
 fi
 restore_err=""

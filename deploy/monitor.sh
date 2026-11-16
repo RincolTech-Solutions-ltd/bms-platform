@@ -367,7 +367,7 @@ main() {
     exec 9> "$STATE/monitor.lock"
     flock --nonblock 9 || { log "previous run still in progress"; exit 0; }
 
-    reap_offline_drills
+    reap_offline_drills || true
     check_site
     check_jobs
     check_disk
