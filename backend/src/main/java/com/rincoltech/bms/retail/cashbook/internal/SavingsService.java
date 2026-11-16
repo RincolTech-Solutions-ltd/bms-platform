@@ -336,8 +336,9 @@ class SavingsService {
                             branch,
                             date,
                             suggested,
-                            // The form's minute is kept, so its mark still names its day within the grace.
-                            shown != null ? shown.readAt() : date.equals(support.today()) ? support.now() : null));
+                            // A form's day proved by its mark gets an unmarked token (the Lead on #958): the mark
+                            // is never reissued, so a retry after a real change is a save of the day it is sent.
+                            shown == null && date.equals(support.today()) ? support.now() : null));
             // Issue #799: never for a day already saved; the 409 savings_exists that follows a fresh read says why.
             if ((profit || salesperson) && repo.activeSavings(branch, date).isEmpty()) {
                 extra.put("suggested_minor", suggested);

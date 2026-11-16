@@ -51,8 +51,9 @@ or a mark lifted from one token onto another, must not open yesterday to a selle
    of the last day of a month saved just after midnight on the 1st is that last day's. A closed accounting period stays the ledger's `period_closed`, as for any save. No
    ADR-120 backdate is asked, since the person did not choose the day; the audit row carries the flag `dated_by_form`.
 4. **The real 409 stays.** The suggestion is recomputed for the form's day in the save's transaction; a sale, void or
-   expense in between is 409 `suggestion_changed` with the new token, which keeps the form's minute, so saving again within
-   the grace still lands on the form's day.
+   expense in between is 409 `suggestion_changed` with the new token. That token carries no mark (the Lead's decision on
+   the second review of pull request #958): a mark is never reissued, so saving again after midnight is a save of the new
+   day, judged on its figures, and the form's day is then the owner's, with a backdate and its reason (ADR-120).
 5. **One rule for both routes.** The till's route and the sales staff route share the save, so both follow it. The cash book
    has no other suggestion or fingerprint route.
 

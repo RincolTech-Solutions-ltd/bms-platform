@@ -301,8 +301,9 @@ class RetailSalesStaffSavingsIT extends IntegrationTest {
 
     /**
      * Issue #957: the 409 stays when the figures did change. A sale at 23:59 after the form was shown changes the 15th's
-     * suggestion; Save at 00:01 is 409 with the new suggestion for the 15th and writes nothing, and saving again with the
-     * token it carries records the 15th's savings.
+     * suggestion; Save at 00:01 is 409 with the new suggestion for the 15th and writes nothing. Its new token carries no mark
+     * (the Lead on #958: a mark is never reissued), so saving again with it is a save of the 16th, judged on the 16th's
+     * figures: 409 again, and still nothing is written.
      */
     @Test
     void aFormShownAt2359WhoseFiguresChangedBeforeTheSaveAt0001StillGetsTheConflict() {
@@ -325,10 +326,17 @@ class RetailSalesStaffSavingsIT extends IntegrationTest {
                         .single())
                 .isZero();
 
-        ResponseEntity<JsonNode> saved =
-                saveUndated(stale.getBody().get("suggestion_token").asString(), null);
-        assertThat(saved.getStatusCode()).as("%s", saved.getBody()).isEqualTo(HttpStatus.CREATED);
-        assertThat(saved.getBody().get("business_date").asString()).isEqualTo(today.toString());
+        String reissued = stale.getBody().get("suggestion_token").asString();
+        assertThat(reissued).doesNotContain(".");
+        ResponseEntity<JsonNode> again = saveUndated(reissued, null);
+        assertThat(again.getStatusCode()).as("%s", again.getBody()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(again.getBody().get("suggested_minor").asLong()).isZero();
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM retail_daily_savings WHERE tenant_id = ?")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isZero();
     }
 
     /** Issue #957: the till's savings route shares the save, so its form shown at 23:59 and saved at 00:01 is the 15th's. */
