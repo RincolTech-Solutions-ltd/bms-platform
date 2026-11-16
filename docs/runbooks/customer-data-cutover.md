@@ -126,7 +126,8 @@ done by hand as the notes say.
 - [ ] Tenant admin and staff invited; at least two users for maker-checker.
 - [ ] The tenant has **not started trading** on the platform, or the trading override is approved
       and recorded with its reason.
-- [ ] Last backup and last restore drill green (`state/last_restore_drill`).
+- [ ] Last backup and last restore drill green (`state/last_restore_drill` before the switch to age backups; after it,
+      `state/last_backup_check` and the last offline drill, `restore-from-backup.md` section 8.5).
 - [ ] Free disk on the host above three times the export size plus the expected dump size.
 - [ ] Operator, checker and the customer contact available for the whole window; dev lead
       reachable.

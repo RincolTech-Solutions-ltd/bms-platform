@@ -2,7 +2,10 @@
 # Nightly database backup to Cloudflare R2 (NFR-BAK-01 to NFR-BAK-03, docs/runbooks/restore-from-backup.md).
 #
 #   1. pg_dump (custom format) as bms_owner, which has BYPASSRLS, so every tenant's rows are in it;
-#   2. encrypted on this host with AES-256 (openssl, PBKDF2) before anything leaves it;
+#   2. piped straight into age, encrypted to the public key BACKUP_AGE_RECIPIENT (ADR-129), so the
+#      unencrypted dump is never on disk and the key that decrypts it is never on this host; with no
+#      valid recipient or no age the run fails before it dumps and uploads nothing. It never reads
+#      the old symmetric BACKUP_ENCRYPTION_KEY, so it cannot fall back to it;
 #   3. uploaded with rclone to r2:<bucket>/<environment>/daily/, and on the first day of a month
 #      also to monthly/;
 #   4. daily copies older than 30 days and monthly copies older than 365 days are deleted, unless
@@ -12,7 +15,7 @@
 #      writes state/last_backup_error instead, which monitor.sh reports at once.
 #
 # Schedule (cron, as the deploy user):  15 1 * * *  /opt/bms/backup.sh >> /opt/bms/state/backup.log 2>&1
-# Reads /opt/bms/.env: BMS_ENVIRONMENT, BACKUP_ENCRYPTION_KEY, R2_ENDPOINT, R2_ACCESS_KEY_ID,
+# Reads /opt/bms/.env: BMS_ENVIRONMENT, BACKUP_AGE_RECIPIENT, R2_ENDPOINT, R2_ACCESS_KEY_ID,
 # R2_SECRET_ACCESS_KEY, R2_BACKUP_BUCKET, RCLONE_IMAGE.
 set -euo pipefail
 
@@ -23,7 +26,7 @@ set -a
 . ./.env
 set +a
 
-: "${BMS_ENVIRONMENT:?}" "${BACKUP_ENCRYPTION_KEY:?}" "${R2_ENDPOINT:?}" "${R2_ACCESS_KEY_ID:?}"
+: "${BMS_ENVIRONMENT:?}" "${R2_ENDPOINT:?}" "${R2_ACCESS_KEY_ID:?}"
 : "${R2_SECRET_ACCESS_KEY:?}" "${R2_BACKUP_BUCKET:?}" "${RCLONE_IMAGE:?}"
 
 IMAGE_TAG="$(cat state/current_tag)"
@@ -39,19 +42,55 @@ NAME="bms-${BMS_ENVIRONMENT}-${STAMP}.dump.enc"
 PREFIX="r2:${R2_BACKUP_BUCKET}/${BMS_ENVIRONMENT}"
 
 log() { echo "[backup $(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
+REASON="exit"
 on_exit() {
     local status=$?
     rm -f "backups/${NAME}"
     if (( status != 0 )); then
-        printf '%s FAILED exit %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$status" > state/last_backup_error
+        printf '%s FAILED %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REASON" "$status" > state/last_backup_error
     fi
 }
 trap on_exit EXIT
+fail() {
+    log "FAILED: $*"
+    REASON="$*; exit"
+    exit 1
+}
 
-log "dumping and encrypting to backups/${NAME}"
+# Before anything is dumped: a public key to encrypt to, and the tool to do it (ADR-129 decision 1).
+[[ -n "${BACKUP_AGE_RECIPIENT:-}" ]] \
+    || fail "BACKUP_AGE_RECIPIENT is not set; nothing was dumped or uploaded (restore-from-backup.md section 8)"
+[[ "$BACKUP_AGE_RECIPIENT" =~ ^age1[02-9ac-hj-np-z]{58}$ ]] \
+    || fail "BACKUP_AGE_RECIPIENT is not an age X25519 public key (age1 and 58 more characters); nothing was dumped or uploaded"
+command -v age > /dev/null || fail "age is not installed (apt install age); nothing was dumped or uploaded"
+
+log "dumping and encrypting to backups/${NAME} for the age recipient in BACKUP_AGE_RECIPIENT"
 "${COMPOSE[@]}" exec -T postgres pg_dump --username bms_owner --dbname bms --format custom --compress 6 \
-    | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:BACKUP_ENCRYPTION_KEY \
-    > "backups/${NAME}"
+    | age --encrypt --recipient "$BACKUP_AGE_RECIPIENT" > "backups/${NAME}" \
+    || fail "pg_dump or age failed; nothing was uploaded"
+# age_header_problem <file>: nothing when its header is age's to exactly one X25519 recipient (grease stanzas, which no
+# key opens, allowed; no passphrase; no other recipient), else what is wrong. It reads up to the header MAC line within the
+# first 64 KiB. Kept identical in backup.sh and restore-drill.sh (deploy/tests/backup-test.sh checks that), so what leaves
+# the host and what the weekly check accepts are the same thing.
+age_header_problem() {
+    local header
+    header="$(head -c 65536 "$1" 2> /dev/null | LC_ALL=C sed -n '1,/^--- /p' | tr -d '\0')"
+    if [[ "$(head -n 1 <<< "$header")" != "age-encryption.org/v1" ]]; then
+        echo "not an age file: no version line"
+    elif [[ ! "$(tail -n 1 <<< "$header")" =~ ^---\ [A-Za-z0-9+/]{43}$ ]]; then
+        echo "not a well formed age file: no header MAC"
+    elif grep -q '^-> scrypt ' <<< "$header"; then
+        echo "encrypted with a passphrase, not to the public key"
+    elif [[ "$(grep -Ec '^-> X25519 [A-Za-z0-9+/]{43}$' <<< "$header")" != 1 \
+        || "$(grep -c '^-> X25519' <<< "$header")" != 1 ]]; then
+        echo "not encrypted to exactly one X25519 recipient"
+    elif [[ "$(grep '^-> ' <<< "$header" | grep -v '^-> X25519 ' | grep -cv '^-> [^ ]*-grease')" != 0 ]]; then
+        echo "encrypted to $(grep -c '^-> ' <<< "$header") recipients, not to the one public key"
+    fi
+}
+# What leaves the host must be an age file to one X25519 recipient, never anything else.
+problem="$(age_header_problem "backups/${NAME}")"
+[[ -z "$problem" ]] || fail "the encrypted file is not an age file to one X25519 recipient (${problem}); nothing was uploaded"
 
 # ADR-018 finding L5: bms.slice is the hard memory cap for the whole staging stack; this run was
 # outside it, so a large upload could take memory from the containers the slice is meant to

@@ -10,7 +10,8 @@ Two layers, both posting to the Telegram operator chat the API already uses (`BM
 |---|---|---|
 | External uptime monitor | A hosted service, outside our hosts | The site or a tenant page down for 3 minutes, the host silent (no heartbeat) |
 | `deploy/monitor.sh` every 5 minutes (`bms-monitor.timer`) | On the host, as the deploy user | Site down, failed, stuck or overdue jobs, disk over 70 percent, certificate expiry within 14 days, failed or stale backups, failed, stale or slow restore drill |
-| `deploy/restore-drill.sh` weekly (`bms-restore-drill.timer`) | On the host | Produces the drill result that `monitor.sh` reports |
+| `deploy/restore-drill.sh` weekly (`bms-restore-drill.timer`) | On the host | Produces the weekly result that `monitor.sh` reports: a full restore of an old-format backup, or a check of an age backup the host cannot decrypt (ADR-129) |
+| `deploy/restore-drill-offline.sh` monthly, by hand | On the operator's Mac, with the backup private key | The full restore of an age backup; its result in R2 (`drill/last_offline_drill.txt`) is what `monitor.sh` reads (`restore-from-backup.md` section 8.5) |
 
 Who reads the chat and who is paged out of hours is in `docs/runbooks/support-and-on-call.md`.
 
@@ -92,7 +93,7 @@ problem again.
 | `disk` | A path is over 70 percent | `df -h`; `docker system df`; old images (`docker image prune` keeps the running ones); `state/*.log` sizes; the database volume. Do not delete anything under the postgres volume |
 | `tls` | A certificate expires within 14 days, or none could be read | Production: `logs proxy \| grep -i acme`; the usual cause is the Cloudflare DNS token (`CLOUDFLARE_API_TOKEN`, Zone.DNS:Edit) revoked or expired. Staging: the Cloudflare edge certificate, check the zone's SSL page |
 | `backup` | The last `backup.sh` failed (`state/last_backup_error`), no good backup in 26 hours, or the newest object in R2 is older than 26 hours | `tail -50 /opt/bms/state/backup.log`; run `backup.sh` by hand; R2 credentials and the bucket lock (`restore-from-backup.md` section 7) |
-| `drill` | The last drill failed, none succeeded in 9 days, or it took longer than the 2 hour RTO | `tail -80 /opt/bms/state/restore-drill.log` (the pg_restore error text is only there, never in Telegram or R2); `state/restore-drill-history.log`; both are cut to their last 200 lines on each run; `restore-from-backup.md` section 5 |
+| `drill` | The last drill or backup check failed, neither succeeded in 9 days, a drill took longer than the 2 hour RTO, no full restore (on the host or by the offline drill) succeeded in 35 days, or the last offline drill failed | `tail -80 /opt/bms/state/restore-drill.log` (the pg_restore error text is only there, never in Telegram or R2); `state/last_backup_check`, `state/restore-drill-history.log`; both logs are cut to their last 200 lines on each run; an offline drill failure or a missing one: run it on the Mac (`restore-from-backup.md` section 8.5); `restore-from-backup.md` section 5 |
 
 A run that could not send an alert does not ping the heartbeat, so the external monitor also notices a host that cannot reach Telegram. Every probe has a timeout (20 s for TLS, 30 s for the database, 60 s for R2), so a wedged Docker daemon still ends in an alert.
 

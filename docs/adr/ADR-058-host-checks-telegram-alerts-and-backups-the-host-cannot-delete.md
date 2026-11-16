@@ -6,7 +6,9 @@ Proposed (issue #425, from the launch readiness audit #416, items M6, M7 and M12
 systemd units), ADR-024 (the Telegram operator chat) and ADR-006 (the delivery pipeline). Does not supersede any of them. No
 migration. The requirements are NFR-AVL-01, NFR-BAK-01 to NFR-BAK-04, NFR-DP-05 and NFR-OBS-04 (chapter 4); the design is chapter 9
 sections 9.10 and 9.11; the runbooks are `docs/runbooks/monitoring-and-alerts.md`, `restore-from-backup.md`,
-`security-incident.md` and `support-and-on-call.md`. Renumbered at merge if needed.
+`security-incident.md` and `support-and-on-call.md`. Renumbered at merge if needed. Decision 4 is amended by ADR-129: once
+backups are encrypted to an age public key, the weekly host drill checks the newest backup and the full restore is a monthly
+drill on the operator's Mac.
 
 ## Context
 

@@ -198,6 +198,12 @@ jobs:
       - name: Host script tests
         if: steps.scope.outputs.run == 'true'
         run: bash deploy/tests/monitor-test.sh
+      - name: Backups are encrypted to the age recipient and never fall back (issue #46, ADR-129)
+        if: steps.scope.outputs.run == 'true'
+        run: bash deploy/tests/backup-test.sh
+      - name: The monthly offline restore drill decrypts with the Keychain key and records its result (issue #46, ADR-129)
+        if: steps.scope.outputs.run == 'true'
+        run: bash deploy/tests/offline-drill-test.sh
       - name: The weekly restore drill is unchanged with no argument (issue #138)
         if: steps.scope.outputs.run == 'true'
         run: bash deploy/tests/restore-drill-test.sh

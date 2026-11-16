@@ -22,7 +22,9 @@
 #   FAKE_COPY_ADVANCE_TO=<epoch> it jumps there while the copy into the throwaway database hangs;
 #   FAKE_LIVE_HANG_ADVANCE_TO=<epoch> it jumps there while the live read of the run hangs;
 #   FAKE_WRITE_SIGNAL=<sig> the live write sends the script that signal once the row is stored;
-#   FAKE_LIVE_SILENT=1      the live database does not answer the read-back of the rehearsal's row.
+#   FAKE_LIVE_SILENT=1      the live database does not answer the read-back of the rehearsal's row;
+#   FAKE_BACKUP_FILE=<path> the backup rclone downloads from daily/ is a copy of that file (ADR-129: an age file);
+#   FAKE_NO_LIVE_DB=1       docker compose finds no running postgres service.
 # JUSTIFICATION-A2: the fake host is shared by two test files and is not a tiny helper.
 
 FAKE_EPOCH=1793000000
@@ -139,7 +141,14 @@ case "$1" in
                 elif [[ "$1" == "copyto" ]]; then
                     dest="$3"
                     for m in "${!mounts[@]}"; do
-                        [[ "$dest" == "$m"/* ]] && { echo "encrypted $2" > "${mounts[$m]}${dest#"$m"}"; break; }
+                        [[ "$dest" == "$m"/* ]] || continue
+                        # FAKE_BACKUP_FILE: the downloaded backup is that file (an age file, say); else a line of text.
+                        if [[ -n "${FAKE_BACKUP_FILE:-}" && "$2" == r2:*/daily/* ]]; then
+                            cp "$FAKE_BACKUP_FILE" "${mounts[$m]}${dest#"$m"}"
+                        else
+                            echo "encrypted $2" > "${mounts[$m]}${dest#"$m"}"
+                        fi
+                        break
                     done
                 fi
                 exit 0 ;;
@@ -172,6 +181,10 @@ case "$1" in
                 fi ;;
         esac ;;
     logs) echo "PostgreSQL init process complete; ready for start up." ;;
+    compose)
+        # docker compose ... exec -T postgres psql ...: the live database through the stack (the age backup check).
+        [[ -n "${FAKE_NO_LIVE_DB:-}" ]] && { echo "service \"postgres\" is not running" >&2; exit 1; }
+        [[ "$*" == *flyway_schema_history* ]] && echo 145 ;;
     ps)
         if [[ "$*" == *"com.docker.compose.service=api"* ]]; then
             echo "bms-api-1"
@@ -293,6 +306,16 @@ case "$1" in
 esac
 STUB
     chmod +x "$bin/date" "$bin/sleep" "$bin/openssl" "$bin/docker"
+}
+
+# fake_age_file <path> [payload bytes, default 40000] [stanza line, default one X25519]: a FABRICATED file in the age
+# format (version line, stanza, body, header MAC, then bytes), which no key opens: what the host check reads.
+fake_age_file() {
+    local b43=RkFCUklDQVRFRGZhYnJpY2F0ZWRmYWJyaWNhdGVkMDA
+    {
+        printf '%s\n' 'age-encryption.org/v1' "${3:-"-> X25519 ${b43}"}" "$b43" "--- ${b43}"
+        head -c "${2:-40000}" /dev/zero | tr '\0' 'x'
+    } > "$1"
 }
 
 # normalise: the drill names its files and containers after its PID; replace the number so two runs compare equal.

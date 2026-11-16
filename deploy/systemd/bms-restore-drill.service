@@ -1,9 +1,11 @@
 # One weekly restore drill (deploy/restore-drill.sh, NFR-BAK-04, ADR-058): restores the newest backup
-# into a throwaway PostgreSQL, times it and records the result on the host and in R2.
+# into a throwaway PostgreSQL, times it and records the result on the host and in R2. Once the newest
+# backup is an age file, whose private key is never on a host, it checks the backup instead and the
+# full restore is the monthly offline drill on the operator's Mac (ADR-129).
 # Runs as the bms user on staging; on production add a drop-in with User=deploy and Group=deploy.
 # Install: docs/runbooks/monitoring-and-alerts.md section 2.
 [Unit]
-Description=BMS: weekly restore drill of the newest backup
+Description=BMS: weekly restore drill or age backup check of the newest backup
 Wants=network-online.target
 After=network-online.target docker.service
 Requires=docker.service

@@ -181,6 +181,11 @@ check "a failed restore exits 1, writes nothing live and removes everything" \
 FAKE_DECRYPT_FAIL=1 rehearse decrypt-fails
 check "a failed decryption exits 1 and removes the temp dir and everything else" \
     eval '[[ "$STATUS" == 1 ]] && no_live_write && all_removed'
+fake_age_file "$WORK/newest.age"
+FAKE_BACKUP_FILE="$WORK/newest.age" rehearse age-backup
+check "an age backup (ADR-129 decision 5) is refused with exit 3: no decryption, no restore, everything removed" \
+    eval '[[ "$STATUS" == 3 ]] && said "encrypted to the offline age key" && [[ ! -s "$FAKE/decrypt-dirs" ]] \
+        && nothing_restored && no_live_write && all_removed'
 FAKE_MIGRATE_FAIL=1 rehearse migrate-fails
 check "a failed migration exits 1, commits nothing and removes everything" \
     eval '[[ "$STATUS" == 1 ]] && no_commit && no_live_write && all_removed'

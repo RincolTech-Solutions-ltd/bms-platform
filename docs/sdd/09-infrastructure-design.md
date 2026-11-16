@@ -388,8 +388,15 @@ deletion 90 days after closing), all Africa/Kampala (ADR-024).
 `deploy/backup.sh`, run nightly by cron at 01:15 host time (NFR-BAK-01 to NFR-BAK-03):
 
 1. `pg_dump --format custom` as `bms_owner` inside the postgres container;
-2. encrypted on the host with AES-256 (`openssl enc -aes-256-cbc -pbkdf2 -iter 200000`) using
-   `BACKUP_ENCRYPTION_KEY`, before anything leaves the host (NFR-BAK-02);
+2. piped straight into `age`, encrypted to the public key `BACKUP_AGE_RECIPIENT` before anything
+   leaves the host, so the unencrypted dump is never on disk (NFR-BAK-02, ADR-129). The private key
+   is never on a server: it is made on the operator's Mac and kept in its Keychain and as a sealed
+   printed copy with the owner (owner decision D121, `docs/runbooks/restore-from-backup.md`
+   section 8). With no valid recipient or no `age` the run fails before it dumps and uploads
+   nothing; it never reads the old symmetric `BACKUP_ENCRYPTION_KEY`. Backups made before the
+   switch (`openssl enc -aes-256-cbc -pbkdf2 -iter 200000` with that key) keep their names and
+   are told apart by their first bytes (`age-encryption.org/v1` or `Salted__`); they stay
+   readable with the old key, kept offline, until they age out;
 3. uploaded with `rclone` (pinned image, configured from environment variables, no config
    file) to `r2:<R2_BACKUP_BUCKET>/<environment>/daily/`, and on the first of the month also to
    `monthly/`;
@@ -413,9 +420,32 @@ deletion 90 days after closing), all Africa/Kampala (ADR-024).
    `state/restore-drill-history.log` and uploads it to `<environment>/drill/` in R2. `monitor.sh`
    alerts on a failed drill, no good drill in 9 days, or a drill over the RTO. The quarterly timed
    restore onto a fresh VM stays a human drill recorded in `docs/meetings/<date>/`.
+   Once the newest backup is an age file (ADR-129 decision 4) the host cannot decrypt it, so the
+   weekly run is a backup check instead of a restore: the newest object exists, is at most 26 hours
+   old, is a well formed age file to exactly one X25519 recipient with no passphrase stanza, is at
+   least 32 KiB and not under half the size of the last one checked. It records
+   `state/last_backup_check` (or `_error`) and uploads it to `<environment>/drill/last_backup_check.txt`
+   with the SHA-256 fingerprint of `BACKUP_AGE_RECIPIENT` and the live Flyway version; a failed check
+   goes to `drill/last_backup_check_error.txt`, so the good check's fingerprint stays. The full
+   restore is the monthly offline drill, `deploy/restore-drill-offline.sh`, run on the operator's Mac
+   with the Keychain key: the key's fingerprint compared with the host's last good check (no record
+   is a failure), the decryption streamed into a throwaway PostgreSQL with no network, the Flyway
+   version checked against the checkout's newest migration, the row counts, and `bms_app` reading
+   under row-level security at least one and exactly the owner role's count of a business's users; its result goes to `~/bms-restore-drills/` and, for the newest daily
+   backup only, to `<environment>/drill/last_offline_drill.txt`. `monitor.sh` takes the weekly result
+   as the newer of the drill and the check (9 days) and alerts when no full restore, on the host or
+   offline, succeeded in 35 days, or the last offline drill failed (read from R2 every 6 hours); once
+   the host checks age backups, only an offline restore of the then newest daily age backup with the
+   key matched to the host's (`recipient=match`) counts, and a check without a fingerprint is not good.
+   `backup.sh` and the weekly check judge an age header with one shared function; the check reaches
+   the live database through `docker compose` and fails when it cannot. An age file does not name its recipient, so the host cannot prove a backup opens
+   with the Keychain key; the monthly drill proves it.
 7. `deploy/restore-drill.sh --rehearse-import <run id>` (issue #138, ADR-027 decision 9) is the same
    script's rehearsal mode, run by hand before a cutover; with no argument the script is the weekly
    drill of item 6, unchanged (`deploy/tests/restore-drill-test.sh` holds it to a golden transcript).
+   It refuses an age backup with exit 3, since it would need the offline private key on the host;
+   whether it should restore a fresh dump of the live database instead is pending an owner decision
+   on issue #46 (ADR-129 decision 5).
    It restores the newest dump into a throwaway PostgreSQL on an internal Docker network of its own,
    refuses to go on unless that database is provably not the live one (container, cluster identifier,
    label, network), migrates it with the live API's image, copies the run's staged rows into it from
@@ -477,7 +507,8 @@ logs JSON (ECS format) with the request id on every line in the `server` profile
   compose.yml            production: copied from deploy/ on every deploy. Staging: refreshed from
                           releases/<tag>/ only after deploy.sh succeeds (ADR-018 finding M3)
   deploy.sh, backup.sh   as above
-  restore-drill.sh, monitor.sh   the weekly drill and the five-minute host checks (section 9.11)
+  restore-drill.sh, monitor.sh   the weekly drill or backup check and the five-minute host checks (section 9.11);
+                          restore-drill-offline.sh is never copied to a host: it runs on the operator's Mac
   pull-staging.sh        staging only: the puller; also refreshed only after a successful deploy
   releases/<tag>/        staging only: each release's host files, staged before deploy.sh runs;
                           the previous one to two releases are kept for inspection and rollback
@@ -494,6 +525,8 @@ logs JSON (ECS format) with the request id on every line in the `server` profile
   state/history.log      every deploy, rollback and failure with its time
   state/last_backup_ok   time of the last good backup; state/last_backup_error the last failed run
   state/last_restore_drill, last_restore_drill_error, restore-drill-history.log   the drill results
+  state/last_backup_check, last_backup_check_error   the weekly check of an age backup (ADR-129)
+  state/monitor_offline_drill   monitor.sh: the last offline drill result read from R2
   state/alerts/<check>   monitor.sh: when a problem was first seen and last sent
   state/deploy.lock      one deploy at a time
   state/last_failed_tag  staging only: a release the puller will not retry
