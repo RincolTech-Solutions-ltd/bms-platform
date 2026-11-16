@@ -147,7 +147,7 @@ the source; the trial balance of one tenant balances (sum of debits equals sum o
 | `backup.sh` | Each host, cron | Nightly 01:15 | The public key `BACKUP_AGE_RECIPIENT` only | A backup was made, encrypted, uploaded |
 | `restore-drill.sh` (no argument), newest backup an **age** file | Each host, `bms-restore-drill.timer` | Weekly, Sunday 03:30 | None (it cannot decrypt) | The newest backup exists, is fresh, is a well formed age file to one public key, and its size is sane (section 5.1) |
 | `restore-drill.sh` (no argument), newest backup in the **old** format | Each host, the same timer | Weekly, until the first age backup | The old `BACKUP_ENCRYPTION_KEY`, while it is still in `.env` | A full restore, as before (section 5.1) |
-| `restore-drill-offline.sh` | **The operator's Mac**, by hand | Monthly | The age private key in the Mac Keychain | A full restore of the newest backup, and that the host encrypts to that key (section 8.5) |
+| `restore-drill-offline.sh --remote <host>` | **The operator's Mac** decrypts, by hand; the throwaway database runs on the host over ssh (the Mac runs no Docker) | Monthly | The age private key in the Mac Keychain | A full restore of the newest backup, and that the host encrypts to that key (section 8.5) |
 | The quarterly drill onto a fresh VM | The Mac decrypts, the new VM restores | Quarterly | The age private key in the Mac Keychain | The two hour RTO (sections 1 to 4 and 6) |
 | `monitor.sh` | Each host, `bms-monitor.timer` | Every five minutes | None | Alerts on all of the above (section 5.1) |
 
@@ -489,8 +489,13 @@ staging and production. Everything below is done by hand by the operator; no pul
 
 ### 8.1 The operator's Mac, once
 
-- `brew install age rclone`, and Docker Desktop (or another Docker engine) running. `age --version` must be 1.1 or newer
-  (it reads the key from standard input). The system bash is enough for the drill script.
+- `brew install age rclone`. `age --version` must be 1.1 or newer (it reads the key from standard input). The system bash
+  is enough for the drill script. **No Docker engine runs on the Mac** (owner constraint of 16 November 2026): the drill's
+  throwaway database runs on the host (8.5).
+- SSH to each host as the operator's own user, by key, with an `~/.ssh/config` entry per host (for example `bms-production`
+  and `bms-staging`), and that user allowed to run the deploy user's docker without a password: `ssh bms-staging sudo -n
+  -u bms docker ps` must answer. The drill runs only `docker image inspect`, `ps`, `run`, `exec`, `inspect` and `rm` there;
+  a sudoers rule narrower than the deploy user's docker must allow all six.
 - A checkout of this repository, kept up to date (`git pull` before each drill: the drill compares the restored Flyway
   version with the checkout's newest migration).
 - An rclone remote for the backup bucket: `rclone config`, a new remote `bms-r2` of type `s3`, provider `Cloudflare`, with an
@@ -647,19 +652,45 @@ key back in `.env` for that time only and record it).
 Once a month (a calendar reminder; `monitor.sh` alerts when no full restore succeeded in 35 days), and after any change to the
 key or to `BACKUP_AGE_RECIPIENT`:
 
+The default is the remote mode: the Mac decrypts, and the throwaway database runs on the host whose backup it is, which
+already holds the same live data. The Mac runs no Docker engine.
+
 ```bash
 cd <the checkout> && git pull
 export BMS_DRILL_REMOTE=bms-r2:<backup bucket> POSTGRES_IMAGE=<the hosts' POSTGRES_IMAGE, for example postgres:16.15-alpine>
-deploy/restore-drill-offline.sh --environment production
-deploy/restore-drill-offline.sh --environment staging                     # when staging holds anything worth it
-deploy/restore-drill-offline.sh --folder monthly --file <name>            # a monthly copy, or an old-format backup
+deploy/restore-drill-offline.sh --remote bms-production --environment production
+deploy/restore-drill-offline.sh --remote bms-staging --environment staging   # when staging holds anything worth it
+deploy/restore-drill-offline.sh --remote bms-production --folder monthly --file <name>   # a monthly copy, or an old-format backup
 ```
 
-It downloads the newest backup into a mode-0700 temp dir and tells its format from its first bytes. For an age file it first
+`--remote` takes an `~/.ssh/config` host or `user@host` (or set `BMS_DRILL_SSH` once). On the host it runs
+`sudo -n -u bms docker` (change it with `BMS_DRILL_REMOTE_DOCKER`, for example `docker` when your user is in the docker group)
+and mounts the host's own roles script `/opt/bms/postgres/initdb` (`BMS_DRILL_REMOTE_INITDB`); the image must already be on
+the host, which it is when `POSTGRES_IMAGE` is the host's. `--local` runs the container in a Docker engine on the Mac instead,
+from the checkout's `deploy/postgres/initdb`; it is kept for a Mac that has one, not the routine. `BMS_DRILL_MEMORY_MB` sets
+the container's memory in MB: 256 for PostgreSQL itself and the rest a tmpfs for the data directory, about 96 MB of
+which is WAL (`max_wal_size=64MB`). Defaults: 640 on staging inside `bms.slice` (384 MB of tmpfs, about 288 MB of data);
+1280 on production (1024 MB of tmpfs, about 928 MB of data); 2048 with `--local`; at least 512. A restore that does not
+fit (no space on the tmpfs, or the engine's OOM kill) fails with `the restore did not fit in the container's <n> MB`; it
+never falls back to a disk volume. Raise it then, within what the VM (or on staging the slice) has free. The container
+has `--oom-score-adj 1000`, so on a host short of memory the kernel kills it before the live stack. A prefix word, initdb path, image or
+memory that is not plainly a word, an absolute path with no comma, an image name or a number is a usage error (exit 2)
+before anything runs: these values reach the host's shell and docker's options.
+
+It first checks that the host answers, has the image, holds no other drill's or rehearsal's database
+(`bms-restore-drill-*`, `bms-rehearsal-db-*`, `bms-offline-drill-*`), and has the container's memory and 256 MB more
+available (`MemAvailable`, read by running the same image with `cat /proc/meminfo`, no network), before anything is
+downloaded or decrypted. It downloads the newest
+backup into a mode-0700 temp dir on the Mac and tells its format from its first bytes. For an age file it
 compares the fingerprint of the Keychain key's public half with the `recipient=` of the host's last good check in
-`drill/last_backup_check.txt`, and fails if they differ or there is none. It starts a throwaway PostgreSQL in Docker with no
-network, created by the checkout's `deploy/postgres/initdb`, and streams the decryption (the Keychain key, or the old key for
-an old file) straight into `pg_restore`, so the decrypted dump is never in a file. It checks the Flyway version (not ahead of
+`drill/last_backup_check.txt`, and fails if they differ or there is none. It starts a throwaway PostgreSQL on the host with no
+network, its memory capped with no swap (inside `bms.slice` on staging, as the host drill), its data directory on a tmpfs
+inside that cap, no log driver, the host's roles script and the label `bms.offline-drill.expires=<start + 6 hours>`; readiness
+is `pg_isready` on 127.0.0.1, which only the final server answers. It decrypts on the Mac (the Keychain key, or the old key
+for an old file) and pipes the dump over ssh straight into `pg_restore` in that container: the key never crosses ssh, only
+the decrypted stream does, and nothing restored reaches a disk on the Mac or the host (no dump file, no data volume, no
+container log that could quote a row). A `pg_restore` error is held in memory and shown on the screen only. It checks the
+Flyway version (not ahead of
 the checkout's newest migration), the counts of tenants, users and audit rows, and that `bms_app` reads, under row-level
 security, at least one of a business's users and exactly as many as the owner role counts. It records one line in `~/bms-restore-drills/history.log` and, for a drill of the
 newest daily backup only, uploads it to `<environment>/drill/last_offline_drill.txt`. A drill of a named file or a monthly
@@ -672,8 +703,12 @@ proves nothing about the current key. `bms_app` must read exactly as many of the
 <time> FAILED <file> folder=daily format=age seconds=<n> <reason>
 ```
 
-It removes the temp dir, the downloaded file and the container whatever the outcome. A pg_restore error is shown on the screen
-only. Exit 0 is a pass, 1 a failure (recorded and uploaded), 2 a usage error.
+`history.log` on the Mac adds ` restored_on=<ssh target, or mac>` to an OK line; the uploaded line never carries it.
+
+It removes the temp dir, the downloaded file and the container whatever the outcome: the Mac's exit trap removes the host's
+container over ssh, and if the Mac dies or loses the network first, the host's `monitor.sh` removes it once the time in its
+label has passed. A pg_restore error is shown on the screen only. Exit 0 is a pass, 1 a failure (recorded and uploaded), 2 a
+usage error.
 
 | It says | Do |
 |---|---|
@@ -684,6 +719,12 @@ only. Exit 0 is a pass, 1 a failure (recorded and uploaded), 2 a usage error.
 | `bms_app reads 0 users` or `bms_app reads <n> users ..., the owner counts <m>` | The restore's row-level security or grants hide some or all of a business's rows from the application role: a finding to fix before the next release |
 | `ahead of this checkout's newest migration` | `git pull`, then run it again |
 | `COULD NOT UPLOAD the result` | Run the `rclone copyto` line it prints, or `monitor.sh` alerts after 35 days |
+| `cannot run '<prefix> image inspect <image>' on <host> over ssh` | `ssh <host> sudo -n -u bms docker image ls` by hand: fix the ssh entry or key, the sudo rule, `BMS_DRILL_REMOTE_DOCKER`, or `POSTGRES_IMAGE` (the host's value in `/opt/bms/.env`) |
+| `<host> runs or has left behind another drill or rehearsal` | Wait for the weekly drill (Sunday 03:30) or the rehearsal to end; a container left behind is removed as section 5.2 says, or by `monitor.sh` for an offline drill's |
+| `<host> has <n> MB available and the drill needs <m> MB plus 256 MB to spare` | Run it when the host is quieter (not during a deploy or a heavy job); lower `BMS_DRILL_MEMORY_MB` only if the data still fits |
+| `the restore did not fit in the container's <n> MB (<m> MB for the data)` | The data outgrew the container: set `BMS_DRILL_MEMORY_MB` higher and run it again (on staging only while the slice has the room; check `docker stats` first) |
+| `the ssh connection to <host> failed during the restore` | The network dropped. Run the drill again; the container was removed by the exit trap or is removed by `monitor.sh` within 6 hours |
+| `COULD NOT REMOVE bms-offline-drill-<n> on <host>` | Run the `ssh ... rm -f -v` line it prints, or leave it to `monitor.sh` after the time it names |
 
 ### 8.6 A lost or exposed key
 

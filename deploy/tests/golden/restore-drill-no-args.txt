@@ -8,6 +8,7 @@ exit 0
 -- docker calls
 run --rm --cgroup-parent bms.slice --memory 64m --volume WORK/ok-staging/opt/backups:/backups --env RCLONE_CONFIG_R2_TYPE=s3 --env RCLONE_CONFIG_R2_PROVIDER=Cloudflare --env RCLONE_CONFIG_R2_ENDPOINT=https://fake-r2.invalid --env RCLONE_CONFIG_R2_ACCESS_KEY_ID=fake-access --env RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=fake-secret --env RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true rclone/rclone:fake lsf --files-only r2:fake-bucket/staging/daily/
 run --rm --cgroup-parent bms.slice --memory 64m --volume WORK/ok-staging/opt/backups:/backups --env RCLONE_CONFIG_R2_TYPE=s3 --env RCLONE_CONFIG_R2_PROVIDER=Cloudflare --env RCLONE_CONFIG_R2_ENDPOINT=https://fake-r2.invalid --env RCLONE_CONFIG_R2_ACCESS_KEY_ID=fake-access --env RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=fake-secret --env RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true rclone/rclone:fake copyto r2:fake-bucket/staging/daily/bms-staging-20261024T011500Z.dump.enc /backups/drill-PID.dump.enc
+ps --all --format {{.Names}}
 run --detach --name bms-restore-drill-PID --cgroup-parent bms.slice --memory 384m --network none --env POSTGRES_PASSWORD=ZmFicmljYXRlZHJhbmRvbXBhc3M --env POSTGRES_DB=bms --env BMS_OWNER_PASSWORD=ZmFicmljYXRlZHJhbmRvbXBhc3M --env BMS_APP_PASSWORD=ZmFicmljYXRlZHJhbmRvbXBhc3M --volume WORK/ok-staging/opt/postgres/initdb:/docker-entrypoint-initdb.d:ro postgres:fake
 logs bms-restore-drill-PID
 exec bms-restore-drill-PID pg_isready -U bms_owner -d bms
@@ -37,6 +38,7 @@ exit 0
 -- docker calls
 run --rm --memory 64m --volume WORK/ok-production/opt/backups:/backups --env RCLONE_CONFIG_R2_TYPE=s3 --env RCLONE_CONFIG_R2_PROVIDER=Cloudflare --env RCLONE_CONFIG_R2_ENDPOINT=https://fake-r2.invalid --env RCLONE_CONFIG_R2_ACCESS_KEY_ID=fake-access --env RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=fake-secret --env RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true rclone/rclone:fake lsf --files-only r2:fake-bucket/production/daily/
 run --rm --memory 64m --volume WORK/ok-production/opt/backups:/backups --env RCLONE_CONFIG_R2_TYPE=s3 --env RCLONE_CONFIG_R2_PROVIDER=Cloudflare --env RCLONE_CONFIG_R2_ENDPOINT=https://fake-r2.invalid --env RCLONE_CONFIG_R2_ACCESS_KEY_ID=fake-access --env RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=fake-secret --env RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true rclone/rclone:fake copyto r2:fake-bucket/production/daily/bms-staging-20261024T011500Z.dump.enc /backups/drill-PID.dump.enc
+ps --all --format {{.Names}}
 run --detach --name bms-restore-drill-PID --memory 384m --network none --env POSTGRES_PASSWORD=ZmFicmljYXRlZHJhbmRvbXBhc3M --env POSTGRES_DB=bms --env BMS_OWNER_PASSWORD=ZmFicmljYXRlZHJhbmRvbXBhc3M --env BMS_APP_PASSWORD=ZmFicmljYXRlZHJhbmRvbXBhc3M --volume WORK/ok-production/opt/postgres/initdb:/docker-entrypoint-initdb.d:ro postgres:fake
 logs bms-restore-drill-PID
 exec bms-restore-drill-PID pg_isready -U bms_owner -d bms
@@ -83,6 +85,7 @@ exit 1
 -- docker calls
 run --rm --cgroup-parent bms.slice --memory 64m --volume WORK/pg-restore-fails/opt/backups:/backups --env RCLONE_CONFIG_R2_TYPE=s3 --env RCLONE_CONFIG_R2_PROVIDER=Cloudflare --env RCLONE_CONFIG_R2_ENDPOINT=https://fake-r2.invalid --env RCLONE_CONFIG_R2_ACCESS_KEY_ID=fake-access --env RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=fake-secret --env RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true rclone/rclone:fake lsf --files-only r2:fake-bucket/staging/daily/
 run --rm --cgroup-parent bms.slice --memory 64m --volume WORK/pg-restore-fails/opt/backups:/backups --env RCLONE_CONFIG_R2_TYPE=s3 --env RCLONE_CONFIG_R2_PROVIDER=Cloudflare --env RCLONE_CONFIG_R2_ENDPOINT=https://fake-r2.invalid --env RCLONE_CONFIG_R2_ACCESS_KEY_ID=fake-access --env RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=fake-secret --env RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true rclone/rclone:fake copyto r2:fake-bucket/staging/daily/bms-staging-20261024T011500Z.dump.enc /backups/drill-PID.dump.enc
+ps --all --format {{.Names}}
 run --detach --name bms-restore-drill-PID --cgroup-parent bms.slice --memory 384m --network none --env POSTGRES_PASSWORD=ZmFicmljYXRlZHJhbmRvbXBhc3M --env POSTGRES_DB=bms --env BMS_OWNER_PASSWORD=ZmFicmljYXRlZHJhbmRvbXBhc3M --env BMS_APP_PASSWORD=ZmFicmljYXRlZHJhbmRvbXBhc3M --volume WORK/pg-restore-fails/opt/postgres/initdb:/docker-entrypoint-initdb.d:ro postgres:fake
 logs bms-restore-drill-PID
 exec bms-restore-drill-PID pg_isready -U bms_owner -d bms

@@ -9,7 +9,9 @@
 #   - a wrong or missing key, a host that encrypts to another public key, an unknown format, a failed pg_restore or a
 #     Flyway version ahead of the checkout fails, is recorded and uploaded, and leaves nothing decrypted behind;
 #   - the key never appears in the output or the record; a pg_restore error never reaches the record;
-#   - backup_format is the host drill's.
+#   - backup_format is the host drill's;
+#   - --remote (issue #949): the Mac has no docker; ssh and the host's sudo and docker are stubs, the decrypted stream is
+#     the only thing that crosses ssh, and the same checks, record and upload hold.
 # Run: bash deploy/tests/offline-drill-test.sh
 # shellcheck disable=SC2016 # the checks are eval'd strings, expanded when they run.
 set -uo pipefail
@@ -45,7 +47,47 @@ fake_mac() {
     : > "$FAKE/calls.log"
     export FAKE TMPDIR="$root/tmp" HOME="$root/home" BMS_DRILL_REMOTE=fake-r2:fake-bucket POSTGRES_IMAGE=postgres:fake
     export FAKE_SECRET FAKE_PUBLIC OLD_KEY PLAIN
+    unset BMS_DRILL_SSH BMS_DRILL_REMOTE_DOCKER BMS_DRILL_REMOTE_INITDB
     stubs
+}
+
+# fake_remote <name>: fake_mac, but the Mac has no docker (owner constraint of 16 November 2026): ssh runs the command
+# string in a shell whose PATH holds the host's sudo and docker. Every ssh call is logged, and what crosses ssh on
+# standard input is kept in $FAKE/ssh-stdin.
+# JUSTIFICATION-A3: the remote mode (#949) needs a fake ssh and host; no existing stub carries either.
+fake_remote() {
+    fake_mac "$1"
+    mkdir -p "$FAKE/hostbin"
+    mv "$BIN/docker" "$FAKE/hostbin/docker"
+    # Ahead of any real docker on this machine: a call on the Mac is logged and fails.
+    printf '%s\n' '#!/bin/sh' 'echo "mac-docker $*" >> "$FAKE/calls.log"' 'exit 1' > "$BIN/docker"
+    cat > "$FAKE/hostbin/sudo" <<'STUB'
+#!/usr/bin/env bash
+printf 'sudo %s\n' "$*" >> "$FAKE/calls.log"
+[[ "$1 $2 $3" == "-n -u bms" ]] || { echo "sudo: a password is required" >&2; exit 1; }
+shift 3
+exec "$@"
+STUB
+    cat > "$BIN/ssh" <<'STUB'
+#!/usr/bin/env bash
+printf 'ssh %s\n' "$*" >> "$FAKE/calls.log"
+no_stdin=""
+while [[ "$1" == -* ]]; do
+    case "$1" in -n) no_stdin=1 ;; -o) shift ;; esac
+    shift
+done
+target="$1"
+[[ -n "${FAKE_SSH_DOWN:-}" ]] && { echo "ssh: connect to host ${target} port 22: Connection refused" >&2; exit 255; }
+# The host's login shell is sh (dash on Debian and Ubuntu): the command string must be POSIX quoted, no bash $'...'.
+if [[ -n "$no_stdin" ]]; then
+    PATH="$FAKE/hostbin:$PATH" sh -c "$2" < /dev/null
+    exit $?
+fi
+# The connection drops while the restore streams: the stream is read, the remote command never finishes.
+[[ -n "${FAKE_SSH_DROP:-}" ]] && { cat >> "$FAKE/ssh-stdin"; echo "client_loop: send disconnect: Broken pipe" >&2; exit 255; }
+tee -a "$FAKE/ssh-stdin" | PATH="$FAKE/hostbin:$PATH" sh -c "$2"
+STUB
+    chmod 755 "$FAKE/hostbin"/* "$BIN/ssh"
 }
 
 stubs() {
@@ -74,9 +116,18 @@ STUB
 #!/usr/bin/env bash
 printf 'docker %s\n' "$*" >> "$FAKE/calls.log"
 case "$1" in
-    run) echo "fake-container-id"; echo started > "$FAKE/container" ;;
+    run)
+        # The host's memory, read through a container of the same image (FAKE_MEMAVAILABLE_KB, default 3 GB available).
+        if [[ "$*" == *"--entrypoint cat "*" /proc/meminfo" ]]; then
+            printf 'MemTotal:        4000000 kB\nMemAvailable:    %s kB\n' "${FAKE_MEMAVAILABLE_KB:-3145728}"
+            exit 0
+        fi
+        echo "fake-container-id"; echo started > "$FAKE/container" ;;
+    image) [[ -z "${FAKE_NO_IMAGE:-}" ]] || { echo "Error: No such image: $*" >&2; exit 1; }; echo "sha256:fake" ;;
+    ps) [[ -f "$FAKE/host_containers" ]] && cat "$FAKE/host_containers" ;;
     logs) echo "PostgreSQL init process complete; ready for start up." ;;
-    rm) rm -f "$FAKE/container" ;;
+    rm) [[ -z "${FAKE_RM_FAIL:-}" ]] || exit 1; rm -f "$FAKE/container" ;;
+    inspect) [[ -n "${FAKE_OOM:-}" ]] && echo true || echo false ;;
     exec)
         shift
         [[ "$1" == -i ]] && shift
@@ -86,6 +137,7 @@ case "$1" in
             pg_restore*)
                 cat > "$FAKE/restored"
                 [[ -n "${FAKE_RESTORE_FAIL:-}" ]] && { echo "pg_restore: error: row (Fabricated Customer, 0700000000)" >&2; exit 1; }
+                [[ -n "${FAKE_RESTORE_NOSPACE:-}" ]] && { echo "pg_restore: error: could not extend file: No space left on device" >&2; exit 1; }
                 exit 0 ;;
             *flyway_schema_history*) echo "${FAKE_FLYWAY:-145}" ;;
             *"count(*) FROM tenants"*) echo 2 ;;
@@ -269,6 +321,162 @@ check "a wrong environment is a usage error that touches nothing" \
     eval '[[ "$STATUS" == 2 && ! -s "$FAKE/calls.log" && ! -e "$HOME/bms-restore-drills" ]]'
 drill --file ../../etc/passwd
 check "a --file that is not a backup name is a usage error" test "$STATUS" = 2
+
+# --- the remote mode: decrypt on the Mac, restore on a host over ssh, no Docker on the Mac (issue #949) ---
+# JUSTIFICATION-A3: new test cases for the new remote mode; they reuse the existing helpers.
+HOST_DOCKER="sudo -n -u bms docker"
+host_run() { grep "^${HOST_DOCKER} run " "$FAKE/calls.log"; }
+nothing_plain_on_mac() { ! grep -rqF -- "$PLAIN" "$TMPDIR" "$HOME"; }
+fake_remote remote-ok; age_backup
+drill --remote bms-production
+check "remote: the newest age backup restores on the host and is checked" test "$STATUS" = 0
+check "remote: what the host restored is the decrypted dump" eval '[[ "$(cat "$FAKE/restored")" == "$PLAIN" ]]'
+check "remote: only the decrypted stream crosses ssh, never the key" \
+    eval '[[ "$(cat "$FAKE/ssh-stdin")" == "$PLAIN" ]] && no_secret_shown'
+check "remote: the Mac's docker is never called, every host docker call goes through the prefix" \
+    eval '! grep -q "^mac-docker" "$FAKE/calls.log" && [[ "$(grep -c "^docker " "$FAKE/calls.log")" == "$(grep -c "^${HOST_DOCKER} " "$FAKE/calls.log")" ]]'
+check "remote: the throwaway postgres has no network, a memory cap, the host's roles script and the expiry label" \
+    eval 'host_run | grep -q -- "--name bms-offline-drill-[0-9]* --network none --memory 1280m --memory-swap 1280m --mount type=bind,source=/opt/bms/postgres/initdb,target=/docker-entrypoint-initdb.d,readonly .*--label bms.offline-drill.expires=[0-9]*"'
+# Review of e7cc8e6, finding 1: nothing restored reaches the host's disk.
+check "remote: its data directory is a tmpfs inside the cap, with no swap and no container log" \
+    eval 'host_run | grep -q -- "--memory-swap 1280m .*--tmpfs /var/lib/postgresql/data:rw,size=1024m --log-driver none --oom-score-adj 1000 "'
+# Review of 7a1faf9, findings 1 to 3: the tmpfs is the image's own data directory with the image's PGDATA (no mode, no
+# subdirectory, so the entrypoint owns and chmods the mount root), the WAL is kept small, and the kernel kills this first.
+check "remote: no mode on the tmpfs and no PGDATA of its own" \
+    eval '! host_run | grep -q -- "mode=0700\|PGDATA"'
+check "remote: the server keeps its WAL small, as arguments after the image" \
+    eval 'host_run | grep -q -- "postgres:fake -c max_wal_size=64MB -c min_wal_size=32MB$"'
+check "remote: readiness is the final server on TCP, never a log read" \
+    eval 'grep -q "^docker exec bms-offline-drill-[0-9]* pg_isready -h 127.0.0.1 " "$FAKE/calls.log" && ! grep -q "^docker logs" "$FAKE/calls.log"'
+check "remote: production is not put in bms.slice" eval '! host_run | grep -q -- --cgroup-parent'
+check "remote: the container expires 6 hours after the start" \
+    eval 'e="$(host_run | sed -nE "s/.*bms.offline-drill.expires=([0-9]+).*/\1/p")"; (( e - $(date -u +%s) > 21200 && e - $(date -u +%s) <= 21600 ))'
+# Review of e7cc8e6, finding 4: the uploaded line is the one it always was; where it restored is in history.log only.
+check "remote: the uploaded line is unchanged, and ends with recipient=match" \
+    eval 'grep -qE "^[^ ]+ OK ${NEWEST} folder=daily format=age seconds=[0-9]+ rto_ok=yes flyway=145 repo_flyway=146 tenants=2 users=5 audit=40 app_visible_users=3 recipient=match\$" "$FAKE/r2/last_offline_drill.txt"'
+check "remote: history.log on the Mac notes where it restored" \
+    eval 'grep -q " recipient=match restored_on=bms-production\$" "$HOME/bms-restore-drills/history.log" && ! grep -rq restored_on "$FAKE/r2"'
+check "remote: the container is removed on the host and the temp dir on the Mac" nothing_left
+check "remote: nothing decrypted is written on the Mac" nothing_plain_on_mac
+counted_by_monitor() {
+    # monitor.sh's own offline_counts accepts the uploaded line, its time set to the morning after the backup.
+    (
+        # shellcheck source=deploy/monitor.sh
+        . "$HERE/../monitor.sh"
+        MONITOR_BACKUP_HOURS=26
+        offline_counts "$(sed -E 's/^[^ ]+/2026-11-14T09:00:00Z/' "$FAKE/r2/last_offline_drill.txt")"
+    )
+}
+check "remote: monitor.sh counts the uploaded line as the month's full restore" counted_by_monitor
+
+fake_remote remote-staging; age_backup
+BMS_DRILL_SSH=bms-staging drill --environment staging
+check "remote: BMS_DRILL_SSH names the host, and staging's container runs inside bms.slice with 640 MB in all" \
+    eval '[[ "$STATUS" == 0 ]] && grep -q "^ssh .* bms-staging " "$FAKE/calls.log" && host_run | grep -q -- "--memory 640m --memory-swap 640m .*--cgroup-parent bms.slice --tmpfs /var/lib/postgresql/data:rw,size=384m "'
+
+fake_remote remote-prefix; age_backup
+BMS_DRILL_REMOTE_DOCKER=docker BMS_DRILL_REMOTE_INITDB=/srv/bms/initdb drill --remote deploy@bms-staging
+check "remote: the docker prefix and the initdb folder are configurable" \
+    eval '[[ "$STATUS" == 0 ]] && ! grep -q "^sudo" "$FAKE/calls.log" && grep -q "^docker run .*source=/srv/bms/initdb," "$FAKE/calls.log"'
+
+fake_mac local-over-env; age_backup
+BMS_DRILL_SSH=bms-staging drill --local
+check "--local runs the container in the Mac's docker even with BMS_DRILL_SSH set" \
+    eval '[[ "$STATUS" == 0 ]] && ! grep -q "^ssh" "$FAKE/calls.log" && grep -q "^docker run " "$FAKE/calls.log"'
+check "--local keeps its data in memory too: 2 GB, a tmpfs, no container log" \
+    eval 'grep -q -- "^docker run .*--memory 2048m --memory-swap 2048m .*--tmpfs /var/lib/postgresql/data:rw,size=1792m --log-driver none " "$FAKE/calls.log"'
+
+# Review of e7cc8e6, finding 2: no value from the environment can inject a command or an option on the host.
+# JUSTIFICATION-A3: one case per finding of the review; they reuse the existing fakes and helpers.
+fake_remote remote-injection; age_backup
+# shellcheck disable=SC2016 # $FAKE is for the host's shell to expand, were the prefix ever pasted raw.
+BMS_DRILL_REMOTE_DOCKER='docker; touch $FAKE/pwned;' drill --remote bms-production
+check "remote: a docker prefix with a shell character is a usage error that runs nothing" \
+    eval '[[ "$STATUS" == 2 && ! -s "$FAKE/calls.log" && ! -e "$FAKE/pwned" ]]'
+BMS_DRILL_REMOTE_INITDB='/opt/bms/postgres/initdb,readonly=false' drill --remote bms-production
+check "remote: an initdb path with a comma (a --mount option) is a usage error" \
+    eval '[[ "$STATUS" == 2 && ! -s "$FAKE/calls.log" ]]'
+BMS_DRILL_REMOTE_INITDB='relative/initdb' drill --remote bms-production
+check "remote: an initdb path that is not absolute is a usage error" test "$STATUS" = 2
+POSTGRES_IMAGE='--privileged' drill --remote bms-production
+check "remote: an image docker could read as an option is a usage error" \
+    eval '[[ "$STATUS" == 2 && ! -s "$FAKE/calls.log" ]]'
+BMS_DRILL_MEMORY_MB=511 drill --remote bms-production
+check "remote: a memory below 512 MB (PostgreSQL's 256 and at least 256 of data) is a usage error" test "$STATUS" = 2
+fake_remote remote-quotes; age_backup
+FAKE_MEMAVAILABLE_KB=4194304 BMS_DRILL_MEMORY_MB=3000 drill --remote bms-production
+check "remote: SQL with quotes reaches the host's sh word for word, and BMS_DRILL_MEMORY_MB sets the cap" \
+    eval '[[ "$STATUS" == 0 ]] && grep -qF "SELECT set_config('"'"'app.tenant_id'"'"', '"'"'0b5e7a2c-0000-4000-8000-00000000a001'"'"', false)" "$FAKE/calls.log" && host_run | grep -q -- "--memory 3000m --memory-swap 3000m .*size=2744m "'
+# Lead on the review of e7cc8e6: a dump too big for the cap fails plainly and never falls back to a disk volume.
+fake_remote remote-too-big; age_backup
+FAKE_RESTORE_NOSPACE=1 drill --remote bms-staging --environment staging
+check "remote: a restore that outgrows the tmpfs fails plainly, naming the cap and the setting" \
+    eval 'failed_with "the restore did not fit in the container.s 640 MB (384 MB of tmpfs, about 288 MB of data beside the WAL): set BMS_DRILL_MEMORY_MB higher" && [[ "$(grep -c "^docker run --detach " "$FAKE/calls.log")" == 1 ]] && ! grep -q -- "--volume\|type=volume" "$FAKE/calls.log"'
+# Lead on the review of 7a1faf9, point 3: a host without the cap and 256 MB to spare fails before the key is read.
+fake_remote remote-short; age_backup
+FAKE_MEMAVAILABLE_KB=1048576 drill --remote bms-production
+check "remote: a host with too little memory available fails plainly before anything is decrypted or started" \
+    eval 'failed_with "bms-production has 1024 MB available and the drill needs 1280 MB plus 256 MB to spare" && ! grep -q "^security" "$FAKE/calls.log" && ! grep -q "^docker run --detach" "$FAKE/calls.log"'
+check "remote: the memory is read through the host's docker, with no network and no log" \
+    eval 'grep -q "^sudo -n -u bms docker run --rm --network none --log-driver none --memory 32m --entrypoint cat postgres:fake /proc/meminfo$" "$FAKE/calls.log"'
+# Review of 7a1faf9, finding 9: the engine's OOM kill is "did not fit"; any other crash stays "pg_restore failed".
+fake_remote remote-oom; age_backup
+FAKE_RESTORE_FAIL=1 FAKE_OOM=1 drill --remote bms-production
+check "remote: a restore the engine killed at the cap fails as did not fit" \
+    failed_with "the restore did not fit in the container.s 1280 MB"
+fake_remote remote-crash; age_backup
+FAKE_RESTORE_FAIL=1 drill --remote bms-production
+check "remote: a restore that fails otherwise is never called too big" \
+    eval 'failed_with "pg_restore failed" && ! recorded "did not fit"'
+
+# Review of e7cc8e6, finding 11: never beside another drill's or a rehearsal's database.
+fake_remote remote-busy; age_backup; printf '%s\n' bms-api-1 bms-restore-drill-4242 > "$FAKE/host_containers"
+drill --remote bms-staging --environment staging
+check "remote: a host running the weekly drill's database fails before the key is read" \
+    eval 'failed_with "bms-staging runs or has left behind another drill or rehearsal (bms-restore-drill-4242)" && ! grep -q "^security" "$FAKE/calls.log" && ! grep -q "docker run" "$FAKE/calls.log"'
+
+fake_remote remote-down; age_backup
+FAKE_SSH_DOWN=1 drill --remote bms-production
+check "remote: a host that does not answer fails before anything is downloaded or the key is read" \
+    eval 'failed_with "cannot run .* on bms-production over ssh" && ! grep -q "copyto fake-r2:fake-bucket/production/daily" "$FAKE/calls.log" && ! grep -q "^security" "$FAKE/calls.log"'
+fake_remote remote-no-image; age_backup
+FAKE_NO_IMAGE=1 drill --remote bms-production
+check "remote: a host without the image fails before anything is decrypted" \
+    eval 'failed_with "check the ssh target, BMS_DRILL_REMOTE_DOCKER and POSTGRES_IMAGE" && [[ ! -e "$FAKE/ssh-stdin" ]]'
+
+fake_remote remote-drop; age_backup
+FAKE_SSH_DROP=1 drill --remote bms-production
+check "remote: a connection lost during the restore fails, and the container is still removed" \
+    eval 'failed_with "the ssh connection to bms-production failed during the restore" && grep -q "^docker rm -f -v bms-offline-drill-[0-9]*$" "$FAKE/calls.log" && [[ ! -e "$FAKE/container" ]]'
+fake_remote remote-restore-fails; age_backup
+FAKE_RESTORE_FAIL=1 drill --remote bms-production
+check "remote: a failed pg_restore on the host fails the drill" failed_with "pg_restore failed"
+check "remote: its error is shown on screen only, never written on the Mac" \
+    eval 'grep -q "Fabricated Customer" <<< "$OUTPUT" && ! grep -rq "Fabricated Customer" "$HOME" "$TMPDIR" "$FAKE/r2"'
+fake_remote remote-rls; age_backup
+FAKE_OWNER_USERS=4 drill --remote bms-production
+check "remote: bms_app reading fewer rows than the owner counts fails" failed_with "bms_app reads 3 users of business .* the owner counts 4"
+fake_remote remote-ahead; age_backup
+FAKE_FLYWAY=147 drill --remote bms-production
+check "remote: a restore ahead of the checkout's migrations fails" failed_with "ahead of this checkout's newest migration 146"
+fake_remote remote-wrong-key; age_backup; printf '%s' "$OTHER_SECRET" > "$FAKE/keychain/bms-backup-age-identity"
+printf '2026-11-15T03:30:00Z OK x format=age recipient=%s\n' \
+    "$(fp_of age1zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz)" > "$FAKE/host_check"
+drill --remote bms-production
+check "remote: a wrong Keychain key fails on the Mac and nothing reaches the host's database" \
+    eval 'failed_with "decryption failed" && [[ ! -s "$FAKE/restored" ]] && ! grep -qF -- "$OTHER_SECRET" "$FAKE/calls.log" "$FAKE/ssh-stdin"'
+
+fake_remote remote-rm-fails; age_backup
+FAKE_RM_FAIL=1 drill --remote bms-production
+check "remote: a container the trap cannot remove is reported, with monitor.sh's time and the command by hand" \
+    eval '[[ "$STATUS" == 0 ]] && grep -qE "COULD NOT REMOVE bms-offline-drill-[0-9]+ on bms-production: the host.s monitor.sh removes it after [0-9]{8}T[0-9]{6}Z, or now" <<< "$OUTPUT" && grep -q "rm -f -v bms-offline-drill-" <<< "$OUTPUT"'
+
+fake_remote remote-usage; age_backup
+drill --remote -oProxyCommand=fabricated
+check "remote: a target ssh could read as an option is a usage error that touches nothing" \
+    eval '[[ "$STATUS" == 2 && ! -s "$FAKE/calls.log" ]]'
+drill --remote
+check "remote: --remote without a target is a usage error" test "$STATUS" = 2
 
 same_format() {
     diff <(sed -n '/^backup_format() {/,/^}/p' "$HERE/../restore-drill.sh") \

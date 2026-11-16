@@ -206,7 +206,7 @@ rh_require_alone() {
     flock --nonblock 9 || rh_refuse "a deploy is running (state/deploy.lock); try again when it ends"
     rh_require_drill_clear
     if pgrep -f 'restore-drill\.sh$' > /dev/null 2>&1 \
-        || docker ps --all --format '{{.Names}}' | grep -Eq '^(bms-restore-drill|bms-rehearsal-db)-'; then
+        || docker ps --all --format '{{.Names}}' | grep -Eq '^(bms-restore-drill|bms-rehearsal-db|bms-offline-drill)-'; then
         rh_refuse "a restore drill or another rehearsal is running, or one left its containers behind; try again when it ends, or remove what is left (docs/runbooks/restore-from-backup.md section 5.2)"
     fi
 }
@@ -805,6 +805,11 @@ fi
 openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_ENCRYPTION_KEY -in "$ENC" -out "$DUMP" 2> /dev/null \
     || fail "decryption failed (wrong BACKUP_ENCRYPTION_KEY or a corrupt file)"
 [[ -s "$DUMP" ]] || fail "decrypted dump is empty"
+# Never beside a remote offline drill's database (restore-drill-offline.sh --remote, issue #949): on staging both would
+# share bms.slice, and its tmpfs cannot be reclaimed (review of 7a1faf9, finding 4).
+if docker ps --all --format '{{.Names}}' | grep -q '^bms-offline-drill-'; then
+    fail "a remote offline drill's database (bms-offline-drill-*) is on this host; run the drill again when it ends"
+fi
 
 rand() { openssl rand -base64 24 | tr -d '/+=' ; }
 log "starting a throwaway postgres (${DRILL})"

@@ -15,6 +15,7 @@
 #           backup check (state/last_backup_check, ADR-129); alerts on a failed one, none good in 9 days, or a drill
 #           over the 2 hour RTO; and the full restore: none good in 35 days on this host or by the monthly offline drill
 #           (<environment>/drill/last_offline_drill.txt in R2, read every 6 hours), or the last offline drill failed.
+# Before the checks it removes a remote offline drill's throwaway database left behind past the time in its label.
 #
 # A problem is sent once when it starts, again every MONITOR_REPEAT_HOURS (6) while it lasts, and
 # once when it clears; state/alerts/<check> remembers what was sent. A message that could not be sent
@@ -330,6 +331,34 @@ check_drill() {
     report drill "$(join "${problems[@]}")"
 }
 
+# The throwaway database of a remote offline drill (restore-drill-offline.sh --remote) whose Mac went away before its
+# exit trap could remove it: the drill labels it with the time after which it is removed here (bms.offline-drill.expires,
+# 6 hours after the drill started). One still within its time is a drill that may be running, and is left alone.
+# It never stops the checks below: a docker that cannot be listed or a container that cannot be removed is logged, and
+# the run goes on (review of e7cc8e6, finding 3). The drill starts it as the deploy user bms, the user this runs as.
+# engine <seconds> <docker args...>: docker with a time limit, so a hung engine never holds monitor.lock (review of
+# 7a1faf9, finding 6); a probe of its own so the tests can replace it.
+engine() { timeout "$1" docker "${@:2}"; }
+reap_offline_drills() {
+    local name expires t listed
+    t="$(now)"
+    if ! listed="$(engine 30 ps --all --filter label=bms.offline-drill.expires \
+        --format '{{.Names}} {{.Label "bms.offline-drill.expires"}}' 2>&1)"; then
+        log "could not list the containers to remove a remote offline drill's database: $(head -c 200 <<< "$listed")"
+        return 0
+    fi
+    while read -r name expires; do
+        [[ "$name" == bms-offline-drill-* && "$expires" =~ ^[0-9]{1,12}$ ]] || continue
+        (( 10#$expires < t )) || continue
+        if engine 60 rm -f -v "$name" > /dev/null 2>&1; then
+            log "removed ${name}, a remote offline drill's database left behind"
+        else
+            log "could not remove ${name}, a remote offline drill's database left behind"
+        fi
+    done <<< "$listed"
+    return 0
+}
+
 main() {
     cd "$(dirname "$0")" || exit 1
     set -a
@@ -341,6 +370,7 @@ main() {
     exec 9> "$STATE/monitor.lock"
     flock --nonblock 9 || { log "previous run still in progress"; exit 0; }
 
+    reap_offline_drills || true
     check_site
     check_jobs
     check_disk

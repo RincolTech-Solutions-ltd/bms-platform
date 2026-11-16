@@ -11,7 +11,7 @@ Two layers, both posting to the Telegram operator chat the API already uses (`BM
 | External uptime monitor | A hosted service, outside our hosts | The site or a tenant page down for 3 minutes, the host silent (no heartbeat) |
 | `deploy/monitor.sh` every 5 minutes (`bms-monitor.timer`) | On the host, as the deploy user | Site down, failed, stuck or overdue jobs, disk over 70 percent, certificate expiry within 14 days, failed or stale backups, failed, stale or slow restore drill |
 | `deploy/restore-drill.sh` weekly (`bms-restore-drill.timer`) | On the host | Produces the weekly result that `monitor.sh` reports: a full restore of an old-format backup, or a check of an age backup the host cannot decrypt (ADR-129) |
-| `deploy/restore-drill-offline.sh` monthly, by hand | On the operator's Mac, with the backup private key | The full restore of an age backup; its result in R2 (`drill/last_offline_drill.txt`) is what `monitor.sh` reads (`restore-from-backup.md` section 8.5) |
+| `deploy/restore-drill-offline.sh` monthly, by hand | On the operator's Mac, with the backup private key; the throwaway database runs on the host over ssh (`--remote`) | The full restore of an age backup; its result in R2 (`drill/last_offline_drill.txt`) is what `monitor.sh` reads (`restore-from-backup.md` section 8.5). Each `monitor.sh` run removes a `bms-offline-drill-*` container whose `bms.offline-drill.expires` time has passed (a Mac that died mid-drill) |
 
 Who reads the chat and who is paged out of hours is in `docs/runbooks/support-and-on-call.md`.
 
