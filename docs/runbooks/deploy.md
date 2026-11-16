@@ -40,6 +40,11 @@ systemctl list-timers bms-pull.timer
   anyway). Fix forward with a new merge (a new tag is tried at once), or retry the same one with
   `rm /opt/bms/state/last_failed_tag`. `releases/<tag>/` on the host keeps that release's files for
   inspection until the next successful deploy cleans it up.
+- The log says `an offline restore drill's database (bms-offline-drill-*) is on this host; deploying
+  on a later run`: the operator's monthly drill (`restore-from-backup.md` section 8.5) is running in
+  `bms.slice`, and the release deploys on the first run after its container is gone (issue #951). A
+  container left by a Mac that died mid-drill is removed by `monitor.sh` once its label's time passes.
+  `cannot list the containers` means docker did not answer; the release waits for that too.
 - To pause staging deploys: `systemctl stop bms-pull.timer` (and `start` to resume).
 
 ## Old app copies after a deploy (ADR-078)
