@@ -518,6 +518,10 @@ real commit. The rehearsal report, its reconciliation and its timings are stored
 throwaway database is dropped. The rehearsal proves the import against the real tenant state,
 the real migrations and the real data volume, without touching production.
 
+Since 16 November 2026 (issue #953, ADR-129 decision 5) the throwaway database starts from a snapshot of the
+live database itself, a `pg_dump` streamed into it at low priority, not from last night's backup: backups
+are encrypted to a key the host does not hold. Everything else above stands.
+
 ## 6. Security and privacy
 
 ### 6.1 Minimisation

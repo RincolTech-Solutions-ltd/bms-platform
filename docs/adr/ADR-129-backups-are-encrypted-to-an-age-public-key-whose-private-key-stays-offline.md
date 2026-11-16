@@ -11,6 +11,10 @@ chapter 9 section 9.10; the runbooks are `docs/runbooks/restore-from-backup.md` 
 engine runs on it.** The monthly drill (decision 4) still decrypts on the Mac with the Keychain key, and now restores on the
 host over ssh (decision 7). Decision 6 and the consequences are amended to match.
 
+**Amended again 16 November 2026** (issue #953, owner decision of that day on #46): **an import rehearsal needs no key on
+the host.** It starts from a `pg_dump` of the same host's live database streamed into its throwaway PostgreSQL, not from
+a backup (decision 5, rewritten). The consequence on rehearsals is amended to match.
+
 ## Context
 
 `deploy/backup.sh` encrypted each nightly dump with `openssl enc -aes-256-cbc -pbkdf2` and `BACKUP_ENCRYPTION_KEY`, a passphrase in
@@ -78,10 +82,25 @@ decrypt.
    An age file does not name its recipient (that is part of age's design), so the host check cannot prove that a backup was
    encrypted to the Keychain key. The monthly drill proves it by decrypting, and the fingerprint comparison catches a host
    whose `.env` recipient was changed after that.
-5. **The import rehearsal refuses an age backup** (`restore-drill.sh --rehearse-import`, ADR-027 decision 9), with exit 3 and a
-   message: it restores last night's backup on the host, which needs the private key there. Whether a rehearsal should restore a
-   fresh `pg_dump` of the live database instead is pending an owner decision on issue #46; until then a rehearsal runs only
-   while the newest backup is still symmetric.
+5. **The import rehearsal starts from the live database, not from a backup** (`restore-drill.sh --rehearse-import`,
+   ADR-027 decision 9; amended 16 November 2026, issue #953). As first decided, a rehearsal refused an age backup (exit 3),
+   since restoring last night's backup on the host needs the private key there. The owner decided on #46 that a rehearsal
+   needs no key on the host at all: it streams a `pg_dump` of the same host's live database (as `bms_owner`, pg_dump's own
+   consistent snapshot, uncompressed) straight into `pg_restore` in its throwaway PostgreSQL, so no backup is fetched, no
+   key is read and no dump is ever a file; the backups' format, age or old, no longer matters to it. So that the live
+   database is not slowed noticeably, `pg_dump` runs at nice 19 and the lowest best-effort I/O priority, and so does its
+   server process once it is found (best-effort, not idle, so a page it reads is never starved behind the live load);
+   `--lock-wait-timeout` keeps it from queueing behind a lock, and `timeout -s KILL` and the rehearsal's session name bound
+   it to the rehearsal's deadline. The throwaway database is kept as the remote drill keeps its own (decision 7): its data
+   and WAL on a tmpfs inside its memory cap, no swap, no log driver, `--oom-score-adj 1000`, on an internal network of its
+   own with no route out (the migrate and API containers must reach it there, so it cannot have no network at all). Its
+   cap is the server's 192 MB, 64 MB of WAL (`wal_level=minimal`, `max_wal_size=32MB`) and one and a half times the live
+   database's size (at least 96 MB), or `BMS_REHEARSAL_DB_MEMORY_MB`; a cap whose tmpfs cannot hold the live data is
+   refused, never put on a disk. On staging it sits in `bms.slice` and the rehearsal starts only while the slice has room
+   for it and the API together; on production only while the host has that much and 256 MB more available. Every other
+   guard of the rehearsal stays as it was: a run of the import screens in review or ready, fabricated only on staging,
+   the target checks, the placeholder keys of outside services, the weekend window, the locks and the overlap checks.
+   The stored rehearsal names its start as `live-bms-postgres-1-<UTC stamp>` where it named a backup.
 6. **A restore that matters decrypts on the Mac and streams.** For a real restore, or the quarterly drill onto a fresh VM, the
    dump is decrypted on the operator's Mac and piped over SSH straight into `pg_restore` on the target host, so the private key
    never reaches a server and the plaintext never lands on a disk (`restore-from-backup.md` section 2). The Mac needs no
@@ -132,7 +151,10 @@ decrypt.
   network and is gone when the drill ends; no live password or key is ever on that line.
 - Losing both the Keychain copies and the envelope loses every backup made since the switch. The envelope is kept apart from the
   Mac, and the ceremony checks the paper copy by reading it back.
-- Import rehearsals stop once the newest backup is an age file, until the owner decides decision 5.
+- Import rehearsals run whatever the backups' format (amended 16 November 2026): they no longer prove anything about a
+  backup, which only the drills do, and a rehearsal reads the whole live database once, at low priority, while it
+  runs. Its throwaway data is in memory only, so the live data's size, not the disk, bounds it: on staging the slice
+  must have room for about one and a half times the live data beside the API's 448 MB.
 - The rollout is by hand and outside this change, and its order matters: the key ceremony, `age` and `BACKUP_AGE_RECIPIENT`
   on every host **before** the release reaches any host (the staging puller deploys within minutes of the merge, and the new
   `backup.sh` fails without them; the old one ignores the recipient). Then on each host `backup.sh` and the check by hand,

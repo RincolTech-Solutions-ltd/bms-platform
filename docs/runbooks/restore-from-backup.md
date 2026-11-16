@@ -203,9 +203,9 @@ The full drill (weekly on the host before the switch, monthly on the Mac after i
 gives a lower bound on the time. It does not prove the two hour RTO for a lost host; that stays the quarterly drill onto a fresh
 VM (sections 1 to 4, recorded as in section 6).
 
-### 5.2 Rehearsing an import on last night's backup (`--rehearse-import`)
+### 5.2 Rehearsing an import on a copy of the live database (`--rehearse-import`)
 
-Before a cutover the operator rehearses the customer's import run against last night's backup (spec
+Before a cutover the operator rehearses the customer's import run against a snapshot of the live database (spec
 `docs/specs/customer-data-onboarding.md` section 5.5, ADR-027 decision 9, issue #138; the cutover runbook
 `docs/runbooks/customer-data-cutover.md` section 2.4 says when). The same script does it, only when asked:
 
@@ -216,10 +216,10 @@ cd /opt/bms && ./restore-drill.sh --rehearse-import <run id>
 Run it by hand as the user that runs the drill (`bms` on staging, `deploy` on production), never from the timer or
 cron: those run the script with no argument, which is the weekly drill above, unchanged.
 
-**It refuses an age backup** (exit 3, "encrypted to the offline age key, which this host does not hold"): a rehearsal
-restores last night's backup on the host, which would need the private key there (ADR-129 decision 5). Until the owner
-decides on issue #46 whether a rehearsal should restore a fresh dump of the live database instead, a rehearsal runs only
-while the newest backup is still in the old format, that is before the switch of section 8.4. What it does, in order:
+**It reads no backup and needs no key** (ADR-129 decision 5, amended 16 November 2026, issue #953). Backups are
+encrypted to the offline age key, which never comes to a host, so a rehearsal no longer restores last night's backup: it
+streams a `pg_dump` of the same host's live database into its throwaway database. It runs the same before and after the
+switch of section 8.4, with neither `BACKUP_ENCRYPTION_KEY` nor the R2 settings in `.env`. What it does, in order:
 
 1. Reads the run on the live database as `bms_owner`, read only: it must be a run of the import screens (origin
    `framework`), in review or ready, and on staging marked fabricated by its uploader (`import_runs.fabricated`).
@@ -239,16 +239,27 @@ while the newest backup is still in the old format, that is before the switch of
    stop (the deadline, Ctrl-C or TERM) comes as the row is being stored, the script reads the row back from the live
    database and says whether it was stored; if that read fails it says the outcome is unknown and prints the query to
    check it with. No commit starts with less than 30 minutes left.
-   A rehearsal that needs longer is a sign to split the run's files. On staging it starts nothing
-   unless `bms.slice` has 704 MB free below `MemoryHigh` (in use counted as `memory.current` less inactive page cache),
-   and 448 MB again before the API container.
-3. Fetches and decrypts the newest backup, as the drill does, into a mode-0700 temp dir `backups/rehearsal.XXXXXX`; the
-   decrypted dump is deleted as soon as it is restored.
-4. Starts a throwaway PostgreSQL (`bms-rehearsal-db-<pid>`, 256 MB, 1 CPU, inside `bms.slice` on staging) on an internal
-   Docker network of its own (`bms-rehearsal-net-<pid>`, no route out, the live database not on it) with a volume of its
-   own, restores into it, and refuses to go on unless it is provably not the live database: another name, another
-   container, another cluster (`pg_control_system()`'s identifier), this rehearsal's label, this network only. It asks
-   again before the commit.
+   A rehearsal that needs longer is a sign to split the run's files.
+3. Sizes its throwaway database from the live database's size (`pg_database_size`, read only): 192 MB for the server,
+   64 MB of WAL and one and a half times the live size (at least 96 MB) for the data, all in memory; 352 MB while the
+   live data is under 64 MB. `BMS_REHEARSAL_DB_MEMORY_MB` (exported, or in `.env`) sets the whole cap instead; a cap
+   whose tmpfs cannot hold the live data is refused (exit 3, "raise BMS_REHEARSAL_DB_MEMORY_MB"), never put on a disk.
+   On staging it starts nothing unless `bms.slice` has that cap and the API's 448 MB free below `MemoryHigh` (in use
+   counted as `memory.current` less inactive page cache), 800 MB for a small database, and 448 MB again before the API
+   container; the refusal says how much it found and needed: wait until no heavy job runs. On production it starts
+   nothing unless the host has that much and 256 MB more available (`MemAvailable`).
+4. Starts the throwaway PostgreSQL (`bms-rehearsal-db-<pid>`, that cap with no swap, 1 CPU, inside `bms.slice` on
+   staging) on an internal Docker network of its own (`bms-rehearsal-net-<pid>`, no route out, the live database not on
+   it), as the remote offline drill keeps its own (section 8.5): its data and WAL on a tmpfs inside the cap, no log
+   driver, `--oom-score-adj 1000` (on a host short of memory the kernel kills it before the live stack), no volume. It
+   refuses to go on unless it is provably not the live database: another name, another container, another cluster
+   (`pg_control_system()`'s identifier), this rehearsal's label, this network only. It asks again before the commit.
+   Then it streams the live database into it: `pg_dump` as `bms_owner` in the live container, in pg_dump's own
+   consistent snapshot, uncompressed, piped straight into `pg_restore` in the throwaway one, so the dump is never a
+   file on the host. pg_dump runs at nice 19 and the lowest best-effort I/O priority, and its server process is put at
+   the same once found (the log says so, or says it could not and goes on); `--lock-wait-timeout=60s` keeps it from
+   queueing behind a lock, and it is named `bms-rehearsal-<pid>` and killed at the deadline like every live session
+   below. An error of either is shown on the terminal only (it can quote a row), never written to a file.
 5. Migrates it with the live API's own image, refuses if its Flyway version is then not the live one, and copies the
    run's staged rows from the live database in one `REPEATABLE READ READ ONLY` transaction: the run, its batches, rows,
    issues, resolutions and the mappings its batches name. The throwaway side loads them in one transaction that commits
@@ -256,8 +267,8 @@ while the newest backup is still in the old format, that is before the switch of
    anything else runs. The encrypted source comes only as its object keys and the run's wrapped data key: the commit
    reads the staged rows, so the source is never fetched or decrypted. In the same transaction it marks the throwaway
    database with a one-time token, the only thing that lets the application commit without the checker and the
-   pre-import dump. No key, password or token is ever on a command line: they go in env files in the temp dir, and the
-   container's label is the token's SHA-256.
+   pre-import dump. No key, password or token is ever on a command line: they go in env files in a mode-0700 temp dir
+   `backups/rehearsal.XXXXXX` (env files only, never data), and the container's label is the token's SHA-256.
 6. Runs `rehearse-import` in a short-lived API container (`bms-rehearsal-api-<pid>`, 448 MB, 1 CPU, the staging api's
    224 MB heap) with the live API's image and settings, the database switched to the throwaway one, the scheduler and
    the clean-ups off, no import key, every key of an outside service (object storage, mail, SMS, payments, push, AI,
@@ -269,18 +280,19 @@ while the newest backup is still in the old format, that is before the switch of
    provider's own host (SMS, payments, Ask BMS) are kept, with placeholder keys, and rely on the internal network,
    which `rehearse-import-test.sh` checks. CI starts the application with exactly these settings
    (`RehearsalSettingsIT`). It moves the run back to review there, takes the dry run again on the restored state and
-   this build, makes the run ready and commits it with the real commit.
+   this build, makes the run ready and commits it with the real commit. The stored rehearsal's `backup` names the live
+   snapshot it started from, `live-bms-postgres-1-<UTC stamp>`.
 7. Stores the rehearsal on the live run: one `import_rehearsals` row, inserted as `bms_app` under the business's
    row-level security. It is the only write the rehearsal makes on the live database.
-8. Removes the containers, the network, the volume and the temp dir on success, on failure, on Ctrl-C (INT) and on
-   TERM, and says so in its last line. The restore, the migrations and the commit run in the background while the
+8. Removes the containers, the network and the temp dir on success, on failure, on Ctrl-C (INT) and on
+   TERM, and says so in its last line. The streamed restore, the migrations and the commit run in the background while the
    script waits, so a Ctrl-C or a stop removes their container at once rather than after they end. A KILL (or a power
    loss) leaves them behind: see below.
 
 Exit status: 0 rehearsed and stored; 1 failed (a commit that ran and failed or halted is stored with its failure's code;
 anything earlier stores nothing, and so does an API container that exits 1 without starting: the script then says
 "without recording an outcome", or "did not say whether it recorded an outcome" when the throwaway database does not
-answer); 2 usage; 3 refused (the run, the target or the room). It writes none of the drill's
+answer); 2 usage; 3 refused (the run, the target, the room or the size). It writes none of the drill's
 state files, so `monitor.sh` never reads a rehearsal as a drill. The output (the report, codes, counts and amounts) has
 no personal value; keep it with the cutover notes.
 
@@ -291,15 +303,17 @@ docker exec bms-postgres-1 psql -U bms_owner -d bms -c "SELECT created_at, backu
   FROM import_rehearsals WHERE run_id = '<run id>' ORDER BY created_at DESC LIMIT 1"
 ```
 
-`timings` holds milliseconds per step: `download_ms`, `restore_ms`, `migrate_ms`, `copy_ms` on the host, then `start_ms`,
-`dry_run_ms` and `commit_ms` (the commit includes the reconciliation) in the API. Plan the cutover window from
+`timings` holds milliseconds per step: `restore_ms` (the throwaway database's start and the streamed dump and restore),
+`migrate_ms`, `copy_ms` on the host, then `start_ms`, `dry_run_ms` and `commit_ms` (the commit includes the
+reconciliation) in the API; rehearsals before issue #953 have a `download_ms` too. Plan the cutover window from
 `dry_run_ms` and `commit_ms`. `matches_dry_run` says whether the commit's report is the run's stored dry run's, apart
-from its mode; journal entry numbers differ when the business posted a journal after last night's backup.
+from its mode; journal entry numbers differ when the business posted a journal after the run's dry run.
 
 If the host loses power during a rehearsal, remove what is left (names all start `bms-rehearsal-`):
 
 ```
 docker rm -f -v $(docker ps -aq --filter name=bms-rehearsal-) 2> /dev/null
+# Only a rehearsal from before issue #953 made a volume; none is made now.
 docker volume rm $(docker volume ls -q --filter name=bms-rehearsal-) 2> /dev/null
 docker network rm $(docker network ls -q --filter name=bms-rehearsal-) 2> /dev/null
 rm -rf /opt/bms/backups/rehearsal.*
@@ -320,9 +334,8 @@ on live staging and ready. It needs a staging business with retail switched on t
   to a plan with room)`. Move the business with the
   operator's `PUT .../plan` (`docs/runbooks/onboard-tenant.md`) and stage again: the refused run stays in review and
   blocks nothing; rehearse only the new run id the second staging prints, never the refused one.
-- **The business must be in last night's backup**: create it at least one nightly backup before the check. The
-  rehearsal refuses a business created today (`business <slug> is not in <backup>; rehearse after the next nightly
-  backup`).
+- **No wait for a nightly backup** (since issue #953): the rehearsal starts from a snapshot of the live database, so a
+  business created today is in it.
 
 It runs only where `BMS_ENVIRONMENT` is exactly `staging`
 (unset, blank or anything else is refused) and stages only that sample, every file present and byte for byte the
@@ -638,7 +651,8 @@ backup is made. The old `backup.sh` ignores `BACKUP_AGE_RECIPIENT`, so setting i
 5. The offline drill on the Mac on that backup (section 8.5). It must pass before step 6.
 6. Remove `BACKUP_ENCRYPTION_KEY` from `/opt/bms/.env` (`sudoedit`); `sudo grep -c BACKUP_ENCRYPTION_KEY /opt/bms/.env` prints
    0. It stays in the offline store and the Mac Keychain for the old backups.
-7. Record the date of the switch in section 8.7. From now on an import rehearsal is refused (section 5.2).
+7. Record the date of the switch in section 8.7. An import rehearsal needs nothing for the switch: it starts from the
+   live database, not from a backup (section 5.2).
 8. **A year later**, when `rclone lsf bms-r2:<bucket>/<environment>/monthly/` lists no backup from before the switch, destroy
    the old key: `security delete-generic-password -a bms-backups -s bms-backup-symmetric-key`, and its copy in the offline
    store. Record it.

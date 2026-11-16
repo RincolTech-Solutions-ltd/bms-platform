@@ -104,11 +104,10 @@ done by hand as the notes say.
 
 ### 2.4 Rehearsal (stage 4)
 
-- [ ] Last night's production backup restored into a throwaway database and the real commit run
-      against it (spec section 5.5, ADR-027 decision 9): for a run of the import screens, on the
-      production host, `cd /opt/bms && ./restore-drill.sh --rehearse-import <run id>`
-      (`docs/runbooks/restore-from-backup.md` section 5.2), the run in review or ready, once
-      last night's backup holds the business (the run's rows are copied live); exit 0. For the
+- [ ] A snapshot of the live production database streamed into a throwaway database and the real
+      commit run against it (spec section 5.5, ADR-027 decision 9, ADR-129 decision 5): for a run of
+      the import screens, on the production host, `cd /opt/bms && ./restore-drill.sh --rehearse-import <run id>`
+      (`docs/runbooks/restore-from-backup.md` section 5.2), the run in review or ready; exit 0. For the
       `import-retail` command, which the rehearsal refuses: the scratch database steps of
       `docs/runbooks/import-retail.md`, "If the real run was wrong", step 2, then the command
       pointed at the scratch database.

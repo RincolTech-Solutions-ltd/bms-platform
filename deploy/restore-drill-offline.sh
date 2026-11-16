@@ -97,7 +97,7 @@ REMOTE_INITDB="${BMS_DRILL_REMOTE_INITDB:-/opt/bms/postgres/initdb}"
 # The container's whole memory: PostgreSQL's own 256 MB (its default 128 MB of shared buffers, which the cgroup counts,
 # and its processes) plus the tmpfs that holds the data directory, the rest. The WAL lives in that tmpfs too, about
 # WAL_MB with max_wal_size 64 MB (review of 7a1faf9, finding 2). 640 MB inside staging's 900 MB bms.slice (384 MB of
-# tmpfs, about 288 MB of data; under the 704 MB a rehearsal's database and API take), 1280 MB on the 4 GB production VM
+# tmpfs, about 288 MB of data; under the 800 MB or more a rehearsal's database and API take), 1280 MB on the 4 GB production VM
 # (1024 MB of tmpfs, about 928 MB of data), 2048 MB on this Mac (--local). Lead on the review of e7cc8e6: raise the cap
 # so both fit.
 SERVER_MB=256
