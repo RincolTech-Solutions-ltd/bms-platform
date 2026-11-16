@@ -26,6 +26,7 @@
 #   FAKE_BACKUP_FILE=<path> the newest backup under daily/ is a copy of that file (ADR-129: an age file); the weekly
 #                           drill downloads it with rclone, the rehearsal never reads it;
 #   FAKE_NO_LIVE_DB=1       docker compose finds no running postgres service;
+#   FAKE_PS_FAIL=1          docker ps cannot reach the engine (issue #951);
 #   FAKE_LIVE_DB_MB=<n>     the live database's size in MB (default 40);
 #   FAKE_DUMP_FAIL=1        the rehearsal's pg_dump of the live database fails part way;
 #   FAKE_DATA_DIRECTORY=<p> the throwaway database's data directory (default its tmpfs, /var/lib/postgresql/data);
@@ -196,6 +197,7 @@ case "$1" in
         [[ -n "${FAKE_NO_LIVE_DB:-}" ]] && { echo "service \"postgres\" is not running" >&2; exit 1; }
         [[ "$*" == *flyway_schema_history* ]] && echo 145 ;;
     ps)
+        [[ -n "${FAKE_PS_FAIL:-}" ]] && { echo "Cannot connect to the Docker daemon" >&2; exit 1; }
         if [[ "$*" == *"com.docker.compose.service=api"* ]]; then
             echo "bms-api-1"
         else

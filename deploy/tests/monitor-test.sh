@@ -255,6 +255,15 @@ printf '%s\n' "bms-offline-drill-444 0$(( NOW - 60 ))" "bms-offline-drill-555 09
 reap_offline_drills 2> /dev/null
 assert "a label with a leading zero is read as a decimal time" \
     test "$(sort "$WORK/removed" | tr '\n' ' ')" = "bms-offline-drill-444 bms-offline-drill-555 "
+# Issue #951, review of 56851fc, must-fix 3: the staging drill's lock holder (bms-offline-drill-<n>-lock, which holds the
+# puller's and deploy's locks) carries the same label and is removed past its time too, running or exited, so a Mac that
+# died mid-drill never keeps staging deploys, the weekly drill or a rehearsal out for longer.
+printf '%s\n' "bms-offline-drill-666-lock $(( NOW - 60 ))" "bms-offline-drill-666 $(( NOW - 60 ))" \
+    "bms-offline-drill-777-lock $(( NOW + 3600 ))" > "$WORK/containers"
+: > "$WORK/removed"
+reap_offline_drills 2> /dev/null
+assert "an expired lock holder is removed with its drill's database; one within its time is left alone" \
+    test "$(sort "$WORK/removed" | tr '\n' ' ')" = "bms-offline-drill-666 bms-offline-drill-666-lock "
 engine() { echo "permission denied while trying to connect to the Docker daemon socket" >&2; return 1; }
 reap_status="$(reap_offline_drills 2> "$WORK/reap.log"; echo $?)"
 assert "a docker that cannot be listed is logged, and the run goes on" test "$reap_status" = 0
