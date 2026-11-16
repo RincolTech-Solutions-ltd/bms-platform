@@ -118,10 +118,18 @@ check "while it streams, no file on the host holds the dump; the temp dir holds 
     eval '[[ ! -s "$FAKE/dump-on-disk" ]] \
         && [[ "$(grep "/backups/" "$FAKE/files-during-restore" | sed -E "s#.*/backups/rehearsal\.[A-Za-z0-9]{6}/##")" == db.env ]]'
 check "the live dump's server process, found by its own name, is reniced as postgres (no CAP_SYS_NICE in a container)" \
-    eval 'grep -qx "exec --user postgres bms-postgres-1 renice -n 19 -p 4242" "$FAKE/calls.log" \
-        && grep -qx "exec --user postgres bms-postgres-1 ionice -c 2 -n 7 -p 4242" "$FAKE/calls.log" \
+    eval 'renice_line="$(grep "^exec --user postgres bms-postgres-1 sh -c " "$FAKE/calls.log")" \
+        && [[ "$renice_line" == *" rh-renice 4242" ]] \
+        && grep -qF "renice -n 19 -p \"\$p\" > /dev/null && ionice -c 2 -n 7 -p \"\$p\"" <<< "$renice_line" \
         && grep -q "application_name = .bms-rehearsal-[0-9]*-dump. AND usename = .bms_owner. AND backend_type = .client backend." "$FAKE/calls.log" \
         && said "server process 4242 runs at nice 19"'
+# Review of 708d02b, point 1: the pid is checked in the same exec, immediately before the change, and nothing else is.
+check "... and only after its process title, in that same exec, shows a local bms_owner backend on bms" \
+    eval 'grep -qF "case \"\$t\" in \"postgres: \"*\"bms_owner bms [local]\"*) ;; *) exit 3 ;; esac; renice" "$FAKE/calls.log" \
+        && ! grep -Eq "^exec .*bms-postgres-1 (renice|ionice) " "$FAKE/calls.log"'
+FAKE_RENICE_NOT_DUMP=1 rehearse renice-pid-gone
+check "a pid that is no longer the dump's when it is reniced is left as it is, and the rehearsal goes on (0)" \
+    eval '[[ "$STATUS" == 0 ]] && said "is no longer the live dump" && ! said "runs at nice 19"'
 check "no backup is listed, fetched or decrypted, and the commit names the live snapshot it started from" \
     eval '! grep -q "rclone" "$FAKE/calls.log" && [[ ! -s "$FAKE/decrypt-dirs" ]] \
         && grep -Eq "rehearse-import --tenant .* --backup live-bms-postgres-1-[0-9]{8}T[0-9]{6}Z " "$FAKE/calls.log"'
@@ -226,6 +234,9 @@ check "an override above what the live size needs is used as the cap (400 MB, 20
 FAKE_DATA_DIRECTORY=/var/lib/postgresql/18/docker rehearse pgdata-elsewhere
 check "a throwaway database whose data directory is not its tmpfs is refused (3) before the dump" \
     eval '[[ "$STATUS" == 3 ]] && said "data directory is not its tmpfs" && nothing_restored && no_live_write && all_removed'
+FAKE_DATA_FS=overlay rehearse pgdata-not-tmpfs
+check "a data directory at the right path that is not a tmpfs mount is refused (3) before the dump" \
+    eval '[[ "$STATUS" == 3 ]] && said "is not a tmpfs mount" && nothing_restored && no_live_write && all_removed'
 PRODUCTION=1 AVAILABLE_KB=900000 FAKE_RUN_ROW="${FAKE_TENANT}|ready|f|framework" rehearse production-no-room
 check "on production, a host with less than the rehearsal's memory and 256 MB more available is refused (3)" \
     eval '[[ "$STATUS" == 3 ]] && said "the host has 878 MB available" && nothing_started && nothing_restored'

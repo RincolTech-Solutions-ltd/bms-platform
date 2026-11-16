@@ -228,11 +228,16 @@ rh_stream_live() {
 # (best-effort I/O, not idle, so a page it holds while reading is never starved behind the live load; a backend at
 # nice 19 can still hold a lightweight lock others wait on, which the bound on the stream keeps short). The backend runs
 # as postgres, and a container has no CAP_SYS_NICE, so renice and ionice run as postgres too (review of 9e0c501,
-# point 1). It is the one client backend named ${RH_APP}-dump; after the change the pid is asked again, so a pid that
-# ended and was reused meanwhile is reported, never passed over in silence (point 6). Found within 30 seconds, or left
-# as it is. ionice takes effect only under an I/O scheduler that honours priorities (BFQ), not none or mq-deadline.
+# point 1). It is the one client backend named ${RH_APP}-dump. A process at nice 19 cannot be put back, so the pid is
+# checked in the same exec immediately before the change (review of 708d02b, point 1): its process title must still be
+# a backend of bms_owner on bms over the local socket, as pg_dump's is and a live API connection (bms_app over TCP)
+# never is; otherwise nothing is changed. The pid is asked again afterwards, for the log only. Found within 30 seconds,
+# or left as it is. ionice takes effect only under an I/O scheduler that honours priorities (BFQ), not none or
+# mq-deadline. The bytes of the stream also pass through dockerd and containerd-shim, which run at their own priority.
+# shellcheck disable=SC2016 # run by sh -c in the live container, with the pid as $1.
+RH_RENICE_SH='p=$1; t=$(tr "\0" " " < "/proc/$p/cmdline" 2> /dev/null); case "$t" in "postgres: "*"bms_owner bms [local]"*) ;; *) exit 3 ;; esac; renice -n 19 -p "$p" > /dev/null && ionice -c 2 -n 7 -p "$p" > /dev/null'
 rh_renice_live_dump() {
-    local pid query again
+    local pid query again status
     trap - EXIT INT TERM USR1
     exec 7>&- 8>&- 9>&-
     query="SELECT pid || ' ' || backend_start FROM pg_stat_activity WHERE application_name = '${RH_APP}-dump'"
@@ -240,17 +245,19 @@ rh_renice_live_dump() {
     for _ in $(seq 1 30); do
         pid="$(rh_live "$query" 2> /dev/null)"
         if [[ "$pid" =~ ^[0-9]+\  ]]; then
-            if docker exec --user postgres "$RH_LIVE_DB" renice -n 19 -p "${pid%% *}" > /dev/null 2>&1 \
-                && docker exec --user postgres "$RH_LIVE_DB" ionice -c 2 -n 7 -p "${pid%% *}" > /dev/null 2>&1; then
-                again="$(rh_live "$query" 2> /dev/null)"
-                if [[ "$again" == "$pid" ]]; then
-                    rh_log "the live dump's server process ${pid%% *} runs at nice 19 and the lowest best-effort I/O priority"
-                else
-                    rh_log "the live dump's server process ${pid%% *} ended as it was reniced; if a live session took its pid, it runs at nice 19 until it ends"
-                fi
-            else
-                rh_log "could not lower the priority of the live dump's server process ${pid%% *}; the dump goes on"
-            fi
+            docker exec --user postgres "$RH_LIVE_DB" sh -c "$RH_RENICE_SH" rh-renice "${pid%% *}" > /dev/null 2>&1
+            status=$?
+            case "$status" in
+                0)
+                    again="$(rh_live "$query" 2> /dev/null)"
+                    if [[ "$again" == "$pid" ]]; then
+                        rh_log "the live dump's server process ${pid%% *} runs at nice 19 and the lowest best-effort I/O priority"
+                    else
+                        rh_log "the live dump's server process ${pid%% *} ended as it was reniced"
+                    fi ;;
+                3) rh_log "process ${pid%% *} is no longer the live dump's (it ended); its priority is left as it is" ;;
+                *) rh_log "could not lower the priority of the live dump's server process ${pid%% *}; the dump goes on" ;;
+            esac
             return 0
         fi
         sleep 1
@@ -316,9 +323,12 @@ rh_require_scratch() {
     [[ -n "$label" && "$label" == "$RH_LABEL" ]] || rh_refuse "the target container does not carry this rehearsal's label"
     networks="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$RH_DB" 2> /dev/null)"
     [[ "$networks" == "${RH_NET} " ]] || rh_refuse "the target container is on other networks: ${networks}"
-    # Its data directory is the tmpfs, whatever the image's default PGDATA (review of 9e0c501, point 4).
+    # Its data directory is the tmpfs, whatever the image's default PGDATA (review of 9e0c501, point 4), and that path is
+    # a tmpfs mount in the container, not the image's volume (review of 708d02b, point 2).
     [[ "$(rh_scratch "SHOW data_directory" 2> /dev/null)" == "$RH_PGDATA" ]] \
         || rh_refuse "the target database's data directory is not its tmpfs ${RH_PGDATA}"
+    [[ "$(docker exec "$RH_DB" awk -v d="$RH_PGDATA" '$2 == d { print $3 }' /proc/mounts 2> /dev/null)" == "tmpfs" ]] \
+        || rh_refuse "the target database's data directory ${RH_PGDATA} is not a tmpfs mount"
     sysid="$(rh_scratch "SELECT system_identifier FROM pg_control_system()" 2> /dev/null)"
     live_sysid="$(docker exec -e "PGAPPNAME=${RH_APP}" -e "PGOPTIONS=$(rh_pgoptions 60)" "$RH_LIVE_DB" psql -U postgres -d bms -tAc "SELECT system_identifier FROM pg_control_system()" 2> /dev/null)"
     [[ "$sysid" =~ ^[0-9]+$ && "$live_sysid" =~ ^[0-9]+$ && "$sysid" != "$live_sysid" ]] \
