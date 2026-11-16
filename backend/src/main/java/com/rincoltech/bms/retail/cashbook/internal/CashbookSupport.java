@@ -64,13 +64,16 @@ class CashbookSupport implements ClosedTills {
     private final JdbcClient jdbc;
     private final EntryDates entryDates;
     private final byte[] tokenKey;
+    private final Duration shownGrace;
 
     CashbookSupport(
             CurrentTenant tenant,
             BusinessClock clock,
             JdbcClient jdbc,
             EntryDates entryDates,
-            @Value("${bms.auth.data-key:}") String dataKey) {
+            @Value("${bms.auth.data-key:}") String dataKey,
+            @Value("${bms.retail.savings.shown-grace:PT30M}") Duration shownGrace) {
+        this.shownGrace = shownGrace;
         this.tenant = tenant;
         this.clock = clock;
         this.jdbc = jdbc;
@@ -355,9 +358,6 @@ class CashbookSupport implements ClosedTills {
         return keyedHash(tenant.profile().id() + "|" + branchId + "|" + date + "|" + suggestedMinor);
     }
 
-    /** How far from the business-local midnight a form shown on its day is still saved for that day (ADR-130). */
-    static final Duration SHOWN_GRACE = Duration.ofMinutes(15);
-
     /** A form's day proved by its token's mark, and the minute the form was read (issue #957, ADR-130). */
     record Shown(LocalDate day, Instant readAt) {}
 
@@ -377,7 +377,8 @@ class CashbookSupport implements ClosedTills {
 
     /**
      * The form's day the presented token proves, or null: its mark is valid for its hash and minute, the minute fell on one
-     * of {@code days}, and {@code at} is within {@link #SHOWN_GRACE} of the midnight between that day and {@code dated}.
+     * of {@code days}, and {@code at} is within the grace ({@code bms.retail.savings.shown-grace}, 30 minutes by default,
+     * ADR-130) of the midnight between that day and {@code dated}.
      */
     Shown shownOn(UUID branchId, String presented, LocalDate dated, Instant at, List<LocalDate> days) {
         String[] parts = presented == null ? new String[0] : presented.split("\\.", -1);
@@ -395,7 +396,7 @@ class CashbookSupport implements ClosedTills {
         }
         Instant midnight =
                 (day.isAfter(dated) ? day : dated).atStartOfDay(zone()).toInstant();
-        return Duration.between(midnight, at).abs().compareTo(SHOWN_GRACE) <= 0 ? new Shown(day, readAt) : null;
+        return Duration.between(midnight, at).abs().compareTo(shownGrace) <= 0 ? new Shown(day, readAt) : null;
     }
 
     private String shownMark(UUID branchId, LocalDate date, String hash, long minute) {

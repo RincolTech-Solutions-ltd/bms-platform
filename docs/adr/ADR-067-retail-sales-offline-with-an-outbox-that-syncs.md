@@ -10,7 +10,7 @@ Migration `V86` (main has `V80` to `V84` merged; agreed merge order: `V85` shop 
 and #318 after `V91`).
 
 Decision 13 is amended for savings by ADR-130 (issue #957): savings kept offline whose form was shown on the day before or
-after the day they were made, within 15 minutes of the midnight between, are for the form's day, judged by the same rules.
+after the day they were made, within a short grace of the midnight between (30 minutes by default), are for the form's day, judged by the same rules.
 
 Amended by issue #812 (3 Nov 2026, the owner's feedback after comparing the old app screen by screen): decisions 12 and 13
 below. The same outbox, waiting count and online dot now carry the other daily forms (expenses, savings on the till's and the

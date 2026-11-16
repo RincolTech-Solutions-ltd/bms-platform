@@ -6,7 +6,7 @@ Proposed (issue #811, 3 Nov 2026; FR-RET-85). Amends ADR-022 (the cash book, who
 today), the date fields of Buy stock (FR-RET-06) and Move stock (issue #84), and ADR-115 decision 8 (issue #799: sales
 staff opened any day of this month; an earlier day is now the owner's only, decision 2). Adds the permission `retail.entry.backdate`
 in migration `V131`, the next number after `V130` on main; renumbered at merge if needed. Leaves ADR-067 (offline sales)
-unchanged. Amended for savings by ADR-130 (issue #957): an undated savings save within 15 minutes after midnight whose form
+unchanged. Amended for savings by ADR-130 (issue #957): an undated savings save within a short grace after midnight (30 minutes by default) whose form
 was shown before it is saved for the form's day, with no backdate asked.
 
 ## Context

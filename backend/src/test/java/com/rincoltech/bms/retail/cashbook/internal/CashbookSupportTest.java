@@ -22,7 +22,13 @@ class CashbookSupportTest {
     static CashbookSupport support(Instant at, String dataKey) {
         CurrentTenant tenant =
                 () -> new CurrentTenant.Profile(TENANT, "test", "Test Shop", "UGX", ZoneId.of("Africa/Kampala"));
-        return new CashbookSupport(tenant, new BusinessClock(Clock.fixed(at, ZoneOffset.UTC)), null, null, dataKey);
+        return new CashbookSupport(
+                tenant,
+                new BusinessClock(Clock.fixed(at, ZoneOffset.UTC)),
+                null,
+                null,
+                dataKey,
+                java.time.Duration.ofMinutes(30));
     }
 
     @Test
@@ -56,7 +62,7 @@ class CashbookSupportTest {
     // cases included.
     /**
      * Issue #957 (ADR-130): the mark proves the form's day only for its own hash and minute, only for that day, and only
-     * within 15 minutes of the midnight after it; the suggestion's match ignores it.
+     * within the grace (30 minutes here, the default) of the midnight after it; the suggestion's match ignores it.
      */
     @Test
     void theMarkOfTheDayAFormWasShownIsBoundToItsSuggestionMinuteAndTheMidnightGrace() {
@@ -75,7 +81,9 @@ class CashbookSupportTest {
         assertThat(s.shownOn(BRANCH, marked, next, justAfter, yesterday))
                 .isEqualTo(new CashbookSupport.Shown(shown, read));
         // Past the grace, for another day, branch or key, unmarked, or with its minute or hash changed: not proved.
-        assertThat(s.shownOn(BRANCH, marked, next, Instant.parse("2026-10-15T21:16:00Z"), yesterday))
+        assertThat(s.shownOn(BRANCH, marked, next, Instant.parse("2026-10-15T21:29:00Z"), yesterday))
+                .isNotNull();
+        assertThat(s.shownOn(BRANCH, marked, next, Instant.parse("2026-10-15T21:31:00Z"), yesterday))
                 .isNull();
         assertThat(s.shownOn(BRANCH, marked, next, justAfter, List.of(next))).isNull();
         assertThat(s.shownOn(UUID.randomUUID(), marked, next, justAfter, yesterday))

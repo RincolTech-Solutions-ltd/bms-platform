@@ -157,7 +157,7 @@ class SavingsService {
     // checked; no existing code carries either.
     /**
      * The day the form was shown when it differs from the day the save is dated by one midnight (issue #957, ADR-130), proved
-     * by the token's mark within {@link CashbookSupport#SHOWN_GRACE} of that midnight; else null. Online, an undated save
+     * by the token's mark within the configured grace of that midnight; else null. Online, an undated save
      * whose form was shown yesterday, judged at now; offline, a form of the day before or after the day the entry was made,
      * never a future day, judged at the time made. A date sent online, chosen or not, is left as sent.
      */
@@ -178,16 +178,28 @@ class SavingsService {
 
     /**
      * The form's day is checked as the entry's own day would be: offline, as an entry made at its last second (or first,
-     * for a later day), so the 7 days, a future day and a closed till are judged for it; online, a closed till (its cash
-     * banked) is the owner's (review of #839).
+     * for a later day), so the 7 days, a future day and a closed till are judged for it; online, by the business-date rules:
+     * never a future day, for sales staff this month or last month within 7 days (as an offline entry), and a closed till
+     * (its cash banked) is the owner's (review of #839). A closed period stays the ledger's {@code period_closed}.
      */
-    private void requireOpenShownDay(UUID branch, LocalDate day, LocalDate dated, OfflineEntry offline) {
+    private void requireOpenShownDay(Caller caller, UUID branch, LocalDate day, LocalDate dated, OfflineEntry offline) {
         if (offline != null) {
             Instant at = day.isBefore(dated)
                     ? dated.atStartOfDay(support.zone()).toInstant().minusSeconds(1)
                     : day.atStartOfDay(support.zone()).toInstant();
             support.offlineDay(new OfflineEntry(at, at), null, "business_date", branch);
-        } else if (day.isBefore(support.today())
+            return;
+        }
+        support.businessDate(day, "business_date");
+        if (caller == Caller.SALES_STAFF
+                && day.isBefore(monthStart())
+                && day.isBefore(support.today().minusDays(7))) {
+            throw ApiException.validation(List.of(new FieldProblem(
+                    "business_date",
+                    "outside_this_month",
+                    "Savings can be opened and saved for days of this month only.")));
+        }
+        if (day.isBefore(support.today())
                 && support.closed(branch, day)
                 && !CurrentPrincipal.require().may(OfflineEntry.BACKDATE, branch)) {
             throw ApiException.validation(List.of(new FieldProblem(
@@ -285,7 +297,7 @@ class SavingsService {
         CashbookSupport.Shown shown = shownDay(branch, r, dated);
         LocalDate date = shown != null ? shown.day() : dated;
         if (shown != null) {
-            requireOpenShownDay(branch, date, dated, r.offline());
+            requireOpenShownDay(caller, branch, date, dated, r.offline());
         }
         // ADR-120: an earlier day is the owner's, with a reason, on the till's route and on the sales staff's alike;
         // not

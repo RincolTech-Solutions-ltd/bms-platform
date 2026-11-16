@@ -364,7 +364,7 @@ class RetailSalesStaffSavingsIT extends IntegrationTest {
     }
 
     /**
-     * Review of #958, finding 1: a form of the 15th saved 20 minutes after midnight, past the 15 minutes of grace, is a save
+     * Review of #958, finding 1: a form of the 15th saved 40 minutes after midnight, past the 30 minutes of grace, is a save
      * of the 16th; its figures differ, so it is 409 and nothing is written. A token whose minute was changed proves nothing.
      */
     @Test
@@ -380,12 +380,57 @@ class RetailSalesStaffSavingsIT extends IntegrationTest {
         String tampered = parts[0] + "." + (Long.parseLong(parts[1]) + 3) + "." + parts[2];
         assertThat(saveUndated(tampered, null).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
 
-        clock.set(CLOSING_TIME.plusSeconds(30 * 60));
+        clock.set(CLOSING_TIME.plusSeconds(50 * 60));
         seller = signIn("ss-seller-late", new Role("retail_sales", null));
         ResponseEntity<JsonNode> stale = saveUndated(token, null);
 
         assertThat(stale.getStatusCode()).as("%s", stale.getBody()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(stale.getBody().get("code").asString()).isEqualTo("suggestion_changed");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM retail_daily_savings WHERE tenant_id = ?")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isZero();
+    }
+
+    // JUSTIFICATION-A3: the Lead's comment on #958 asks for the two-days-ago and spliced mark cases; one new test.
+    /**
+     * Review of #958, findings 1 and 3: a mark of two days ago, or a mark spliced from another shop's token onto this one's
+     * hash, never dates the save by it; at 00:01 both are saves of the 16th, 409, and nothing is written.
+     */
+    @Test
+    void aMarkOfTwoDaysAgoOrSplicedFromAnotherTokenIsNotUsed() {
+        theSwitch(true);
+        clock.set(AT_2359.minusSeconds(2 * 24 * 3600));
+        String twoDaysAgo = cb.get("/savings/suggestion?branch_id=" + hq, ALL)
+                .getBody()
+                .get("suggestion_token")
+                .asString();
+        clock.set(AT_2359);
+        String atHq =
+                suggestion(seller, hq, today).getBody().get("suggestion_token").asString();
+        String atSecond = suggestion(seller, second, today)
+                .getBody()
+                .get("suggestion_token")
+                .asString();
+        String spliced = atSecond.split("\\.")[0] + atHq.substring(atHq.indexOf('.'));
+
+        clock.set(AT_0001);
+        Map<String, Object> old = new LinkedHashMap<>();
+        old.put("branch_id", hq);
+        old.put("suggestion_token", twoDaysAgo);
+        assertThat(cb.post("/savings", old, ALL).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", second);
+        body.put("suggestion_token", spliced);
+        ResponseEntity<JsonNode> r = api.call(
+                HttpMethod.POST,
+                SALES_STAFF,
+                body,
+                seller,
+                Map.of("Idempotency-Key", UUID.randomUUID().toString()));
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(TestDatabase.owner()
                         .sql("SELECT count(*) FROM retail_daily_savings WHERE tenant_id = ?")
                         .param(t.tenantId())

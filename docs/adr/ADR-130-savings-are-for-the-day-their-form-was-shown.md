@@ -32,16 +32,19 @@ or a mark lifted from one token onto another, must not open yesterday to a selle
    minute it was read and a keyed mark of the tenant, branch, day, hash and minute: `hash.minute.mark`. A suggestion of any
    other day carries no mark. The mark is keyed under the same purpose key as the hash, so it reveals nothing, cannot be made
    by a caller, and fails if the hash or the minute is changed or spliced from another token.
-2. **The mark counts only within 15 minutes of the midnight** between the form's day and the day the save would otherwise
-   take (`SHOWN_GRACE`). Online, only an undated save (no `business_date` sent, so neither a date the phone chose nor one the
+2. **The mark counts only within a short grace of the midnight** between the form's day and the day the save would
+   otherwise take: the setting `bms.retail.savings.shown-grace`, 30 minutes by default (the Lead's decision on the review of
+   pull request #958). Online, only an undated save (no `business_date` sent, so neither a date the phone chose nor one the
    owner chose with a reason is moved) is judged, at the time of the save, against a mark of yesterday. Offline, the time the
    entry was made is judged against a mark of the day before or the day after it, never a day after today. Anything else is
    dated as before: a form left open past the grace is a save of the new day, judged on its figures.
 3. **The form's day is judged as the entry's own day would be.** Offline it is checked as an entry made at that day's last
    second (or first, for a later day): the 7 days (`offline_entry_too_old` without `retail.entry.backdate`), never a future
    day, and a closed till (`offline_day_closed`). Online, a form's day whose till was closed (its cash banked) is the owner's,
-   422 `day_closed` on `business_date`, "That day's till is closed. Ask the owner to enter it." A seller's form of the last
-   day of a month saved just after midnight on the 1st is that last day's: the grace stands in for the month rule here. No
+   422 `day_closed` on `business_date`, "That day's till is closed. Ask the owner to enter it."; it is never a future day,
+   and for sales staff it is a day of this month or of last month within 7 days, as for an entry kept offline, else 422
+   `outside_this_month`, so a seller's form of the last day of a month saved just after midnight on the 1st is that last
+   day's. A closed accounting period stays the ledger's `period_closed`, as for any save. No
    ADR-120 backdate is asked, since the person did not choose the day; the audit row carries the flag `dated_by_form`.
 4. **The real 409 stays.** The suggestion is recomputed for the form's day in the save's transaction; a sale, void or
    expense in between is 409 `suggestion_changed` with the new token, which keeps the form's minute, so saving again within
@@ -51,10 +54,11 @@ or a mark lifted from one token onto another, must not open yesterday to a selle
 
 ## Consequences
 
-- A clerk saving within 15 minutes after midnight records the day they were looking at, with no false 409. Saved later, the
+- A clerk saving within the grace (30 minutes by default) after midnight records the day they were looking at, with no false 409. Saved later, the
   form is judged as a save of the new day, a 409 that offers the new day's suggestion, as before this record.
 - A seller cannot use a mark to save an arbitrary earlier day: it names one day, one suggestion and one minute, and opens
-  that day for at most 15 minutes after its midnight.
+  that day only within the grace after its midnight; a stale form from yesterday afternoon needs the owner's backdate and
+  reason, as any earlier day (ADR-120).
 - Tokens issued before this change have no mark and keep working as before; a form shown before the deploy and saved after
   midnight still gets the old 409, which is safe (nothing is written) and passes after one look again.
 - The token stays opaque to the phone; no OpenAPI change.

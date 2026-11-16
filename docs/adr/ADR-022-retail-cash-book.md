@@ -12,7 +12,7 @@ expenses, a savings amount may not exceed that, and the overwrite reason is opti
 #802): adding an item to an active expense category needs `retail.expense.record`, not `retail.expense.manage`. The business
 date of a record is amended by ADR-120 (issue #811): the server dates it today, and only a holder of `retail.entry.backdate`
 may choose an earlier day, with a reason that is audited. Decision 11 is amended by ADR-130 (issue #957, proposed, accepted on
-merge): savings are for the day their form was shown, which a keyed mark on the token proves within 15 minutes of midnight,
+merge): savings are for the day their form was shown, which a keyed mark on the token proves within a short grace of midnight (30 minutes by default),
 so a save just after midnight is no false 409.
 
 ## Context
