@@ -668,11 +668,14 @@ deploy/restore-drill-offline.sh --remote bms-production --folder monthly --file 
 and mounts the host's own roles script `/opt/bms/postgres/initdb` (`BMS_DRILL_REMOTE_INITDB`); the image must already be on
 the host, which it is when `POSTGRES_IMAGE` is the host's. `--local` runs the container in a Docker engine on the Mac instead,
 from the checkout's `deploy/postgres/initdb`; it is kept for a Mac that has one, not the routine. `BMS_DRILL_MEMORY_MB` sets
-the container's memory in MB: 256 for PostgreSQL itself and the rest a tmpfs for the data directory, about 96 MB of
-which is WAL (`max_wal_size=64MB`). Defaults: 640 on staging inside `bms.slice` (384 MB of tmpfs, about 288 MB of data);
-1280 on production (1024 MB of tmpfs, about 928 MB of data); 2048 with `--local`; at least 512. A restore that does not
-fit (no space on the tmpfs, or the engine's OOM kill) fails with `the restore did not fit in the container's <n> MB`; it
-never falls back to a disk volume. Raise it then, within what the VM (or on staging the slice) has free. The container
+the container's memory in MB: 256 for the PostgreSQL server, 96 for the restore, which runs in the same container
+(`pg_restore` itself and the server's `maintenance_work_mem`, pinned at 64 MB, for each index it builds), and the rest a
+tmpfs for the data directory, about 96 MB of which is WAL (`max_wal_size=64MB`). Defaults: 640 on staging inside
+`bms.slice` (288 MB of tmpfs, about 192 MB of data); 1280 on production (928 MB of tmpfs, about 832 MB of data); 2048 with
+`--local` (1696 MB of tmpfs, about 1600 MB of data); at least 608. A restore that does not fit (no space on the tmpfs, the
+engine's OOM kill, or under 32 MB left on the tmpfs when `pg_restore` fails, which is how a WAL that ran out of room shows:
+the server panics and the client sees only a lost connection) fails with `the restore did not fit in the container's <n>
+MB`; it never falls back to a disk volume. Raise it then, within what the VM (or on staging the slice) has free. The container
 has `--oom-score-adj 1000`, so on a host short of memory the kernel kills it before the live stack. A prefix word, initdb path, image or
 memory that is not plainly a word, an absolute path with no comma, an image name or a number is a usage error (exit 2)
 before anything runs: these values reach the host's shell and docker's options.
@@ -680,7 +683,16 @@ before anything runs: these values reach the host's shell and docker's options.
 It first checks that the host answers, has the image, holds no other drill's or rehearsal's database
 (`bms-restore-drill-*`, `bms-rehearsal-db-*`, `bms-offline-drill-*`), and has the container's memory and 256 MB more
 available (`MemAvailable`, read by running the same image with `cat /proc/meminfo`, no network), before anything is
-downloaded or decrypted. It downloads the newest
+downloaded or decrypted. On staging the container goes inside `bms.slice`, so first it takes the staging puller's
+`pull.lock` and `deploy.sh`'s `deploy.lock` in `/opt/bms/state` (`BMS_DRILL_REMOTE_STATE`) and holds them for the whole
+drill: a container `bms-offline-drill-<n>-lock` of the same image takes them with `flock` and sleeps, and removing it (the
+exit trap, or `monitor.sh` by the same expiry label, running or exited) releases them. It waits up to 30 seconds for
+`pull.lock`, which the puller holds for a few seconds every two minutes, and never for `deploy.lock`. Meanwhile no deploy
+runs, a rehearsal refuses, and the puller logs `an offline restore drill (bms-offline-drill-<n>) is on this host;
+deploying on a later run` once per drill and deploys the release on the first run after it. Then it checks that the slice has the container's whole memory free below its
+`MemoryHigh` and that its own oom count (`memory.events.local`) is readable (read the same way, the slice's folder
+`/sys/fs/cgroup/bms.slice` mounted read only, counted as the rehearsal counts it), and asks the slice again just before
+the database starts. Production takes no lock: it has no slice. It downloads the newest
 backup into a mode-0700 temp dir on the Mac and tells its format from its first bytes. For an age file it
 compares the fingerprint of the Keychain key's public half with the `recipient=` of the host's last good check in
 `drill/last_backup_check.txt`, and fails if they differ or there is none. It starts a throwaway PostgreSQL on the host with no
@@ -722,7 +734,14 @@ usage error.
 | `cannot run '<prefix> image inspect <image>' on <host> over ssh` | `ssh <host> sudo -n -u bms docker image ls` by hand: fix the ssh entry or key, the sudo rule, `BMS_DRILL_REMOTE_DOCKER`, or `POSTGRES_IMAGE` (the host's value in `/opt/bms/.env`) |
 | `<host> runs or has left behind another drill or rehearsal` | Wait for the weekly drill (Sunday 03:30) or the rehearsal to end; a container left behind is removed as section 5.2 says, or by `monitor.sh` for an offline drill's |
 | `<host> has <n> MB available and the drill needs <m> MB plus 256 MB to spare` | Run it when the host is quieter (not during a deploy or a heavy job); lower `BMS_DRILL_MEMORY_MB` only if the data still fits |
-| `the restore did not fit in the container's <n> MB (<m> MB for the data)` | The data outgrew the container: set `BMS_DRILL_MEMORY_MB` higher and run it again (on staging only while the slice has the room; check `docker stats` first) |
+| `bms.slice on <host> has <n> MB free under its MemoryHigh and the drill needs <m> MB` | Staging's slice is busy (a deploy, a rehearsal or another heavy job): run it again when that ends; lower `BMS_DRILL_MEMORY_MB` only if the data still fits |
+| `could not take the staging puller's and deploy's locks on <host>` | A deploy or a rehearsal is running, or the puller held `pull.lock` for more than the 30 seconds the drill waits: run it again when it ends. If none is, `ssh <host> ls -l /opt/bms/state/pull.lock /opt/bms/state/deploy.lock`: `pull-staging.sh` makes `pull.lock` on its first run and `deploy.sh` makes `deploy.lock` on the first deploy; the drill never creates either |
+| `cannot read the memory of bms.slice on <host>` | `ssh <host> cat /sys/fs/cgroup/bms.slice/memory.high /sys/fs/cgroup/bms.slice/memory.events.local` by hand: the slice must exist (provision-host.md) and the kernel must have `memory.events.local` (5.2 or later) before the drill runs on staging |
+| `the restore ran out of memory on <host> and bms.slice could not be read again` | Whether the slice or the cap was the limit is unknown: run it again when staging is quiet, and raise `BMS_DRILL_MEMORY_MB` only if it then fails as `did not fit` |
+| `the throwaway postgres stopped during the restore (exit <n>)` | The server stopped by itself, most likely after its WAL filled the tmpfs: set `BMS_DRILL_MEMORY_MB` higher and run it again |
+| `COULD NOT REMOVE bms-offline-drill-<n>-lock on <host>` | It still holds the staging locks, so no deploy runs: run the `ssh ... rm -f -v` line it prints, or `monitor.sh` removes it after the time it names |
+| `the restore did not fit in the container's <n> MB (<m> MB of tmpfs, about <d> MB of data beside the WAL)` | The data outgrew the container: set `BMS_DRILL_MEMORY_MB` higher and run it again (on staging only while the slice has the room; the drill checks it) |
+| `bms.slice on <host> ran out of memory while the drill ran` | Something else in staging's slice grew during the drill and the slice's limit killed the drill's container: run it again when staging is quiet. Raising `BMS_DRILL_MEMORY_MB` would not help |
 | `the ssh connection to <host> failed during the restore` | The network dropped. Run the drill again; the container was removed by the exit trap or is removed by `monitor.sh` within 6 hours |
 | `COULD NOT REMOVE bms-offline-drill-<n> on <host>` | Run the `ssh ... rm -f -v` line it prints, or leave it to `monitor.sh` after the time it names |
 
@@ -743,7 +762,9 @@ usage error.
 
 | Event | Date | By | Witness | Public key fingerprint | Notes |
 |---|---|---|---|---|---|
-| Key ceremony (8.2) | not yet | | | | |
-| Switch on staging (8.4) | not yet | | | | |
+| Key ceremony (8.2) | 15 and 16 November 2026 | Hillary Arinda (owner), on the operator's Mac | none (no second witness) | `8470526145bbc28c` (public key `age1sf2489hlzc0zsa5yzztheq0d3u0mk35j4zdhxk5hlsyj2vu5p5tsm9arl4`) | Copies: the Mac's login Keychain item `bms-backup-age-identity` and the owner's iCloud Keychain. **No paper copy**, by the owner's decision of 16 November 2026, recorded as an accepted risk: losing both the Mac and the Apple ID makes every age backup unreadable (8.6) |
+| Switch on staging (8.4) | 16 November 2026 | Hillary Arinda | none | `8470526145bbc28c` (the same key) | Staging switched to age backups on 16 November 2026. First remote offline drill (8.5) OK on 16 November 2026 at 09:27 UTC. Step 7: `BACKUP_ENCRYPTION_KEY` removed from staging's `/opt/bms/.env` and its `.env.bak` copies on 16 November 2026; it is kept in the operator's Keychain (`bms-backup-symmetric-key`) for the old backups |
+| Bucket lock rules on `bms-backups` | 16 November 2026 | Hillary Arinda | none | n/a | `staging/daily/` and `production/daily/` 29 days, `staging/monthly/` and `production/monthly/` 364 days: below `backup.sh`'s 30 and 365 day retention, so its own deletions still succeed |
+| Drill-only R2 token | 16 November 2026 | Hillary Arinda | none | n/a | Object Read and Write on `bms-backups` only, on the operator's Mac, for the offline drill (`BMS_DRILL_REMOTE`) |
 | Switch on production (8.4) | not yet | | | | |
 | Old key destroyed (8.4 step 8) | not yet | | | | |

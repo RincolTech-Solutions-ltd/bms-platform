@@ -723,6 +723,15 @@ pick_newest_backup() {
     printf '%s\n' "$best"
 }
 
+# Never beside a remote offline drill's database (restore-drill-offline.sh --remote, issue #949): on staging both would
+# share bms.slice, and its tmpfs cannot be reclaimed (review of 7a1faf9, finding 4). Asked before anything is downloaded
+# or decrypted, and a docker that cannot list its containers counts as one being there (issue #951, item 2).
+if ! containers="$(docker ps --all --format '{{.Names}}' 2> /dev/null)"; then
+    fail "cannot list the containers to look for a remote offline drill's database; run the drill again when docker answers"
+fi
+if grep -q '^bms-offline-drill-' <<< "$containers"; then
+    fail "a remote offline drill's database (bms-offline-drill-*) is on this host; run the drill again when it ends"
+fi
 NAME="$(rclone lsf --files-only "${PREFIX}/daily/" 2> /dev/null | pick_newest_backup "$(date -u +%s)")"
 [[ -n "$NAME" ]] || fail "no backup found under ${PREFIX}/daily/"
 log "newest backup: ${NAME}"
@@ -805,11 +814,6 @@ fi
 openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_ENCRYPTION_KEY -in "$ENC" -out "$DUMP" 2> /dev/null \
     || fail "decryption failed (wrong BACKUP_ENCRYPTION_KEY or a corrupt file)"
 [[ -s "$DUMP" ]] || fail "decrypted dump is empty"
-# Never beside a remote offline drill's database (restore-drill-offline.sh --remote, issue #949): on staging both would
-# share bms.slice, and its tmpfs cannot be reclaimed (review of 7a1faf9, finding 4).
-if docker ps --all --format '{{.Names}}' | grep -q '^bms-offline-drill-'; then
-    fail "a remote offline drill's database (bms-offline-drill-*) is on this host; run the drill again when it ends"
-fi
 
 rand() { openssl rand -base64 24 | tr -d '/+=' ; }
 log "starting a throwaway postgres (${DRILL})"

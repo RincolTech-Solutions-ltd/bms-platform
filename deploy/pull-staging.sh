@@ -8,7 +8,8 @@
 #      (the immutable sha-<short> tag) and org.opencontainers.image.revision (the full commit).
 #      An unchanged pointer is a manifest check only; nothing is downloaded.
 #   2. If that tag is already live (state/current_tag), stop. If it failed before
-#      (state/last_failed_tag), stop too: a broken release is not retried every two minutes.
+#      (state/last_failed_tag), stop too: a broken release is not retried every two minutes. While a remote
+#      offline restore drill's database is on the host, stop and deploy on a later run (issue #951).
 #   3. Resolve the api, web and proxy images to their digests and verify each one's cosign
 #      signature against /opt/bms/cosign.pub, the key provisioned once by hand
 #      (docs/runbooks/provision-host.md), never taken from the release itself (ADR-018 finding H2).
@@ -112,10 +113,42 @@ remove_old_images() {
         done
 }
 
-# One run at a time; a run that finds the previous one still deploying just ends.
+# A remote offline restore drill (restore-drill-offline.sh --remote, issue #951) keeps its database's tmpfs in bms.slice
+# for its whole run, and tmpfs pages cannot be reclaimed; a deploy beside it (a migrate and a second api) could take the
+# slice past MemoryHigh and throttle the live stack. So a new release waits while a bms-offline-drill-* container is on
+# the host, and a docker that cannot list its containers counts as one being there. The drill also holds this script's
+# pull.lock and deploy.sh's deploy.lock for its whole run, so this is the second line, and the one that names the
+# reason when the lock is taken. It logs once per drill, not on every run of the timer (state/offline_drill_wait keeps
+# what it last logged). deploy/tests/cleanup-test.sh runs this function with a stub docker.
+offline_drill_present() {
+    local names seen
+    # Keyed on the drill (its lock holder -lock comes first and goes last, its database between), so one drill is one
+    # line whichever of its containers are there (review of 56851fc, must-fix 1).
+    if names="$(docker ps --all --format '{{.Names}}' 2> /dev/null)"; then
+        seen="$(grep '^bms-offline-drill-' <<< "$names" | sed 's/-lock$//' | sort -u | tr '\n' ' ' || true)"
+    else
+        seen="cannot list"
+    fi
+    if [[ -z "$seen" ]]; then
+        rm -f state/offline_drill_wait
+        return 1
+    fi
+    if [[ "$(cat state/offline_drill_wait 2> /dev/null || true)" != "$seen" ]]; then
+        if [[ "$seen" == "cannot list" ]]; then
+            log "cannot list the containers to look for an offline restore drill; deploying on a later run"
+        else
+            log "an offline restore drill (${seen% }) is on this host; deploying on a later run (logged once per drill)"
+        fi
+        printf '%s\n' "$seen" > state/offline_drill_wait
+    fi
+    return 0
+}
+
+# One run at a time; a run that finds the previous one still deploying just ends. An offline drill holds this lock for
+# its whole run; then the reason is logged once, not "previous run" every two minutes.
 exec 8> state/pull.lock
 if ! flock --nonblock 8; then
-    log "previous run still in progress"
+    offline_drill_present || log "previous run still in progress"
     exit 0
 fi
 
@@ -135,6 +168,9 @@ if [[ "$tag" == "$current" ]]; then
     exit 0
 fi
 if [[ "$tag" == "$(cat state/last_failed_tag 2>/dev/null || true)" ]]; then
+    exit 0
+fi
+if offline_drill_present; then
     exit 0
 fi
 log "pointer ${POINTER} is ${tag} (live: ${current:-none}); verifying ${revision}"
