@@ -15,6 +15,7 @@
 #           backup check (state/last_backup_check, ADR-129); alerts on a failed one, none good in 9 days, or a drill
 #           over the 2 hour RTO; and the full restore: none good in 35 days on this host or by the monthly offline drill
 #           (<environment>/drill/last_offline_drill.txt in R2, read every 6 hours), or the last offline drill failed.
+# Before the checks it removes a remote offline drill's throwaway database left behind past the time in its label.
 #
 # A problem is sent once when it starts, again every MONITOR_REPEAT_HOURS (6) while it lasts, and
 # once when it clears; state/alerts/<check> remembers what was sent. A message that could not be sent
@@ -330,6 +331,23 @@ check_drill() {
     report drill "$(join "${problems[@]}")"
 }
 
+# The throwaway database of a remote offline drill (restore-drill-offline.sh --remote) whose Mac went away before its
+# exit trap could remove it: the drill labels it with the time after which it is removed here (bms.offline-drill.expires,
+# 4 hours after the drill started). One still within its time is a drill that may be running, and is left alone.
+reap_offline_drills() {
+    local name expires t
+    t="$(now)"
+    docker ps --all --filter label=bms.offline-drill.expires \
+        --format '{{.Names}} {{.Label "bms.offline-drill.expires"}}' 2> /dev/null \
+        | while read -r name expires; do
+            [[ "$name" == bms-offline-drill-* && "$expires" =~ ^[0-9]+$ ]] || continue
+            (( expires < t )) || continue
+            if docker rm -f -v "$name" > /dev/null 2>&1; then
+                log "removed ${name}, a remote offline drill's database left behind"
+            fi
+        done
+}
+
 main() {
     cd "$(dirname "$0")" || exit 1
     set -a
@@ -341,6 +359,7 @@ main() {
     exec 9> "$STATE/monitor.lock"
     flock --nonblock 9 || { log "previous run still in progress"; exit 0; }
 
+    reap_offline_drills
     check_site
     check_jobs
     check_disk

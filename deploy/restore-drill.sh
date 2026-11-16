@@ -206,7 +206,7 @@ rh_require_alone() {
     flock --nonblock 9 || rh_refuse "a deploy is running (state/deploy.lock); try again when it ends"
     rh_require_drill_clear
     if pgrep -f 'restore-drill\.sh$' > /dev/null 2>&1 \
-        || docker ps --all --format '{{.Names}}' | grep -Eq '^(bms-restore-drill|bms-rehearsal-db)-'; then
+        || docker ps --all --format '{{.Names}}' | grep -Eq '^(bms-restore-drill|bms-rehearsal-db|bms-offline-drill)-'; then
         rh_refuse "a restore drill or another rehearsal is running, or one left its containers behind; try again when it ends, or remove what is left (docs/runbooks/restore-from-backup.md section 5.2)"
     fi
 }

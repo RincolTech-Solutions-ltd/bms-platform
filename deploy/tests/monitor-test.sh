@@ -226,6 +226,23 @@ same_picker() {
 }
 assert "restore-drill.sh picks backups the same way" same_picker
 
+# --- a remote offline drill's database left behind (restore-drill-offline.sh --remote, issue #949) ---
+# The stub answers docker ps with the containers in $WORK/containers ("<name> <expires>") and records each rm.
+docker() {
+    case "$1" in
+        ps) [[ "$*" == *"--filter label=bms.offline-drill.expires"* ]] && cat "$WORK/containers" ;;
+        rm) printf '%s\n' "${*: -1}" >> "$WORK/removed" ;;
+    esac
+}
+printf '%s\n' "bms-offline-drill-111 $(( NOW - 60 ))" "bms-offline-drill-222 $(( NOW + 3600 ))" \
+    "bms-postgres-1 $(( NOW - 60 ))" "bms-offline-drill-333 not-a-time" > "$WORK/containers"
+: > "$WORK/removed"
+reap_offline_drills 2> /dev/null
+assert "a remote drill's database past its time is removed" grep -qx bms-offline-drill-111 "$WORK/removed"
+assert "one still within its time, another name or an unreadable label is left alone" \
+    test "$(wc -l < "$WORK/removed")" = 1
+unset -f docker
+
 if (( FAILURES > 0 )); then
     echo "${FAILURES} test(s) failed"
     exit 1
