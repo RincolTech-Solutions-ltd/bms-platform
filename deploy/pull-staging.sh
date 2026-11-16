@@ -8,7 +8,8 @@
 #      (the immutable sha-<short> tag) and org.opencontainers.image.revision (the full commit).
 #      An unchanged pointer is a manifest check only; nothing is downloaded.
 #   2. If that tag is already live (state/current_tag), stop. If it failed before
-#      (state/last_failed_tag), stop too: a broken release is not retried every two minutes.
+#      (state/last_failed_tag), stop too: a broken release is not retried every two minutes. While a remote
+#      offline restore drill's database is on the host, stop and deploy on a later run (issue #951).
 #   3. Resolve the api, web and proxy images to their digests and verify each one's cosign
 #      signature against /opt/bms/cosign.pub, the key provisioned once by hand
 #      (docs/runbooks/provision-host.md), never taken from the release itself (ADR-018 finding H2).
@@ -112,6 +113,24 @@ remove_old_images() {
         done
 }
 
+# A remote offline restore drill (restore-drill-offline.sh --remote, issue #951) keeps its database's tmpfs in bms.slice
+# for its whole run, and tmpfs pages cannot be reclaimed; a deploy beside it (a migrate and a second api) could take the
+# slice past MemoryHigh and throttle the live stack. So a new release waits while a bms-offline-drill-* container is on
+# the host, and a docker that cannot list its containers counts as one being there. The drill checks the slice's room
+# when it starts. deploy/tests/cleanup-test.sh runs this function with a stub docker.
+offline_drill_present() {
+    local names
+    if ! names="$(docker ps --all --format '{{.Names}}' 2> /dev/null)"; then
+        log "cannot list the containers to look for an offline restore drill; deploying on a later run"
+        return 0
+    fi
+    if grep -q '^bms-offline-drill-' <<< "$names"; then
+        log "an offline restore drill's database (bms-offline-drill-*) is on this host; deploying on a later run"
+        return 0
+    fi
+    return 1
+}
+
 # One run at a time; a run that finds the previous one still deploying just ends.
 exec 8> state/pull.lock
 if ! flock --nonblock 8; then
@@ -135,6 +154,9 @@ if [[ "$tag" == "$current" ]]; then
     exit 0
 fi
 if [[ "$tag" == "$(cat state/last_failed_tag 2>/dev/null || true)" ]]; then
+    exit 0
+fi
+if offline_drill_present; then
     exit 0
 fi
 log "pointer ${POINTER} is ${tag} (live: ${current:-none}); verifying ${revision}"
