@@ -508,19 +508,17 @@ different one, it is kept (price history is append only) and the run reports it 
   staging refuses a run not marked `fabricated` by the uploader, and the uploader confirms it in the
   upload form (section 6.1).
 
-### 5.5 Rehearsal on last night's backup
+### 5.5 Rehearsal on a copy of the live database
 
 Before cutover day, the operator runs the rehearsal: the restore drill script (`deploy/restore-drill.sh`,
-`docs/runbooks/restore-from-backup.md` section 5) gains a rehearsal mode that restores last night's
-production backup into a throwaway database on the production host, starts a short-lived API
-container against it, copies the run's staging rows and the encrypted source into it, and runs the
-real commit. The rehearsal report, its reconciliation and its timings are stored on the run; the
-throwaway database is dropped. The rehearsal proves the import against the real tenant state,
-the real migrations and the real data volume, without touching production.
-
-Since 16 November 2026 (issue #953, ADR-129 decision 5) the throwaway database starts from a snapshot of the
-live database itself, a `pg_dump` streamed into it at low priority, not from last night's backup: backups
-are encrypted to a key the host does not hold. Everything else above stands.
+`docs/runbooks/restore-from-backup.md` section 5) has a rehearsal mode that streams a snapshot of the live
+production database (a `pg_dump` at low priority, never a file) into a throwaway database in memory on the
+production host, starts a short-lived API container against it, copies the run's staging rows and the
+encrypted source's object keys into it, and runs the real commit. The rehearsal report, its reconciliation
+and its timings are stored on the run; the throwaway database is dropped. The rehearsal proves the import
+against the real tenant state, the real migrations and the real data volume, without touching production.
+Until 16 November 2026 it restored last night's backup instead; backups are now encrypted to a key the host
+does not hold (issue #953, ADR-129 decision 5).
 
 ## 6. Security and privacy
 

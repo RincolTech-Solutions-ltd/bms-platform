@@ -86,17 +86,24 @@ decrypt.
    ADR-027 decision 9; amended 16 November 2026, issue #953). As first decided, a rehearsal refused an age backup (exit 3),
    since restoring last night's backup on the host needs the private key there. The owner decided on #46 that a rehearsal
    needs no key on the host at all: it streams a `pg_dump` of the same host's live database (as `bms_owner`, pg_dump's own
-   consistent snapshot, uncompressed) straight into `pg_restore` in its throwaway PostgreSQL, so no backup is fetched, no
-   key is read and no dump is ever a file; the backups' format, age or old, no longer matters to it. So that the live
-   database is not slowed noticeably, `pg_dump` runs at nice 19 and the lowest best-effort I/O priority, and so does its
-   server process once it is found (best-effort, not idle, so a page it reads is never starved behind the live load);
-   `--lock-wait-timeout` keeps it from queueing behind a lock, and `timeout -s KILL` and the rehearsal's session name bound
-   it to the rehearsal's deadline. The throwaway database is kept as the remote drill keeps its own (decision 7): its data
-   and WAL on a tmpfs inside its memory cap, no swap, no log driver, `--oom-score-adj 1000`, on an internal network of its
-   own with no route out (the migrate and API containers must reach it there, so it cannot have no network at all). Its
-   cap is the server's 192 MB, 64 MB of WAL (`wal_level=minimal`, `max_wal_size=32MB`) and one and a half times the live
-   database's size (at least 96 MB), or `BMS_REHEARSAL_DB_MEMORY_MB`; a cap whose tmpfs cannot hold the live data is
-   refused, never put on a disk. On staging it sits in `bms.slice` and the rehearsal starts only while the slice has room
+   consistent read-only snapshot, uncompressed) straight into `pg_restore` in its throwaway PostgreSQL, so no backup is
+   fetched, no key is read and no dump is ever a file; the backups' format, age or old, no longer matters to it. So that
+   the live database is not slowed noticeably, `pg_dump` runs at nice 19 and the lowest best-effort I/O priority, and so
+   does its server process once it is found (by its own session name; reniced as `postgres`, its own user, since a
+   container has no `CAP_SYS_NICE`). Best-effort, not idle, so a page it reads is never starved behind the live load;
+   the I/O priority takes effect only under a scheduler that honours it (BFQ), not under `none` or `mq-deadline`, and a
+   backend at nice 19 can still briefly hold a lightweight lock others wait on. **The dump holds `ACCESS SHARE` on every
+   table and a snapshot that holds back vacuum for as long as it runs**: a live `ACCESS EXCLUSIVE` request would wait
+   for it, and the reads of that table behind that request. The stack makes such requests only in migrations, which the
+   deploy lock keeps out for the whole rehearsal, so the dump is bounded to minutes rather than to the rehearsal's
+   deadline: 5 minutes and 2 seconds a MB of live data, an hour at most, by `timeout -s KILL` and the session name;
+   `--lock-wait-timeout` keeps pg_dump itself from queueing behind a lock. The throwaway database is kept as the remote
+   drill keeps its own (decision 7): its data and WAL on a tmpfs inside its memory cap (`PGDATA` set to it and checked),
+   no swap, no log driver, `--oom-score-adj 1000`, and no network (`--network none`); the migrate and API containers
+   join its network namespace and reach it on `localhost`, so none of the three has any network. Its cap is the
+   server's 192 MB, 64 MB of WAL (`wal_level=minimal`, `max_wal_size=32MB`) and one and a half times the live
+   database's size (at least 96 MB); `BMS_REHEARSAL_DB_MEMORY_MB` may raise it, never lower it, and nothing is ever put
+   on a disk. On staging it sits in `bms.slice` and the rehearsal starts only while the slice has room
    for it and the API together; on production only while the host has that much and 256 MB more available. Every other
    guard of the rehearsal stays as it was: a run of the import screens in review or ready, fabricated only on staging,
    the target checks, the placeholder keys of outside services, the weekend window, the locks and the overlap checks.
@@ -152,8 +159,8 @@ decrypt.
 - Losing both the Keychain copies and the envelope loses every backup made since the switch. The envelope is kept apart from the
   Mac, and the ceremony checks the paper copy by reading it back.
 - Import rehearsals run whatever the backups' format (amended 16 November 2026): they no longer prove anything about a
-  backup, which only the drills do, and a rehearsal reads the whole live database once, at low priority, while it
-  runs. Its throwaway data is in memory only, so the live data's size, not the disk, bounds it: on staging the slice
+  backup, which only the drills do, and a rehearsal reads the whole live database once, at low priority, holding its
+  tables' share locks and a vacuum horizon for minutes, while it runs. Its throwaway data is in memory only, so the live data's size, not the disk, bounds it: on staging the slice
   must have room for about one and a half times the live data beside the API's 448 MB.
 - The rollout is by hand and outside this change, and its order matters: the key ceremony, `age` and `BACKUP_AGE_RECIPIENT`
   on every host **before** the release reaches any host (the staging puller deploys within minutes of the merge, and the new

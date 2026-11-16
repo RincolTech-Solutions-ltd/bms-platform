@@ -1728,10 +1728,10 @@ section 4.1; coordinated with #110, which builds no second framework).**
   validate. #922 runs the two requests in the background (202 and poll) and raises the limit to 100,000;
   `ImportBigFileIT` no longer holds any case to the 80 s budget.
 
-**12/16, the rehearsal on last night's backup (#138, migration `V146`, ADR-027 decision 9, spec section 5.5).**
+**12/16, the rehearsal on a copy of the live database (#138 and #953, migration `V146`, ADR-027 decision 9, spec section 5.5).**
 
 - **The host side** is `deploy/restore-drill.sh --rehearse-import <run id>` (chapter 9 section 9.10 item 7, runbook
-  `docs/runbooks/restore-from-backup.md` section 5.2): a throwaway PostgreSQL in memory on an internal network of its own,
+  `docs/runbooks/restore-from-backup.md` section 5.2): a throwaway PostgreSQL in memory with no network,
   filled by a `pg_dump` of the live database streamed into it (since 16 November 2026, issue #953, ADR-129 decision 5: no
   backup and no key on the host; before, the newest backup was restored), the live API's migrations, the run's staged rows copied from the live database in one read-only
   transaction, then `rehearse-import` in a short-lived API container, then one `import_rehearsals` row copied onto the live

@@ -451,18 +451,22 @@ deletion 90 days after closing), all Africa/Kampala (ADR-024).
    script's rehearsal mode, run by hand before a cutover; with no argument the script is the weekly
    drill of item 6, unchanged (`deploy/tests/restore-drill-test.sh` holds it to a golden transcript).
    It reads no backup and needs no key (ADR-129 decision 5, amended 16 November 2026, issue #953):
-   it starts a throwaway PostgreSQL on an internal Docker network of its own (no route out), its data
-   and WAL on a tmpfs inside its memory cap, no swap, no log driver, `--oom-score-adj 1000`, refuses
-   to go on unless that database is provably not the live one (container, cluster identifier, label,
-   network), then streams a `pg_dump` of the live database (pg_dump's own snapshot, as `bms_owner`, at
-   nice 19 and the lowest best-effort I/O priority for pg_dump and its server process) straight into
-   its `pg_restore`, so the dump is never a file. It then migrates it with the live API's image,
-   copies the run's staged rows into it from the live database in one read-only transaction, runs the
-   real dry run and commit in a short-lived API container (`rehearse-import`) that reaches only that
-   network, stores one `import_rehearsals` row on the live run as `bms_app` (its only write there),
-   and removes the containers, network and the mode-0700 temp dir of its env files on success,
-   failure and interrupt. The database's cap is 192 MB for the server, 64 MB of WAL and one and a
-   half times the live database's size (at least 96 MB), or `BMS_REHEARSAL_DB_MEMORY_MB`.
+   it starts a throwaway PostgreSQL with no network (`--network none`), its data and WAL on a tmpfs
+   inside its memory cap (`PGDATA` set to it and checked), no swap, no log driver,
+   `--oom-score-adj 1000`, refuses to go on unless that database is provably not the live one
+   (container, cluster identifier, label, no network, data directory), then streams a `pg_dump` of the
+   live database (pg_dump's own read-only snapshot, as `bms_owner`, at nice 19 and the lowest
+   best-effort I/O priority for pg_dump and its server process, reniced as `postgres`) straight into
+   its `pg_restore`, so the dump is never a file. The dump holds `ACCESS SHARE` on every table and a
+   vacuum horizon while it runs, so it is bounded to 5 minutes and 2 seconds a MB of live data (an
+   hour at most); migrations, the stack's only `ACCESS EXCLUSIVE` requests, are kept out by the deploy
+   lock. It then migrates it with the live API's image, copies the run's staged rows into it from the
+   live database in one read-only transaction, runs the real dry run and commit in a short-lived API
+   container (`rehearse-import`) that shares the database's network namespace and so has no network
+   either, stores one `import_rehearsals` row on the live run as `bms_app` (its only write there),
+   and removes the containers and the mode-0700 temp dir of its env files on success, failure and
+   interrupt. The database's cap is 192 MB for the server, 64 MB of WAL and one and a half times the
+   live database's size (at least 96 MB); `BMS_REHEARSAL_DB_MEMORY_MB` may raise it, not lower it.
    On staging it takes only a run marked fabricated and only while `bms.slice` has that cap and the
    API's 448 MB free below `MemoryHigh` (section 9.13); on production only while the host has that
    and 256 MB more available. It holds its own lock and the puller's and deploy's locks to the end,
@@ -595,7 +599,7 @@ Staging runs on an ARM64 host that already exists at a Rincol home site: a Raspb
   | second `api`, `web` | 448 MB, 32 MB | Only during a switch, beside the old ones until they are healthy (ADR-083). The second api starts only while its own limit plus 64 MB (512 MB) is free below the slice's `MemoryHigh` and on the host, so its start-up peak can never bring the slice's OOM killer onto the old api or PostgreSQL (reclaim, a slowdown, stays possible); otherwise the api restarts in place, with the old gap. Measured 24 Oct 2026: about 790 MB in use, so about 710 MB free below the 1500 MB `MemoryHigh`: staging overlaps on every deploy. `BMS_ROLL_MIN_FREE_MB` can replace the limit with a measured start-up peak |
   | restore drill `postgres`, `rclone` | 384 MB, 64 MB | Sunday 03:30 only (section 9.10 item 6) |
   | offline drill `postgres` (`bms-offline-drill-<pid>`) | 640 MB, no swap | Only while the operator runs `restore-drill-offline.sh --remote bms-staging` by hand (ADR-129 decision 7, issue #949): 256 MB for the server, a 384 MB tmpfs for its data and WAL (`max_wal_size=64MB`), `--oom-score-adj 1000`, no network. With the steady stack, 1376 MB by limits, under `MemoryHigh`; it refuses a host with a drill's or rehearsal's database, and the weekly drill and a rehearsal refuse while it runs |
-  | rehearsal `postgres` | 192 MB, 64 MB of WAL and 1.5 times the live data (at least 96 MB), no swap, 1 CPU | Only during an import rehearsal (section 9.10 item 7, issues #138 and #953): the data and WAL on a tmpfs inside the cap, no log driver, `--oom-score-adj 1000`, `shared_buffers=32MB`, `max_connections=20`, `work_mem=4MB`, `maintenance_work_mem=32MB`, `wal_level=minimal`, `max_wal_size=32MB`, no network but its own internal one. 352 MB while the live data is under 64 MB; `BMS_REHEARSAL_DB_MEMORY_MB` sets it instead. Filled by a `pg_dump` of the live database streamed in at the lowest CPU and I/O priority |
+  | rehearsal `postgres` | 192 MB, 64 MB of WAL and 1.5 times the live data (at least 96 MB), no swap, 1 CPU | Only during an import rehearsal (section 9.10 item 7, issues #138 and #953): the data and WAL on a tmpfs inside the cap, no log driver, `--oom-score-adj 1000`, `shared_buffers=32MB`, `max_connections=20`, `work_mem=4MB`, `maintenance_work_mem=32MB`, `wal_level=minimal`, `max_wal_size=32MB`, no network (the migrate and API containers share its namespace). 352 MB while the live data is under 64 MB; `BMS_REHEARSAL_DB_MEMORY_MB` may raise it. Filled by a `pg_dump` of the live database streamed in at the lowest CPU and I/O priority |
   | rehearsal `api` (and its `migrate` before it) | 448 MB, 1 CPU | The staging api's JVM with a 224 MB heap, the heap the big file test commits 2,500 rows a batch on (chapter 15 section 15.7). With the rehearsal `postgres`, 800 MB by limits while the live data is under 64 MB; the script starts nothing unless that much is free below `MemoryHigh` (in use counted as `memory.current` less inactive page cache), holds the puller's and deploy's locks for its whole run (so never beside a deploy's `migrate` and second `api`), and starts nothing from Saturday 21:30 to Sunday 07:00 or while a drill or another rehearsal runs. With about 710 MB free on 24 Oct 2026, a rehearsal waits for a quieter slice or a smaller cap |
   | **Total** | 736 MB steady, 896 MB while migrations run, 1216 MB by limits during an overlap, at least 1536 MB by limits during a rehearsal (736 + 800), which the room check allows only when the stack's actual use leaves that room | `bms.slice`: `MemoryMax=1600M`, `MemoryHigh=1500M` (decision D37), no swap, `CPUQuota=250%` |
 
