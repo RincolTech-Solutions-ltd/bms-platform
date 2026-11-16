@@ -102,6 +102,8 @@ REMOTE_INITDB="${BMS_DRILL_REMOTE_INITDB:-/opt/bms/postgres/initdb}"
 # so both fit.
 SERVER_MB=256
 WAL_MB=96
+# What the remote host must have available beyond the cap before the drill starts, so the live stack keeps room.
+HEADROOM_MB=256
 MEMORY_MB="${BMS_DRILL_MEMORY_MB:-2048}"
 [[ -n "$TARGET" ]] && MEMORY_MB="${BMS_DRILL_MEMORY_MB:-1280}"
 [[ -n "$TARGET" && "$ENVIRONMENT" == staging ]] && MEMORY_MB="${BMS_DRILL_MEMORY_MB:-640}"
@@ -233,11 +235,19 @@ if [[ -n "$TARGET" ]]; then
     dk image inspect --format '{{.Id}}' "$POSTGRES_IMAGE" > /dev/null 2>&1 \
         || fail "cannot run '${REMOTE_DOCKER} image inspect ${POSTGRES_IMAGE}' on ${TARGET} over ssh: check the ssh target, BMS_DRILL_REMOTE_DOCKER and POSTGRES_IMAGE (restore-from-backup.md section 8.5)"
     # Nothing else that needs the host's room runs beside it: the weekly drill's or a rehearsal's throwaway database, or
-    # another offline drill's (review of e7cc8e6, finding 11; bms.slice on staging holds 900 MB in all).
+    # another offline drill's (review of e7cc8e6, finding 11; on staging they would share bms.slice).
     others="$(dk ps --all --format '{{.Names}}' 2> /dev/null)" || fail "cannot list the containers on ${TARGET}"
     busy="$(grep -E '^(bms-restore-drill|bms-rehearsal-db|bms-offline-drill)-' <<< "$others" | tr '\n' ' ')"
     [[ -z "$busy" ]] \
         || fail "${TARGET} runs or has left behind another drill or rehearsal (${busy% }): try again when it ends, or remove what is left (restore-from-backup.md section 5.2)"
+    # The host has room for the whole cap and HEADROOM_MB more (Lead on the review of 7a1faf9, point 3): MemAvailable,
+    # read through the docker the drill already runs (a container's /proc/meminfo is the host's), from the same image.
+    meminfo="$(dk run --rm --network none --log-driver none --memory 32m --entrypoint cat "$POSTGRES_IMAGE" /proc/meminfo \
+        2> /dev/null)" || fail "cannot read the memory of ${TARGET}"
+    available_kb="$(awk '$1 == "MemAvailable:" { print $2 }' <<< "$meminfo")"
+    [[ "$available_kb" =~ ^[0-9]+$ ]] || fail "cannot read MemAvailable on ${TARGET}"
+    (( available_kb / 1024 >= MEMORY_MB + HEADROOM_MB )) \
+        || fail "${TARGET} has $(( available_kb / 1024 )) MB available and the drill needs ${MEMORY_MB} MB plus ${HEADROOM_MB} MB to spare: try again when the host is quieter, or lower BMS_DRILL_MEMORY_MB if the data fits"
     log "restoring on ${TARGET}: the backup is decrypted on this Mac and only the decrypted stream crosses ssh"
 else
     [[ -d "$INITDB" ]] || fail "no initdb folder at ${INITDB}: run this from a checkout of the repository"

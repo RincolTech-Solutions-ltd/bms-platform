@@ -116,7 +116,13 @@ STUB
 #!/usr/bin/env bash
 printf 'docker %s\n' "$*" >> "$FAKE/calls.log"
 case "$1" in
-    run) echo "fake-container-id"; echo started > "$FAKE/container" ;;
+    run)
+        # The host's memory, read through a container of the same image (FAKE_MEMAVAILABLE_KB, default 3 GB available).
+        if [[ "$*" == *"--entrypoint cat "*" /proc/meminfo" ]]; then
+            printf 'MemTotal:        4000000 kB\nMemAvailable:    %s kB\n' "${FAKE_MEMAVAILABLE_KB:-3145728}"
+            exit 0
+        fi
+        echo "fake-container-id"; echo started > "$FAKE/container" ;;
     image) [[ -z "${FAKE_NO_IMAGE:-}" ]] || { echo "Error: No such image: $*" >&2; exit 1; }; echo "sha256:fake" ;;
     ps) [[ -f "$FAKE/host_containers" ]] && cat "$FAKE/host_containers" ;;
     logs) echo "PostgreSQL init process complete; ready for start up." ;;
@@ -398,14 +404,21 @@ check "remote: an image docker could read as an option is a usage error" \
 BMS_DRILL_MEMORY_MB=511 drill --remote bms-production
 check "remote: a memory below 512 MB (PostgreSQL's 256 and at least 256 of data) is a usage error" test "$STATUS" = 2
 fake_remote remote-quotes; age_backup
-BMS_DRILL_MEMORY_MB=3000 drill --remote bms-production
+FAKE_MEMAVAILABLE_KB=4194304 BMS_DRILL_MEMORY_MB=3000 drill --remote bms-production
 check "remote: SQL with quotes reaches the host's sh word for word, and BMS_DRILL_MEMORY_MB sets the cap" \
     eval '[[ "$STATUS" == 0 ]] && grep -qF "SELECT set_config('"'"'app.tenant_id'"'"', '"'"'0b5e7a2c-0000-4000-8000-00000000a001'"'"', false)" "$FAKE/calls.log" && host_run | grep -q -- "--memory 3000m --memory-swap 3000m .*size=2744m "'
 # Lead on the review of e7cc8e6: a dump too big for the cap fails plainly and never falls back to a disk volume.
 fake_remote remote-too-big; age_backup
 FAKE_RESTORE_NOSPACE=1 drill --remote bms-staging --environment staging
 check "remote: a restore that outgrows the tmpfs fails plainly, naming the cap and the setting" \
-    eval 'failed_with "the restore did not fit in the container.s 640 MB (384 MB of tmpfs, about 288 MB of data beside the WAL): set BMS_DRILL_MEMORY_MB higher" && [[ "$(grep -c "^docker run " "$FAKE/calls.log")" == 1 ]] && ! grep -q -- "--volume\|type=volume" "$FAKE/calls.log"'
+    eval 'failed_with "the restore did not fit in the container.s 640 MB (384 MB of tmpfs, about 288 MB of data beside the WAL): set BMS_DRILL_MEMORY_MB higher" && [[ "$(grep -c "^docker run --detach " "$FAKE/calls.log")" == 1 ]] && ! grep -q -- "--volume\|type=volume" "$FAKE/calls.log"'
+# Lead on the review of 7a1faf9, point 3: a host without the cap and 256 MB to spare fails before the key is read.
+fake_remote remote-short; age_backup
+FAKE_MEMAVAILABLE_KB=1048576 drill --remote bms-production
+check "remote: a host with too little memory available fails plainly before anything is decrypted or started" \
+    eval 'failed_with "bms-production has 1024 MB available and the drill needs 1280 MB plus 256 MB to spare" && ! grep -q "^security" "$FAKE/calls.log" && ! grep -q "^docker run --detach" "$FAKE/calls.log"'
+check "remote: the memory is read through the host's docker, with no network and no log" \
+    eval 'grep -q "^sudo -n -u bms docker run --rm --network none --log-driver none --memory 32m --entrypoint cat postgres:fake /proc/meminfo$" "$FAKE/calls.log"'
 # Review of 7a1faf9, finding 9: the engine's OOM kill is "did not fit"; any other crash stays "pg_restore failed".
 fake_remote remote-oom; age_backup
 FAKE_RESTORE_FAIL=1 FAKE_OOM=1 drill --remote bms-production
