@@ -6,14 +6,16 @@
 #     live cluster's system identifier, or the live container's id, or the live API's settings naming another database;
 #   - on staging a run not marked fabricated is refused, and so are a run that is not in review or ready, a run of the
 #     import-retail command, a missing run, a slice without room and a drill or rehearsal already running;
-#   - the containers get their memory and CPU limits, inside bms.slice on staging, on an internal network of their own;
+#   - the containers get their memory and CPU limits, inside bms.slice on staging, the database with no network and the
+#     migrate and API containers in its namespace only (review of 9e0c501, point 3);
 #   - no backup is fetched or decrypted (ADR-129 decision 5, amended 16 Nov 2026, issue #953): a pg_dump of the live
 #     database at the lowest priority is streamed straight into pg_restore, nothing of it on disk, into a throwaway
 #     database whose data is a tmpfs inside its memory cap, with no log driver, sized from the live database;
 #   - the guards still refuse before anything is dumped, and a slice or host without room for that size is refused;
 #   - the live database is read in one read-only transaction and written once, the rehearsal's row, as bms_app;
-#   - every container, the network, the volume and the temp dir are removed on success, on failure and on interrupt;
-#   - rh_pick_newest_backup is the drill's pick_newest_backup.
+#   - every container and the temp dir are removed on success, on failure and on interrupt;
+#   - the rehearsal's code reads no backup, and the drill keeps its own picker.
+# The streamed path against a real PostgreSQL is deploy/tests/rehearsal-sessions-test.sh.
 # Run: bash deploy/tests/rehearse-import-test.sh
 # The checks are strings eval'd when they run, so their variables are meant to stay unexpanded until then.
 # shellcheck disable=SC2016
@@ -95,56 +97,65 @@ done
 rehearse ok-staging
 check "a fabricated ready run on staging is rehearsed and stored (exit 0)" eval '[[ "$STATUS" == 0 ]]'
 check "it says it stored the rehearsal on the live run" said "stored the rehearsal on live run ${RUN}"
-check "the throwaway postgres is capped at 352 MB (40 MB live) and 1 CPU inside bms.slice, on the rehearsal's network" \
-    grep -Eq '^run --detach --name bms-rehearsal-db-[0-9]+ --cgroup-parent bms\.slice --memory 352m --memory-swap 352m --cpus 1\.0 --network bms-rehearsal-net-[0-9]+ ' "$FAKE/calls.log"
+check "the throwaway postgres is capped at 352 MB (40 MB live) and 1 CPU inside bms.slice, with no network" \
+    grep -Eq '^run --detach --name bms-rehearsal-db-[0-9]+ --cgroup-parent bms\.slice --memory 352m --memory-swap 352m --cpus 1\.0 --network none ' "$FAKE/calls.log"
+check "its PGDATA is set to the tmpfs, and it is checked to be the data directory" \
+    eval 'grep -qx PGDATA=/var/lib/postgresql/data "$FAKE/db-env.seen" \
+        && grep -Eq "^exec bms-rehearsal-db-[0-9]+ psql -U postgres -d bms -v ON_ERROR_STOP=1 -tAc SHOW data_directory$" "$FAKE/calls.log"'
 # JUSTIFICATION-A3: issue #953 asks for tests of the new path: tmpfs, streamed, nothing on disk, low priority, no backup.
 check "its data and WAL are a 160 MB tmpfs inside that cap, with no log driver, first to go on a host short of memory" \
     grep -Eq '^run --detach --name bms-rehearsal-db-[0-9]+ .*--tmpfs /var/lib/postgresql/data:rw,size=160m --log-driver none --oom-score-adj 1000 ' "$FAKE/calls.log"
 check "nothing of the throwaway database is on a disk: no volume, no data mount, and no log is read" \
     eval '! grep -q "^volume create" "$FAKE/calls.log" && ! grep -q "^logs " "$FAKE/calls.log" \
         && ! grep -E "^run --detach --name bms-rehearsal-db-" "$FAKE/calls.log" | grep -Eq -- "--volume [^ ]*:/var/lib/postgresql"'
-check "the live database is dumped as bms_owner, uncompressed, at nice 19 and the lowest best-effort I/O, named and bounded" \
-    grep -Eq '^exec -e PGAPPNAME=bms-rehearsal-[0-9]+ -e PGOPTIONS=-c statement_timeout=60s -c idle_in_transaction_session_timeout=60s bms-postgres-1 timeout -s KILL [0-9]+ nice -n 19 ionice -c 2 -n 7 pg_dump --username bms_owner --dbname bms --format custom --compress 0 --lock-wait-timeout=60s$' "$FAKE/calls.log"
+check "the live database is dumped as bms_owner, read only, uncompressed, at nice 19 and the lowest best-effort I/O, named" \
+    grep -Eq '^exec -e PGAPPNAME=bms-rehearsal-[0-9]+-dump -e PGOPTIONS=-c statement_timeout=60s -c idle_in_transaction_session_timeout=60s -c default_transaction_read_only=on bms-postgres-1 timeout -s KILL [0-9]+ nice -n 19 ionice -c 2 -n 7 pg_dump --username bms_owner --dbname bms --format custom --compress 0 --lock-wait-timeout=60s$' "$FAKE/calls.log"
+check "the dump is bounded by minutes from the live size (300 s and 2 s a MB: 380 s for 40 MB), not the 6 h deadline" \
+    grep -Eq '^exec .* bms-postgres-1 timeout -s KILL 380 nice .* pg_dump ' "$FAKE/calls.log"
 check "the dump is streamed: the throwaway pg_restore reads exactly what pg_dump wrote" \
     eval '[[ "$(cat "$FAKE/restored")" == "fabricated dump of the live database" ]] \
         && grep -Eq "^exec -i bms-rehearsal-db-[0-9]+ pg_restore -U bms_owner -d bms --exit-on-error$" "$FAKE/calls.log"'
 check "while it streams, no file on the host holds the dump; the temp dir holds the database's env file only" \
     eval '[[ ! -s "$FAKE/dump-on-disk" ]] \
         && [[ "$(grep "/backups/" "$FAKE/files-during-restore" | sed -E "s#.*/backups/rehearsal\.[A-Za-z0-9]{6}/##")" == db.env ]]'
-check "the live dump's server process is put at nice 19 and the lowest best-effort I/O priority too" \
-    eval 'grep -qx "exec bms-postgres-1 renice -n 19 -p 4242" "$FAKE/calls.log" \
-        && grep -qx "exec bms-postgres-1 ionice -c 2 -n 7 -p 4242" "$FAKE/calls.log"'
+check "the live dump's server process, found by its own name, is reniced as postgres (no CAP_SYS_NICE in a container)" \
+    eval 'grep -qx "exec --user postgres bms-postgres-1 renice -n 19 -p 4242" "$FAKE/calls.log" \
+        && grep -qx "exec --user postgres bms-postgres-1 ionice -c 2 -n 7 -p 4242" "$FAKE/calls.log" \
+        && grep -q "application_name = .bms-rehearsal-[0-9]*-dump. AND usename = .bms_owner. AND backend_type = .client backend." "$FAKE/calls.log" \
+        && said "server process 4242 runs at nice 19"'
 check "no backup is listed, fetched or decrypted, and the commit names the live snapshot it started from" \
     eval '! grep -q "rclone" "$FAKE/calls.log" && [[ ! -s "$FAKE/decrypt-dirs" ]] \
         && grep -Eq "rehearse-import --tenant .* --backup live-bms-postgres-1-[0-9]{8}T[0-9]{6}Z " "$FAKE/calls.log"'
-check "the API container is capped at 448 MB and 1 CPU inside bms.slice, on the rehearsal's network" \
-    grep -Eq '^run --rm --name bms-rehearsal-api-[0-9]+ --cgroup-parent bms\.slice --memory 448m --memory-swap 448m --cpus 1\.0 --network bms-rehearsal-net-[0-9]+ ' "$FAKE/calls.log"
+check "the API container is capped at 448 MB and 1 CPU inside bms.slice, in the database's namespace" \
+    grep -Eq '^run --rm --name bms-rehearsal-api-[0-9]+ --cgroup-parent bms\.slice --memory 448m --memory-swap 448m --cpus 1\.0 --network container:bms-rehearsal-db-[0-9]+ ' "$FAKE/calls.log"
 check "the migrate container is capped the same way" \
     grep -Eq '^run --rm --name bms-rehearsal-migrate-[0-9]+ --cgroup-parent bms\.slice --memory 448m --memory-swap 448m --cpus 1\.0 ' "$FAKE/calls.log"
-check "the network is internal: no route out of it, and the live database is not on it" \
-    grep -Eq '^network create --internal bms-rehearsal-net-[0-9]+$' "$FAKE/calls.log"
-# Review of #890, Lead on point 3: the provider hosts the startup guards pin are kept, so this network is what keeps the
-# API container from them. isolated <calls log>: the network is created --internal; the throwaway database, the migrate
-# and the API containers each run with exactly one --network, that one; nothing is connected to another network later.
+check "no network is made: no route out at all, and the live database is not reachable" \
+    eval '! grep -q "^network " "$FAKE/calls.log"'
+# Review of #890, Lead on point 3, and of 9e0c501, point 3: the provider hosts the startup guards pin are kept, so having
+# no network is what keeps the API container from them. isolated <calls log>: no network is created or connected; the
+# throwaway database runs with exactly one --network, none, and the migrate and API containers with exactly one, its
+# namespace.
 isolated() {
-    local net line
-    net="$(sed -nE 's/^network create --internal (bms-rehearsal-net-[0-9]+)$/\1/p' "$1")"
-    [[ -n "$net" ]] && grep -Eq '^run .*--name bms-rehearsal-api-[0-9]+ ' "$1" || return 1
+    local db line
+    db="$(sed -nE 's/^run --detach --name (bms-rehearsal-db-[0-9]+) .*/\1/p' "$1")"
+    [[ -n "$db" ]] && grep -Eq '^run .*--name bms-rehearsal-api-[0-9]+ ' "$1" || return 1
+    [[ "$(grep -E "^run --detach --name ${db} " "$1" | grep -o -- '--network [^ ]*')" == "--network none" ]] || return 1
     while IFS= read -r line; do
-        [[ "$(grep -o -- '--network [^ ]*' <<< "$line")" == "--network $net" ]] || return 1
-    done < <(grep -E '^run .*--name bms-rehearsal-(db|migrate|api)-[0-9]+ ' "$1")
-    ! grep -q '^network connect' "$1"
+        [[ "$(grep -o -- '--network [^ ]*' <<< "$line")" == "--network container:${db}" ]] || return 1
+    done < <(grep -E '^run .*--name bms-rehearsal-(migrate|api)-[0-9]+ ' "$1")
+    ! grep -q '^network ' "$1"
 }
-check "the database, migrate and API containers join the internal rehearsal network only" isolated "$FAKE/calls.log"
-# The check fails the other way: each way of giving the API a route out is caught.
-sed 's/^network create --internal /network create /' "$FAKE/calls.log" > "$WORK/no-internal.log"
+check "the database has no network, and the migrate and API containers have its namespace only" isolated "$FAKE/calls.log"
+# The check fails the other way: each way of giving a container a route out is caught.
+sed -E 's/^(run --detach --name bms-rehearsal-db-[0-9]+ .*)--network none /\1--network bridge /' "$FAKE/calls.log" > "$WORK/db-bridge.log"
 sed -E 's/^(run .*--name bms-rehearsal-api-[0-9]+ .*--network [^ ]+)/\1 --network bridge/' "$FAKE/calls.log" > "$WORK/two-networks.log"
 { cat "$FAKE/calls.log"; echo "network connect bridge bms-rehearsal-api-4242"; } > "$WORK/connected.log"
-check "... and it fails without --internal, with a second --network on the API, or with a network connect" \
-    eval '! isolated "$WORK/no-internal.log" && ! isolated "$WORK/two-networks.log" && ! isolated "$WORK/connected.log"'
+check "... and it fails with a database on a network, a second --network on the API, or a network connect" \
+    eval '! isolated "$WORK/db-bridge.log" && ! isolated "$WORK/two-networks.log" && ! isolated "$WORK/connected.log"'
 check "the API runs the live API's image" grep -q 'ghcr.io/fake/bms-platform-api@sha256:fake rehearse-import --tenant' "$FAKE/calls.log"
 check "the API's only database is the throwaway one, its scheduler off, with the one-time token" \
-    eval '[[ "$(grep -E "jdbc:|postgres(ql)?://" "$FAKE/api-env.seen")" =~ ^BMS_DB_URL=jdbc:postgresql://bms-rehearsal-db-[0-9]+:5432/bms$ ]] \
+    eval '[[ "$(grep -E "jdbc:|postgres(ql)?://" "$FAKE/api-env.seen")" == BMS_DB_URL=jdbc:postgresql://localhost:5432/bms ]] \
         && grep -qx BMS_SCHEDULER_ENABLED=false "$FAKE/api-env.seen" && grep -q "^BMS_REHEARSAL_TOKEN=f00d" "$FAKE/api-env.seen" \
         && ! grep -q live-app-secret "$FAKE/api-env.seen"'
 check "the env files are only inside a mode-0700 temp dir under backups/" \
@@ -207,6 +218,16 @@ check "a bigger live database needs a bigger throwaway: 200 MB live needs 1004 M
 FAKE_LIVE_DB_MB=500 BMS_REHEARSAL_DB_MEMORY_MB=512 rehearse too-small
 check "a BMS_REHEARSAL_DB_MEMORY_MB whose tmpfs cannot hold the live data is refused (3), never put on a disk" \
     eval '[[ "$STATUS" == 3 ]] && said "raise BMS_REHEARSAL_DB_MEMORY_MB" && nothing_started && nothing_restored'
+# Review of 9e0c501, point 7: 757 MB left 1 MB of room beside 500 MB of live data; the override keeps the 1.5 times margin.
+FAKE_LIVE_DB_MB=500 BMS_REHEARSAL_DB_MEMORY_MB=757 rehearse thin-override
+check "an override with less than one and a half times the live data as room (500 MB live, 757 MB) is refused (3)" \
+    eval '[[ "$STATUS" == 3 ]] && said "needs a throwaway database of 1006 MB" && nothing_started && nothing_restored'
+BMS_REHEARSAL_DB_MEMORY_MB=400 rehearse bigger-override
+check "an override above what the live size needs is used as the cap (400 MB, 208 MB of tmpfs)" \
+    eval '[[ "$STATUS" == 0 ]] && grep -Eq "^run --detach --name bms-rehearsal-db-[0-9]+ .*--memory 400m .*--tmpfs /var/lib/postgresql/data:rw,size=208m " "$FAKE/calls.log"'
+FAKE_DATA_DIRECTORY=/var/lib/postgresql/18/docker rehearse pgdata-elsewhere
+check "a throwaway database whose data directory is not its tmpfs is refused (3) before the dump" \
+    eval '[[ "$STATUS" == 3 ]] && said "data directory is not its tmpfs" && nothing_restored && no_live_write && all_removed'
 PRODUCTION=1 AVAILABLE_KB=900000 FAKE_RUN_ROW="${FAKE_TENANT}|ready|f|framework" rehearse production-no-room
 check "on production, a host with less than the rehearsal's memory and 256 MB more available is refused (3)" \
     eval '[[ "$STATUS" == 3 ]] && said "the host has 878 MB available" && nothing_started && nothing_restored'
@@ -225,7 +246,7 @@ FAKE_BACKUP_FILE="$WORK/newest.age" rehearse age-backup
 sed -i -E '/^(BACKUP_ENCRYPTION_KEY|R2_[A-Z_]+|RCLONE_IMAGE)=/d' "$HOST/.env"
 : > "$FAKE/calls.log"
 : > "$FAKE/live-writes"
-run_script --rehearse-import "$RUN"
+FAKE_BACKUP_FILE="$WORK/newest.age" run_script --rehearse-import "$RUN"
 check "with age backups and no backup key or R2 setting on the host, the rehearsal runs and is stored (0)" \
     eval '[[ "$STATUS" == 0 ]] && ! said "age key" && [[ ! -s "$FAKE/decrypt-dirs" ]] && ! grep -q rclone "$FAKE/calls.log" \
         && [[ -s "$FAKE/live-writes" ]] && all_removed'
@@ -347,7 +368,7 @@ check "a live read that hangs past the deadline is stopped (1), its client ended
     eval '[[ "$STATUS" == 1 ]] && said "stopped at its deadline" && no_commit && no_live_write && all_removed \
         && (( SECONDS - started_at < 15 ))'
 check "... the rehearsal's live sessions are ended on the server by their name, and the locks are free" \
-    eval 'grep -Eq "bms-postgres-1 psql -U postgres .*pg_terminate_backend.*application_name = .bms-rehearsal-[0-9]+. +AND usename IN" "$FAKE/calls.log" \
+    eval 'grep -Eq "bms-postgres-1 psql -U postgres .*pg_terminate_backend.*application_name IN \(.bms-rehearsal-[0-9]+., .bms-rehearsal-[0-9]+-dump.\) +AND usename IN" "$FAKE/calls.log" \
         && flock --nonblock "$HOST/state/deploy.lock" true && flock --nonblock "$HOST/state/pull.lock" true'
 check "every session on the live database is named by PGAPPNAME and bounded on the server (statement and idle timeouts)" \
     eval '! grep -E "bms-postgres-1 (timeout -s KILL [0-9]+ )?psql -U (bms_|postgres -d bms -tAc SELECT system)" "$FAKE/calls.log" \

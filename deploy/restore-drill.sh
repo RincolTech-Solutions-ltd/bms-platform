@@ -40,22 +40,22 @@
 #   3. sizes its throwaway PostgreSQL from the live database's size: the data and WAL on a tmpfs inside the container's
 #      memory cap, no swap, no log driver, so nothing it holds reaches a disk (amendment of ADR-129 decision 5, 16 Nov
 #      2026, issue #953); on staging the slice must have room for it and the API, on production the host;
-#   4. starts that PostgreSQL on an internal network of its own (no route out), goes on only while that database is
-#      provably not the live one (another name, container and cluster, this run's label, this network only), then streams
-#      a pg_dump of the live database straight into its pg_restore: pg_dump's own snapshot, at the lowest CPU and I/O
-#      priority (its client and its server process), never a file. No backup is fetched and no key is needed, so the
-#      rehearsal runs the same whatever the backups' format;
+#   4. starts that PostgreSQL with no network (--network none), goes on only while that database is provably not the
+#      live one (another name, container and cluster, this run's label, no network, its tmpfs the data directory), then
+#      streams a pg_dump of the live database straight into its pg_restore: pg_dump's own snapshot, at the lowest CPU and
+#      I/O priority (its client and its server process), bounded to minutes (RH_STREAM_SECONDS), never a file. No backup
+#      is fetched and no key is needed, so the rehearsal runs the same whatever the backups' format;
 #   5. migrates it with the live API's image, copies the run's staged rows into it from the live database in one read-only
 #      transaction (the run, its batches, rows, issues, resolutions and mappings; the encrypted source comes as its object
 #      keys and the run's wrapped data key, and is never fetched or decrypted: the commit reads the staged rows only), and
 #      marks it with this rehearsal's one-time token;
 #   6. runs `rehearse-import` in a short-lived API container (the live API's image and settings, the database switched to
-#      the throwaway one, on that internal network only): the real dry run and the real commit, without the checker's
+#      the throwaway one, in its network namespace only): the real dry run and the real commit, without the checker's
 #      approval and the pre-import dump, which the application waives only in a database that holds the token
 #      (core.imports.ImportRehearsals);
 #   7. stores the rehearsal (report, reconciliation, timings) on the live run: one import_rehearsals row inserted as bms_app
 #      under row-level security, the only write the rehearsal makes on the live database;
-#   8. removes every container, the network and the temp dir it made, on success, failure and interrupt.
+#   8. removes every container and the temp dir it made, on success, failure and interrupt.
 # Limits, inside bms.slice on staging (SDD chapter 9 section 9.13): the throwaway PostgreSQL RH_DB_SERVER_MB (192 MB)
 # for the server plus its tmpfs (RH_DB_WAL_MB of WAL and one and a half times the live database's size, at least
 # RH_DB_MIN_DATA_MB), 1 CPU, or BMS_REHEARSAL_DB_MEMORY_MB in all when set; the API 448 MB and 1 CPU with the staging
@@ -65,6 +65,11 @@
 set -uo pipefail
 
 RH_LIVE_DB=bms-postgres-1
+# The migrate and API containers share the throwaway database's network namespace, which has no network (--network none),
+# so the one database they can reach is that one, on its loopback.
+RH_DB_URL=jdbc:postgresql://localhost:5432/bms
+# Set explicitly, so the tmpfs is the data directory whatever the image's default PGDATA.
+RH_PGDATA=/var/lib/postgresql/data
 RH_API_MB=448
 RH_DB_SERVER_MB=192
 RH_DB_WAL_MB=64
@@ -115,7 +120,7 @@ rh_pgoptions() {
 # Ends every live session the rehearsal still has: its name, one of the three roles it connects as, opened since it
 # started; as the superuser, itself bounded by a statement timeout.
 rh_terminate_live() {
-    local sql="SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE application_name = '${RH_APP}'"
+    local sql="SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE application_name IN ('${RH_APP}', '${RH_APP}-dump')"
     sql+=" AND usename IN ('bms_owner', 'bms_app', 'postgres') AND pid <> pg_backend_pid()"
     sql+=" AND backend_start >= to_timestamp(${RH_STARTED_EPOCH})"
     docker exec -e "PGOPTIONS=-c statement_timeout=10s" "$RH_LIVE_DB" psql -U postgres -d bms -tAc "$sql" \
@@ -150,19 +155,20 @@ rh_cleanup() {
         rh_terminate_live
     fi
     docker rm -f -v "$RH_API" "$RH_MIGRATE" "$RH_DB" > /dev/null 2>&1 || true
-    docker network rm "$RH_NET" > /dev/null 2>&1 || true
     if [[ -n "${RH_TMP:-}" && -d "$RH_TMP" ]]; then
         rm -rf "$RH_TMP"
     fi
-    rh_log "removed what the rehearsal made: its containers, network ${RH_NET} and temp dir"
+    rh_log "removed what the rehearsal made: its containers and temp dir"
     exit "$status"
 }
 
 # rh_size_db: the throwaway database's memory cap from the live database's size (read only), the whole of which is the
 # server's RH_DB_SERVER_MB and a tmpfs for the data and WAL: the restored data, then the migrations and the commit, need
 # room beside it, so one and a half times the live size, at least RH_DB_MIN_DATA_MB. BMS_REHEARSAL_DB_MEMORY_MB (in the
-# environment or .env) sets the cap instead; a tmpfs that could not hold the live data is refused before anything starts,
-# as a restore that does not fit never falls back to a disk.
+# environment or .env) sets a bigger cap; one that leaves less than that data room is refused before anything starts
+# (review of 9e0c501, point 7), as a restore that does not fit never falls back to a disk.
+# It also bounds the live dump (review of 9e0c501, point 2): RH_STREAM_SECONDS, 5 minutes and 2 seconds a MB of live
+# data, at most an hour, so pg_dump's locks and snapshot are held minutes, not the rehearsal's six hours.
 rh_size_db() {
     local live_mb data_mb
     live_mb="$(rh_live "SELECT ceil(pg_database_size(current_database()) / 1048576.0)::bigint" 2> /dev/null)"
@@ -173,13 +179,14 @@ rh_size_db() {
     if [[ -n "${BMS_REHEARSAL_DB_MEMORY_MB:-}" ]]; then
         [[ "$BMS_REHEARSAL_DB_MEMORY_MB" =~ ^[1-9][0-9]{2,5}$ ]] \
             || rh_refuse "BMS_REHEARSAL_DB_MEMORY_MB is ${BMS_REHEARSAL_DB_MEMORY_MB}; it is a number of MB, 100 or more"
+        (( BMS_REHEARSAL_DB_MEMORY_MB >= RH_DB_MB )) \
+            || rh_refuse "the live database is ${live_mb} MB and needs a throwaway database of ${RH_DB_MB} MB (${data_mb} MB of data room beside the server and WAL); BMS_REHEARSAL_DB_MEMORY_MB is ${BMS_REHEARSAL_DB_MEMORY_MB}: raise BMS_REHEARSAL_DB_MEMORY_MB or unset it (docs/runbooks/restore-from-backup.md section 5.2)"
         RH_DB_MB=$BMS_REHEARSAL_DB_MEMORY_MB
     fi
     RH_TMPFS_MB=$(( RH_DB_MB - RH_DB_SERVER_MB ))
-    (( RH_TMPFS_MB - RH_DB_WAL_MB > live_mb )) \
-        || rh_refuse "the live database is ${live_mb} MB and the throwaway database's ${RH_DB_MB} MB leave $(( RH_TMPFS_MB - RH_DB_WAL_MB )) MB for its data; raise BMS_REHEARSAL_DB_MEMORY_MB (docs/runbooks/restore-from-backup.md section 5.2)"
     RH_NEEDED_MB=$(( RH_DB_MB + RH_API_MB ))
-    rh_log "the live database is ${live_mb} MB: a throwaway database of ${RH_DB_MB} MB in memory only, ${RH_TMPFS_MB} MB of it the tmpfs"
+    RH_STREAM_SECONDS=$(( 300 + 2 * live_mb < 3600 ? 300 + 2 * live_mb : 3600 ))
+    rh_log "the live database is ${live_mb} MB: a throwaway database of ${RH_DB_MB} MB in memory only, ${RH_TMPFS_MB} MB of it the tmpfs; the live dump may take ${RH_STREAM_SECONDS} s"
 }
 
 # On production (no slice) the host must have the rehearsal's memory and 256 MB more available (MemAvailable), as the
@@ -193,17 +200,22 @@ rh_require_host_room() {
     rh_log "the host has $(( available_kb / 1024 )) MB available; the rehearsal needs ${RH_NEEDED_MB} MB of it"
 }
 
-# rh_stream_live: pg_dump of the live database, in pg_dump's own consistent snapshot (one REPEATABLE READ transaction), as
-# bms_owner (BYPASSRLS, as backup.sh dumps), piped straight into pg_restore in the throwaway database: the dump is never
-# a file. pg_dump runs at nice 19 and the lowest best-effort I/O class, uncompressed (no CPU spent on a stream that only
-# crosses a pipe), named by PGAPPNAME so rh_terminate_live ends its server session, and under timeout -s KILL in the
-# live container until the deadline (pg_dump sets its own statement timeout to 0, so the server bounds it no other way);
-# --lock-wait-timeout keeps it from queueing behind a lock. The errors of both (pg_restore's can quote rows) are held in
-# memory and shown on the terminal only.
+# rh_stream_live: pg_dump of the live database, in pg_dump's own consistent snapshot (one REPEATABLE READ READ ONLY
+# transaction, and default_transaction_read_only besides), as bms_owner (BYPASSRLS, as backup.sh dumps), piped straight
+# into pg_restore in the throwaway database: the dump is never a file. pg_dump runs at nice 19 and the lowest best-effort
+# I/O class, uncompressed (no CPU spent on a stream that only crosses a pipe), named ${RH_APP}-dump so the renice below
+# finds it alone and rh_terminate_live ends it, and under timeout -s KILL in the live container for RH_STREAM_SECONDS at
+# most, and never past the deadline (pg_dump sets its own statement timeout to 0, so the server bounds it no other way).
+# Its ACCESS SHARE locks make a live ACCESS EXCLUSIVE request (and the reads queued behind that) wait for it, which is why
+# it is bounded; migrations, the only such requests the stack makes, are kept out by the deploy lock (review of 9e0c501,
+# point 2). --lock-wait-timeout keeps pg_dump itself from queueing behind a lock. The errors of both (pg_restore's can
+# quote rows) are held in memory and shown on the terminal only.
 rh_stream_live() {
     local err left
     left=$(( RH_DEADLINE - $(date +%s) > 1 ? RH_DEADLINE - $(date +%s) : 1 ))
-    if err="$( { docker exec -e "PGAPPNAME=${RH_APP}" -e "PGOPTIONS=$(rh_pgoptions 60)" "$RH_LIVE_DB" \
+    (( left < RH_STREAM_SECONDS )) || left=$RH_STREAM_SECONDS
+    if err="$( { docker exec -e "PGAPPNAME=${RH_APP}-dump" \
+            -e "PGOPTIONS=$(rh_pgoptions 60) -c default_transaction_read_only=on" "$RH_LIVE_DB" \
             timeout -s KILL "$left" nice -n 19 ionice -c 2 -n 7 \
             pg_dump --username bms_owner --dbname bms --format custom --compress 0 --lock-wait-timeout=60s \
         | docker exec -i "$RH_DB" pg_restore -U bms_owner -d bms --exit-on-error > /dev/null; } 2>&1 )"; then
@@ -214,20 +226,31 @@ rh_stream_live() {
 }
 
 # rh_renice_live_dump: the dump's server process does the reading, so it is put at the same low priority as pg_dump
-# (best-effort I/O, not idle, so a page it holds while reading is never starved behind the live load). It is the one
-# session of the rehearsal's name on the live database while the stream runs; found within 30 seconds, or left as it is.
+# (best-effort I/O, not idle, so a page it holds while reading is never starved behind the live load; a backend at
+# nice 19 can still hold a lightweight lock others wait on, which the bound on the stream keeps short). The backend runs
+# as postgres, and a container has no CAP_SYS_NICE, so renice and ionice run as postgres too (review of 9e0c501,
+# point 1). It is the one client backend named ${RH_APP}-dump; after the change the pid is asked again, so a pid that
+# ended and was reused meanwhile is reported, never passed over in silence (point 6). Found within 30 seconds, or left
+# as it is. ionice takes effect only under an I/O scheduler that honours priorities (BFQ), not none or mq-deadline.
 rh_renice_live_dump() {
-    local pid
+    local pid query again
     trap - EXIT INT TERM USR1
     exec 7>&- 8>&- 9>&-
+    query="SELECT pid || ' ' || backend_start FROM pg_stat_activity WHERE application_name = '${RH_APP}-dump'"
+    query+=" AND usename = 'bms_owner' AND backend_type = 'client backend' AND backend_start >= to_timestamp(${RH_STARTED_EPOCH})"
     for _ in $(seq 1 30); do
-        pid="$(rh_live "SELECT pid FROM pg_stat_activity WHERE application_name = '${RH_APP}' AND usename = 'bms_owner' AND pid <> pg_backend_pid() AND backend_start >= to_timestamp(${RH_STARTED_EPOCH}) ORDER BY backend_start DESC LIMIT 1" 2> /dev/null)"
-        if [[ "$pid" =~ ^[0-9]+$ ]]; then
-            if docker exec "$RH_LIVE_DB" renice -n 19 -p "$pid" > /dev/null 2>&1 \
-                && docker exec "$RH_LIVE_DB" ionice -c 2 -n 7 -p "$pid" > /dev/null 2>&1; then
-                rh_log "the live dump's server process ${pid} runs at nice 19 and the lowest best-effort I/O priority"
+        pid="$(rh_live "$query" 2> /dev/null)"
+        if [[ "$pid" =~ ^[0-9]+\  ]]; then
+            if docker exec --user postgres "$RH_LIVE_DB" renice -n 19 -p "${pid%% *}" > /dev/null 2>&1 \
+                && docker exec --user postgres "$RH_LIVE_DB" ionice -c 2 -n 7 -p "${pid%% *}" > /dev/null 2>&1; then
+                again="$(rh_live "$query" 2> /dev/null)"
+                if [[ "$again" == "$pid" ]]; then
+                    rh_log "the live dump's server process ${pid%% *} runs at nice 19 and the lowest best-effort I/O priority"
+                else
+                    rh_log "the live dump's server process ${pid%% *} ended as it was reniced; if a live session took its pid, it runs at nice 19 until it ends"
+                fi
             else
-                rh_log "could not lower the priority of the live dump's server process ${pid}; the dump goes on"
+                rh_log "could not lower the priority of the live dump's server process ${pid%% *}; the dump goes on"
             fi
             return 0
         fi
@@ -292,8 +315,12 @@ rh_require_scratch() {
     [[ -n "$id" && "$id" != "$live_id" ]] || rh_refuse "the target container is the live database's"
     label="$(docker inspect -f '{{index .Config.Labels "bms.rehearsal"}}' "$RH_DB" 2> /dev/null)"
     [[ -n "$label" && "$label" == "$RH_LABEL" ]] || rh_refuse "the target container does not carry this rehearsal's label"
-    networks="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$RH_DB" 2> /dev/null)"
-    [[ "$networks" == "${RH_NET} " ]] || rh_refuse "the target container is on other networks: ${networks}"
+    # No network at all (review of 9e0c501, point 3): the migrate and API containers join its namespace, nothing else.
+    networks="$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$RH_DB" 2> /dev/null)"
+    [[ "$networks" == "none" ]] || rh_refuse "the target container has a network: ${networks:-unknown}"
+    # Its data directory is the tmpfs, whatever the image's default PGDATA (review of 9e0c501, point 4).
+    [[ "$(rh_scratch "SHOW data_directory" 2> /dev/null)" == "$RH_PGDATA" ]] \
+        || rh_refuse "the target database's data directory is not its tmpfs ${RH_PGDATA}"
     sysid="$(rh_scratch "SELECT system_identifier FROM pg_control_system()" 2> /dev/null)"
     live_sysid="$(docker exec -e "PGAPPNAME=${RH_APP}" -e "PGOPTIONS=$(rh_pgoptions 60)" "$RH_LIVE_DB" psql -U postgres -d bms -tAc "SELECT system_identifier FROM pg_control_system()" 2> /dev/null)"
     [[ "$sysid" =~ ^[0-9]+$ && "$live_sysid" =~ ^[0-9]+$ && "$sysid" != "$live_sysid" ]] \
@@ -391,19 +418,20 @@ rh_on_int() { rh_stopped "interrupted" 130; }
 rh_require_env_target() {
     local urls
     urls="$(grep -E 'jdbc:|postgres(ql)?://' "$1")"
-    [[ "$urls" == "BMS_DB_URL=jdbc:postgresql://${RH_DB}:5432/bms" ]] \
+    [[ "$urls" == "BMS_DB_URL=${RH_DB_URL}" ]] \
         || rh_refuse "a rehearsal container would be given another database: ${urls//$'\n'/, }"
 }
 
 # rh_api_env <bms_app password>: the rehearsal API container's settings from the live API's (KEY=value lines on stdin).
-# The database is switched to RH_DB, the scheduler and clean-ups are off, no import key (the source is never read), and
+# The database is switched to RH_DB (localhost in its namespace), the scheduler and clean-ups are off, no import key, and
 # every key of an outside service (object storage, mail, SMS, payments, push, AI, chat) is a placeholder (review of #882,
 # finding 6). Kept: the data key and the signing key, which the application needs to start and to read its own sealed
 # columns. Issue #889: a placeholder has the shape its setting is checked for at start, and its address is on .invalid,
 # which no resolver answers; an empty value stays empty, so a service off on the live API stays off; push is off (no
 # placeholder is a VAPID key pair). The Resend and AI URLs are always set, as their empty value means a real host
 # (review of #890). Base URLs the startup guards hold to the provider's own host (SMS, payments, Ask BMS) are not secrets
-# and are kept, with placeholder keys; the container's network is --internal. RehearsalSettingsIT starts the application
+# and are kept, with placeholder keys; the container has no network but the throwaway database's own, which is none
+# (issue #953; before, an --internal network). RehearsalSettingsIT starts the application
 # with these lines.
 # JUSTIFICATION-A3: the lines moved out of rehearse_import unchanged in purpose, so CI can start the API with exactly them.
 rh_api_env() {
@@ -416,7 +444,8 @@ rh_api_env() {
             $1 ~ /^R2_|SECRET|PASSWORD|PRIVATE|WEBHOOK|ACCESS_KEY|_TOKEN$|_KEY$/ { print $1 "=rehearsal-placeholder"; next }
             { print }' \
         || return 1
-    printf '%s\n' "BMS_DB_URL=jdbc:postgresql://${RH_DB}:5432/bms" BMS_APP_USER=bms_app "BMS_APP_PASSWORD=${1}" \
+    # RH_DB_URL, written out: RehearsalSettingsIT runs this function alone; rh_require_env_target holds the two equal.
+    printf '%s\n' "BMS_DB_URL=jdbc:postgresql://localhost:5432/bms" BMS_APP_USER=bms_app "BMS_APP_PASSWORD=${1}" \
         BMS_SCHEDULER_ENABLED=false BMS_IMPORTS_CLEANUP_ENABLED=false BMS_DOCUMENTS_ORPHAN_SWEEP_ENABLED=false \
         BMS_IMPORT_KEY= "BMS_REHEARSAL_TOKEN=${RH_TOKEN}" "JAVA_TOOL_OPTIONS=${RH_JAVA_OPTS}" \
         BMS_RESEND_API_URL=https://rehearsal-mail.invalid BMS_AI_BASE_URL=https://rehearsal-ai.invalid
@@ -450,7 +479,6 @@ rehearse_import() {
     RH_DB="bms-rehearsal-db-$$"
     RH_API="bms-rehearsal-api-$$"
     RH_MIGRATE="bms-rehearsal-migrate-$$"
-    RH_NET="bms-rehearsal-net-$$"
     RH_TMP=""
     RH_WATCHDOG=""
     RH_RENICE=""
@@ -508,15 +536,14 @@ rehearse_import() {
         rh_require_host_room
     fi
 
-    # 3. The throwaway database, in memory only, on an internal network of its own. The temp dir holds the env files,
-    # never data.
+    # 3. The throwaway database, in memory only, with no network (the migrate and API containers join its namespace).
+    # The temp dir holds the env files, never data.
     step="$(rh_ms)"
     RH_TOKEN="$(openssl rand -hex 24)"
     owner_pw="$(openssl rand -hex 24)"
     app_pw="$(openssl rand -hex 24)"
-    docker network create --internal "$RH_NET" > /dev/null || rh_fail "cannot create the network ${RH_NET}"
     printf '%s\n' "POSTGRES_PASSWORD=$(openssl rand -hex 24)" POSTGRES_DB=bms "BMS_OWNER_PASSWORD=${owner_pw}" \
-        "BMS_APP_PASSWORD=${app_pw}" > "$RH_TMP/db.env"
+        "BMS_APP_PASSWORD=${app_pw}" "PGDATA=${RH_PGDATA}" > "$RH_TMP/db.env"
     rh_log "starting a throwaway postgres (${RH_DB}): ${RH_DB_MB} MB in memory only, ${RH_TMPFS_MB} MB of it its data and WAL"
     # The label is the token's SHA-256, so `docker inspect` never shows the token itself.
     RH_LABEL="$(printf '%s' "$RH_TOKEN" | sha256sum | cut -c1-64)"
@@ -525,8 +552,8 @@ rehearse_import() {
     # container before the live stack. The WAL is kept small (wal_level minimal, max_wal_size 32 MB, no full page images:
     # a throwaway in memory has no crash to recover from).
     docker run --detach --name "$RH_DB" "${cgroup[@]}" --memory "${RH_DB_MB}m" --memory-swap "${RH_DB_MB}m" --cpus 1.0 \
-        --network "$RH_NET" --label "bms.rehearsal=${RH_LABEL}" --env-file "$RH_TMP/db.env" \
-        --tmpfs "/var/lib/postgresql/data:rw,size=${RH_TMPFS_MB}m" --log-driver none --oom-score-adj 1000 \
+        --network none --label "bms.rehearsal=${RH_LABEL}" --env-file "$RH_TMP/db.env" \
+        --tmpfs "${RH_PGDATA}:rw,size=${RH_TMPFS_MB}m" --log-driver none --oom-score-adj 1000 \
         --volume "${initdb}:/docker-entrypoint-initdb.d:ro" \
         "$POSTGRES_IMAGE" postgres -c shared_buffers=32MB -c max_connections=20 -c work_mem=4MB \
         -c maintenance_work_mem=32MB -c log_error_verbosity=terse -c wal_level=minimal -c max_wal_senders=0 \
@@ -559,12 +586,12 @@ rehearse_import() {
 
     # 5. The live API's migrations, then the run's staged rows from the live database, then the token.
     step="$(rh_ms)"
-    printf '%s\n' "BMS_DB_URL=jdbc:postgresql://${RH_DB}:5432/bms" BMS_OWNER_USER=bms_owner \
+    printf '%s\n' "BMS_DB_URL=${RH_DB_URL}" BMS_OWNER_USER=bms_owner \
         "BMS_OWNER_PASSWORD=${owner_pw}" "JAVA_TOOL_OPTIONS=${RH_JAVA_OPTS}" > "$RH_TMP/migrate.env"
     rh_require_env_target "$RH_TMP/migrate.env"
     rh_require_drill_clear
     rh_bg docker run --rm --name "$RH_MIGRATE" "${cgroup[@]}" --memory 448m --memory-swap 448m --cpus 1.0 \
-        --network "$RH_NET" --env-file "$RH_TMP/migrate.env" "$RH_IMAGE" migrate \
+        --network "container:${RH_DB}" --env-file "$RH_TMP/migrate.env" "$RH_IMAGE" migrate \
         || rh_fail "the live API's migrations failed on the throwaway database"
     live_ver="$(rh_live "SELECT max(version::int) FROM flyway_schema_history WHERE success")"
     scratch_ver="$(rh_scratch "SELECT max(version::int) FROM flyway_schema_history WHERE success")"
@@ -635,7 +662,7 @@ rehearse_import() {
     old_ifs="$IFS"
     IFS=,
     rh_bg docker run --rm --name "$RH_API" "${cgroup[@]}" --memory 448m --memory-swap 448m --cpus 1.0 \
-        --network "$RH_NET" --env-file "$RH_TMP/api.env" "$RH_IMAGE" \
+        --network "container:${RH_DB}" --env-file "$RH_TMP/api.env" "$RH_IMAGE" \
         rehearse-import --tenant "$RH_TENANT" --run "$RH_RUN" --backup "$RH_NAME" --timings "${timings[*]}"
     status=$?
     IFS="$old_ifs"
