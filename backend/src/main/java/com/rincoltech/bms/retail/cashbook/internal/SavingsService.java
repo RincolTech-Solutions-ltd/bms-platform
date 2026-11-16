@@ -26,6 +26,7 @@ import com.rincoltech.bms.retail.cashbook.internal.CashbookRepository.SavingsRow
 import com.rincoltech.bms.retail.cashbook.internal.CashbookSupport.SalespeopleSavings;
 import com.rincoltech.bms.retail.reports.DailyProfits;
 import com.rincoltech.bms.retail.stock.EntryDates;
+import com.rincoltech.bms.retail.stock.OfflineEntry;
 import com.rincoltech.bms.retail.stock.RetailBooks;
 import com.rincoltech.bms.retail.stock.RetailBranchContext;
 import java.math.BigDecimal;
@@ -152,6 +153,39 @@ class SavingsService {
         return date;
     }
 
+    // JUSTIFICATION-A3: issue #957 needs the form's day chosen from the token and that day's closed till
+    // checked; no existing code carries either.
+    /**
+     * The day the form was shown when it differs from the day the save is dated by one midnight (issue #957, ADR-130), proved
+     * by the token's mark; else null. Online, a save dated today whose form was shown yesterday; offline, a form of the day
+     * before or after the day the entry was made, never a future day. An earlier day the owner chose is left as chosen.
+     */
+    private LocalDate shownDay(UUID branch, SavingsRequest r, LocalDate dated) {
+        LocalDate today = support.today();
+        List<LocalDate> days;
+        if (r.offline() != null) {
+            days = dated.isBefore(today) ? List.of(dated.minusDays(1), dated.plusDays(1)) : List.of(dated.minusDays(1));
+        } else if (dated.equals(today)
+                && (r.dateReason() == null || r.dateReason().isBlank())) {
+            days = List.of(today.minusDays(1));
+        } else {
+            return null;
+        }
+        return support.shownOn(branch, r.suggestionToken(), days);
+    }
+
+    /** A form's day before today whose till was closed (its cash banked) is the owner's, as offline (review of #839). */
+    private void requireOpenShownDay(UUID branch, LocalDate day, OfflineEntry offline) {
+        if (offline != null) {
+            support.requireOpen(offline, day, support.today(), List.of(branch));
+        } else if (day.isBefore(support.today())
+                && support.closed(branch, day)
+                && !CurrentPrincipal.require().may(OfflineEntry.BACKDATE, branch)) {
+            throw ApiException.validation(List.of(new FieldProblem(
+                    "business_date", "day_closed", "That day's till is closed. Ask the owner to enter it.")));
+        }
+    }
+
     @Transactional(readOnly = true)
     SavingsSuggestion suggestion(UUID branchId, LocalDate date) {
         return suggestion(Caller.TILL, branchId, date);
@@ -179,7 +213,7 @@ class SavingsService {
                 branch,
                 on,
                 figures.day(branch, on).totalSold(),
-                support.suggestionToken(branch, on, d.suggested()),
+                support.issuedToken(branch, on, d.suggested(), on.equals(support.today())),
                 // Issue #799 (the owner's request): once the day is saved, its suggestion is no longer sent to anyone;
                 // the
                 // screen shows only what was saved.
@@ -233,14 +267,23 @@ class SavingsService {
         // an offline sale is, never a closed day but for the owner, and within the 7 days a day of last month too
         // (review
         // of #839: made on the 31st, sent on the 1st). Otherwise the sales staff save days of this month only.
-        LocalDate date = r.offline() != null
+        LocalDate dated = r.offline() != null
                 ? support.offlineDay(r.offline(), r.businessDate(), "business_date", branch)
                 : businessDate(caller, r.businessDate(), "business_date");
+        // Issue #957 (ADR-130): savings are for the day their form was shown. A form shown before midnight and
+        // saved (or made offline) after it, or the other way round by a phone clock within its skew, is saved for
+        // the form's day, which the token's mark proves, so the suggestion and the save share one business day.
+        LocalDate shown = shownDay(branch, r, dated);
+        LocalDate date = shown != null ? shown : dated;
+        if (shown != null) {
+            requireOpenShownDay(branch, shown, r.offline());
+        }
         // ADR-120: an earlier day is the owner's, with a reason, on the till's route and on the sales staff's alike;
         // not
-        // for savings kept offline, which the phone dated.
-        EntryDates.Backdate backdate =
-                r.offline() != null ? null : support.entryDates().check(date, "business_date", r.dateReason(), branch);
+        // for savings kept offline, which the phone dated, nor for a form shown on its own day.
+        EntryDates.Backdate backdate = r.offline() != null || shown != null
+                ? null
+                : support.entryDates().check(date, "business_date", r.dateReason(), branch);
         boolean profit = mayProfit(branch);
         boolean salesperson = !profit && setting.on();
         if (r.suggestionToken() == null || r.suggestionToken().isBlank()) {
@@ -265,7 +308,9 @@ class SavingsService {
         long suggested = d.suggested();
         if (!support.tokenMatches(branch, date, suggested, r.suggestionToken())) {
             Map<String, Object> extra = new LinkedHashMap<>();
-            extra.put("suggestion_token", support.suggestionToken(branch, date, suggested));
+            extra.put(
+                    "suggestion_token",
+                    support.issuedToken(branch, date, suggested, shown != null || date.equals(support.today())));
             // Issue #799: never for a day already saved; the 409 savings_exists that follows a fresh read says why.
             if ((profit || salesperson) && repo.activeSavings(branch, date).isEmpty()) {
                 extra.put("suggested_minor", suggested);
@@ -337,6 +382,10 @@ class SavingsService {
         if (setting.on()) {
             // ADR-115: the record was made under the owner's setting; the actor is on the audit row itself.
             after.put("salespeople_setting", true);
+        }
+        if (shown != null) {
+            // Issue #957: dated by the day its form was shown, not by the clock at the save.
+            after.put("dated_by_form", true);
         }
         audit.record(AuditLog.Entry.created("retail.savings.created", "retail.savings", id, branch, after));
         support.entryDates().audit(backdate, "retail.savings", id, branch);

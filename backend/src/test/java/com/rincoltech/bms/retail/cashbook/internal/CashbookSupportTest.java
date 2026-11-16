@@ -50,4 +50,28 @@ class CashbookSupportTest {
         assertThat(support(at, "test-key-one").suggestionToken(BRANCH, day, 2_500))
                 .isEqualTo(token);
     }
+
+    // JUSTIFICATION-A3: issue #957 adds the token's mark; one new unit test of it.
+    /** Issue #957: the mark of the day a form was shown is proved only for that day and does not change the match. */
+    @Test
+    void theMarkOfTheDayAFormWasShownNamesThatDayOnlyAndLeavesTheSuggestionsMatchAlone() {
+        CashbookSupport s = support(Instant.parse("2026-10-15T20:59:00Z"), "test-key-one");
+        LocalDate shown = LocalDate.parse("2026-10-15");
+        LocalDate next = LocalDate.parse("2026-10-16");
+        String marked = s.issuedToken(BRANCH, shown, 2_500, true);
+
+        assertThat(marked).startsWith(s.suggestionToken(BRANCH, shown, 2_500) + ".");
+        assertThat(s.issuedToken(BRANCH, shown, 2_500, false)).isEqualTo(s.suggestionToken(BRANCH, shown, 2_500));
+        assertThat(s.tokenMatches(BRANCH, shown, 2_500, marked)).isTrue();
+        assertThat(s.tokenMatches(BRANCH, shown, 2_501, marked)).isFalse();
+        assertThat(s.shownOn(BRANCH, marked, java.util.List.of(next, shown))).isEqualTo(shown);
+        assertThat(s.shownOn(BRANCH, marked, java.util.List.of(next))).isNull();
+        assertThat(s.shownOn(BRANCH, s.suggestionToken(BRANCH, shown, 2_500), java.util.List.of(shown)))
+                .isNull();
+        assertThat(s.shownOn(UUID.randomUUID(), marked, java.util.List.of(shown)))
+                .isNull();
+        assertThat(support(Instant.parse("2026-10-15T20:59:00Z"), "test-key-two")
+                        .shownOn(BRANCH, marked, java.util.List.of(shown)))
+                .isNull();
+    }
 }

@@ -351,23 +351,60 @@ class CashbookSupport implements ClosedTills {
      * it reveals nothing about the amount, so every caller may hold it.
      */
     String suggestionToken(UUID branchId, LocalDate date, long suggestedMinor) {
+        return keyedHash(tenant.profile().id() + "|" + branchId + "|" + date + "|" + suggestedMinor);
+    }
+
+    /**
+     * The token a form is shown (issue #957, ADR-130): the suggestion's hash and, when the form was shown while its day was
+     * the business day (business-local, the tenant's zone), a keyed mark of that, after a dot, so a save after midnight can
+     * be dated by the form's day and not by the clock.
+     */
+    String issuedToken(UUID branchId, LocalDate date, long suggestedMinor, boolean shownOnItsDay) {
+        String token = suggestionToken(branchId, date, suggestedMinor);
+        return shownOnItsDay ? token + "." + shownMark(branchId, date) : token;
+    }
+
+    /** The day among {@code days} whose mark the presented token carries (its form was shown on that day), or null. */
+    LocalDate shownOn(UUID branchId, String presented, List<LocalDate> days) {
+        int dot = presented == null ? -1 : presented.indexOf('.');
+        if (dot < 0) {
+            return null;
+        }
+        byte[] mark = presented.substring(dot + 1).getBytes(StandardCharsets.UTF_8);
+        for (LocalDate day : days) {
+            if (MessageDigest.isEqual(shownMark(branchId, day).getBytes(StandardCharsets.UTF_8), mark)) {
+                return day;
+            }
+        }
+        return null;
+    }
+
+    private String shownMark(UUID branchId, LocalDate date) {
+        return keyedHash(tenant.profile().id() + "|" + branchId + "|" + date + "|shown-on-its-day");
+    }
+
+    private String keyedHash(String input) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(tokenKey, "HmacSHA256"));
-            String input = tenant.profile().id() + "|" + branchId + "|" + date + "|" + suggestedMinor;
             return HexFormat.of().formatHex(mac.doFinal(input.getBytes(StandardCharsets.UTF_8)), 0, 16);
         } catch (NoSuchAlgorithmException | InvalidKeyException e) {
             throw new IllegalStateException(e);
         }
     }
 
-    /** Constant-time comparison of a presented token with the one for the current suggestion. */
+    /**
+     * Constant-time comparison of a presented token with the one for the current suggestion; a mark of the day the form was
+     * shown (issue #957) is not part of the suggestion and is left out.
+     */
     boolean tokenMatches(UUID branchId, LocalDate date, long suggestedMinor, String presented) {
         if (presented == null) {
             return false;
         }
+        int dot = presented.indexOf('.');
+        String hash = dot < 0 ? presented : presented.substring(0, dot);
         return MessageDigest.isEqual(
                 suggestionToken(branchId, date, suggestedMinor).getBytes(StandardCharsets.UTF_8),
-                presented.getBytes(StandardCharsets.UTF_8));
+                hash.getBytes(StandardCharsets.UTF_8));
     }
 }
