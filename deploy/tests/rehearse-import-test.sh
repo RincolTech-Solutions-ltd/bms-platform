@@ -7,7 +7,10 @@
 #   - on staging a run not marked fabricated is refused, and so are a run that is not in review or ready, a run of the
 #     import-retail command, a missing run, a slice without room and a drill or rehearsal already running;
 #   - the containers get their memory and CPU limits, inside bms.slice on staging, on an internal network of their own;
-#   - the backup is decrypted only inside a mode-0700 temp dir;
+#   - no backup is fetched or decrypted (ADR-129 decision 5, amended 16 Nov 2026, issue #953): a pg_dump of the live
+#     database at the lowest priority is streamed straight into pg_restore, nothing of it on disk, into a throwaway
+#     database whose data is a tmpfs inside its memory cap, with no log driver, sized from the live database;
+#   - the guards still refuse before anything is dumped, and a slice or host without room for that size is refused;
 #   - the live database is read in one read-only transaction and written once, the rehearsal's row, as bms_app;
 #   - every container, the network, the volume and the temp dir are removed on success, on failure and on interrupt;
 #   - rh_pick_newest_backup is the drill's pick_newest_backup.
@@ -37,11 +40,12 @@ check() {
     if "$@"; then ok "$what"; else fail "$what"; fi
 }
 
-# A slice with room: 1500 MB high, 800 MB used of which 100 MB is page cache, so 700 + 100 = 800 MB free.
+# A slice with room: 1500 MB high, 700 MB used of which 100 MB is page cache, so 800 + 100 = 900 MB free. The fake live
+# database is 40 MB, so the rehearsal needs 192 + 64 + 96 (the least data room) + 448 = 800 MB.
 slice() {
     mkdir -p "$1"
     echo $(( 1500 * 1048576 )) > "$1/memory.high"
-    echo $(( ${2:-800} * 1048576 )) > "$1/memory.current"
+    echo $(( ${2:-700} * 1048576 )) > "$1/memory.current"
     printf 'anon 1\ninactive_file %s\n' $(( 100 * 1048576 )) > "$1/memory.stat"
 }
 
@@ -50,8 +54,11 @@ rehearse() {
     local name="$1"
     shift
     fake_host "$WORK/$name"
-    slice "$WORK/$name/slice" "${USED_MB:-800}"
+    slice "$WORK/$name/slice" "${USED_MB:-700}"
     export BMS_REHEARSAL_SLICE_DIR="$WORK/$name/slice"
+    # The production host's memory: 4000 MB available unless a test says otherwise.
+    printf 'MemTotal: 4000000 kB\nMemAvailable: %s kB\n' "${AVAILABLE_KB:-4096000}" > "$WORK/$name/meminfo"
+    export BMS_REHEARSAL_MEMINFO="$WORK/$name/meminfo"
     if [[ -n "${PRODUCTION:-}" ]]; then
         sed -i 's/^BMS_ENVIRONMENT=staging$/BMS_ENVIRONMENT=production/' "$HOST/.env"
     fi
@@ -64,7 +71,7 @@ rehearse() {
 calls() { grep -c -- "$1" "$FAKE/calls.log"; }
 said() { grep -q -- "$1" <<< "$OUTPUT"; }
 nothing_started() { ! grep -q '^run ' "$FAKE/calls.log"; }
-nothing_restored() { ! grep -q 'pg_restore' "$FAKE/calls.log"; }
+nothing_restored() { ! grep -q 'pg_restore\|pg_dump' "$FAKE/calls.log"; }
 no_commit() { ! grep -q 'rehearse-import' "$FAKE/calls.log"; }
 no_live_write() {
     [[ ! -s "$FAKE/live-writes" ]] && ! grep -Eq 'bms-postgres-1 (timeout -s KILL [0-9]+ )?psql -U bms_app' "$FAKE/calls.log"
@@ -88,8 +95,28 @@ done
 rehearse ok-staging
 check "a fabricated ready run on staging is rehearsed and stored (exit 0)" eval '[[ "$STATUS" == 0 ]]'
 check "it says it stored the rehearsal on the live run" said "stored the rehearsal on live run ${RUN}"
-check "the throwaway postgres is capped at 256 MB and 1 CPU inside bms.slice, on the rehearsal's network" \
-    grep -Eq '^run --detach --name bms-rehearsal-db-[0-9]+ --cgroup-parent bms\.slice --memory 256m --memory-swap 256m --cpus 1\.0 --network bms-rehearsal-net-[0-9]+ ' "$FAKE/calls.log"
+check "the throwaway postgres is capped at 352 MB (40 MB live) and 1 CPU inside bms.slice, on the rehearsal's network" \
+    grep -Eq '^run --detach --name bms-rehearsal-db-[0-9]+ --cgroup-parent bms\.slice --memory 352m --memory-swap 352m --cpus 1\.0 --network bms-rehearsal-net-[0-9]+ ' "$FAKE/calls.log"
+# JUSTIFICATION-A3: issue #953 asks for tests of the new path: tmpfs, streamed, nothing on disk, low priority, no backup.
+check "its data and WAL are a 160 MB tmpfs inside that cap, with no log driver, first to go on a host short of memory" \
+    grep -Eq '^run --detach --name bms-rehearsal-db-[0-9]+ .*--tmpfs /var/lib/postgresql/data:rw,size=160m --log-driver none --oom-score-adj 1000 ' "$FAKE/calls.log"
+check "nothing of the throwaway database is on a disk: no volume, no data mount, and no log is read" \
+    eval '! grep -q "^volume create" "$FAKE/calls.log" && ! grep -q "^logs " "$FAKE/calls.log" \
+        && ! grep -E "^run --detach --name bms-rehearsal-db-" "$FAKE/calls.log" | grep -Eq -- "--volume [^ ]*:/var/lib/postgresql"'
+check "the live database is dumped as bms_owner, uncompressed, at nice 19 and the lowest best-effort I/O, named and bounded" \
+    grep -Eq '^exec -e PGAPPNAME=bms-rehearsal-[0-9]+ -e PGOPTIONS=-c statement_timeout=60s -c idle_in_transaction_session_timeout=60s bms-postgres-1 timeout -s KILL [0-9]+ nice -n 19 ionice -c 2 -n 7 pg_dump --username bms_owner --dbname bms --format custom --compress 0 --lock-wait-timeout=60s$' "$FAKE/calls.log"
+check "the dump is streamed: the throwaway pg_restore reads exactly what pg_dump wrote" \
+    eval '[[ "$(cat "$FAKE/restored")" == "fabricated dump of the live database" ]] \
+        && grep -Eq "^exec -i bms-rehearsal-db-[0-9]+ pg_restore -U bms_owner -d bms --exit-on-error$" "$FAKE/calls.log"'
+check "while it streams, no file on the host holds the dump; the temp dir holds the database's env file only" \
+    eval '[[ ! -s "$FAKE/dump-on-disk" ]] \
+        && [[ "$(grep "/backups/" "$FAKE/files-during-restore" | sed -E "s#.*/backups/rehearsal\.[A-Za-z0-9]{6}/##")" == db.env ]]'
+check "the live dump's server process is put at nice 19 and the lowest best-effort I/O priority too" \
+    eval 'grep -qx "exec bms-postgres-1 renice -n 19 -p 4242" "$FAKE/calls.log" \
+        && grep -qx "exec bms-postgres-1 ionice -c 2 -n 7 -p 4242" "$FAKE/calls.log"'
+check "no backup is listed, fetched or decrypted, and the commit names the live snapshot it started from" \
+    eval '! grep -q "rclone" "$FAKE/calls.log" && [[ ! -s "$FAKE/decrypt-dirs" ]] \
+        && grep -Eq "rehearse-import --tenant .* --backup live-bms-postgres-1-[0-9]{8}T[0-9]{6}Z " "$FAKE/calls.log"'
 check "the API container is capped at 448 MB and 1 CPU inside bms.slice, on the rehearsal's network" \
     grep -Eq '^run --rm --name bms-rehearsal-api-[0-9]+ --cgroup-parent bms\.slice --memory 448m --memory-swap 448m --cpus 1\.0 --network bms-rehearsal-net-[0-9]+ ' "$FAKE/calls.log"
 check "the migrate container is capped the same way" \
@@ -120,8 +147,9 @@ check "the API's only database is the throwaway one, its scheduler off, with the
     eval '[[ "$(grep -E "jdbc:|postgres(ql)?://" "$FAKE/api-env.seen")" =~ ^BMS_DB_URL=jdbc:postgresql://bms-rehearsal-db-[0-9]+:5432/bms$ ]] \
         && grep -qx BMS_SCHEDULER_ENABLED=false "$FAKE/api-env.seen" && grep -q "^BMS_REHEARSAL_TOKEN=f00d" "$FAKE/api-env.seen" \
         && ! grep -q live-app-secret "$FAKE/api-env.seen"'
-check "the backup is decrypted only inside a mode-0700 temp dir under backups/" \
-    eval '[[ "$(wc -l < "$FAKE/decrypt-dirs")" == 1 ]] && grep -Eq "^700 .*/opt/backups/rehearsal\.[A-Za-z0-9]{6}$" "$FAKE/decrypt-dirs"'
+check "the env files are only inside a mode-0700 temp dir under backups/" \
+    eval '[[ "$(grep -c "/backups/" "$FAKE/files-during-restore")" == 1 ]] \
+        && grep -Eq "/opt/backups/rehearsal\.[A-Za-z0-9]{6}/db\.env$" "$FAKE/files-during-restore"'
 check "the live run's rows are read in one read-only transaction, with no write" \
     eval 'head -n 1 "$FAKE/live-reads" | grep -q "READ ONLY" && ! grep -Eiq "^(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|TRUNCATE|GRANT)" "$FAKE/live-reads"'
 check "the copy into the throwaway database holds the deletes, the token and every table's rows" \
@@ -171,21 +199,36 @@ check "a run of the import-retail command is refused (3)" eval '[[ "$STATUS" == 
 FAKE_RUN_ROW="" rehearse no-run
 check "a run that is not on the live database is refused (3)" eval '[[ "$STATUS" == 3 ]] && nothing_started'
 USED_MB=1000 rehearse no-room
-check "on staging, a slice with less than 704 MB free is refused (3) before any container starts" \
-    eval '[[ "$STATUS" == 3 ]] && said "needs 704 MB" && nothing_started'
+check "on staging, a slice with less than 800 MB free is refused (3) before any container starts" \
+    eval '[[ "$STATUS" == 3 ]] && said "needs 800 MB" && nothing_started && nothing_restored'
+FAKE_LIVE_DB_MB=200 rehearse big-live
+check "a bigger live database needs a bigger throwaway: 200 MB live needs 1004 MB, refused (3) in a slice with 900" \
+    eval '[[ "$STATUS" == 3 ]] && said "needs 1004 MB" && nothing_started && nothing_restored'
+FAKE_LIVE_DB_MB=500 BMS_REHEARSAL_DB_MEMORY_MB=512 rehearse too-small
+check "a BMS_REHEARSAL_DB_MEMORY_MB whose tmpfs cannot hold the live data is refused (3), never put on a disk" \
+    eval '[[ "$STATUS" == 3 ]] && said "raise BMS_REHEARSAL_DB_MEMORY_MB" && nothing_started && nothing_restored'
+PRODUCTION=1 AVAILABLE_KB=900000 FAKE_RUN_ROW="${FAKE_TENANT}|ready|f|framework" rehearse production-no-room
+check "on production, a host with less than the rehearsal's memory and 256 MB more available is refused (3)" \
+    eval '[[ "$STATUS" == 3 ]] && said "the host has 878 MB available" && nothing_started && nothing_restored'
 
 # --- Clean-up on failure and on interrupt ---------------------------------------------------------------------------------
 FAKE_RESTORE_FAIL=1 rehearse restore-fails
 check "a failed restore exits 1, writes nothing live and removes everything" \
     eval '[[ "$STATUS" == 1 ]] && no_commit && no_live_write && all_removed'
-FAKE_DECRYPT_FAIL=1 rehearse decrypt-fails
-check "a failed decryption exits 1 and removes the temp dir and everything else" \
-    eval '[[ "$STATUS" == 1 ]] && no_live_write && all_removed'
+FAKE_DUMP_FAIL=1 rehearse dump-fails
+check "a live dump that fails part way exits 1, shows pg_dump's words, commits nothing and removes everything" \
+    eval '[[ "$STATUS" == 1 ]] && said "pg_dump: error: fabricated failure" && said "streaming the live database" \
+        && no_commit && no_live_write && all_removed'
+# ADR-129 decision 5, amended 16 Nov 2026: the newest backup's format no longer matters; no key or R2 setting is needed.
 fake_age_file "$WORK/newest.age"
 FAKE_BACKUP_FILE="$WORK/newest.age" rehearse age-backup
-check "an age backup (ADR-129 decision 5) is refused with exit 3: no decryption, no restore, everything removed" \
-    eval '[[ "$STATUS" == 3 ]] && said "encrypted to the offline age key" && [[ ! -s "$FAKE/decrypt-dirs" ]] \
-        && nothing_restored && no_live_write && all_removed'
+sed -i -E '/^(BACKUP_ENCRYPTION_KEY|R2_[A-Z_]+|RCLONE_IMAGE)=/d' "$HOST/.env"
+: > "$FAKE/calls.log"
+: > "$FAKE/live-writes"
+run_script --rehearse-import "$RUN"
+check "with age backups and no backup key or R2 setting on the host, the rehearsal runs and is stored (0)" \
+    eval '[[ "$STATUS" == 0 ]] && ! said "age key" && [[ ! -s "$FAKE/decrypt-dirs" ]] && ! grep -q rclone "$FAKE/calls.log" \
+        && [[ -s "$FAKE/live-writes" ]] && all_removed'
 FAKE_MIGRATE_FAIL=1 rehearse migrate-fails
 check "a failed migration exits 1, commits nothing and removes everything" \
     eval '[[ "$STATUS" == 1 ]] && no_commit && no_live_write && all_removed'
@@ -335,12 +378,16 @@ locks_match() {
 }
 check "the locks it takes are the very files pull-staging.sh and deploy.sh lock (state/ under /opt/bms)" locks_match
 
-same_picker() {
-    diff <(sed -n '/^pick_newest_backup() {/,/^}/p' "$TESTS_HERE/../restore-drill.sh" | tail -n +2) \
-        <(sed -n '/^rh_pick_newest_backup() {/,/^}/p' "$TESTS_HERE/../restore-drill.sh" | tail -n +2) > /dev/null \
-        && [[ -n "$(sed -n '/^rh_pick_newest_backup() {/,/^}/p' "$TESTS_HERE/../restore-drill.sh")" ]]
+# Issue #953: the rehearsal no longer picks a backup, so it has no copy of the drill's picker to keep in step; the drill
+# keeps its own (monitor-test.sh checks it against monitor.sh's), and the rehearsal's lines never reach for a backup.
+no_backup_in_rehearsal() {
+    local body
+    body="$(sed -n '/^rehearse_import() {/,/^}/p' "$TESTS_HERE/../restore-drill.sh")"
+    [[ -n "$body" ]] && ! grep -Eq 'rclone|pick_newest_backup|BACKUP_ENCRYPTION_KEY|openssl enc|\bage\b' <<< "$body" \
+        && ! grep -q '^rh_pick_newest_backup() {' "$TESTS_HERE/../restore-drill.sh" \
+        && grep -q '^pick_newest_backup() {' "$TESTS_HERE/../restore-drill.sh"
 }
-check "the rehearsal picks the newest backup with the drill's own picker" same_picker
+check "the rehearsal's code reads no backup, while the drill keeps its own picker" no_backup_in_rehearsal
 
 if (( FAILURES > 0 )); then
     echo "${FAILURES} failure(s)"
