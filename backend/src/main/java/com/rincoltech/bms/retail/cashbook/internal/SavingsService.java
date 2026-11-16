@@ -157,23 +157,16 @@ class SavingsService {
     // checked; no existing code carries either.
     /**
      * The day the form was shown when it differs from the day the save is dated by one midnight (issue #957, ADR-130), proved
-     * by the token's mark within the configured grace of that midnight; else null. Online, an undated save
-     * whose form was shown yesterday, judged at now; offline, a form of the day before or after the day the entry was made,
-     * never a future day, judged at the time made. A date sent online, chosen or not, is left as sent.
+     * by the token's mark, read and saved (or made) within the configured grace of that midnight; else null. Online, an
+     * undated save (the caller passes only those) whose form was shown yesterday, judged at now; offline, a form of the
+     * day before or after the day the entry was made, never a future day, judged at the time made.
      */
-    private CashbookSupport.Shown shownDay(UUID branch, SavingsRequest r, LocalDate dated) {
+    private CashbookSupport.Shown shownDay(UUID branch, SavingsRequest r, LocalDate dated, Instant at) {
         LocalDate today = support.today();
-        if (r.offline() != null) {
-            List<LocalDate> days = dated.isBefore(today)
-                    ? List.of(dated.minusDays(1), dated.plusDays(1))
-                    : List.of(dated.minusDays(1));
-            Instant made = support.entryTime(null, r.offline(), branch);
-            return support.shownOn(branch, r.suggestionToken(), dated, made, days);
-        }
-        if (r.businessDate() == null) {
-            return support.shownOn(branch, r.suggestionToken(), dated, support.now(), List.of(today.minusDays(1)));
-        }
-        return null;
+        List<LocalDate> days = r.offline() != null && dated.isBefore(today)
+                ? List.of(dated.minusDays(1), dated.plusDays(1))
+                : List.of(dated.minusDays(1));
+        return support.shownOn(branch, r.suggestionToken(), dated, at, days);
     }
 
     /**
@@ -288,13 +281,21 @@ class SavingsService {
         // an offline sale is, never a closed day but for the owner, and within the 7 days a day of last month too
         // (review
         // of #839: made on the 31st, sent on the 1st). Otherwise the sales staff save days of this month only.
-        LocalDate dated = r.offline() != null
-                ? support.offlineDay(r.offline(), r.businessDate(), "business_date", branch)
-                : businessDate(caller, r.businessDate(), "business_date");
         // Issue #957 (ADR-130): savings are for the day their form was shown. A form shown before midnight and
         // saved (or made offline) after it, or the other way round by a phone clock within its skew, is saved for
         // the form's day, which the token's mark proves, so the suggestion and the save share one business day.
-        CashbookSupport.Shown shown = shownDay(branch, r, dated);
+        // Offline the form's day is chosen first (only the phone clock's skew checked), so the day used, not the
+        // day made, is the one judged (review of #958).
+        Instant made = r.offline() != null ? r.offline().madeAt(support.now()) : null;
+        LocalDate madeOn = made != null ? support.dayOf(made) : null;
+        CashbookSupport.Shown shown = r.offline() != null
+                ? shownDay(branch, r, madeOn, made)
+                : r.businessDate() == null ? shownDay(branch, r, support.today(), support.now()) : null;
+        LocalDate dated = shown != null
+                ? (r.offline() != null ? madeOn : support.today())
+                : r.offline() != null
+                        ? support.offlineDay(r.offline(), r.businessDate(), "business_date", branch)
+                        : businessDate(caller, r.businessDate(), "business_date");
         LocalDate date = shown != null ? shown.day() : dated;
         if (shown != null) {
             requireOpenShownDay(caller, branch, date, dated, r.offline());

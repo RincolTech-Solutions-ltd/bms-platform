@@ -86,6 +86,11 @@ class CashbookSupportTest {
         assertThat(s.shownOn(BRANCH, marked, next, Instant.parse("2026-10-15T21:31:00Z"), yesterday))
                 .isNull();
         assertThat(s.shownOn(BRANCH, marked, next, justAfter, List.of(next))).isNull();
+        // Read at 14:00 on the 15th, saved at 00:05: the read is far from midnight, so the stale form proves nothing.
+        Instant afternoon = Instant.parse("2026-10-15T11:00:00Z");
+        String stale = s.issuedToken(BRANCH, shown, 2_500, afternoon);
+        assertThat(s.shownOn(BRANCH, stale, next, Instant.parse("2026-10-15T21:05:00Z"), yesterday))
+                .isNull();
         assertThat(s.shownOn(UUID.randomUUID(), marked, next, justAfter, yesterday))
                 .isNull();
         assertThat(support(read, "test-key-two").shownOn(BRANCH, marked, next, justAfter, yesterday))

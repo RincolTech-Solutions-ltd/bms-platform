@@ -34,17 +34,21 @@ or a mark lifted from one token onto another, must not open yesterday to a selle
    by a caller, and fails if the hash or the minute is changed or spliced from another token.
 2. **The mark counts only within a short grace of the midnight** between the form's day and the day the save would
    otherwise take: the setting `bms.retail.savings.shown-grace`, 30 minutes by default (the Lead's decision on the review of
-   pull request #958). Online, only an undated save (no `business_date` sent, so neither a date the phone chose nor one the
+   pull request #958), refused at startup outside 0 to 60 minutes. Both the minute the form was read and the time of the
+   save (or, offline, the time made) must fall within the grace of that midnight, so a form read in the afternoon and saved
+   at 00:05 proves nothing. Online, only an undated save (no `business_date` sent, so neither a date the phone chose nor one the
    owner chose with a reason is moved) is judged, at the time of the save, against a mark of yesterday. Offline, the time the
    entry was made is judged against a mark of the day before or the day after it, never a day after today. Anything else is
    dated as before: a form left open past the grace is a save of the new day, judged on its figures.
-3. **The form's day is judged as the entry's own day would be.** Offline it is checked as an entry made at that day's last
-   second (or first, for a later day): the 7 days (`offline_entry_too_old` without `retail.entry.backdate`), never a future
+3. **The form's day is judged as the entry's own day would be.** Offline, the form's day is chosen first, with only the
+   phone clock's skew checked on the time made, and the day used is then judged, not the day made (so a till of the made
+   day banked before midnight does not refuse an entry of the next day's form). It is checked as an entry made at that
+   day's last second (or first, for a later day): the 7 days (`offline_entry_too_old` without `retail.entry.backdate`), never a future
    day, and a closed till (`offline_day_closed`). Online, a form's day whose till was closed (its cash banked) is the owner's,
    422 `day_closed` on `business_date`, "That day's till is closed. Ask the owner to enter it."; it is never a future day,
    and for sales staff it is a day of this month or of last month within 7 days, as for an entry kept offline, else 422
-   `outside_this_month`, so a seller's form of the last day of a month saved just after midnight on the 1st is that last
-   day's. A closed accounting period stays the ledger's `period_closed`, as for any save. No
+   `outside_this_month`; within one midnight that rule always holds, so it is checked for safety only, and a seller's form
+   of the last day of a month saved just after midnight on the 1st is that last day's. A closed accounting period stays the ledger's `period_closed`, as for any save. No
    ADR-120 backdate is asked, since the person did not choose the day; the audit row carries the flag `dated_by_form`.
 4. **The real 409 stays.** The suggestion is recomputed for the form's day in the save's transaction; a sale, void or
    expense in between is 409 `suggestion_changed` with the new token, which keeps the form's minute, so saving again within

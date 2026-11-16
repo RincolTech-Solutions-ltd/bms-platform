@@ -73,6 +73,9 @@ class CashbookSupport implements ClosedTills {
             EntryDates entryDates,
             @Value("${bms.auth.data-key:}") String dataKey,
             @Value("${bms.retail.savings.shown-grace:PT30M}") Duration shownGrace) {
+        if (shownGrace.isNegative() || shownGrace.compareTo(Duration.ofMinutes(60)) > 0) {
+            throw new IllegalArgumentException("bms.retail.savings.shown-grace must be 0 to 60 minutes (ADR-130)");
+        }
         this.shownGrace = shownGrace;
         this.tenant = tenant;
         this.clock = clock;
@@ -377,7 +380,7 @@ class CashbookSupport implements ClosedTills {
 
     /**
      * The form's day the presented token proves, or null: its mark is valid for its hash and minute, the minute fell on one
-     * of {@code days}, and {@code at} is within the grace ({@code bms.retail.savings.shown-grace}, 30 minutes by default,
+     * of {@code days}, and both that minute and {@code at} are within the grace ({@code bms.retail.savings.shown-grace}, 30 minutes by default,
      * ADR-130) of the midnight between that day and {@code dated}.
      */
     Shown shownOn(UUID branchId, String presented, LocalDate dated, Instant at, List<LocalDate> days) {
@@ -396,7 +399,11 @@ class CashbookSupport implements ClosedTills {
         }
         Instant midnight =
                 (day.isAfter(dated) ? day : dated).atStartOfDay(zone()).toInstant();
-        return Duration.between(midnight, at).abs().compareTo(shownGrace) <= 0 ? new Shown(day, readAt) : null;
+        // Both the read and the save are within the grace of that midnight: a form read in the afternoon proves
+        // nothing.
+        boolean near = Duration.between(midnight, at).abs().compareTo(shownGrace) <= 0
+                && Duration.between(readAt, midnight).abs().compareTo(shownGrace) <= 0;
+        return near ? new Shown(day, readAt) : null;
     }
 
     private String shownMark(UUID branchId, LocalDate date, String hash, long minute) {

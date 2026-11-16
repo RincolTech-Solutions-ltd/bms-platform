@@ -363,6 +363,78 @@ class RetailSalesStaffSavingsIT extends IntegrationTest {
         assertThat(saved.getBody().get("business_date").asString()).isEqualTo(today.toString());
     }
 
+    // JUSTIFICATION-A3: the second review of #958 (must-fix 1 to 3) asks for the stale afternoon form and the closed
+    // made day; two new tests.
+    /**
+     * Second review of #958, must-fix 1 and 2: a form read at 14:00 on the 15th and saved at 00:04 on the 16th, online or
+     * made offline at 00:03, is a save of the 16th: the read is far from midnight, so it is 409 and nothing is written.
+     */
+    @Test
+    void aFormReadInTheAfternoonAndSavedJustAfterMidnightIsNotTheFormsDay() {
+        theSwitch(true);
+        clock.set(Instant.parse("2026-10-15T11:00:00Z"));
+        String afternoonSeller = signIn("ss-seller-afternoon", new Role("retail_sales", null));
+        String token = suggestion(afternoonSeller, hq, today)
+                .getBody()
+                .get("suggestion_token")
+                .asString();
+
+        clock.set(AT_0001.plusSeconds(180));
+        ResponseEntity<JsonNode> online = saveUndated(token, null);
+        assertThat(online.getStatusCode()).as("%s", online.getBody()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(online.getBody().get("code").asString()).isEqualTo("suggestion_changed");
+        ResponseEntity<JsonNode> offline = saveUndated(
+                token,
+                Map.of("occurred_at", AT_0001.plusSeconds(120).toString(), "online_as_of", "2026-10-15T11:00:00Z"));
+        assertThat(offline.getStatusCode()).as("%s", offline.getBody()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM retail_daily_savings WHERE tenant_id = ?")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isZero();
+    }
+
+    /**
+     * Second review of #958, must-fix 3: the 15th's till banked at 23:55, the form read at 00:01 on the 16th and the entry
+     * stamped 23:59:30 on the 15th by a phone clock 90 seconds behind: the day used is the 16th, so the 15th's closed till
+     * does not refuse it.
+     */
+    @Test
+    void anEntryStampedOnAClosedDayByAClockBehindIsForItsFormsOpenDay() {
+        theSwitch(true);
+        clock.set(CLOSING_TIME.plusSeconds(5 * 60));
+        Map<String, Object> banking = new LinkedHashMap<>();
+        banking.put("branch_id", hq);
+        banking.put("business_date", today.toString());
+        banking.put("amount_minor", 1_000);
+        assertThat(cb.api
+                        .postKeyed(
+                                "/bankings",
+                                banking,
+                                ALL,
+                                "*",
+                                UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        clock.set(AT_0001);
+        String token = suggestion(seller, hq, today.plusDays(1))
+                .getBody()
+                .get("suggestion_token")
+                .asString();
+
+        clock.set(AT_0001.plusSeconds(60));
+        ResponseEntity<JsonNode> saved = saveUndated(
+                token,
+                Map.of(
+                        "occurred_at", AT_2359.plusSeconds(30).toString(),
+                        "online_as_of", AT_0001.toString()));
+
+        assertThat(saved.getStatusCode()).as("%s", saved.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(saved.getBody().get("business_date").asString())
+                .isEqualTo(today.plusDays(1).toString());
+    }
+
     /**
      * Review of #958, finding 1: a form of the 15th saved 40 minutes after midnight, past the 30 minutes of grace, is a save
      * of the 16th; its figures differ, so it is 409 and nothing is written. A token whose minute was changed proves nothing.
@@ -496,12 +568,15 @@ class RetailSalesStaffSavingsIT extends IntegrationTest {
         clock.set(AT_0001);
         ResponseEntity<JsonNode> online = saveUndated(token, null);
         assertThat(online.getStatusCode()).as("%s", online.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(online.getBody().toString()).contains("day_closed");
+        JsonNode onlineProblem = online.getBody().get("errors").get(0);
+        assertThat(onlineProblem.get("field").asString()).isEqualTo("business_date");
+        assertThat(onlineProblem.get("code").asString()).isEqualTo("day_closed");
 
         ResponseEntity<JsonNode> offline =
                 saveUndated(token, Map.of("occurred_at", AT_0001.toString(), "online_as_of", AT_2359.toString()));
         assertThat(offline.getStatusCode()).as("%s", offline.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(offline.getBody().toString()).contains("offline_day_closed");
+        assertThat(offline.getBody().get("errors").get(0).get("code").asString())
+                .isEqualTo("offline_day_closed");
         assertThat(TestDatabase.owner()
                         .sql("SELECT count(*) FROM retail_daily_savings WHERE tenant_id = ?")
                         .param(t.tenantId())
