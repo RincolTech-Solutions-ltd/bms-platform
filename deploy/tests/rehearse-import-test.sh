@@ -6,14 +6,13 @@
 #     live cluster's system identifier, or the live container's id, or the live API's settings naming another database;
 #   - on staging a run not marked fabricated is refused, and so are a run that is not in review or ready, a run of the
 #     import-retail command, a missing run, a slice without room and a drill or rehearsal already running;
-#   - the containers get their memory and CPU limits, inside bms.slice on staging, the database with no network and the
-#     migrate and API containers in its namespace only (review of 9e0c501, point 3);
+#   - the containers get their memory and CPU limits, inside bms.slice on staging, on an internal network of their own;
 #   - no backup is fetched or decrypted (ADR-129 decision 5, amended 16 Nov 2026, issue #953): a pg_dump of the live
 #     database at the lowest priority is streamed straight into pg_restore, nothing of it on disk, into a throwaway
 #     database whose data is a tmpfs inside its memory cap, with no log driver, sized from the live database;
 #   - the guards still refuse before anything is dumped, and a slice or host without room for that size is refused;
 #   - the live database is read in one read-only transaction and written once, the rehearsal's row, as bms_app;
-#   - every container and the temp dir are removed on success, on failure and on interrupt;
+#   - every container, the network and the temp dir are removed on success, on failure and on interrupt;
 #   - the rehearsal's code reads no backup, and the drill keeps its own picker.
 # The streamed path against a real PostgreSQL is deploy/tests/rehearsal-sessions-test.sh.
 # Run: bash deploy/tests/rehearse-import-test.sh
@@ -97,8 +96,8 @@ done
 rehearse ok-staging
 check "a fabricated ready run on staging is rehearsed and stored (exit 0)" eval '[[ "$STATUS" == 0 ]]'
 check "it says it stored the rehearsal on the live run" said "stored the rehearsal on live run ${RUN}"
-check "the throwaway postgres is capped at 352 MB (40 MB live) and 1 CPU inside bms.slice, with no network" \
-    grep -Eq '^run --detach --name bms-rehearsal-db-[0-9]+ --cgroup-parent bms\.slice --memory 352m --memory-swap 352m --cpus 1\.0 --network none ' "$FAKE/calls.log"
+check "the throwaway postgres is capped at 352 MB (40 MB live) and 1 CPU inside bms.slice, on the rehearsal's network" \
+    grep -Eq '^run --detach --name bms-rehearsal-db-[0-9]+ --cgroup-parent bms\.slice --memory 352m --memory-swap 352m --cpus 1\.0 --network bms-rehearsal-net-[0-9]+ ' "$FAKE/calls.log"
 check "its PGDATA is set to the tmpfs, and it is checked to be the data directory" \
     eval 'grep -qx PGDATA=/var/lib/postgresql/data "$FAKE/db-env.seen" \
         && grep -Eq "^exec bms-rehearsal-db-[0-9]+ psql -U postgres -d bms -v ON_ERROR_STOP=1 -tAc SHOW data_directory$" "$FAKE/calls.log"'
@@ -126,36 +125,35 @@ check "the live dump's server process, found by its own name, is reniced as post
 check "no backup is listed, fetched or decrypted, and the commit names the live snapshot it started from" \
     eval '! grep -q "rclone" "$FAKE/calls.log" && [[ ! -s "$FAKE/decrypt-dirs" ]] \
         && grep -Eq "rehearse-import --tenant .* --backup live-bms-postgres-1-[0-9]{8}T[0-9]{6}Z " "$FAKE/calls.log"'
-check "the API container is capped at 448 MB and 1 CPU inside bms.slice, in the database's namespace" \
-    grep -Eq '^run --rm --name bms-rehearsal-api-[0-9]+ --cgroup-parent bms\.slice --memory 448m --memory-swap 448m --cpus 1\.0 --network container:bms-rehearsal-db-[0-9]+ ' "$FAKE/calls.log"
+check "the API container is capped at 448 MB and 1 CPU inside bms.slice, on the rehearsal's network" \
+    grep -Eq '^run --rm --name bms-rehearsal-api-[0-9]+ --cgroup-parent bms\.slice --memory 448m --memory-swap 448m --cpus 1\.0 --network bms-rehearsal-net-[0-9]+ ' "$FAKE/calls.log"
 check "the migrate container is capped the same way" \
     grep -Eq '^run --rm --name bms-rehearsal-migrate-[0-9]+ --cgroup-parent bms\.slice --memory 448m --memory-swap 448m --cpus 1\.0 ' "$FAKE/calls.log"
-check "no network is made: no route out at all, and the live database is not reachable" \
-    eval '! grep -q "^network " "$FAKE/calls.log"'
-# Review of #890, Lead on point 3, and of 9e0c501, point 3: the provider hosts the startup guards pin are kept, so having
-# no network is what keeps the API container from them. isolated <calls log>: no network is created or connected; the
-# throwaway database runs with exactly one --network, none, and the migrate and API containers with exactly one, its
-# namespace.
+check "the network is internal: no route out of it, and the live database is not on it" \
+    grep -Eq '^network create --internal bms-rehearsal-net-[0-9]+$' "$FAKE/calls.log"
+# Review of #890, Lead on point 3: the provider hosts the startup guards pin are kept, so this network is what keeps the
+# API container from them. isolated <calls log>: the network is created --internal; the throwaway database, the migrate
+# and the API containers each run with exactly one --network, that one; nothing is connected to another network later.
+# The Lead approved this network as meeting the brief's "no network" (review of 9e0c501, point 3).
 isolated() {
-    local db line
-    db="$(sed -nE 's/^run --detach --name (bms-rehearsal-db-[0-9]+) .*/\1/p' "$1")"
-    [[ -n "$db" ]] && grep -Eq '^run .*--name bms-rehearsal-api-[0-9]+ ' "$1" || return 1
-    [[ "$(grep -E "^run --detach --name ${db} " "$1" | grep -o -- '--network [^ ]*')" == "--network none" ]] || return 1
+    local net line
+    net="$(sed -nE 's/^network create --internal (bms-rehearsal-net-[0-9]+)$/\1/p' "$1")"
+    [[ -n "$net" ]] && grep -Eq '^run .*--name bms-rehearsal-api-[0-9]+ ' "$1" || return 1
     while IFS= read -r line; do
-        [[ "$(grep -o -- '--network [^ ]*' <<< "$line")" == "--network container:${db}" ]] || return 1
-    done < <(grep -E '^run .*--name bms-rehearsal-(migrate|api)-[0-9]+ ' "$1")
-    ! grep -q '^network ' "$1"
+        [[ "$(grep -o -- '--network [^ ]*' <<< "$line")" == "--network $net" ]] || return 1
+    done < <(grep -E '^run .*--name bms-rehearsal-(db|migrate|api)-[0-9]+ ' "$1")
+    ! grep -q '^network connect' "$1"
 }
-check "the database has no network, and the migrate and API containers have its namespace only" isolated "$FAKE/calls.log"
-# The check fails the other way: each way of giving a container a route out is caught.
-sed -E 's/^(run --detach --name bms-rehearsal-db-[0-9]+ .*)--network none /\1--network bridge /' "$FAKE/calls.log" > "$WORK/db-bridge.log"
+check "the database, migrate and API containers join the internal rehearsal network only" isolated "$FAKE/calls.log"
+# The check fails the other way: each way of giving the API a route out is caught.
+sed 's/^network create --internal /network create /' "$FAKE/calls.log" > "$WORK/no-internal.log"
 sed -E 's/^(run .*--name bms-rehearsal-api-[0-9]+ .*--network [^ ]+)/\1 --network bridge/' "$FAKE/calls.log" > "$WORK/two-networks.log"
 { cat "$FAKE/calls.log"; echo "network connect bridge bms-rehearsal-api-4242"; } > "$WORK/connected.log"
-check "... and it fails with a database on a network, a second --network on the API, or a network connect" \
-    eval '! isolated "$WORK/db-bridge.log" && ! isolated "$WORK/two-networks.log" && ! isolated "$WORK/connected.log"'
+check "... and it fails without --internal, with a second --network on the API, or with a network connect" \
+    eval '! isolated "$WORK/no-internal.log" && ! isolated "$WORK/two-networks.log" && ! isolated "$WORK/connected.log"'
 check "the API runs the live API's image" grep -q 'ghcr.io/fake/bms-platform-api@sha256:fake rehearse-import --tenant' "$FAKE/calls.log"
 check "the API's only database is the throwaway one, its scheduler off, with the one-time token" \
-    eval '[[ "$(grep -E "jdbc:|postgres(ql)?://" "$FAKE/api-env.seen")" == BMS_DB_URL=jdbc:postgresql://localhost:5432/bms ]] \
+    eval '[[ "$(grep -E "jdbc:|postgres(ql)?://" "$FAKE/api-env.seen")" =~ ^BMS_DB_URL=jdbc:postgresql://bms-rehearsal-db-[0-9]+:5432/bms$ ]] \
         && grep -qx BMS_SCHEDULER_ENABLED=false "$FAKE/api-env.seen" && grep -q "^BMS_REHEARSAL_TOKEN=f00d" "$FAKE/api-env.seen" \
         && ! grep -q live-app-secret "$FAKE/api-env.seen"'
 check "the env files are only inside a mode-0700 temp dir under backups/" \

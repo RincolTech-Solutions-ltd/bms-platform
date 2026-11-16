@@ -5,8 +5,8 @@
 # rh_terminate_live, copied out of deploy/restore-drill.sh, against a postgres:16-alpine container with
 # fabricated roles and no data. Needs Docker and nothing else.
 # Issue #953 (review of 9e0c501, points 1 and 5): the rehearsal's streamed start, rh_stream_live, against real
-# PostgreSQL: a pg_dump of the "live" container piped from a non-seekable stdin into pg_restore in a throwaway one with no
-# network, its PGDATA a tmpfs and no volume, every row and the forced row-level security arriving; and
+# PostgreSQL: a pg_dump of the "live" container piped from a non-seekable stdin into pg_restore in a throwaway one, its
+# PGDATA a tmpfs and no volume, every row and the forced row-level security arriving; and
 # rh_renice_live_dump really lowering the dump backend's CPU and I/O priority as postgres, inside a container.
 # Run: bash deploy/tests/rehearsal-sessions-test.sh
 set -uo pipefail
@@ -103,8 +103,8 @@ check "$(sleeping)" "$left" "rh_terminate_live ends bms_owner and bms_app sessio
 
 # JUSTIFICATION-A3: the review of 9e0c501 (points 1 and 5) asks for the streamed path and the renice on a real PostgreSQL.
 # 5. The streamed start (issue #953). The live side: bms_owner with BYPASSRLS, as in the stack, owning a table under
-# forced row-level security with fabricated rows. The throwaway side: no network, PGDATA a tmpfs, no log, as the script
-# starts it, with the same roles.
+# forced row-level security with fabricated rows. The throwaway side: PGDATA a tmpfs, no log, as the script starts it,
+# with the same roles; no network at all here, since docker exec needs none.
 super "ALTER ROLE bms_owner BYPASSRLS; ALTER DATABASE bms OWNER TO bms_owner; ALTER SCHEMA public OWNER TO bms_owner;" \
     > /dev/null || fail "could not set up the live roles"
 docker exec -e "PGAPPNAME=$RH_APP" "$PG" psql -U bms_owner -d bms -v ON_ERROR_STOP=1 -q -c "
@@ -138,8 +138,7 @@ check "$(scratch "SELECT relrowsecurity::text || ' ' || relforcerowsecurity::tex
 check "$(scratch "SHOW data_directory")" "$RH_PGDATA" "the throwaway database's data directory is the PGDATA the script sets"
 check "$(docker exec "$PG2" awk -v d="$RH_PGDATA" '$2 == d { print $3 }' /proc/mounts)" "tmpfs" \
     "that data directory is a tmpfs"
-check "$(docker inspect -f '{{len .Mounts}} {{.HostConfig.NetworkMode}}' "$PG2")" "0 none" \
-    "the throwaway database has no volume and no network"
+check "$(docker inspect -f '{{len .Mounts}}' "$PG2")" "0" "the throwaway database has no volume (no anonymous one either)"
 
 # 6. The dump's backend is reniced as postgres (no CAP_SYS_NICE in a container): a session named as the dump is.
 docker exec -d -e "PGAPPNAME=${RH_APP}-dump" "$PG" psql -U bms_owner -d bms -c "SELECT pg_sleep(100)"

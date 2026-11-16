@@ -139,8 +139,7 @@ class RehearsalSettingsIT {
         }
         assertThat(lines).noneMatch(line -> line.contains(LIVE_ONLY));
         assertThat(settings)
-                // Issue #953: the API shares the throwaway database's network namespace, which has no network.
-                .containsEntry("BMS_DB_URL", "jdbc:postgresql://localhost:5432/bms")
+                .containsEntry("BMS_DB_URL", "jdbc:postgresql://" + REHEARSAL_DB + ":5432/bms")
                 .containsEntry("BMS_APP_USER", "bms_app")
                 .containsEntry("BMS_APP_PASSWORD", SCRIPT_APP_PASSWORD)
                 .containsEntry("BMS_SCHEDULER_ENABLED", "false")

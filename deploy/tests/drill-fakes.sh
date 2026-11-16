@@ -212,9 +212,7 @@ case "$1" in
                 if [[ -n "${FAKE_ENV_DB_URL:-}" ]]; then echo "SPRING_DATASOURCE_URL=${FAKE_ENV_DB_URL}"; fi ;;
             *Id*)
                 if [[ "$target" == "$live_db" || -n "${FAKE_SAME_ID:-}" ]]; then echo "live-container-id"; else echo "id-$target"; fi ;;
-            *Labels*) awk -F'|' -v n="$target" '$1 == n { print $2 }' "$FAKE/containers" ;;
-            *NetworkMode*) awk -F'|' -v n="$target" '$1 == n { print $3 }' "$FAKE/containers" ;;
-            *Networks*) awk -F'|' -v n="$target" '$1 == n { print $3 " " }' "$FAKE/containers" ;;
+            *Labels*) awk -F'|' -v n="$target" '$1 == n { print $2 }' "$FAKE/containers" ;;            *Networks*) awk -F'|' -v n="$target" '$1 == n { print $3 " " }' "$FAKE/containers" ;;
         esac ;;
     network)
         case "$2" in create) echo "${*: -1}" >> "$FAKE/networks" ;; rm) sed -i "/^$3\$/d" "$FAKE/networks" ;; esac ;;

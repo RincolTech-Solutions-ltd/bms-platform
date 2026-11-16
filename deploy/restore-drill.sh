@@ -40,8 +40,9 @@
 #   3. sizes its throwaway PostgreSQL from the live database's size: the data and WAL on a tmpfs inside the container's
 #      memory cap, no swap, no log driver, so nothing it holds reaches a disk (amendment of ADR-129 decision 5, 16 Nov
 #      2026, issue #953); on staging the slice must have room for it and the API, on production the host;
-#   4. starts that PostgreSQL with no network (--network none), goes on only while that database is provably not the
-#      live one (another name, container and cluster, this run's label, no network, its tmpfs the data directory), then
+#   4. starts that PostgreSQL on an internal network of its own (no route out; approved by the Lead as meeting the
+#      brief's "no network", review of 9e0c501), goes on only while that database is provably not the live one (another
+#      name, container and cluster, this run's label, this network only, its tmpfs the data directory), then
 #      streams a pg_dump of the live database straight into its pg_restore: pg_dump's own snapshot, at the lowest CPU and
 #      I/O priority (its client and its server process), bounded to minutes (RH_STREAM_SECONDS), never a file. No backup
 #      is fetched and no key is needed, so the rehearsal runs the same whatever the backups' format;
@@ -50,12 +51,12 @@
 #      keys and the run's wrapped data key, and is never fetched or decrypted: the commit reads the staged rows only), and
 #      marks it with this rehearsal's one-time token;
 #   6. runs `rehearse-import` in a short-lived API container (the live API's image and settings, the database switched to
-#      the throwaway one, in its network namespace only): the real dry run and the real commit, without the checker's
+#      the throwaway one, on that internal network only): the real dry run and the real commit, without the checker's
 #      approval and the pre-import dump, which the application waives only in a database that holds the token
 #      (core.imports.ImportRehearsals);
 #   7. stores the rehearsal (report, reconciliation, timings) on the live run: one import_rehearsals row inserted as bms_app
 #      under row-level security, the only write the rehearsal makes on the live database;
-#   8. removes every container and the temp dir it made, on success, failure and interrupt.
+#   8. removes every container, the network and the temp dir it made, on success, failure and interrupt.
 # Limits, inside bms.slice on staging (SDD chapter 9 section 9.13): the throwaway PostgreSQL RH_DB_SERVER_MB (192 MB)
 # for the server plus its tmpfs (RH_DB_WAL_MB of WAL and one and a half times the live database's size, at least
 # RH_DB_MIN_DATA_MB), 1 CPU, or BMS_REHEARSAL_DB_MEMORY_MB in all when set; the API 448 MB and 1 CPU with the staging
@@ -65,9 +66,6 @@
 set -uo pipefail
 
 RH_LIVE_DB=bms-postgres-1
-# The migrate and API containers share the throwaway database's network namespace, which has no network (--network none),
-# so the one database they can reach is that one, on its loopback.
-RH_DB_URL=jdbc:postgresql://localhost:5432/bms
 # Set explicitly, so the tmpfs is the data directory whatever the image's default PGDATA.
 RH_PGDATA=/var/lib/postgresql/data
 RH_API_MB=448
@@ -155,10 +153,11 @@ rh_cleanup() {
         rh_terminate_live
     fi
     docker rm -f -v "$RH_API" "$RH_MIGRATE" "$RH_DB" > /dev/null 2>&1 || true
+    docker network rm "$RH_NET" > /dev/null 2>&1 || true
     if [[ -n "${RH_TMP:-}" && -d "$RH_TMP" ]]; then
         rm -rf "$RH_TMP"
     fi
-    rh_log "removed what the rehearsal made: its containers and temp dir"
+    rh_log "removed what the rehearsal made: its containers, network ${RH_NET} and temp dir"
     exit "$status"
 }
 
@@ -315,9 +314,8 @@ rh_require_scratch() {
     [[ -n "$id" && "$id" != "$live_id" ]] || rh_refuse "the target container is the live database's"
     label="$(docker inspect -f '{{index .Config.Labels "bms.rehearsal"}}' "$RH_DB" 2> /dev/null)"
     [[ -n "$label" && "$label" == "$RH_LABEL" ]] || rh_refuse "the target container does not carry this rehearsal's label"
-    # No network at all (review of 9e0c501, point 3): the migrate and API containers join its namespace, nothing else.
-    networks="$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$RH_DB" 2> /dev/null)"
-    [[ "$networks" == "none" ]] || rh_refuse "the target container has a network: ${networks:-unknown}"
+    networks="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$RH_DB" 2> /dev/null)"
+    [[ "$networks" == "${RH_NET} " ]] || rh_refuse "the target container is on other networks: ${networks}"
     # Its data directory is the tmpfs, whatever the image's default PGDATA (review of 9e0c501, point 4).
     [[ "$(rh_scratch "SHOW data_directory" 2> /dev/null)" == "$RH_PGDATA" ]] \
         || rh_refuse "the target database's data directory is not its tmpfs ${RH_PGDATA}"
@@ -418,20 +416,19 @@ rh_on_int() { rh_stopped "interrupted" 130; }
 rh_require_env_target() {
     local urls
     urls="$(grep -E 'jdbc:|postgres(ql)?://' "$1")"
-    [[ "$urls" == "BMS_DB_URL=${RH_DB_URL}" ]] \
+    [[ "$urls" == "BMS_DB_URL=jdbc:postgresql://${RH_DB}:5432/bms" ]] \
         || rh_refuse "a rehearsal container would be given another database: ${urls//$'\n'/, }"
 }
 
 # rh_api_env <bms_app password>: the rehearsal API container's settings from the live API's (KEY=value lines on stdin).
-# The database is switched to RH_DB (localhost in its namespace), the scheduler and clean-ups are off, no import key, and
+# The database is switched to RH_DB, the scheduler and clean-ups are off, no import key (the source is never read), and
 # every key of an outside service (object storage, mail, SMS, payments, push, AI, chat) is a placeholder (review of #882,
 # finding 6). Kept: the data key and the signing key, which the application needs to start and to read its own sealed
 # columns. Issue #889: a placeholder has the shape its setting is checked for at start, and its address is on .invalid,
 # which no resolver answers; an empty value stays empty, so a service off on the live API stays off; push is off (no
 # placeholder is a VAPID key pair). The Resend and AI URLs are always set, as their empty value means a real host
 # (review of #890). Base URLs the startup guards hold to the provider's own host (SMS, payments, Ask BMS) are not secrets
-# and are kept, with placeholder keys; the container has no network but the throwaway database's own, which is none
-# (issue #953; before, an --internal network). RehearsalSettingsIT starts the application
+# and are kept, with placeholder keys; the container's network is --internal. RehearsalSettingsIT starts the application
 # with these lines.
 # JUSTIFICATION-A3: the lines moved out of rehearse_import unchanged in purpose, so CI can start the API with exactly them.
 rh_api_env() {
@@ -444,8 +441,7 @@ rh_api_env() {
             $1 ~ /^R2_|SECRET|PASSWORD|PRIVATE|WEBHOOK|ACCESS_KEY|_TOKEN$|_KEY$/ { print $1 "=rehearsal-placeholder"; next }
             { print }' \
         || return 1
-    # RH_DB_URL, written out: RehearsalSettingsIT runs this function alone; rh_require_env_target holds the two equal.
-    printf '%s\n' "BMS_DB_URL=jdbc:postgresql://localhost:5432/bms" BMS_APP_USER=bms_app "BMS_APP_PASSWORD=${1}" \
+    printf '%s\n' "BMS_DB_URL=jdbc:postgresql://${RH_DB}:5432/bms" BMS_APP_USER=bms_app "BMS_APP_PASSWORD=${1}" \
         BMS_SCHEDULER_ENABLED=false BMS_IMPORTS_CLEANUP_ENABLED=false BMS_DOCUMENTS_ORPHAN_SWEEP_ENABLED=false \
         BMS_IMPORT_KEY= "BMS_REHEARSAL_TOKEN=${RH_TOKEN}" "JAVA_TOOL_OPTIONS=${RH_JAVA_OPTS}" \
         BMS_RESEND_API_URL=https://rehearsal-mail.invalid BMS_AI_BASE_URL=https://rehearsal-ai.invalid
@@ -479,6 +475,7 @@ rehearse_import() {
     RH_DB="bms-rehearsal-db-$$"
     RH_API="bms-rehearsal-api-$$"
     RH_MIGRATE="bms-rehearsal-migrate-$$"
+    RH_NET="bms-rehearsal-net-$$"
     RH_TMP=""
     RH_WATCHDOG=""
     RH_RENICE=""
@@ -536,12 +533,13 @@ rehearse_import() {
         rh_require_host_room
     fi
 
-    # 3. The throwaway database, in memory only, with no network (the migrate and API containers join its namespace).
-    # The temp dir holds the env files, never data.
+    # 3. The throwaway database, in memory only, on an internal network of its own (no route out, nothing else on it but
+    # the migrate and API containers). The temp dir holds the env files, never data.
     step="$(rh_ms)"
     RH_TOKEN="$(openssl rand -hex 24)"
     owner_pw="$(openssl rand -hex 24)"
     app_pw="$(openssl rand -hex 24)"
+    docker network create --internal "$RH_NET" > /dev/null || rh_fail "cannot create the network ${RH_NET}"
     printf '%s\n' "POSTGRES_PASSWORD=$(openssl rand -hex 24)" POSTGRES_DB=bms "BMS_OWNER_PASSWORD=${owner_pw}" \
         "BMS_APP_PASSWORD=${app_pw}" "PGDATA=${RH_PGDATA}" > "$RH_TMP/db.env"
     rh_log "starting a throwaway postgres (${RH_DB}): ${RH_DB_MB} MB in memory only, ${RH_TMPFS_MB} MB of it its data and WAL"
@@ -552,7 +550,7 @@ rehearse_import() {
     # container before the live stack. The WAL is kept small (wal_level minimal, max_wal_size 32 MB, no full page images:
     # a throwaway in memory has no crash to recover from).
     docker run --detach --name "$RH_DB" "${cgroup[@]}" --memory "${RH_DB_MB}m" --memory-swap "${RH_DB_MB}m" --cpus 1.0 \
-        --network none --label "bms.rehearsal=${RH_LABEL}" --env-file "$RH_TMP/db.env" \
+        --network "$RH_NET" --label "bms.rehearsal=${RH_LABEL}" --env-file "$RH_TMP/db.env" \
         --tmpfs "${RH_PGDATA}:rw,size=${RH_TMPFS_MB}m" --log-driver none --oom-score-adj 1000 \
         --volume "${initdb}:/docker-entrypoint-initdb.d:ro" \
         "$POSTGRES_IMAGE" postgres -c shared_buffers=32MB -c max_connections=20 -c work_mem=4MB \
@@ -586,12 +584,12 @@ rehearse_import() {
 
     # 5. The live API's migrations, then the run's staged rows from the live database, then the token.
     step="$(rh_ms)"
-    printf '%s\n' "BMS_DB_URL=${RH_DB_URL}" BMS_OWNER_USER=bms_owner \
+    printf '%s\n' "BMS_DB_URL=jdbc:postgresql://${RH_DB}:5432/bms" BMS_OWNER_USER=bms_owner \
         "BMS_OWNER_PASSWORD=${owner_pw}" "JAVA_TOOL_OPTIONS=${RH_JAVA_OPTS}" > "$RH_TMP/migrate.env"
     rh_require_env_target "$RH_TMP/migrate.env"
     rh_require_drill_clear
     rh_bg docker run --rm --name "$RH_MIGRATE" "${cgroup[@]}" --memory 448m --memory-swap 448m --cpus 1.0 \
-        --network "container:${RH_DB}" --env-file "$RH_TMP/migrate.env" "$RH_IMAGE" migrate \
+        --network "$RH_NET" --env-file "$RH_TMP/migrate.env" "$RH_IMAGE" migrate \
         || rh_fail "the live API's migrations failed on the throwaway database"
     live_ver="$(rh_live "SELECT max(version::int) FROM flyway_schema_history WHERE success")"
     scratch_ver="$(rh_scratch "SELECT max(version::int) FROM flyway_schema_history WHERE success")"
@@ -662,7 +660,7 @@ rehearse_import() {
     old_ifs="$IFS"
     IFS=,
     rh_bg docker run --rm --name "$RH_API" "${cgroup[@]}" --memory 448m --memory-swap 448m --cpus 1.0 \
-        --network "container:${RH_DB}" --env-file "$RH_TMP/api.env" "$RH_IMAGE" \
+        --network "$RH_NET" --env-file "$RH_TMP/api.env" "$RH_IMAGE" \
         rehearse-import --tenant "$RH_TENANT" --run "$RH_RUN" --backup "$RH_NAME" --timings "${timings[*]}"
     status=$?
     IFS="$old_ifs"
