@@ -122,8 +122,10 @@ remove_old_images() {
 # what it last logged). deploy/tests/cleanup-test.sh runs this function with a stub docker.
 offline_drill_present() {
     local names seen
+    # Keyed on the drill (its lock holder -lock comes first and goes last, its database between), so one drill is one
+    # line whichever of its containers are there (review of 56851fc, must-fix 1).
     if names="$(docker ps --all --format '{{.Names}}' 2> /dev/null)"; then
-        seen="$(grep '^bms-offline-drill-' <<< "$names" | sort | tr '\n' ' ' || true)"
+        seen="$(grep '^bms-offline-drill-' <<< "$names" | sed 's/-lock$//' | sort -u | tr '\n' ' ' || true)"
     else
         seen="cannot list"
     fi

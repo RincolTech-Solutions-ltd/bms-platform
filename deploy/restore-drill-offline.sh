@@ -248,6 +248,7 @@ random_hex() { head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 # limit; a container hitting its own cap never raises it). Each is empty when it cannot be read.
 # JUSTIFICATION-A3: the remote drill had no way to read the slice; the host-side rh_require_room cannot run over ssh.
 SLICE_DIR=/sys/fs/cgroup/bms.slice
+LOCK_WAIT=30
 read_slice() {
     local out limit current inactive
     out="$(dk run --rm --network none --log-driver none --memory 32m \
@@ -283,18 +284,25 @@ require_slice_room() {
 # JUSTIFICATION-A3: the locks live on the host and the Mac reaches it only through docker; no existing helper does this.
 take_locks() {
     local script held=no
-    script='[ -f /state/pull.lock ] && [ -f /state/deploy.lock ] || exit 5; exec 8>> /state/pull.lock; flock -n 8 || exit 3'
+    # pull.lock is waited for, up to LOCK_WAIT seconds: the puller holds it for a few seconds every two minutes just to
+    # check the pointer (review of 56851fc, point 5; Lead: a short bounded wait). A loop of flock -n, since busybox's
+    # flock has no -w. deploy.lock is never waited for: a deploy holds it for minutes.
+    script='[ -f /state/pull.lock ] && [ -f /state/deploy.lock ] || exit 5; exec 8>> /state/pull.lock; i=0'
+    script+="; until flock -n 8; do i=\$((i + 1)); [ \$i -ge ${LOCK_WAIT} ] && exit 3; sleep 1; done"
     script+='; exec 9>> /state/deploy.lock; flock -n 9 || exit 4; touch /tmp/held; exec sleep 21600'
     LOCK_STARTED=yes
     dk run --detach --name "$LOCK" --network none --log-driver none --memory 16m \
         --mount "type=bind,source=${REMOTE_STATE},target=/state" --label "bms.offline-drill.expires=${EXPIRES}" \
         --entrypoint sh "$POSTGRES_IMAGE" -c "$script" > /dev/null \
         || fail "could not start the lock holder on ${TARGET} (${REMOTE_STATE} mounted)"
-    for _ in 1 2 3 4 5; do
+    # Until the holder says it holds both, or has stopped (a lock taken, or no lock files), or LOCK_WAIT and a little
+    # more have passed.
+    for _ in $(seq 1 $(( LOCK_WAIT + 10 ))); do
         if dk exec "$LOCK" test -e /tmp/held > /dev/null 2>&1; then
             held=yes
             break
         fi
+        [[ "$(dk inspect --format '{{.State.Running}}' "$LOCK" 2> /dev/null || true)" == false ]] && break
         sleep 1
     done
     [[ "$held" == yes ]] \
@@ -476,26 +484,31 @@ if [[ "${statuses[1]}" != 0 ]]; then
     # (issue #951, item 3).
     left_kb="$(dk exec "$DB" df -Pk /var/lib/postgresql/data 2> /dev/null | awk 'NR == 2 { print $4 }' || true)"
     did_not_fit="the restore did not fit in the container's ${MEMORY_MB} MB (${DATA_MB} MB of tmpfs, about $(( DATA_MB - WAL_MB )) MB of data beside the WAL): set BMS_DRILL_MEMORY_MB higher (restore-from-backup.md section 8.5); it never falls back to disk"
+    # out_of_room: killed at a memory limit, out of space on the tmpfs, or the tmpfs full. stopped: the server stopped
+    # during the restore, not at a memory limit as far as docker says: after a WAL panic the postmaster cannot recover
+    # on a full tmpfs and exits, the tmpfs goes with the container, and df has nothing to say (review of d88ad47, point 4).
+    out_of_room=no
     if [[ "$oom" == true ]] || grep -qiE 'no space left on device|could not extend file' <<< "$restore_err" \
         || [[ "$left_kb" =~ ^[0-9]+$ && "$left_kb" -lt 32768 ]]; then
-        # On staging the slice, not the cap, may have been the limit: its own oom count rose while the drill ran
-        # (something else in the slice grew), and raising the cap would only make that worse (issue #951, item 1). A
-        # count that cannot be read again (the slice may still be full) gives a message that blames neither and never
-        # advises raising the cap (review of d88ad47, must-fix 3).
-        if [[ -n "$SLICE_OOM_BEFORE" ]]; then
-            read_slice
-            [[ "$SLICE_OOM" =~ ^[0-9]+$ ]] \
-                || fail "the restore ran out of memory on ${TARGET} and bms.slice could not be read again, so whether the slice or the container's ${MEMORY_MB} MB was the limit is unknown: run it again when staging is quiet before raising BMS_DRILL_MEMORY_MB"
-            (( SLICE_OOM > SLICE_OOM_BEFORE )) \
-                && fail "bms.slice on ${TARGET} ran out of memory while the drill ran, so its container was killed: something else in the slice grew (a deploy or a rehearsal, say); try again when staging is quiet. Raising BMS_DRILL_MEMORY_MB will not help"
-        fi
-        fail "$did_not_fit"
+        out_of_room=yes
     fi
-    # The server stopped during the restore, not at a memory limit: after a WAL panic the postmaster cannot recover on a
-    # full tmpfs and exits, the tmpfs goes with the container, and df has nothing to say (review of d88ad47, point 4).
-    if [[ "$running" == false && "$oom" == false ]]; then
-        fail "the throwaway postgres stopped during the restore (exit ${exit_code:-unknown}), which a data directory that filled its tmpfs (a WAL panic) causes: ${did_not_fit#*: }"
+    stopped=no
+    [[ "$running" == false && "$oom" != true ]] && stopped=yes
+    # Before either "did not fit" (review of 56851fc, must-fix 2): on staging the slice, not the cap, may have been the
+    # limit: its own oom count rose while the drill ran (something else in the slice grew; docker may not have marked
+    # the kill), and raising the cap would only make that worse (issue #951, item 1). A count that cannot be read again
+    # (the slice may still be full) gives a message that blames neither and never advises raising the cap (review of
+    # d88ad47, must-fix 3).
+    if [[ ( "$out_of_room" == yes || "$stopped" == yes ) && -n "$SLICE_OOM_BEFORE" ]]; then
+        read_slice
+        [[ "$SLICE_OOM" =~ ^[0-9]+$ ]] \
+            || fail "the restore ran out of memory on ${TARGET} and bms.slice could not be read again, so whether the slice or the container's ${MEMORY_MB} MB was the limit is unknown: run it again when staging is quiet before raising BMS_DRILL_MEMORY_MB"
+        (( SLICE_OOM > SLICE_OOM_BEFORE )) \
+            && fail "bms.slice on ${TARGET} ran out of memory while the drill ran, so its container was killed: something else in the slice grew (a deploy or a rehearsal, say); try again when staging is quiet. Raising BMS_DRILL_MEMORY_MB will not help"
     fi
+    [[ "$out_of_room" == yes ]] && fail "$did_not_fit"
+    [[ "$stopped" == yes ]] \
+        && fail "the throwaway postgres stopped during the restore (exit ${exit_code:-unknown}), which a data directory that filled its tmpfs (a WAL panic) causes: ${did_not_fit#*: }"
     fail "pg_restore failed"
 fi
 restore_err=""

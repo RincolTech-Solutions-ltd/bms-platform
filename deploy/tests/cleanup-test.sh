@@ -217,14 +217,29 @@ mkdir -p "$WORK/pullhost/state"
 present() { (cd "$WORK/pullhost" && set -euo pipefail && offline_drill_present); }
 printf '%s\n' "aaa111 sha-img" "bms-offline-drill-4242 sha-pg" "bms-offline-drill-4242-lock sha-pg" > "$STUB/containers"
 out="$(present)"; status=$?
-if [[ "$status" == 0 && "$out" == *"an offline restore drill (bms-offline-drill-4242 bms-offline-drill-4242-lock) is on this host; deploying on a later run"* ]]; then
+if [[ "$status" == 0 && "$out" == *"an offline restore drill (bms-offline-drill-4242) is on this host; deploying on a later run"* ]]; then
     ok "the puller defers a deploy while an offline drill's database is on the host"
 else
     fail "offline_drill_present with a drill's container: status $status, '$out'"
 fi
-# Review of d88ad47, nice-to-have 6: once per drill, not every two minutes for its whole length.
-out="$(present)"; status=$?
-if [[ "$status" == 0 && -z "$out" ]]; then ok "the second run during the same drill defers without logging again"; else fail "second run: status $status, '$out'"; fi
+# Review of d88ad47, nice-to-have 6: once per drill, not every two minutes for its whole length. Review of 56851fc,
+# must-fix 1: the drill's containers come and go (the lock holder first, then the database, then the database removed
+# first), and that is still one drill, logged once.
+logged=""
+for containers in "bms-offline-drill-4242-lock" "bms-offline-drill-4242-lock bms-offline-drill-4242" "bms-offline-drill-4242-lock"; do
+    tr ' ' '\n' <<< "$containers" > "$STUB/containers"
+    out="$(present)"; status=$?
+    [[ "$status" == 0 ]] || logged+="[status $status]"
+    logged+="$out"
+done
+if [[ -z "$logged" ]]; then
+    ok "one drill, from its lock holder alone to lock holder and database and back, is logged once"
+else
+    fail "the same drill was logged again: '$logged'"
+fi
+printf '%s\n' "bms-offline-drill-5151-lock" > "$STUB/containers"
+out="$(present)"
+if [[ "$out" == *"(bms-offline-drill-5151)"* ]]; then ok "another drill is logged"; else fail "another drill: '$out'"; fi
 printf '%s\n' "aaa111 sha-img" "bms-restore-drill-1 sha-pg" > "$STUB/containers"
 if present > /dev/null; then fail "offline_drill_present without a drill's container"; else ok "with no offline drill's database the puller goes on (under set -euo pipefail)"; fi
 if [[ ! -e "$WORK/pullhost/state/offline_drill_wait" ]]; then ok "and forgets the drill it logged, so the next one is logged"; else fail "state/offline_drill_wait left behind"; fi

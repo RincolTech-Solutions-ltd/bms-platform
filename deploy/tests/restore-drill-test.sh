@@ -207,4 +207,8 @@ fake_host "$WORK/offline-drill-ps-fails"
 FAKE_PS_FAIL=1 run_script
 expect "the weekly drill fails closed, downloading and starting nothing, when docker ps errors" \
     eval '[[ "$STATUS" == 1 ]] && grep -q "cannot list the containers to look for a remote offline drill.s database" "$HOST/state/last_restore_drill_error" && downloaded_nothing && ! grep -q "^run --detach" "$FAKE/calls.log" && nothing_left'
+# Review of 56851fc, point 7: the refusal comes before a backup is named, and its result line is still the drill's usual
+# FAILED line (time, FAILED, seconds, reason), the one monitor.sh reads, recorded and uploaded as always.
+expect "the early refusal's result line has the usual FAILED shape and is uploaded" \
+    eval 'grep -qE "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z FAILED seconds=[0-9]+ cannot list the containers" "$HOST/state/last_restore_drill_error" && grep -q "copyto /backups/drill-result-[0-9]*.txt r2:fake-bucket/staging/drill/last_restore_drill.txt" "$FAKE/calls.log"'
 exit "$failures"

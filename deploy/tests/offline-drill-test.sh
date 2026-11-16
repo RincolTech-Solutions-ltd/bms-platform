@@ -156,6 +156,8 @@ case "$1" in
             script="${script//\/state\//$FAKE/state/}"
             script="${script//\/tmp\/held/$FAKE/lock-held}"
             script="${script//sleep 21600/sleep 120}"
+            # The wait for pull.lock: 3 tries here, not 30, so a test of a held lock ends in seconds.
+            script="${script//-ge 30 ]/-ge 3 ]}"
             sh -c "$script" > /dev/null 2>&1 < /dev/null &
             echo "$!" > "$FAKE/lock-pid"
             echo "fake-lock-id"; exit 0
@@ -177,6 +179,11 @@ case "$1" in
     # OOMKilled, Running and ExitCode: FAKE_OOM killed at a limit, FAKE_EXITED=<code> stopped by itself, FAKE_INSPECT_FAIL
     # no answer.
     inspect)
+        # The lock holder runs while its process does.
+        if [[ "${*: -1}" == *-lock ]]; then
+            if [[ -s "$FAKE/lock-pid" ]] && kill -0 "$(cat "$FAKE/lock-pid")" 2> /dev/null; then echo true; else echo false; fi
+            exit 0
+        fi
         [[ -z "${FAKE_INSPECT_FAIL:-}" ]] || exit 1
         if [[ -n "${FAKE_OOM:-}" ]]; then echo "true false 137"
         elif [[ -n "${FAKE_EXITED:-}" ]]; then echo "false false ${FAKE_EXITED}"
@@ -601,6 +608,33 @@ fake_remote remote-exited; age_backup
 FAKE_RESTORE_FAIL=1 FAKE_EXITED=1 FAKE_DF_FAIL=1 drill --remote bms-production
 check "remote: a server that stopped during the restore, not at a limit, says so and that the tmpfs filled" \
     eval 'failed_with "the throwaway postgres stopped during the restore (exit 1), which a data directory that filled its tmpfs (a WAL panic) causes: set BMS_DRILL_MEMORY_MB higher"'
+
+# Review of 56851fc. JUSTIFICATION-A3: the tests the review names, on the existing fakes.
+# Must-fix 2: on staging a server that stopped, docker not marking an OOM kill, is put down to the slice when the slice's
+# own oom count rose, never to the cap.
+fake_remote remote-exited-slice; age_backup
+FAKE_RESTORE_FAIL=1 FAKE_EXITED=137 FAKE_DF_FAIL=1 FAKE_SLICE_OOM=3 FAKE_SLICE_OOM_AFTER=4 drill --remote bms-staging --environment staging
+check "remote staging: a server stopped with no OOM mark while the slice's own oom count rose blames the slice, never the cap" \
+    eval 'failed_with "bms.slice on bms-staging ran out of memory while the drill ran" && ! recorded "set BMS_DRILL_MEMORY_MB higher"'
+fake_remote remote-exited-staging; age_backup
+FAKE_RESTORE_FAIL=1 FAKE_EXITED=1 FAKE_DF_FAIL=1 FAKE_SLICE_OOM=3 drill --remote bms-staging --environment staging
+check "remote staging: a server stopped with the slice's count unchanged is the tmpfs filling" \
+    failed_with "the throwaway postgres stopped during the restore (exit 1)"
+fake_remote remote-exited-reread-fails; age_backup
+FAKE_RESTORE_FAIL=1 FAKE_EXITED=1 FAKE_DF_FAIL=1 FAKE_SLICE_REREAD_FAIL=1 drill --remote bms-staging --environment staging
+check "remote staging: a server stopped with the slice unreadable afterwards blames neither" \
+    eval 'failed_with "bms.slice could not be read again" && ! recorded "set BMS_DRILL_MEMORY_MB higher"'
+# Point 5 (Lead: a short bounded wait): a pull.lock the puller holds for a moment is waited for, not a failure.
+fake_remote remote-pull-brief; age_backup
+flock "$FAKE/state/pull.lock" sleep 1 &
+holder=$!
+for _ in $(seq 1 50); do flock --nonblock "$FAKE/state/pull.lock" true || break; sleep 0.1; done
+drill --remote bms-staging --environment staging
+wait "$holder" 2> /dev/null
+check "remote staging: a pull.lock held for a moment (the puller's pointer check) is waited for, and the drill runs" \
+    eval '[[ "$STATUS" == 0 && "$(cat "$FAKE/locks-during-restore")" == "pull held"$'"'"'\n'"'"'"deploy held" ]]'
+check "the wait for pull.lock is bounded (30 tries of flock -n), deploy.lock is not waited for" \
+    eval 'grep -qF "until flock -n 8; do" "$REPO/deploy/restore-drill-offline.sh" && grep -qF -- "-ge \${LOCK_WAIT} ] && exit 3; sleep 1; done" "$REPO/deploy/restore-drill-offline.sh" && grep -q "^LOCK_WAIT=30$" "$REPO/deploy/restore-drill-offline.sh" && grep -qF "flock -n 9 || exit 4" "$REPO/deploy/restore-drill-offline.sh"'
 
 # Review of e7cc8e6, finding 11: never beside another drill's or a rehearsal's database.
 fake_remote remote-busy; age_backup; printf '%s\n' bms-api-1 bms-restore-drill-4242 > "$FAKE/host_containers"
