@@ -241,6 +241,10 @@ check "a data directory at the right path that is not a tmpfs mount is refused (
 PRODUCTION=1 AVAILABLE_KB=900000 FAKE_RUN_ROW="${FAKE_TENANT}|ready|f|framework" rehearse production-no-room
 check "on production, a host with less than the rehearsal's memory and 256 MB more available is refused (3)" \
     eval '[[ "$STATUS" == 3 ]] && said "the host has 878 MB available" && nothing_started && nothing_restored'
+# Review of #956, point 3: on staging the slice can have room while the shared host does not (user.slice near its cap).
+AVAILABLE_KB=900000 rehearse staging-host-no-room
+check "on staging, a slice with room on a host with less than the rehearsal's memory and 256 MB more available is refused (3)" \
+    eval '[[ "$STATUS" == 3 ]] && said "the host has 878 MB available" && nothing_started && nothing_restored'
 
 # --- Clean-up on failure and on interrupt ---------------------------------------------------------------------------------
 FAKE_RESTORE_FAIL=1 rehearse restore-fails
