@@ -333,13 +333,16 @@ check_drill() {
 
 # The throwaway database of a remote offline drill (restore-drill-offline.sh --remote) whose Mac went away before its
 # exit trap could remove it: the drill labels it with the time after which it is removed here (bms.offline-drill.expires,
-# 4 hours after the drill started). One still within its time is a drill that may be running, and is left alone.
+# 6 hours after the drill started). One still within its time is a drill that may be running, and is left alone.
 # It never stops the checks below: a docker that cannot be listed or a container that cannot be removed is logged, and
 # the run goes on (review of e7cc8e6, finding 3). The drill starts it as the deploy user bms, the user this runs as.
+# engine <seconds> <docker args...>: docker with a time limit, so a hung engine never holds monitor.lock (review of
+# 7a1faf9, finding 6); a probe of its own so the tests can replace it.
+engine() { timeout "$1" docker "${@:2}"; }
 reap_offline_drills() {
     local name expires t listed
     t="$(now)"
-    if ! listed="$(docker ps --all --filter label=bms.offline-drill.expires \
+    if ! listed="$(engine 30 ps --all --filter label=bms.offline-drill.expires \
         --format '{{.Names}} {{.Label "bms.offline-drill.expires"}}' 2>&1)"; then
         log "could not list the containers to remove a remote offline drill's database: $(head -c 200 <<< "$listed")"
         return 0
@@ -347,7 +350,7 @@ reap_offline_drills() {
     while read -r name expires; do
         [[ "$name" == bms-offline-drill-* && "$expires" =~ ^[0-9]{1,12}$ ]] || continue
         (( 10#$expires < t )) || continue
-        if docker rm -f -v "$name" > /dev/null 2>&1; then
+        if engine 60 rm -f -v "$name" > /dev/null 2>&1; then
             log "removed ${name}, a remote offline drill's database left behind"
         else
             log "could not remove ${name}, a remote offline drill's database left behind"

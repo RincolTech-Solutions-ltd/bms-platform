@@ -227,9 +227,11 @@ same_picker() {
 assert "restore-drill.sh picks backups the same way" same_picker
 
 # --- a remote offline drill's database left behind (restore-drill-offline.sh --remote, issue #949) ---
-# The stub answers docker ps with the containers in $WORK/containers ("<name> <expires>") and records each rm.
-docker() {
-    case "$1" in
+# The stub answers docker ps with the containers in $WORK/containers ("<name> <expires>"), records each rm, and each
+# call's time limit (review of 7a1faf9, finding 6).
+engine() {
+    printf '%s %s\n' "$1" "$2" >> "$WORK/engine-limits"
+    case "$2" in
         ps) [[ "$*" == *"--filter label=bms.offline-drill.expires"* ]] && cat "$WORK/containers" ;;
         rm) printf '%s\n' "${*: -1}" >> "$WORK/removed" ;;
     esac
@@ -241,6 +243,11 @@ reap_offline_drills 2> /dev/null
 assert "a remote drill's database past its time is removed" grep -qx bms-offline-drill-111 "$WORK/removed"
 assert "one still within its time, another name or an unreadable label is left alone" \
     test "$(wc -l < "$WORK/removed")" = 1
+assert "every engine call has a time limit: 30 s to list, 60 s to remove" \
+    test "$(sort -u "$WORK/engine-limits" | tr '\n' ' ')" = "30 ps 60 rm "
+# shellcheck disable=SC2016 # the line of monitor.sh itself, never expanded.
+assert "monitor.sh's engine runs docker under timeout" \
+    grep -qxF 'engine() { timeout "$1" docker "${@:2}"; }' "$HERE/../monitor.sh"
 # Review of e7cc8e6, findings 3 and 9: a label with a leading zero is a decimal time, and a docker that cannot be
 # listed is logged and never stops the checks that follow.
 printf '%s\n' "bms-offline-drill-444 0$(( NOW - 60 ))" "bms-offline-drill-555 09" > "$WORK/containers"
@@ -248,7 +255,7 @@ printf '%s\n' "bms-offline-drill-444 0$(( NOW - 60 ))" "bms-offline-drill-555 09
 reap_offline_drills 2> /dev/null
 assert "a label with a leading zero is read as a decimal time" \
     test "$(sort "$WORK/removed" | tr '\n' ' ')" = "bms-offline-drill-444 bms-offline-drill-555 "
-docker() { echo "permission denied while trying to connect to the Docker daemon socket" >&2; return 1; }
+engine() { echo "permission denied while trying to connect to the Docker daemon socket" >&2; return 1; }
 reap_status="$(reap_offline_drills 2> "$WORK/reap.log"; echo $?)"
 assert "a docker that cannot be listed is logged, and the run goes on" test "$reap_status" = 0
 assert "the failed listing is in the log" grep -q "could not list the containers.*permission denied" "$WORK/reap.log"
@@ -256,7 +263,6 @@ assert "the failed listing is in the log" grep -q "could not list the containers
 sweep_lines="$(sed -n '/^main() {/,/^}/p' "$HERE/../monitor.sh" | grep -E 'reap_offline_drills|check_site' | tr -s ' ' | tr '\n' '|')"
 assert "main runs the sweep with || true, before the first check" \
     test "$sweep_lines" = " reap_offline_drills || true| check_site|"
-unset -f docker
 
 if (( FAILURES > 0 )); then
     echo "${FAILURES} test(s) failed"

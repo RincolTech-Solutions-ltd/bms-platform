@@ -26,8 +26,8 @@
 #      nothing about the current key, so it is kept on the Mac only.
 # The downloaded file, the temp dir and the container are removed whatever the outcome: on a remote host by the Mac's exit
 # trap over ssh and, should the Mac die mid-run, by the host's monitor.sh once the time in the container's label
-# bms.offline-drill.expires (4 hours after the start) has passed. The exit trap runs on INT and TERM too (they exit, and
-# the EXIT trap removes). A pg_restore error can quote row values, so it is held in memory, shown on this screen only and
+# bms.offline-drill.expires (6 hours after the start) has passed. The exit trap runs on HUP, INT and TERM too (they exit,
+# and the EXIT trap removes). A pg_restore error can quote row values, so it is held in memory, shown on this screen only and
 # never written, recorded or uploaded.
 #
 # Usage: deploy/restore-drill-offline.sh [--remote <ssh target> | --local] [--environment production|staging]
@@ -39,8 +39,9 @@
 #   BMS_DRILL_SSH         the ssh target when --remote is not given, for example bms-production (an ~/.ssh/config host);
 #   BMS_DRILL_REMOTE_DOCKER  the docker command on the remote host (default: sudo -n -u bms docker);
 #   BMS_DRILL_REMOTE_INITDB  the roles script folder on the remote host (default: /opt/bms/postgres/initdb);
-#   BMS_DRILL_MEMORY_MB   the container's memory, 256 MB for PostgreSQL and the rest the tmpfs data directory (default
-#                         512 on staging, 1280 on production, 2048 with --local; at least 512);
+#   BMS_DRILL_MEMORY_MB   the container's memory, 256 MB for PostgreSQL and the rest the tmpfs data directory, about
+#                         96 MB of which is WAL (default 640 on staging, 1280 on production, 2048 with --local; at
+#                         least 512);
 #   BMS_DRILL_RECORD_DIR  where the results are kept (default ~/bms-restore-drills);
 #   OPENSSL               an openssl that has -pbkdf2, for old backups (default openssl).
 # Exit status: 0 restored and checked, 1 failed (recorded), 2 usage.
@@ -94,13 +95,16 @@ MIGRATIONS="$HERE/../backend/src/main/resources/db/migration"
 REMOTE_DOCKER="${BMS_DRILL_REMOTE_DOCKER:-sudo -n -u bms docker}"
 REMOTE_INITDB="${BMS_DRILL_REMOTE_INITDB:-/opt/bms/postgres/initdb}"
 # The container's whole memory: PostgreSQL's own 256 MB (its default 128 MB of shared buffers, which the cgroup counts,
-# and its processes) plus the tmpfs that holds the data directory, the rest. 512 MB inside staging's 900 MB bms.slice
-# (256 MB of data, the rehearsal's database and API fit the same room), 1280 MB on the 4 GB production VM (1 GB of
-# data), 2048 MB on this Mac (--local). Lead on the review of e7cc8e6: raise the cap so both fit.
+# and its processes) plus the tmpfs that holds the data directory, the rest. The WAL lives in that tmpfs too, about
+# WAL_MB with max_wal_size 64 MB (review of 7a1faf9, finding 2). 640 MB inside staging's 900 MB bms.slice (384 MB of
+# tmpfs, about 288 MB of data; under the 704 MB a rehearsal's database and API take), 1280 MB on the 4 GB production VM
+# (1024 MB of tmpfs, about 928 MB of data), 2048 MB on this Mac (--local). Lead on the review of e7cc8e6: raise the cap
+# so both fit.
 SERVER_MB=256
+WAL_MB=96
 MEMORY_MB="${BMS_DRILL_MEMORY_MB:-2048}"
 [[ -n "$TARGET" ]] && MEMORY_MB="${BMS_DRILL_MEMORY_MB:-1280}"
-[[ -n "$TARGET" && "$ENVIRONMENT" == staging ]] && MEMORY_MB="${BMS_DRILL_MEMORY_MB:-512}"
+[[ -n "$TARGET" && "$ENVIRONMENT" == staging ]] && MEMORY_MB="${BMS_DRILL_MEMORY_MB:-640}"
 # Every value that reaches the host's shell or docker's options is checked here, before anything runs (review of
 # e7cc8e6, finding 2): the prefix word by word, an absolute initdb path with no comma (a --mount option separator), an
 # image reference that docker cannot read as an option.
@@ -116,7 +120,8 @@ DATA_MB=$(( MEMORY_MB - SERVER_MB ))
 DB="bms-offline-drill-$$"
 STARTED="$(date -u +%s)"
 # After this time the host's monitor.sh removes the container, should this Mac die before its exit trap runs.
-EXPIRES=$(( STARTED + 4 * 3600 ))
+# Six hours: three times the RTO, so a slow restore is never removed while it runs (review of 7a1faf9, finding 7).
+EXPIRES=$(( STARTED + 6 * 3600 ))
 WORK=""
 NAME="${FILE:-none}"
 FORMAT=unknown
@@ -182,6 +187,7 @@ cleanup() {
     if [[ -n "$WORK" && -d "$WORK" ]]; then rm -rf "$WORK"; fi
 }
 trap cleanup EXIT
+trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
@@ -308,14 +314,19 @@ fi
 # memory cap, no swap (--memory-swap equal to --memory), and no log driver, so a server error that quotes a row is never
 # written to the engine's log file. The tmpfs takes all but SERVER_MB of the cap; a dump too big for it fails the drill
 # plainly, and never falls back to a disk volume.
-log "starting a throwaway postgres (${DB})${WHERE}: ${MEMORY_MB} MB in memory only, ${DATA_MB} MB of it for the data"
+# The tmpfs is mounted on the image's own data directory (its VOLUME, so no anonymous volume is made) with the image's
+# PGDATA, so the entrypoint chowns and chmods the mount root itself (review of 7a1faf9, finding 1). WAL shares the tmpfs:
+# max_wal_size 64 MB keeps it to about WAL_MB while pg_restore writes (finding 2). On a host short of memory the kernel
+# kills this container before the live stack (--oom-score-adj 1000, finding 3).
+log "starting a throwaway postgres (${DB})${WHERE}: ${MEMORY_MB} MB in memory only, ${DATA_MB} MB of it the data directory (about $(( DATA_MB - WAL_MB )) MB of data beside the WAL)"
 DB_STARTED=yes
 dk run --detach --name "$DB" --network none --memory "${MEMORY_MB}m" --memory-swap "${MEMORY_MB}m" "${PLACE[@]}" \
-    --tmpfs "/var/lib/postgresql/data:rw,size=${DATA_MB}m,mode=0700" --log-driver none \
-    --label "bms.offline-drill.expires=${EXPIRES}" --env PGDATA=/var/lib/postgresql/data/pgdata \
+    --tmpfs "/var/lib/postgresql/data:rw,size=${DATA_MB}m" --log-driver none --oom-score-adj 1000 \
+    --label "bms.offline-drill.expires=${EXPIRES}" \
     --env POSTGRES_PASSWORD="$(random_hex)" --env POSTGRES_DB=bms \
     --env BMS_OWNER_PASSWORD="$(random_hex)" --env BMS_APP_PASSWORD="$(random_hex)" \
-    "$POSTGRES_IMAGE" > /dev/null || fail "could not start the throwaway postgres${WHERE}"
+    "$POSTGRES_IMAGE" -c max_wal_size=64MB -c min_wal_size=32MB > /dev/null \
+    || fail "could not start the throwaway postgres${WHERE}"
 ready=0
 # With no log to read, the marker of the end of initdb is TCP: the image's init server listens on the socket only, the
 # final server on 127.0.0.1 too (inside the container's own loopback; it has no network).
@@ -350,10 +361,12 @@ if [[ -n "$TARGET" && "${statuses[1]}" == 255 ]]; then
 fi
 if [[ "${statuses[1]}" != 0 ]]; then
     log "pg_restore said (on this screen only, never recorded): $(printf '%s' "$restore_err" | head -c 2000 | tr '\n' ' ')"
-    # The data outgrew the tmpfs (no space) or the server outgrew the cap (killed, 137): said plainly, never retried on
-    # a disk volume (Lead on the review of e7cc8e6).
-    if [[ "${statuses[1]}" == 137 ]] || grep -qiE 'no space left on device|could not extend file|server closed the connection unexpectedly|out of memory' <<< "$restore_err"; then
-        fail "the restore did not fit in the container's ${MEMORY_MB} MB (${DATA_MB} MB for the data): set BMS_DRILL_MEMORY_MB higher (restore-from-backup.md section 8.5); it never falls back to disk"
+    # The data outgrew the tmpfs (no space) or the server outgrew the cap (the engine's OOM kill): said plainly, never
+    # retried on a disk volume (Lead on the review of e7cc8e6). Any other crash stays "pg_restore failed" (review of
+    # 7a1faf9, finding 9).
+    oom="$(dk inspect --format '{{.State.OOMKilled}}' "$DB" 2> /dev/null)"
+    if [[ "$oom" == true ]] || grep -qiE 'no space left on device|could not extend file' <<< "$restore_err"; then
+        fail "the restore did not fit in the container's ${MEMORY_MB} MB (${DATA_MB} MB of tmpfs, about $(( DATA_MB - WAL_MB )) MB of data beside the WAL): set BMS_DRILL_MEMORY_MB higher (restore-from-backup.md section 8.5); it never falls back to disk"
     fi
     fail "pg_restore failed"
 fi

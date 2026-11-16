@@ -7,6 +7,8 @@
 # deploy/tests/golden/restore-drill-no-args.txt is the transcript of the drill as it was before the rehearsal mode (main
 # at 0da2f17), made with UPDATE_GOLDEN=1 against that script: a success on staging and on production, a failed
 # decryption and a failed pg_restore. The current script must print the same transcript byte for byte, its PID aside.
+# One call was added since, by hand and on purpose: `ps --all --format {{.Names}}` before the throwaway database starts,
+# the check that no remote offline drill's database is on the host (issue #949, review of 7a1faf9, finding 4).
 # Run: bash deploy/tests/restore-drill-test.sh
 # The age checks at the end are strings and functions run through expect and eval, expanded only when they run.
 # shellcheck disable=SC2016,SC2317
@@ -188,4 +190,12 @@ printf 'Salted__fabricated-old-format-bytes\n' > "$WORK/old-format.age"
 age_drill old-format
 expect "an old-format newest backup without BACKUP_ENCRYPTION_KEY fails the drill and says why" \
     eval '[[ "$STATUS" == 1 ]] && grep -q "BACKUP_ENCRYPTION_KEY is not set on this host" "$HOST/state/last_restore_drill_error"'
+
+# Issue #949, review of 7a1faf9, finding 4: the weekly full restore never starts beside a remote offline drill's database.
+fake_host "$WORK/offline-drill-running"
+printf '%s\n' 'bms-offline-drill-4242||none' > "$FAKE/containers"
+# shellcheck disable=SC2119 # the drill is run with no argument on purpose.
+run_script
+expect "the weekly drill fails, and starts nothing, while a remote offline drill's database is on the host" \
+    eval '[[ "$STATUS" == 1 ]] && grep -q "a remote offline drill.s database (bms-offline-drill-\*) is on this host" "$HOST/state/last_restore_drill_error" && ! grep -q "^run --detach" "$FAKE/calls.log" && nothing_left'
 exit "$failures"
