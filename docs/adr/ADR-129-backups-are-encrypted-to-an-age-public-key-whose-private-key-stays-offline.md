@@ -90,14 +90,20 @@ decrypt.
    on the operator's Mac. `restore-drill-offline.sh --remote <ssh target>`, the default in `restore-from-backup.md`
    section 8.5, runs `age --decrypt` on the Mac with the Keychain key and pipes the plaintext dump over ssh into
    `pg_restore` in a throwaway PostgreSQL that it starts through the host's docker (a configurable command prefix, by
-   default `sudo -n -u bms docker`). The container has no network, a 384 MB memory cap (inside `bms.slice` on staging, as
-   the weekly host drill), is created by the host's own `/opt/bms/postgres/initdb` roles script, and is removed on every
+   default `sudo -n -u bms docker`). The container has no network, a memory cap with no swap (384 MB inside `bms.slice` on
+   staging, as the weekly host drill; 1 GB on production, which has no slice; `BMS_DRILL_MEMORY_MB`), its data directory on a
+   tmpfs inside that cap and no log driver, is created by the host's own `/opt/bms/postgres/initdb` roles script, and is removed on every
    exit path: the Mac's exit trap removes it over ssh, and its label `bms.offline-drill.expires` (4 hours after the start)
    lets the host's `monitor.sh` remove it if the Mac dies mid-run. The key never crosses ssh; only the decrypted stream
    does, to a host that already holds the same live data. The decrypted dump is never written to a file on the Mac or the
-   host, and a `pg_restore` error (which can quote rows) is held in the Mac's memory and shown on its screen only; the
-   restored rows live in the container's anonymous data volume, removed with it (`docker rm -v`). Every check of decision 4 and the upload of the result line are unchanged, so `monitor.sh` counts it as before.
-   `--local` keeps the old mode for a Mac that has an engine.
+   host, and a `pg_restore` error (which can quote rows) is held in the Mac's memory and shown on its screen only. The
+   restored rows live only in the container's memory (the tmpfs, no swap), and a server error that quotes a row is never
+   written to the engine's log file: nothing restored reaches a disk on the host. Every check of decision 4 is unchanged,
+   and so is the uploaded result line, so `monitor.sh` counts it as before; where the drill restored is noted in the
+   Mac's `history.log` only. Every value that reaches the host's shell or docker's options (the prefix, the initdb path,
+   the image, the memory) is validated, and each word is single-quoted for a POSIX shell. A remote drill refuses a host
+   that runs another drill's or a rehearsal's database. `--local` keeps the old mode for a Mac that has an engine, with
+   the same tmpfs and no log.
 
 ## Consequences
 
@@ -109,9 +115,11 @@ decrypt.
 - A restore needs the operator, or the owner with the sealed copy, and a Mac with age and ssh access to the target host; the
   Mac needs no Docker (amended 16 November 2026). That adds minutes to the two hour RTO, not hours; the quarterly drill
   measures it.
-- The remote drill puts the plaintext dump, for the length of the drill, in a container's memory and data directory on the
-  host whose live database holds the same rows, and its checks are answered by that host. It adds no data the host did not
-  hold. A compromised host could answer the checks falsely, as the last consequence below already allows for the records;
+- The remote drill puts the restored rows, for the length of the drill, in a container's memory on the host whose live
+  database holds the same rows, and its checks are answered by that host. It adds no data the host did not hold, and none
+  of it on disk. The whole restore must fit in the container's memory: 384 MB on staging, 1 GB on production by default,
+  raised with `BMS_DRILL_MEMORY_MB` as the data grows; a restore that does not fit fails the drill, it never spills to
+  disk. A compromised host could answer the checks falsely, as the last consequence below already allows for the records;
   the decryption, and so the proof of the key, stays on the Mac.
 - Losing both the Keychain copies and the envelope loses every backup made since the switch. The envelope is kept apart from the
   Mac, and the ceremony checks the paper copy by reading it back.
