@@ -188,8 +188,9 @@ rh_size_db() {
     rh_log "the live database is ${live_mb} MB: a throwaway database of ${RH_DB_MB} MB in memory only, ${RH_TMPFS_MB} MB of it the tmpfs; the live dump may take ${RH_STREAM_SECONDS} s"
 }
 
-# On production (no slice) the host must have the rehearsal's memory and 256 MB more available (MemAvailable), as the
-# remote offline drill asks (ADR-129 decision 7), since the throwaway data now lives in memory.
+# The host must have the rehearsal's memory and 256 MB more available (MemAvailable), as the remote offline drill asks
+# (ADR-129 decision 7), since the throwaway data now lives in memory: on production (no slice), and on staging beside the
+# slice check, where a slice with room can still sit on a shared host that has none (#956).
 rh_require_host_room() {
     local available_kb
     available_kb="$(awk '$1 == "MemAvailable:" { print $2 }' "${BMS_REHEARSAL_MEMINFO:-/proc/meminfo}" 2> /dev/null)"
@@ -536,14 +537,14 @@ rehearse_import() {
     [[ -d "$initdb" ]] || initdb="$PWD/postgres/initdb"
     [[ -d "$initdb" ]] || rh_fail "no initdb folder at ${initdb}"
 
-    # 2. The throwaway database's size, from the live one's, and room for it and the API: in the slice on staging, on
-    # the host on production.
+    # 2. The throwaway database's size, from the live one's, and room for it and the API: in the slice and on the host
+    # on staging (the host is shared, and the slice's cap with user.slice's is close to the host's memory, #956), on the
+    # host on production.
     rh_size_db
     if [[ "$BMS_ENVIRONMENT" == "staging" ]]; then
         rh_require_room
-    else
-        rh_require_host_room
     fi
+    rh_require_host_room
 
     # 3. The throwaway database, in memory only, on an internal network of its own (no route out, nothing else on it but
     # the migrate and API containers). The temp dir holds the env files, never data.

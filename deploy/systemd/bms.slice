@@ -12,7 +12,11 @@ MemoryAccounting=yes
 # Raised from 860M/900M on 24 Oct 2026 (owner decision D37) so a deploy can start the new api beside the
 # old one (ADR-083, #496): the api peaks at about 380 MB and the stack used 790 MB of the old cap. The host
 # also caps user.slice (the CI runner) at 5500M, so 1600M here still leaves the host its headroom.
-MemoryHigh=1500M
-MemoryMax=1600M
+# Raised again to 2000M/2100M on 16 Nov 2026 (owner decision D275): an import rehearsal now starts from a
+# streamed dump of the live database into a memory-only database (ADR-129 decision 5, #954) and needs about
+# 920 MB beside the live stack. The host has 7.8 GB; with user.slice at 5500M the two caps total 7.6 GB,
+# which are ceilings, not reservations.
+MemoryHigh=2000M
+MemoryMax=2100M
 MemorySwapMax=0
 CPUQuota=250%

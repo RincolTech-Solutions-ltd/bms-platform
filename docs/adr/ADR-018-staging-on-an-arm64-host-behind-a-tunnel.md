@@ -339,3 +339,7 @@ all of these are reversed and the self-hosted rule above applies unchanged.
 ## Amendment, 24 Oct 2026 (owner decision D37)
 
 The `bms.slice` cap is raised from MemoryHigh 860M / MemoryMax 900M to 1500M / 1600M. Measured that day: the stack used 790 MB of the old cap and the api peaked at about 380 MB, so a deploy could never start a second api beside the old one without the slice reclaiming or OOM-killing (pending ADR-083, #496). The host has 7.8 GB with user.slice (the CI runner) capped at 5500M, so 1600M for BMS still fits. Where this record says 900 MB, read 1.6 GB from this date.
+
+## Amendment, 16 Nov 2026 (owner decision D275)
+
+The cap is raised again, to MemoryHigh 2000M / MemoryMax 2100M (#955, #956), so an import rehearsal, which now starts from a streamed dump of the live database into a memory-only database (ADR-129 decision 5), fits beside the live stack (about 920 MB beside about 790 MB in use). With user.slice at 5500M the two caps total 7600 MiB of the host's 7.8 GiB; they are ceilings, and every memory-only job (the rehearsal, the remote offline drill) also checks the host's MemAvailable before it starts, so neither can push the host as a whole out of memory. Where this record says 1.6 GB, read 2.1 GB from this date.

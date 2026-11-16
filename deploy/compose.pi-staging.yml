@@ -15,9 +15,9 @@
 # the api's management port, so a wrong tunnel ingress rule or a leaked onboarding token cannot
 # expose the database or the actuator directly.
 #
-# Memory budget: about 1.6 GB for all of BMS staging (was 900 MB until 24 Oct 2026, D37) on a host it shares with other workloads.
+# Memory budget: about 2.1 GB for all of BMS staging (900 MB until 24 Oct 2026, D37; 1.6 GB until 16 Nov 2026, D275) on a host it shares with other workloads.
 # Every container runs under the systemd slice bms.slice (deploy/systemd/bms.slice), whose
-# MemoryMax=1600M is the hard cap for the whole stack, including the one-shot migrate container.
+# MemoryMax=2100M is the hard cap for the whole stack, including the one-shot migrate container.
 # The per-container limits below add up to 736 MB steady, 896 MB while a migration runs:
 #
 #   postgres 176  api 448  web 32  proxy 32  cloudflared 48  (migrate 160, only during a deploy;
@@ -27,8 +27,9 @@
 # (ADR-083). deploy.sh starts the second api only while its own limit plus 64 MB (512 MB) is free below
 # the slice's MemoryHigh and on the host, so the new JVM's start-up peak can never bring the slice's OOM
 # killer onto the old api or postgres (reclaim, a slowdown, stays possible); otherwise it restarts the
-# api in place, with the old short gap. With the slice at MemoryHigh=1500M, MemoryMax=1600M (D37) and the
-# stack using about 790 MB, about 710 MB is free, so the overlap is the expected path on this host: two api
+# api in place, with the old short gap. With the slice at MemoryHigh=2000M, MemoryMax=2100M (D37, raised by
+# D275 for the memory-only import rehearsal) and the stack using about 790 MB, about 1.2 GB is free, so the
+# overlap is the expected path on this host: two api
 # containers for the length of each switch, 1216 MB by limits at most. An in-place restart here means the
 # slice has filled up; see docs/runbooks/deploy.md.
 # BMS_ROLL_MIN_FREE_MB in .env replaces the limit with a measured start-up peak (memory.peak).
