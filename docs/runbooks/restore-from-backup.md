@@ -257,21 +257,31 @@ switch of section 8.4, with neither `BACKUP_ENCRYPTION_KEY` nor the R2 settings 
    API on it, never a live container. That meets the intent of "no network" (approved by the Lead, review of 9e0c501):
    the two containers must reach it. It refuses to go on unless it is provably not the live database: another name,
    another container, another cluster (`pg_control_system()`'s identifier), this rehearsal's label, this network only,
-   and its data directory the tmpfs (`SHOW data_directory`). It asks again before the commit.
+   and its data directory the tmpfs (`SHOW data_directory`, and a `tmpfs` line for it in the container's
+   `/proc/mounts`). It asks again before the commit.
    Then it streams the live database into it: `pg_dump` as `bms_owner` in the live container, in pg_dump's own
    consistent read-only snapshot, uncompressed, piped straight into `pg_restore` in the throwaway one, so the dump is
    never a file on the host. pg_dump runs at nice 19 and the lowest best-effort I/O priority, and its server process
    (the one session named `bms-rehearsal-<pid>-dump`) is put at the same as `postgres`, its own user, since a container
-   cannot renice another user's process; the log says so, or says it could not and goes on. I/O priorities take
-   effect only under a scheduler that honours them (BFQ), not under `none` or `mq-deadline`; the CPU priority always
-   does. A backend at nice 19 can still hold a lightweight lock that others wait on, briefly.
+   cannot renice another user's process. A process at nice 19 cannot be put back, so the change is one `sh -c` in the
+   live container that first checks the pid's process title is still `postgres: bms_owner bms [local]`, as pg_dump's
+   is and a live API connection (`bms_app` over TCP) never is, and changes nothing otherwise. The log says it was
+   lowered, or that the process was no longer the dump's, or that it could not, and the dump goes on either way. I/O
+   priorities take effect only under a scheduler that honours them (BFQ), not under `none` or `mq-deadline`; the CPU
+   priority always does. A backend at nice 19 can still hold a lightweight lock that others wait on, briefly. The
+   stream's bytes also pass through dockerd and containerd-shim at their own priority, which at tens of MB is
+   negligible.
    **Locks.** For the whole stream pg_dump holds `ACCESS SHARE` on every table and a snapshot that keeps vacuum from
    cleaning newer dead rows. A live `ACCESS EXCLUSIVE` request (an `ALTER`, a `TRUNCATE`, a non-concurrent `REFRESH`)
    would wait for it, and the live reads of that table queue behind that request. The stack makes such requests only
-   in its migrations, which the deploy lock keeps out for the whole rehearsal; the application takes none. The stream
+   in its migrations, which the deploy lock keeps out for the whole rehearsal. Checked on 16 November 2026 (issue
+   #953): the application's code holds no `TRUNCATE`, `LOCK TABLE`, `ALTER TABLE`, `DROP` or `REFRESH MATERIALIZED VIEW`
+   outside its migrations, the schema has no materialized view and no partitioned table, and the scheduled jobs take
+   row locks only; check again if any of that changes. The stream
    is bounded (step 3) so that nothing waits on it more than minutes; `--lock-wait-timeout=60s` keeps pg_dump itself
    from queueing behind a lock. The dump's session is killed at that bound, or at the deadline, like every live
-   session below. An error of either is shown on the terminal only (it can quote a row), never written to a file.
+   session below. An error of either is shown on the terminal only (it can quote a row): the script never writes it to
+   a file, so on production do not redirect or tee its output either.
 5. Migrates it with the live API's own image, refuses if its Flyway version is then not the live one, and copies the
    run's staged rows from the live database in one `REPEATABLE READ READ ONLY` transaction: the run, its batches, rows,
    issues, resolutions and the mappings its batches name. The throwaway side loads them in one transaction that commits
@@ -392,6 +402,8 @@ docker exec bms-postgres-1 psql -U bms_owner -d bms -tAc "SELECT count(*) FROM i
 #    Note the bms-rehearsal-db peak against its cap (issue #953): a cap far above the peak is a reason to lower the
 #    192/64/96 MB floor in restore-drill.sh, so staging refuses less often. A refusal for room here is the safe outcome:
 #    retry when the slice is quieter.
+#    The tee keeps the output in a file, and a failed restore's error can quote a row: kept here only because staging
+#    holds fabricated data (review of 708d02b, point 4). On production never tee a rehearsal; read it on the terminal.
 ./restore-drill.sh --rehearse-import "$RUN" 2>&1 | tee "state/rehearsal-$RUN.log"; echo "exit ${PIPESTATUS[0]}"   # exit 0
 
 # 2. The live database is untouched: no difference at all (counts, Flyway, the run's status, version and content, its

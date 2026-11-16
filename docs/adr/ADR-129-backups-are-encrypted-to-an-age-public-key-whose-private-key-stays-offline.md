@@ -90,15 +90,23 @@ decrypt.
    fetched, no key is read and no dump is ever a file; the backups' format, age or old, no longer matters to it. So that
    the live database is not slowed noticeably, `pg_dump` runs at nice 19 and the lowest best-effort I/O priority, and so
    does its server process once it is found (by its own session name; reniced as `postgres`, its own user, since a
-   container has no `CAP_SYS_NICE`). Best-effort, not idle, so a page it reads is never starved behind the live load;
-   the I/O priority takes effect only under a scheduler that honours it (BFQ), not under `none` or `mq-deadline`, and a
-   backend at nice 19 can still briefly hold a lightweight lock others wait on. **The dump holds `ACCESS SHARE` on every
-   table and a snapshot that holds back vacuum for as long as it runs**: a live `ACCESS EXCLUSIVE` request would wait
-   for it, and the reads of that table behind that request. The stack makes such requests only in migrations, which the
-   deploy lock keeps out for the whole rehearsal, so the dump is bounded to minutes rather than to the rehearsal's
+   container has no `CAP_SYS_NICE`). A process at nice 19 cannot be put back, so the change is made in one `sh -c` in
+   the live container that first checks the pid's process title is still a local `bms_owner` backend on `bms`, as
+   pg_dump's is and a live API connection (`bms_app` over TCP) never is, and changes nothing otherwise. Best-effort,
+   not idle, so a page it reads is never starved behind the live load; the I/O priority takes effect only under a
+   scheduler that honours it (BFQ), not under `none` or `mq-deadline`; a backend at nice 19 can still briefly hold a
+   lightweight lock others wait on; and the stream's bytes also pass through dockerd and containerd-shim, which keep
+   their own priority (negligible at tens of MB). **The dump holds `ACCESS SHARE` on every table and a snapshot that
+   holds back vacuum for as long as it runs**: a live `ACCESS EXCLUSIVE` request would wait for it, and the reads of that
+   table behind that request. The stack makes such requests only in migrations, which the deploy lock keeps out for the
+   whole rehearsal: as of this amendment the application's code holds no `TRUNCATE`, `LOCK TABLE`, `ALTER TABLE`, `DROP`
+   or `REFRESH MATERIALIZED VIEW` outside its migrations, the schema has no materialized view and no partitioned table
+   (so no job creates partitions), and the scheduled jobs (db-scheduler) take row locks only. Even so the dump is
+   bounded to minutes rather than to the rehearsal's
    deadline: 5 minutes and 2 seconds a MB of live data, an hour at most, by `timeout -s KILL` and the session name;
    `--lock-wait-timeout` keeps pg_dump itself from queueing behind a lock. The throwaway database is kept as the remote
-   drill keeps its own (decision 7): its data and WAL on a tmpfs inside its memory cap (`PGDATA` set to it and checked),
+   drill keeps its own (decision 7): its data and WAL on a tmpfs inside its memory cap (`PGDATA` set to it, and checked to be the data
+   directory and a tmpfs mount),
    no swap, no log driver, `--oom-score-adj 1000`. In place of the remote drill's "no network" it is on an `--internal`
    Docker network of its own, which only it, the migrate container and the rehearsal API join: no route out, and no
    live container on it. The migrate and API containers must reach it, and the Lead approved this network as meeting

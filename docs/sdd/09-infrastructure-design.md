@@ -455,9 +455,10 @@ deletion 90 days after closing), all Africa/Kampala (ADR-024).
    migrate and the rehearsal API on it; approved as meeting "no network", review of 9e0c501), its data
    and WAL on a tmpfs inside its memory cap (`PGDATA` set to it and checked), no swap, no log driver,
    `--oom-score-adj 1000`, refuses to go on unless that database is provably not the live one
-   (container, cluster identifier, label, network, data directory), then streams a `pg_dump` of the
-   live database (pg_dump's own read-only snapshot, as `bms_owner`, at nice 19 and the lowest
-   best-effort I/O priority for pg_dump and its server process, reniced as `postgres`) straight into
+   (container, cluster identifier, label, network, data directory and its tmpfs mount), then streams a
+   `pg_dump` of the live database (pg_dump's own read-only snapshot, as `bms_owner`, at nice 19 and the
+   lowest best-effort I/O priority for pg_dump and its server process, reniced as `postgres` only after
+   the pid is checked, in the same exec, to still be a local `bms_owner` backend) straight into
    its `pg_restore`, so the dump is never a file. The dump holds `ACCESS SHARE` on every table and a
    vacuum horizon while it runs, so it is bounded to 5 minutes and 2 seconds a MB of live data (an
    hour at most); migrations, the stack's only `ACCESS EXCLUSIVE` requests, are kept out by the deploy
