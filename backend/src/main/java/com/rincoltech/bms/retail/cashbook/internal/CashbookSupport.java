@@ -15,6 +15,7 @@ import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -354,33 +355,51 @@ class CashbookSupport implements ClosedTills {
         return keyedHash(tenant.profile().id() + "|" + branchId + "|" + date + "|" + suggestedMinor);
     }
 
+    /** How far from the business-local midnight a form shown on its day is still saved for that day (ADR-130). */
+    static final Duration SHOWN_GRACE = Duration.ofMinutes(15);
+
+    /** A form's day proved by its token's mark, and the minute the form was read (issue #957, ADR-130). */
+    record Shown(LocalDate day, Instant readAt) {}
+
     /**
-     * The token a form is shown (issue #957, ADR-130): the suggestion's hash and, when the form was shown while its day was
-     * the business day (business-local, the tenant's zone), a keyed mark of that, after a dot, so a save after midnight can
-     * be dated by the form's day and not by the clock.
+     * The token a form is shown (issue #957, ADR-130): the suggestion's hash and, when {@code readAt} is given (the form was
+     * read while its day was the business day, the tenant's zone), the minute it was read and a keyed mark of the hash and
+     * that minute, after dots, so a save just after midnight can be dated by the form's day and not by the clock.
      */
-    String issuedToken(UUID branchId, LocalDate date, long suggestedMinor, boolean shownOnItsDay) {
+    String issuedToken(UUID branchId, LocalDate date, long suggestedMinor, Instant readAt) {
         String token = suggestionToken(branchId, date, suggestedMinor);
-        return shownOnItsDay ? token + "." + shownMark(branchId, date) : token;
+        if (readAt == null) {
+            return token;
+        }
+        long minute = readAt.getEpochSecond() / 60;
+        return token + "." + minute + "." + shownMark(branchId, date, token, minute);
     }
 
-    /** The day among {@code days} whose mark the presented token carries (its form was shown on that day), or null. */
-    LocalDate shownOn(UUID branchId, String presented, List<LocalDate> days) {
-        int dot = presented == null ? -1 : presented.indexOf('.');
-        if (dot < 0) {
+    /**
+     * The form's day the presented token proves, or null: its mark is valid for its hash and minute, the minute fell on one
+     * of {@code days}, and {@code at} is within {@link #SHOWN_GRACE} of the midnight between that day and {@code dated}.
+     */
+    Shown shownOn(UUID branchId, String presented, LocalDate dated, Instant at, List<LocalDate> days) {
+        String[] parts = presented == null ? new String[0] : presented.split("\\.", -1);
+        if (parts.length != 3 || !parts[1].matches("\\d{1,12}")) {
             return null;
         }
-        byte[] mark = presented.substring(dot + 1).getBytes(StandardCharsets.UTF_8);
-        for (LocalDate day : days) {
-            if (MessageDigest.isEqual(shownMark(branchId, day).getBytes(StandardCharsets.UTF_8), mark)) {
-                return day;
-            }
+        long minute = Long.parseLong(parts[1]);
+        Instant readAt = Instant.ofEpochSecond(minute * 60);
+        LocalDate day = dayOf(readAt);
+        if (!days.contains(day)
+                || !MessageDigest.isEqual(
+                        shownMark(branchId, day, parts[0], minute).getBytes(StandardCharsets.UTF_8),
+                        parts[2].getBytes(StandardCharsets.UTF_8))) {
+            return null;
         }
-        return null;
+        Instant midnight =
+                (day.isAfter(dated) ? day : dated).atStartOfDay(zone()).toInstant();
+        return Duration.between(midnight, at).abs().compareTo(SHOWN_GRACE) <= 0 ? new Shown(day, readAt) : null;
     }
 
-    private String shownMark(UUID branchId, LocalDate date) {
-        return keyedHash(tenant.profile().id() + "|" + branchId + "|" + date + "|shown-on-its-day");
+    private String shownMark(UUID branchId, LocalDate date, String hash, long minute) {
+        return keyedHash(tenant.profile().id() + "|" + branchId + "|" + date + "|" + hash + "|" + minute + "|shown");
     }
 
     private String keyedHash(String input) {

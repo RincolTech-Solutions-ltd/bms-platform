@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -51,27 +52,41 @@ class CashbookSupportTest {
                 .isEqualTo(token);
     }
 
-    // JUSTIFICATION-A3: issue #957 adds the token's mark; one new unit test of it.
-    /** Issue #957: the mark of the day a form was shown is proved only for that day and does not change the match. */
+    // JUSTIFICATION-A3: issue #957 adds the token's mark; one unit test of it, the review's splice and stale
+    // cases included.
+    /**
+     * Issue #957 (ADR-130): the mark proves the form's day only for its own hash and minute, only for that day, and only
+     * within 15 minutes of the midnight after it; the suggestion's match ignores it.
+     */
     @Test
-    void theMarkOfTheDayAFormWasShownNamesThatDayOnlyAndLeavesTheSuggestionsMatchAlone() {
-        CashbookSupport s = support(Instant.parse("2026-10-15T20:59:00Z"), "test-key-one");
+    void theMarkOfTheDayAFormWasShownIsBoundToItsSuggestionMinuteAndTheMidnightGrace() {
+        Instant read = Instant.parse("2026-10-15T20:59:00Z"); // 23:59 in Kampala on the 15th
+        CashbookSupport s = support(read, "test-key-one");
         LocalDate shown = LocalDate.parse("2026-10-15");
         LocalDate next = LocalDate.parse("2026-10-16");
-        String marked = s.issuedToken(BRANCH, shown, 2_500, true);
+        List<LocalDate> yesterday = List.of(shown);
+        String hash = s.suggestionToken(BRANCH, shown, 2_500);
+        String marked = s.issuedToken(BRANCH, shown, 2_500, read);
+        Instant justAfter = Instant.parse("2026-10-15T21:01:00Z");
 
-        assertThat(marked).startsWith(s.suggestionToken(BRANCH, shown, 2_500) + ".");
-        assertThat(s.issuedToken(BRANCH, shown, 2_500, false)).isEqualTo(s.suggestionToken(BRANCH, shown, 2_500));
+        assertThat(s.issuedToken(BRANCH, shown, 2_500, null)).isEqualTo(hash);
         assertThat(s.tokenMatches(BRANCH, shown, 2_500, marked)).isTrue();
         assertThat(s.tokenMatches(BRANCH, shown, 2_501, marked)).isFalse();
-        assertThat(s.shownOn(BRANCH, marked, java.util.List.of(next, shown))).isEqualTo(shown);
-        assertThat(s.shownOn(BRANCH, marked, java.util.List.of(next))).isNull();
-        assertThat(s.shownOn(BRANCH, s.suggestionToken(BRANCH, shown, 2_500), java.util.List.of(shown)))
+        assertThat(s.shownOn(BRANCH, marked, next, justAfter, yesterday))
+                .isEqualTo(new CashbookSupport.Shown(shown, read));
+        // Past the grace, for another day, branch or key, unmarked, or with its minute or hash changed: not proved.
+        assertThat(s.shownOn(BRANCH, marked, next, Instant.parse("2026-10-15T21:16:00Z"), yesterday))
                 .isNull();
-        assertThat(s.shownOn(UUID.randomUUID(), marked, java.util.List.of(shown)))
+        assertThat(s.shownOn(BRANCH, marked, next, justAfter, List.of(next))).isNull();
+        assertThat(s.shownOn(UUID.randomUUID(), marked, next, justAfter, yesterday))
                 .isNull();
-        assertThat(support(Instant.parse("2026-10-15T20:59:00Z"), "test-key-two")
-                        .shownOn(BRANCH, marked, java.util.List.of(shown)))
+        assertThat(support(read, "test-key-two").shownOn(BRANCH, marked, next, justAfter, yesterday))
                 .isNull();
+        assertThat(s.shownOn(BRANCH, hash, next, justAfter, yesterday)).isNull();
+        String[] parts = marked.split("\\.");
+        String later = hash + "." + (Long.parseLong(parts[1]) + 1) + "." + parts[2];
+        assertThat(s.shownOn(BRANCH, later, next, justAfter, yesterday)).isNull();
+        String spliced = s.suggestionToken(BRANCH, shown, 0) + "." + parts[1] + "." + parts[2];
+        assertThat(s.shownOn(BRANCH, spliced, next, justAfter, yesterday)).isNull();
     }
 }

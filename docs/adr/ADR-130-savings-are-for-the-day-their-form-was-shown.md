@@ -2,10 +2,10 @@
 
 ## Status
 
-Proposed (issue #957, found by the Lead while watching CI on 16 November 2026). Amends ADR-022 decision 11 (the savings
-suggestion token) and, for savings only, ADR-120 (the server dates an entry today) and ADR-067 decision 13 (an entry kept
-offline is dated by when it was made). No migration. The requirements are FR-RET-18 and FR-RET-19 (chapter 3); the routes are
-in chapter 7. Renumbered at merge if needed.
+Proposed (issue #957, found by the Lead while watching CI on 16 November 2026); it becomes Accepted on merge of the pull
+request that carries it. Amends ADR-022 decision 11 (the savings suggestion token) and, for savings only, ADR-120 (the
+server dates an entry today) and ADR-067 decision 13 (an entry kept offline is dated by when it was made). No migration. The
+requirements are FR-RET-18 and FR-RET-19 (chapter 3); the routes are in chapter 7. Renumbered at merge if needed.
 
 ## Context
 
@@ -22,34 +22,41 @@ entry made at 00:01), and the other way round for a phone whose clock is behind 
 00:01, entry stamped 23:59:30). `RetailSalesStaffSavingsIT` failed in CI at 00:03 in Kampala for that last reason.
 
 The day the form was shown cannot simply be taken from the request: a seller may read any day of the month's suggestion, and
-an earlier day is the owner's to choose (ADR-120).
+an earlier day is the owner's to choose (ADR-120). Nor may a proof of the form's day be reusable: a form left open all day,
+or a mark lifted from one token onto another, must not open yesterday to a seller.
 
 ## Decision
 
-1. **Savings are for the day their form was shown.** The token a form is shown carries, after a dot, a keyed mark that the
-   suggestion was read while its day was the business day (the business-local date in the tenant's zone, never UTC or the JVM
-   zone). A suggestion of any other day carries no mark. The mark is a keyed hash of the tenant, branch and day under the
-   same purpose key as the token, so it reveals nothing and cannot be made by a caller. The part before the dot is the
-   suggestion's hash, judged as before.
-2. **The save uses the form's day when the mark proves it and it is one midnight away.** Online, a save the server would
-   date today (no earlier day chosen with a reason) whose token is marked for yesterday is saved for yesterday. Offline, an
-   entry whose token is marked for the day before or the day after the day it was made is saved for that day, never a day
-   after today. Anything else is dated as before.
-3. **The rules of that day still hold.** A form's day before today whose till is closed (its cash banked) is the owner's, as
-   for an entry kept offline: 422 `offline_day_closed` offline, 422 `day_closed` on `business_date` online, "That day's till
-   is closed. Ask the owner to enter it." No ADR-120 backdate is asked for, since the person did not choose the day; the
-   audit row of the record carries the flag `dated_by_form`.
+1. **Savings are for the day their form was shown, across one midnight.** A suggestion read while its day is the business
+   day (the business-local date in the tenant's zone, never UTC or the JVM zone) carries, after the suggestion's hash, the
+   minute it was read and a keyed mark of the tenant, branch, day, hash and minute: `hash.minute.mark`. A suggestion of any
+   other day carries no mark. The mark is keyed under the same purpose key as the hash, so it reveals nothing, cannot be made
+   by a caller, and fails if the hash or the minute is changed or spliced from another token.
+2. **The mark counts only within 15 minutes of the midnight** between the form's day and the day the save would otherwise
+   take (`SHOWN_GRACE`). Online, only an undated save (no `business_date` sent, so neither a date the phone chose nor one the
+   owner chose with a reason is moved) is judged, at the time of the save, against a mark of yesterday. Offline, the time the
+   entry was made is judged against a mark of the day before or the day after it, never a day after today. Anything else is
+   dated as before: a form left open past the grace is a save of the new day, judged on its figures.
+3. **The form's day is judged as the entry's own day would be.** Offline it is checked as an entry made at that day's last
+   second (or first, for a later day): the 7 days (`offline_entry_too_old` without `retail.entry.backdate`), never a future
+   day, and a closed till (`offline_day_closed`). Online, a form's day whose till was closed (its cash banked) is the owner's,
+   422 `day_closed` on `business_date`, "That day's till is closed. Ask the owner to enter it." A seller's form of the last
+   day of a month saved just after midnight on the 1st is that last day's: the grace stands in for the month rule here. No
+   ADR-120 backdate is asked, since the person did not choose the day; the audit row carries the flag `dated_by_form`.
 4. **The real 409 stays.** The suggestion is recomputed for the form's day in the save's transaction; a sale, void or
-   expense in between is 409 `suggestion_changed` with the new token, which keeps the mark, so saving again still lands on the
-   form's day.
+   expense in between is 409 `suggestion_changed` with the new token, which keeps the form's minute, so saving again within
+   the grace still lands on the form's day.
 5. **One rule for both routes.** The till's route and the sales staff route share the save, so both follow it. The cash book
    has no other suggestion or fingerprint route.
 
 ## Consequences
 
-- A clerk saving just after midnight records the day they were looking at, with no false 409.
-- A token issued before this change has no mark and keeps working as before; a token is still opaque to the phone.
-- A seller holding a marked token of yesterday may save yesterday's savings until the end of today. That is the day they
-  were shown on its own day, not an earlier day chosen after the fact, so ADR-120 is not loosened beyond one midnight.
+- A clerk saving within 15 minutes after midnight records the day they were looking at, with no false 409. Saved later, the
+  form is judged as a save of the new day, a 409 that offers the new day's suggestion, as before this record.
+- A seller cannot use a mark to save an arbitrary earlier day: it names one day, one suggestion and one minute, and opens
+  that day for at most 15 minutes after its midnight.
+- Tokens issued before this change have no mark and keep working as before; a form shown before the deploy and saved after
+  midnight still gets the old 409, which is safe (nothing is written) and passes after one look again.
+- The token stays opaque to the phone; no OpenAPI change.
 - Tests no longer read the wall clock: `RetailSalesStaffSavingsIT` runs on the movable clock at 23:50 in Kampala and moves it
-  to 23:59 and 00:01.
+  to 23:59, 00:01 and past the grace.

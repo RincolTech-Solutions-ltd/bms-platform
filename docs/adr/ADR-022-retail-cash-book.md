@@ -11,8 +11,9 @@ nothing in ADR-020. Decision 11 is amended by ADR-080 (issue #538): the suggesti
 expenses, a savings amount may not exceed that, and the overwrite reason is optional. Decision 13 is relaxed by ADR-118 (issue
 #802): adding an item to an active expense category needs `retail.expense.record`, not `retail.expense.manage`. The business
 date of a record is amended by ADR-120 (issue #811): the server dates it today, and only a holder of `retail.entry.backdate`
-may choose an earlier day, with a reason that is audited. Decision 11 is amended by ADR-130 (issue #957): savings are for the
-day their form was shown, which a keyed mark on the token proves, so a save just after midnight is no false 409.
+may choose an earlier day, with a reason that is audited. Decision 11 is amended by ADR-130 (issue #957, proposed, accepted on
+merge): savings are for the day their form was shown, which a keyed mark on the token proves within 15 minutes of midnight,
+so a save just after midnight is no false 409.
 
 ## Context
 

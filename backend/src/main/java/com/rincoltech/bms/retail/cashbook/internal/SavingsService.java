@@ -157,27 +157,36 @@ class SavingsService {
     // checked; no existing code carries either.
     /**
      * The day the form was shown when it differs from the day the save is dated by one midnight (issue #957, ADR-130), proved
-     * by the token's mark; else null. Online, a save dated today whose form was shown yesterday; offline, a form of the day
-     * before or after the day the entry was made, never a future day. An earlier day the owner chose is left as chosen.
+     * by the token's mark within {@link CashbookSupport#SHOWN_GRACE} of that midnight; else null. Online, an undated save
+     * whose form was shown yesterday, judged at now; offline, a form of the day before or after the day the entry was made,
+     * never a future day, judged at the time made. A date sent online, chosen or not, is left as sent.
      */
-    private LocalDate shownDay(UUID branch, SavingsRequest r, LocalDate dated) {
+    private CashbookSupport.Shown shownDay(UUID branch, SavingsRequest r, LocalDate dated) {
         LocalDate today = support.today();
-        List<LocalDate> days;
         if (r.offline() != null) {
-            days = dated.isBefore(today) ? List.of(dated.minusDays(1), dated.plusDays(1)) : List.of(dated.minusDays(1));
-        } else if (dated.equals(today)
-                && (r.dateReason() == null || r.dateReason().isBlank())) {
-            days = List.of(today.minusDays(1));
-        } else {
-            return null;
+            List<LocalDate> days = dated.isBefore(today)
+                    ? List.of(dated.minusDays(1), dated.plusDays(1))
+                    : List.of(dated.minusDays(1));
+            Instant made = support.entryTime(null, r.offline(), branch);
+            return support.shownOn(branch, r.suggestionToken(), dated, made, days);
         }
-        return support.shownOn(branch, r.suggestionToken(), days);
+        if (r.businessDate() == null) {
+            return support.shownOn(branch, r.suggestionToken(), dated, support.now(), List.of(today.minusDays(1)));
+        }
+        return null;
     }
 
-    /** A form's day before today whose till was closed (its cash banked) is the owner's, as offline (review of #839). */
-    private void requireOpenShownDay(UUID branch, LocalDate day, OfflineEntry offline) {
+    /**
+     * The form's day is checked as the entry's own day would be: offline, as an entry made at its last second (or first,
+     * for a later day), so the 7 days, a future day and a closed till are judged for it; online, a closed till (its cash
+     * banked) is the owner's (review of #839).
+     */
+    private void requireOpenShownDay(UUID branch, LocalDate day, LocalDate dated, OfflineEntry offline) {
         if (offline != null) {
-            support.requireOpen(offline, day, support.today(), List.of(branch));
+            Instant at = day.isBefore(dated)
+                    ? dated.atStartOfDay(support.zone()).toInstant().minusSeconds(1)
+                    : day.atStartOfDay(support.zone()).toInstant();
+            support.offlineDay(new OfflineEntry(at, at), null, "business_date", branch);
         } else if (day.isBefore(support.today())
                 && support.closed(branch, day)
                 && !CurrentPrincipal.require().may(OfflineEntry.BACKDATE, branch)) {
@@ -213,7 +222,7 @@ class SavingsService {
                 branch,
                 on,
                 figures.day(branch, on).totalSold(),
-                support.issuedToken(branch, on, d.suggested(), on.equals(support.today())),
+                support.issuedToken(branch, on, d.suggested(), on.equals(support.today()) ? support.now() : null),
                 // Issue #799 (the owner's request): once the day is saved, its suggestion is no longer sent to anyone;
                 // the
                 // screen shows only what was saved.
@@ -273,10 +282,10 @@ class SavingsService {
         // Issue #957 (ADR-130): savings are for the day their form was shown. A form shown before midnight and
         // saved (or made offline) after it, or the other way round by a phone clock within its skew, is saved for
         // the form's day, which the token's mark proves, so the suggestion and the save share one business day.
-        LocalDate shown = shownDay(branch, r, dated);
-        LocalDate date = shown != null ? shown : dated;
+        CashbookSupport.Shown shown = shownDay(branch, r, dated);
+        LocalDate date = shown != null ? shown.day() : dated;
         if (shown != null) {
-            requireOpenShownDay(branch, shown, r.offline());
+            requireOpenShownDay(branch, date, dated, r.offline());
         }
         // ADR-120: an earlier day is the owner's, with a reason, on the till's route and on the sales staff's alike;
         // not
@@ -310,7 +319,12 @@ class SavingsService {
             Map<String, Object> extra = new LinkedHashMap<>();
             extra.put(
                     "suggestion_token",
-                    support.issuedToken(branch, date, suggested, shown != null || date.equals(support.today())));
+                    support.issuedToken(
+                            branch,
+                            date,
+                            suggested,
+                            // The form's minute is kept, so its mark still names its day within the grace.
+                            shown != null ? shown.readAt() : date.equals(support.today()) ? support.now() : null));
             // Issue #799: never for a day already saved; the 409 savings_exists that follows a fresh read says why.
             if ((profit || salesperson) && repo.activeSavings(branch, date).isEmpty()) {
                 extra.put("suggested_minor", suggested);
