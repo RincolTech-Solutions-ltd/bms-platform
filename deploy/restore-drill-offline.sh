@@ -39,6 +39,8 @@
 #   BMS_DRILL_SSH         the ssh target when --remote is not given, for example bms-production (an ~/.ssh/config host);
 #   BMS_DRILL_REMOTE_DOCKER  the docker command on the remote host (default: sudo -n -u bms docker);
 #   BMS_DRILL_REMOTE_INITDB  the roles script folder on the remote host (default: /opt/bms/postgres/initdb);
+#   BMS_DRILL_REMOTE_STATE   on staging, the folder of the puller's and deploy's locks, which the drill holds for its
+#                         whole run (default: /opt/bms/state);
 #   BMS_DRILL_MEMORY_MB   the container's memory: 256 MB for the PostgreSQL server, 96 MB for the restore itself
 #                         (pg_restore and the server's 64 MB maintenance_work_mem), the rest the tmpfs data directory,
 #                         about 96 MB of which is WAL (default 640 on staging, 1280 on production, 2048 with --local; at
@@ -95,6 +97,8 @@ INITDB="$HERE/postgres/initdb"
 MIGRATIONS="$HERE/../backend/src/main/resources/db/migration"
 REMOTE_DOCKER="${BMS_DRILL_REMOTE_DOCKER:-sudo -n -u bms docker}"
 REMOTE_INITDB="${BMS_DRILL_REMOTE_INITDB:-/opt/bms/postgres/initdb}"
+# The staging host's state folder, where pull-staging.sh and deploy.sh keep pull.lock and deploy.lock.
+REMOTE_STATE="${BMS_DRILL_REMOTE_STATE:-/opt/bms/state}"
 # The container's whole memory: PostgreSQL's own 256 MB (its default 128 MB of shared buffers, which the cgroup counts,
 # and its processes), RESTORE_MB for the restore, which runs in the same cgroup (pg_restore itself, `docker exec`ed into
 # the container, and the 64 MB maintenance_work_mem the server takes for each index it builds, pinned with -c below;
@@ -120,6 +124,7 @@ for word in "${DOCKER_WORDS[@]}"; do
     [[ "$word" =~ ^[A-Za-z0-9_./=-]+$ ]] || usage
 done
 [[ "$REMOTE_INITDB" =~ ^/[A-Za-z0-9_./-]*$ ]] || usage
+[[ "$REMOTE_STATE" =~ ^/[A-Za-z0-9_./-]*$ ]] || usage
 [[ -z "${POSTGRES_IMAGE:-}" || "$POSTGRES_IMAGE" =~ ^[A-Za-z0-9][A-Za-z0-9._/:@-]*$ ]] || usage
 if ! [[ "$MEMORY_MB" =~ ^[1-9][0-9]{2,4}$ ]] || (( MEMORY_MB < SERVER_MB + RESTORE_MB + 256 )); then usage; fi
 DATA_MB=$(( MEMORY_MB - SERVER_MB - RESTORE_MB ))
@@ -132,6 +137,8 @@ WORK=""
 NAME="${FILE:-none}"
 FORMAT=unknown
 DB_STARTED=no
+LOCK="${DB}-lock"
+LOCK_STARTED=no
 SLICE_OOM_BEFORE=""
 umask 077
 
@@ -190,6 +197,11 @@ cleanup() {
     if [[ "$DB_STARTED" == yes ]] && ! dk rm -f -v "$DB" > /dev/null 2>&1 && [[ -n "$TARGET" ]]; then
         log "COULD NOT REMOVE ${DB} on ${TARGET}: the host's monitor.sh removes it after $(stamp_of "$EXPIRES"), or now by hand:"
         log "  ssh ${TARGET} '${REMOTE_DOCKER} rm -f -v ${DB}'"
+    fi
+    # Removing the lock holder ends its process, which releases the puller's and deploy's locks (issue #951).
+    if [[ "$LOCK_STARTED" == yes ]] && ! dk rm -f -v "$LOCK" > /dev/null 2>&1; then
+        log "COULD NOT REMOVE ${LOCK} on ${TARGET}, which holds the staging puller's and deploy's locks: monitor.sh removes it after $(stamp_of "$EXPIRES"), or now by hand:"
+        log "  ssh ${TARGET} '${REMOTE_DOCKER} rm -f -v ${LOCK}'"
     fi
     if [[ -n "$WORK" && -d "$WORK" ]]; then rm -rf "$WORK"; fi
 }
@@ -250,6 +262,45 @@ read_slice() {
     SLICE_FREE_MB=""
     [[ "$limit" =~ ^[0-9]+$ && "$current" =~ ^[0-9]+$ ]] && SLICE_FREE_MB=$(( (limit - current + ${inactive:-0}) / 1048576 ))
 }
+# require_slice_room: the slice has the whole cap free below MemoryHigh, and its oom count is readable, so a failure can
+# later be put down to the slice or to the cap (review of d88ad47, must-fix 3). Either unreadable fails closed. Asked
+# once the locks are held and again just before the container starts; the count of the last read is the baseline.
+require_slice_room() {
+    read_slice
+    [[ -n "$SLICE_FREE_MB" && "$SLICE_OOM" =~ ^[0-9]+$ ]] \
+        || fail "cannot read the memory of bms.slice on ${TARGET} (${SLICE_DIR}: memory.high or memory.max, memory.current and memory.events.local)"
+    (( SLICE_FREE_MB >= MEMORY_MB )) \
+        || fail "bms.slice on ${TARGET} has ${SLICE_FREE_MB} MB free under its MemoryHigh and the drill needs ${MEMORY_MB} MB: try again when no deploy, rehearsal or other heavy job runs, or lower BMS_DRILL_MEMORY_MB if the data fits"
+    SLICE_OOM_BEFORE="$SLICE_OOM"
+    log "bms.slice on ${TARGET} has ${SLICE_FREE_MB} MB free; the drill needs ${MEMORY_MB} MB of it"
+}
+# take_locks (staging): the staging puller's pull.lock and deploy.sh's deploy.lock, held for the whole drill, so no deploy
+# (a migrate and a second api) runs beside it in the slice, whenever it would start (review of d88ad47, must-fix 1; Lead:
+# take both for the whole run). A small container of the same image, with the host's state folder mounted, takes both
+# with flock and sleeps holding them; removing it (the exit trap, or monitor.sh by the same expiry label) releases them.
+# The lock files must already exist (the puller makes them), so a root-owned one is never created. Either lock taken
+# (a deploy, the puller, a rehearsal) fails the drill.
+# JUSTIFICATION-A3: the locks live on the host and the Mac reaches it only through docker; no existing helper does this.
+take_locks() {
+    local script held=no
+    script='[ -f /state/pull.lock ] && [ -f /state/deploy.lock ] || exit 5; exec 8>> /state/pull.lock; flock -n 8 || exit 3'
+    script+='; exec 9>> /state/deploy.lock; flock -n 9 || exit 4; touch /tmp/held; exec sleep 21600'
+    LOCK_STARTED=yes
+    dk run --detach --name "$LOCK" --network none --log-driver none --memory 16m \
+        --mount "type=bind,source=${REMOTE_STATE},target=/state" --label "bms.offline-drill.expires=${EXPIRES}" \
+        --entrypoint sh "$POSTGRES_IMAGE" -c "$script" > /dev/null \
+        || fail "could not start the lock holder on ${TARGET} (${REMOTE_STATE} mounted)"
+    for _ in 1 2 3 4 5; do
+        if dk exec "$LOCK" test -e /tmp/held > /dev/null 2>&1; then
+            held=yes
+            break
+        fi
+        sleep 1
+    done
+    [[ "$held" == yes ]] \
+        || fail "could not take the staging puller's and deploy's locks on ${TARGET} (${REMOTE_STATE}/pull.lock and deploy.lock): a deploy, the puller or a rehearsal holds one, or they are missing; try again when it ends"
+    log "holding the staging puller's and deploy's locks on ${TARGET}: no deploy runs until the drill ends"
+}
 
 RUNNER=docker
 [[ -n "$TARGET" ]] && RUNNER=ssh
@@ -276,16 +327,12 @@ if [[ -n "$TARGET" ]]; then
     [[ "$available_kb" =~ ^[0-9]+$ ]] || fail "cannot read MemAvailable on ${TARGET}"
     (( available_kb / 1024 >= MEMORY_MB + HEADROOM_MB )) \
         || fail "${TARGET} has $(( available_kb / 1024 )) MB available and the drill needs ${MEMORY_MB} MB plus ${HEADROOM_MB} MB to spare: try again when the host is quieter, or lower BMS_DRILL_MEMORY_MB if the data fits"
-    # On staging the container goes inside bms.slice, so the slice must have room for the whole cap below its
-    # MemoryHigh too, where throttling of the live api and PostgreSQL begins (issue #951, item 1). A deploy cannot start
-    # beside the drill: the puller defers while a bms-offline-drill-* container is on the host (pull-staging.sh).
+    # On staging the container goes inside bms.slice, so no deploy may run beside it (the locks, for the whole run) and
+    # the slice must have room for the whole cap below its MemoryHigh, where throttling of the live api and PostgreSQL
+    # begins (issue #951, item 1).
     if [[ "$ENVIRONMENT" == staging ]]; then
-        read_slice
-        [[ -n "$SLICE_FREE_MB" ]] || fail "cannot read the memory of bms.slice on ${TARGET} (${SLICE_DIR})"
-        (( SLICE_FREE_MB >= MEMORY_MB )) \
-            || fail "bms.slice on ${TARGET} has ${SLICE_FREE_MB} MB free under its MemoryHigh and the drill needs ${MEMORY_MB} MB: try again when no deploy, rehearsal or other heavy job runs, or lower BMS_DRILL_MEMORY_MB if the data fits"
-        SLICE_OOM_BEFORE="$SLICE_OOM"
-        log "bms.slice on ${TARGET} has ${SLICE_FREE_MB} MB free; the drill needs ${MEMORY_MB} MB of it"
+        take_locks
+        require_slice_room
     fi
     log "restoring on ${TARGET}: the backup is decrypted on this Mac and only the decrypted stream crosses ssh"
 else
@@ -367,7 +414,12 @@ fi
 # PGDATA, so the entrypoint chowns and chmods the mount root itself (review of 7a1faf9, finding 1). WAL shares the tmpfs:
 # max_wal_size 64 MB keeps it to about WAL_MB while pg_restore writes (finding 2). On a host short of memory the kernel
 # kills this container before the live stack (--oom-score-adj 1000, finding 3). maintenance_work_mem is pinned to the
-# 64 MB counted in RESTORE_MB, so a newer image's default cannot outgrow the budget (issue #951, item 4).
+# 64 MB counted in RESTORE_MB, so a newer image's default cannot outgrow the budget (issue #951, item 4), and autovacuum
+# is off: its workers would take autovacuum_work_mem (64 MB each, by default maintenance_work_mem's) beyond that budget
+# while the load runs, and a throwaway database needs no vacuum (review of d88ad47, point 5).
+# On staging the slice is asked again here, minutes after the first time (the download and decryption ran between): the
+# locks keep deploys out, not every other job in the slice (review of d88ad47, must-fix 1).
+[[ -n "$TARGET" && "$ENVIRONMENT" == staging ]] && require_slice_room
 log "starting a throwaway postgres (${DB})${WHERE}: ${MEMORY_MB} MB in memory only, ${DATA_MB} MB of it the data directory (about $(( DATA_MB - WAL_MB )) MB of data beside the WAL)"
 DB_STARTED=yes
 dk run --detach --name "$DB" --network none --memory "${MEMORY_MB}m" --memory-swap "${MEMORY_MB}m" "${PLACE[@]}" \
@@ -375,7 +427,7 @@ dk run --detach --name "$DB" --network none --memory "${MEMORY_MB}m" --memory-sw
     --label "bms.offline-drill.expires=${EXPIRES}" \
     --env POSTGRES_PASSWORD="$(random_hex)" --env POSTGRES_DB=bms \
     --env BMS_OWNER_PASSWORD="$(random_hex)" --env BMS_APP_PASSWORD="$(random_hex)" \
-    "$POSTGRES_IMAGE" -c max_wal_size=64MB -c min_wal_size=32MB -c maintenance_work_mem=64MB > /dev/null \
+    "$POSTGRES_IMAGE" -c max_wal_size=64MB -c min_wal_size=32MB -c maintenance_work_mem=64MB -c autovacuum=off > /dev/null \
     || fail "could not start the throwaway postgres${WHERE}"
 ready=0
 # With no log to read, the marker of the end of initdb is TCP: the image's init server listens on the socket only, the
@@ -414,21 +466,35 @@ if [[ "${statuses[1]}" != 0 ]]; then
     # The data outgrew the tmpfs (no space) or the server outgrew the cap (the engine's OOM kill): said plainly, never
     # retried on a disk volume (Lead on the review of e7cc8e6). Any other crash stays "pg_restore failed" (review of
     # 7a1faf9, finding 9).
-    oom="$(dk inspect --format '{{.State.OOMKilled}}' "$DB" 2> /dev/null)"
+    # Whether the engine killed it at a memory limit, whether it still runs, and its exit code. None of these, nor the
+    # df below, may hide the real error when they fail: each is || true and an empty answer is "unknown" (review of
+    # d88ad47, must-fix 2).
+    read -r oom running exit_code <<< "$(dk inspect --format '{{.State.OOMKilled}} {{.State.Running}} {{.State.ExitCode}}' \
+        "$DB" 2> /dev/null || true)"
     # WAL that runs out of room is a PANIC: the client may see only a lost connection and no "no space" at all, and
     # there is no container log to read. So the tmpfs itself is asked: under two WAL segments (32 MB) left is full
     # (issue #951, item 3).
-    left_kb="$(dk exec "$DB" df -Pk /var/lib/postgresql/data 2> /dev/null | awk 'NR == 2 { print $4 }')"
+    left_kb="$(dk exec "$DB" df -Pk /var/lib/postgresql/data 2> /dev/null | awk 'NR == 2 { print $4 }' || true)"
+    did_not_fit="the restore did not fit in the container's ${MEMORY_MB} MB (${DATA_MB} MB of tmpfs, about $(( DATA_MB - WAL_MB )) MB of data beside the WAL): set BMS_DRILL_MEMORY_MB higher (restore-from-backup.md section 8.5); it never falls back to disk"
     if [[ "$oom" == true ]] || grep -qiE 'no space left on device|could not extend file' <<< "$restore_err" \
         || [[ "$left_kb" =~ ^[0-9]+$ && "$left_kb" -lt 32768 ]]; then
         # On staging the slice, not the cap, may have been the limit: its own oom count rose while the drill ran
-        # (something else in the slice grew), and raising the cap would only make that worse (issue #951, item 1).
+        # (something else in the slice grew), and raising the cap would only make that worse (issue #951, item 1). A
+        # count that cannot be read again (the slice may still be full) gives a message that blames neither and never
+        # advises raising the cap (review of d88ad47, must-fix 3).
         if [[ -n "$SLICE_OOM_BEFORE" ]]; then
             read_slice
-            [[ "$SLICE_OOM" =~ ^[0-9]+$ ]] && (( SLICE_OOM > SLICE_OOM_BEFORE )) \
+            [[ "$SLICE_OOM" =~ ^[0-9]+$ ]] \
+                || fail "the restore ran out of memory on ${TARGET} and bms.slice could not be read again, so whether the slice or the container's ${MEMORY_MB} MB was the limit is unknown: run it again when staging is quiet before raising BMS_DRILL_MEMORY_MB"
+            (( SLICE_OOM > SLICE_OOM_BEFORE )) \
                 && fail "bms.slice on ${TARGET} ran out of memory while the drill ran, so its container was killed: something else in the slice grew (a deploy or a rehearsal, say); try again when staging is quiet. Raising BMS_DRILL_MEMORY_MB will not help"
         fi
-        fail "the restore did not fit in the container's ${MEMORY_MB} MB (${DATA_MB} MB of tmpfs, about $(( DATA_MB - WAL_MB )) MB of data beside the WAL): set BMS_DRILL_MEMORY_MB higher (restore-from-backup.md section 8.5); it never falls back to disk"
+        fail "$did_not_fit"
+    fi
+    # The server stopped during the restore, not at a memory limit: after a WAL panic the postmaster cannot recover on a
+    # full tmpfs and exits, the tmpfs goes with the container, and df has nothing to say (review of d88ad47, point 4).
+    if [[ "$running" == false && "$oom" == false ]]; then
+        fail "the throwaway postgres stopped during the restore (exit ${exit_code:-unknown}), which a data directory that filled its tmpfs (a WAL panic) causes: ${did_not_fit#*: }"
     fi
     fail "pg_restore failed"
 fi

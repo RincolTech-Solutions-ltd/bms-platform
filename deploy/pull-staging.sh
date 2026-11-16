@@ -116,25 +116,37 @@ remove_old_images() {
 # A remote offline restore drill (restore-drill-offline.sh --remote, issue #951) keeps its database's tmpfs in bms.slice
 # for its whole run, and tmpfs pages cannot be reclaimed; a deploy beside it (a migrate and a second api) could take the
 # slice past MemoryHigh and throttle the live stack. So a new release waits while a bms-offline-drill-* container is on
-# the host, and a docker that cannot list its containers counts as one being there. The drill checks the slice's room
-# when it starts. deploy/tests/cleanup-test.sh runs this function with a stub docker.
+# the host, and a docker that cannot list its containers counts as one being there. The drill also holds this script's
+# pull.lock and deploy.sh's deploy.lock for its whole run, so this is the second line, and the one that names the
+# reason when the lock is taken. It logs once per drill, not on every run of the timer (state/offline_drill_wait keeps
+# what it last logged). deploy/tests/cleanup-test.sh runs this function with a stub docker.
 offline_drill_present() {
-    local names
-    if ! names="$(docker ps --all --format '{{.Names}}' 2> /dev/null)"; then
-        log "cannot list the containers to look for an offline restore drill; deploying on a later run"
-        return 0
+    local names seen
+    if names="$(docker ps --all --format '{{.Names}}' 2> /dev/null)"; then
+        seen="$(grep '^bms-offline-drill-' <<< "$names" | sort | tr '\n' ' ' || true)"
+    else
+        seen="cannot list"
     fi
-    if grep -q '^bms-offline-drill-' <<< "$names"; then
-        log "an offline restore drill's database (bms-offline-drill-*) is on this host; deploying on a later run"
-        return 0
+    if [[ -z "$seen" ]]; then
+        rm -f state/offline_drill_wait
+        return 1
     fi
-    return 1
+    if [[ "$(cat state/offline_drill_wait 2> /dev/null || true)" != "$seen" ]]; then
+        if [[ "$seen" == "cannot list" ]]; then
+            log "cannot list the containers to look for an offline restore drill; deploying on a later run"
+        else
+            log "an offline restore drill (${seen% }) is on this host; deploying on a later run (logged once per drill)"
+        fi
+        printf '%s\n' "$seen" > state/offline_drill_wait
+    fi
+    return 0
 }
 
-# One run at a time; a run that finds the previous one still deploying just ends.
+# One run at a time; a run that finds the previous one still deploying just ends. An offline drill holds this lock for
+# its whole run; then the reason is logged once, not "previous run" every two minutes.
 exec 8> state/pull.lock
 if ! flock --nonblock 8; then
-    log "previous run still in progress"
+    offline_drill_present || log "previous run still in progress"
     exit 0
 fi
 

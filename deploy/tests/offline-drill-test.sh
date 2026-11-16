@@ -57,7 +57,10 @@ fake_mac() {
 # JUSTIFICATION-A3: the remote mode (#949) needs a fake ssh and host; no existing stub carries either.
 fake_remote() {
     fake_mac "$1"
-    mkdir -p "$FAKE/hostbin"
+    # The staging host's state folder, with the puller's and deploy's lock files the puller makes (issue #951).
+    mkdir -p "$FAKE/hostbin" "$FAKE/state"
+    : > "$FAKE/state/pull.lock"
+    : > "$FAKE/state/deploy.lock"
     mv "$BIN/docker" "$FAKE/hostbin/docker"
     # Ahead of any real docker on this machine: a call on the Mac is logged and fails.
     printf '%s\n' '#!/bin/sh' 'echo "mac-docker $*" >> "$FAKE/calls.log"' 'exit 1' > "$BIN/docker"
@@ -123,36 +126,83 @@ case "$1" in
             exit 0
         fi
         # bms.slice's memory files (issue #951): MemoryHigh 1500M, FAKE_SLICE_FREE_MB free below it (default 800), and
-        # the slice's own oom count, FAKE_SLICE_OOM_AFTER from the second read on (the read after a failed restore).
+        # the slice's own oom count. A staging drill reads it twice before its container starts; from the third read on
+        # (the read after a failed restore) the count is FAKE_SLICE_OOM_AFTER, or the read fails with
+        # FAKE_SLICE_REREAD_FAIL. FAKE_SLICE_NO_EVENTS: a kernel without memory.events.local.
         if [[ "$*" == *"target=/slice,readonly --entrypoint grep "* ]]; then
             [[ -z "${FAKE_SLICE_UNREADABLE:-}" ]] || exit 2
+            echo read >> "$FAKE/slice-reads"
             oom="${FAKE_SLICE_OOM:-0}"
-            [[ -e "$FAKE/slice-read" ]] && oom="${FAKE_SLICE_OOM_AFTER:-$oom}"
-            : > "$FAKE/slice-read"
+            # FAKE_SLICE_FREE_MB_LATER: the room from the second read on (the read just before the database starts).
+            if (( $(wc -l < "$FAKE/slice-reads") >= 2 )) && [[ -n "${FAKE_SLICE_FREE_MB_LATER:-}" ]]; then
+                FAKE_SLICE_FREE_MB="$FAKE_SLICE_FREE_MB_LATER"
+            fi
+            if (( $(wc -l < "$FAKE/slice-reads") >= 3 )); then
+                [[ -z "${FAKE_SLICE_REREAD_FAIL:-}" ]] || exit 125
+                oom="${FAKE_SLICE_OOM_AFTER:-$oom}"
+            fi
             high=1572864000
             printf '/slice/memory.high:%s\n/slice/memory.max:1677721600\n/slice/memory.current:%s\n' \
                 "$high" $(( high - ${FAKE_SLICE_FREE_MB:-800} * 1048576 + 52428800 ))
             printf '/slice/memory.stat:anon 1\n/slice/memory.stat:inactive_file 52428800\n'
-            printf '/slice/memory.events.local:low 0\n/slice/memory.events.local:oom %s\n' "$oom"
+            [[ -n "${FAKE_SLICE_NO_EVENTS:-}" ]] \
+                || printf '/slice/memory.events.local:low 0\n/slice/memory.events.local:oom %s\n' "$oom"
             exit 0
+        fi
+        # The lock holder (issue #951): its script runs for real, with sh and flock, against the fake host's state folder
+        # $FAKE/state, in the background as the container would; its pid is kept so rm can end it.
+        if [[ "$*" == *"--name bms-offline-drill-"*"-lock "* ]]; then
+            script="${*: -1}"
+            script="${script//\/state\//$FAKE/state/}"
+            script="${script//\/tmp\/held/$FAKE/lock-held}"
+            script="${script//sleep 21600/sleep 120}"
+            sh -c "$script" > /dev/null 2>&1 < /dev/null &
+            echo "$!" > "$FAKE/lock-pid"
+            echo "fake-lock-id"; exit 0
         fi
         echo "fake-container-id"; echo started > "$FAKE/container" ;;
     image) [[ -z "${FAKE_NO_IMAGE:-}" ]] || { echo "Error: No such image: $*" >&2; exit 1; }; echo "sha256:fake" ;;
     ps) [[ -f "$FAKE/host_containers" ]] && cat "$FAKE/host_containers" ;;
     logs) echo "PostgreSQL init process complete; ready for start up." ;;
-    rm) [[ -z "${FAKE_RM_FAIL:-}" ]] || exit 1; rm -f "$FAKE/container" ;;
-    inspect) [[ -n "${FAKE_OOM:-}" ]] && echo true || echo false ;;
+    rm)
+        [[ -z "${FAKE_RM_FAIL:-}" ]] || exit 1
+        if [[ "${*: -1}" == *-lock ]]; then
+            [[ -s "$FAKE/lock-pid" ]] && kill "$(cat "$FAKE/lock-pid")" 2> /dev/null
+            # Wait until the holder has gone and its locks with it, as docker rm -f returns once the container is gone.
+            for _ in $(seq 1 50); do kill -0 "$(cat "$FAKE/lock-pid")" 2> /dev/null || break; sleep 0.1; done
+            rm -f "$FAKE/lock-pid" "$FAKE/lock-held"
+        else
+            rm -f "$FAKE/container"
+        fi ;;
+    # OOMKilled, Running and ExitCode: FAKE_OOM killed at a limit, FAKE_EXITED=<code> stopped by itself, FAKE_INSPECT_FAIL
+    # no answer.
+    inspect)
+        [[ -z "${FAKE_INSPECT_FAIL:-}" ]] || exit 1
+        if [[ -n "${FAKE_OOM:-}" ]]; then echo "true false 137"
+        elif [[ -n "${FAKE_EXITED:-}" ]]; then echo "false false ${FAKE_EXITED}"
+        else echo "false true 0"; fi ;;
     exec)
         shift
         [[ "$1" == -i ]] && shift
         shift
         case "$*" in
             pg_isready*) exit 0 ;;
-            # The tmpfs after a failed restore (issue #951): FAKE_DF_LEFT_KB left, default plenty.
+            "test -e /tmp/held") test -e "$FAKE/lock-held"; exit $? ;;
+            # The tmpfs after a failed restore (issue #951): FAKE_DF_LEFT_KB left, default plenty; FAKE_DF_FAIL: the
+            # container is gone and exec fails.
             "df -Pk /var/lib/postgresql/data")
+                [[ -z "${FAKE_DF_FAIL:-}" ]] || { echo "Error response from daemon: container is not running" >&2; exit 1; }
                 printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
                 printf 'tmpfs 294912 %s %s 50%% /var/lib/postgresql/data\n' 94912 "${FAKE_DF_LEFT_KB:-200000}" ;;
             pg_restore*)
+                # Whether the puller's and deploy's locks are held while the restore runs (a real flock on the files).
+                for lock in pull deploy; do
+                    if [[ -e "$FAKE/state/$lock.lock" ]] && flock --nonblock "$FAKE/state/$lock.lock" true; then
+                        echo "$lock free"
+                    else
+                        echo "$lock held"
+                    fi
+                done > "$FAKE/locks-during-restore"
                 cat > "$FAKE/restored"
                 [[ -n "${FAKE_RESTORE_FAIL:-}" ]] && { echo "pg_restore: error: row (Fabricated Customer, 0700000000)" >&2; exit 1; }
                 [[ -n "${FAKE_RESTORE_NOSPACE:-}" ]] && { echo "pg_restore: error: could not extend file: No space left on device" >&2; exit 1; }
@@ -224,7 +274,7 @@ check() {
 }
 recorded() { grep -q -- "$1" "$HOME/bms-restore-drills/last_offline_drill.txt" && grep -q -- "$1" "$HOME/bms-restore-drills/history.log"; }
 uploaded() { grep -q -- "$1" "$FAKE/r2/last_offline_drill.txt"; }
-nothing_left() { [[ -z "$(find "$TMPDIR" -mindepth 1 -print -quit)" && ! -e "$FAKE/container" ]]; }
+nothing_left() { [[ -z "$(find "$TMPDIR" -mindepth 1 -print -quit)" && ! -e "$FAKE/container" && ! -e "$FAKE/lock-pid" ]]; }
 no_secret_shown() {
     ! grep -qF -- "$FAKE_SECRET" <<< "$OUTPUT" && ! grep -rqF -- "$FAKE_SECRET" "$HOME/bms-restore-drills" "$FAKE/r2" \
         && ! grep -qF -- "$FAKE_SECRET" "$FAKE/calls.log" && ! grep -qF -- "$OLD_KEY" "$FAKE/calls.log"
@@ -362,8 +412,8 @@ check "remote: its data directory is a tmpfs inside the cap, with no swap and no
 # subdirectory, so the entrypoint owns and chmods the mount root), the WAL is kept small, and the kernel kills this first.
 check "remote: no mode on the tmpfs and no PGDATA of its own" \
     eval '! host_run | grep -q -- "mode=0700\|PGDATA"'
-check "remote: the server keeps its WAL small, and its maintenance_work_mem at the budgeted 64 MB, as arguments after the image" \
-    eval 'host_run | grep -q -- "postgres:fake -c max_wal_size=64MB -c min_wal_size=32MB -c maintenance_work_mem=64MB$"'
+check "remote: the server keeps its WAL small, its maintenance_work_mem at the budgeted 64 MB and autovacuum off, as arguments after the image" \
+    eval 'host_run | grep -q -- "postgres:fake -c max_wal_size=64MB -c min_wal_size=32MB -c maintenance_work_mem=64MB -c autovacuum=off$"'
 check "remote: readiness is the final server on TCP, never a log read" \
     eval 'grep -q "^docker exec bms-offline-drill-[0-9]* pg_isready -h 127.0.0.1 " "$FAKE/calls.log" && ! grep -q "^docker logs" "$FAKE/calls.log"'
 check "remote: production is not put in bms.slice" eval '! host_run | grep -q -- --cgroup-parent'
@@ -429,7 +479,7 @@ check "remote: SQL with quotes reaches the host's sh word for word, and BMS_DRIL
 fake_remote remote-too-big; age_backup
 FAKE_RESTORE_NOSPACE=1 drill --remote bms-staging --environment staging
 check "remote: a restore that outgrows the tmpfs fails plainly, naming the cap and the setting" \
-    eval 'failed_with "the restore did not fit in the container.s 640 MB (288 MB of tmpfs, about 192 MB of data beside the WAL): set BMS_DRILL_MEMORY_MB higher" &&[[ "$(grep -c "^docker run --detach " "$FAKE/calls.log")" == 1 ]] && ! grep -q -- "--volume\|type=volume" "$FAKE/calls.log"'
+    eval 'failed_with "the restore did not fit in the container.s 640 MB (288 MB of tmpfs, about 192 MB of data beside the WAL): set BMS_DRILL_MEMORY_MB higher" && [[ "$(grep -c "^docker run --detach .*--tmpfs " "$FAKE/calls.log")" == 1 ]] && ! grep -q -- "--volume\|type=volume" "$FAKE/calls.log"'
 # Lead on the review of 7a1faf9, point 3: a host without the cap and 256 MB to spare fails before the key is read.
 fake_remote remote-short; age_backup
 FAKE_MEMAVAILABLE_KB=1048576 drill --remote bms-production
@@ -467,12 +517,12 @@ slice_read() { grep -q "^sudo -n -u bms docker run --rm --network none --log-dri
 fake_remote remote-slice-short; age_backup
 FAKE_SLICE_FREE_MB=500 drill --remote bms-staging --environment staging
 check "remote staging: a bms.slice with less room below MemoryHigh than the cap fails before the key is read or anything starts" \
-    eval 'failed_with "bms.slice on bms-staging has 500 MB free under its MemoryHigh and the drill needs 640 MB" && ! grep -q "^security" "$FAKE/calls.log" && ! grep -q "docker run --detach" "$FAKE/calls.log"'
+    eval 'failed_with "bms.slice on bms-staging has 500 MB free under its MemoryHigh and the drill needs 640 MB" && ! grep -q "^security" "$FAKE/calls.log" && ! grep -q "docker run --detach .*--tmpfs" "$FAKE/calls.log"'
 check "remote staging: the slice is read through the host's docker, read only, with no network and no log" slice_read
 fake_remote remote-slice-unreadable; age_backup
 FAKE_SLICE_UNREADABLE=1 drill --remote bms-staging --environment staging
 check "remote staging: a slice whose memory cannot be read fails closed" \
-    eval 'failed_with "cannot read the memory of bms.slice on bms-staging" && ! grep -q "docker run --detach" "$FAKE/calls.log"'
+    eval 'failed_with "cannot read the memory of bms.slice on bms-staging" && ! grep -q "docker run --detach .*--tmpfs" "$FAKE/calls.log"'
 fake_remote remote-slice-room; age_backup
 FAKE_SLICE_FREE_MB=700 drill --remote bms-staging --environment staging
 check "remote staging: a slice with room for the cap runs the drill and says how much room it had" \
@@ -489,6 +539,68 @@ fake_remote remote-cap-oom-staging; age_backup
 FAKE_RESTORE_FAIL=1 FAKE_OOM=1 FAKE_SLICE_OOM=3 drill --remote bms-staging --environment staging
 check "remote staging: a container killed at its own cap, the slice never at its limit, is did not fit: raise the cap" \
     eval 'failed_with "the restore did not fit in the container.s 640 MB" && recorded "set BMS_DRILL_MEMORY_MB higher"'
+
+# Review of d88ad47. JUSTIFICATION-A3: one case per must-fix and point taken; they reuse the fakes above.
+# Must-fix 1 (Lead: take pull.lock and deploy.lock for the whole run): the locks are the real files, taken with flock.
+lock_run() { grep -q "^sudo -n -u bms docker run --detach --name bms-offline-drill-[0-9]*-lock --network none --log-driver none --memory 16m --mount type=bind,source=/opt/bms/state,target=/state --label bms.offline-drill.expires=[0-9]* --entrypoint sh postgres:fake -c .*flock -n 8.*flock -n 9" "$FAKE/calls.log"; }
+check "remote staging: the drill holds the puller's and deploy's locks while it restores" \
+    eval '[[ "$(cat "$WORK/remote-slice-room/fake/locks-during-restore")" == "pull held"$'"'"'\n'"'"'"deploy held" ]] && FAKE="$WORK/remote-slice-room/fake" lock_run'
+check "remote staging: and releases them when it ends, the lock holder removed like the database" \
+    eval 'flock --nonblock "$WORK/remote-slice-room/fake/state/pull.lock" true && flock --nonblock "$WORK/remote-slice-room/fake/state/deploy.lock" true && grep -q "^sudo -n -u bms docker rm -f -v bms-offline-drill-[0-9]*-lock$" "$WORK/remote-slice-room/fake/calls.log"'
+check "remote production: no lock is taken" eval '! grep -q -- "-lock" "$WORK/remote-ok/fake/calls.log"'
+for lock in pull deploy; do
+    fake_remote "remote-$lock-locked"; age_backup
+    flock "$FAKE/state/$lock.lock" sleep 30 &
+    holder=$!
+    for _ in $(seq 1 50); do flock --nonblock "$FAKE/state/$lock.lock" true || break; sleep 0.1; done
+    drill --remote bms-staging --environment staging
+    kill "$holder" 2> /dev/null; wait "$holder" 2> /dev/null
+    check "remote staging: a $lock.lock already held (a deploy or the puller) fails before the key is read or the database starts" \
+        eval 'failed_with "could not take the staging puller.s and deploy.s locks on bms-staging" && ! grep -q "^security" "$FAKE/calls.log" && ! grep -q "docker run --detach .*--tmpfs" "$FAKE/calls.log"'
+done
+fake_remote remote-locks-fail-later; age_backup
+FAKE_RESTORE_FAIL=1 drill --remote bms-staging --environment staging
+check "remote staging: a failed drill releases the locks too" \
+    eval 'failed_with "pg_restore failed" && flock --nonblock "$FAKE/state/pull.lock" true && flock --nonblock "$FAKE/state/deploy.lock" true'
+fake_remote remote-no-lockfiles; age_backup; rm "$FAKE/state/deploy.lock"
+drill --remote bms-staging --environment staging
+check "remote staging: missing lock files fail the drill, and none is created" \
+    eval 'failed_with "could not take the staging puller.s and deploy.s locks" && [[ ! -e "$FAKE/state/deploy.lock" ]]'
+fake_remote remote-slice-twice; age_backup
+drill --remote bms-staging --environment staging
+check "remote staging: the slice is asked again just before the database starts" \
+    eval '[[ "$STATUS" == 0 && "$(grep -c "^docker run --rm .*target=/slice" "$FAKE/calls.log")" == 2 ]] && [[ "$(grep -n "^docker run --rm .*target=/slice" "$FAKE/calls.log" | tail -n 1 | cut -d: -f1)" -lt "$(grep -n "^docker run --detach .*--tmpfs" "$FAKE/calls.log" | cut -d: -f1)" ]]'
+fake_remote remote-slice-late; age_backup
+# The second read, after the download, finds the slice filled meanwhile (by a job the locks do not keep out).
+FAKE_SLICE_FREE_MB_LATER=500 drill --remote bms-staging --environment staging
+check "remote staging: a slice that filled while the backup downloaded fails before the database starts, and releases the locks" \
+    eval 'failed_with "bms.slice on bms-staging has 500 MB free under its MemoryHigh" && ! grep -q "docker run --detach .*--tmpfs" "$FAKE/calls.log" && flock --nonblock "$FAKE/state/pull.lock" true'
+# Must-fix 2: a df that fails never hides the real error.
+fake_remote remote-df-fails-oom; age_backup
+FAKE_RESTORE_FAIL=1 FAKE_OOM=1 FAKE_DF_FAIL=1 drill --remote bms-production
+check "remote: df failing after an OOM kill still reports did not fit" failed_with "the restore did not fit in the container.s 1280 MB"
+fake_remote remote-df-fails-plain; age_backup
+FAKE_RESTORE_FAIL=1 FAKE_DF_FAIL=1 drill --remote bms-production
+check "remote: df failing after a plain failure still reports pg_restore failed" \
+    eval 'failed_with "pg_restore failed" && ! recorded "did not fit"'
+fake_remote remote-inspect-fails; age_backup
+FAKE_RESTORE_FAIL=1 FAKE_INSPECT_FAIL=1 FAKE_DF_FAIL=1 drill --remote bms-production
+check "remote: inspect and df both failing still reports pg_restore failed" \
+    eval 'failed_with "pg_restore failed" && ! recorded "did not fit"'
+# Must-fix 3: the oom count unreadable at the start fails closed; unreadable after a failure is neutral.
+fake_remote remote-no-events; age_backup
+FAKE_SLICE_NO_EVENTS=1 drill --remote bms-staging --environment staging
+check "remote staging: a slice without memory.events.local fails closed before anything starts" \
+    eval 'failed_with "cannot read the memory of bms.slice on bms-staging" && ! grep -q "docker run --detach .*--tmpfs" "$FAKE/calls.log"'
+fake_remote remote-reread-fails; age_backup
+FAKE_RESTORE_FAIL=1 FAKE_OOM=1 FAKE_SLICE_REREAD_FAIL=1 drill --remote bms-staging --environment staging
+check "remote staging: an OOM with the slice unreadable afterwards blames neither and never advises raising the cap" \
+    eval 'failed_with "bms.slice could not be read again, so whether the slice or the container.s 640 MB was the limit is unknown" && ! recorded "set BMS_DRILL_MEMORY_MB higher"'
+# Point 4: the server stopped by itself during the restore (a WAL panic it could not recover from) is did not fit.
+fake_remote remote-exited; age_backup
+FAKE_RESTORE_FAIL=1 FAKE_EXITED=1 FAKE_DF_FAIL=1 drill --remote bms-production
+check "remote: a server that stopped during the restore, not at a limit, says so and that the tmpfs filled" \
+    eval 'failed_with "the throwaway postgres stopped during the restore (exit 1), which a data directory that filled its tmpfs (a WAL panic) causes: set BMS_DRILL_MEMORY_MB higher"'
 
 # Review of e7cc8e6, finding 11: never beside another drill's or a rehearsal's database.
 fake_remote remote-busy; age_backup; printf '%s\n' bms-api-1 bms-restore-drill-4242 > "$FAKE/host_containers"

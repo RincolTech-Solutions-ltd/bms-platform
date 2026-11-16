@@ -213,23 +213,34 @@ fi
 #     puller's own offline_drill_present against the stub docker: a drill's container, none, and a docker that errors.
 # JUSTIFICATION-A3: new test cases for the puller's new guard; they reuse this file's stub docker and helpers.
 eval "$(sed -n '/^offline_drill_present() {/,/^}/p' "$HERE/../pull-staging.sh")"
-printf '%s\n' "aaa111 sha-img" "bms-offline-drill-4242 sha-pg" > "$STUB/containers"
-out="$(offline_drill_present)"; status=$?
-if [[ "$status" == 0 && "$out" == *"bms-offline-drill-*) is on this host; deploying on a later run"* ]]; then
+mkdir -p "$WORK/pullhost/state"
+present() { (cd "$WORK/pullhost" && set -euo pipefail && offline_drill_present); }
+printf '%s\n' "aaa111 sha-img" "bms-offline-drill-4242 sha-pg" "bms-offline-drill-4242-lock sha-pg" > "$STUB/containers"
+out="$(present)"; status=$?
+if [[ "$status" == 0 && "$out" == *"an offline restore drill (bms-offline-drill-4242 bms-offline-drill-4242-lock) is on this host; deploying on a later run"* ]]; then
     ok "the puller defers a deploy while an offline drill's database is on the host"
 else
     fail "offline_drill_present with a drill's container: status $status, '$out'"
 fi
+# Review of d88ad47, nice-to-have 6: once per drill, not every two minutes for its whole length.
+out="$(present)"; status=$?
+if [[ "$status" == 0 && -z "$out" ]]; then ok "the second run during the same drill defers without logging again"; else fail "second run: status $status, '$out'"; fi
 printf '%s\n' "aaa111 sha-img" "bms-restore-drill-1 sha-pg" > "$STUB/containers"
-if offline_drill_present > /dev/null; then fail "offline_drill_present without a drill's container"; else ok "with no offline drill's database the puller goes on"; fi
+if present > /dev/null; then fail "offline_drill_present without a drill's container"; else ok "with no offline drill's database the puller goes on (under set -euo pipefail)"; fi
+if [[ ! -e "$WORK/pullhost/state/offline_drill_wait" ]]; then ok "and forgets the drill it logged, so the next one is logged"; else fail "state/offline_drill_wait left behind"; fi
 mkdir -p "$WORK/broken"
 printf '%s\n' '#!/bin/sh' 'echo "Cannot connect to the Docker daemon" >&2' 'exit 1' > "$WORK/broken/docker"
 chmod +x "$WORK/broken/docker"
-out="$(PATH="$WORK/broken:$PATH" offline_drill_present)"; status=$?
+out="$(PATH="$WORK/broken:$PATH" present)"; status=$?
 if [[ "$status" == 0 && "$out" == *"cannot list the containers"* ]]; then
     ok "a docker ps that errors defers the deploy too (fails closed)"
 else
     fail "offline_drill_present with a broken docker: status $status, '$out'"
+fi
+if grep -q '^    offline_drill_present || log "previous run still in progress"$' "$HERE/../pull-staging.sh"; then
+    ok "a puller that finds its lock held by an offline drill says so, not previous run"
+else
+    fail "the pull.lock branch does not name an offline drill"
 fi
 guard_line="$(grep -n '^if offline_drill_present; then$' "$HERE/../pull-staging.sh" | cut -d: -f1)"
 # shellcheck disable=SC2016 # the literal $tag is what the script must contain
