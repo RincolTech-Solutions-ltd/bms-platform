@@ -91,11 +91,12 @@ decrypt.
    section 8.5, runs `age --decrypt` on the Mac with the Keychain key and pipes the plaintext dump over ssh into
    `pg_restore` in a throwaway PostgreSQL that it starts through the host's docker (a configurable command prefix, by
    default `sudo -n -u bms docker`). The container has no network, a memory cap with no swap (256 MB for the PostgreSQL
-   server, 96 MB for the restore that runs in the same cgroup, `pg_restore` itself and the server's `maintenance_work_mem`
-   pinned at 64 MB (issue #951), plus the data: 640 MB inside `bms.slice` on staging, as the weekly host drill is kept in
+   server, 96 MB for the restore that runs in the same cgroup, `pg_restore` itself and the server's
+   `maintenance_work_mem` pinned at 64 MB (issue #951), plus the data: 640 MB inside `bms.slice` on staging, as the weekly host drill is kept in
    it; 1280 MB on production, which has no slice; `BMS_DRILL_MEMORY_MB`), its data directory on a tmpfs inside that cap
-   (the cap less 352 MB, WAL included, kept small with `max_wal_size=64MB`), no log driver and `--oom-score-adj 1000` (on a host short of memory the kernel kills
-   it before the live stack), is created by the host's own `/opt/bms/postgres/initdb` roles script, and is removed on every
+   (the cap less 352 MB, WAL included, kept small with `max_wal_size=64MB`; autovacuum off, so no worker takes memory
+   beyond that budget), no log driver and `--oom-score-adj 1000` (on a host short of memory the kernel kills it before
+   the live stack), is created by the host's own `/opt/bms/postgres/initdb` roles script, and is removed on every
    exit path: the Mac's exit trap removes it over ssh, and its label `bms.offline-drill.expires` (6 hours after the start)
    lets the host's `monitor.sh` remove it if the Mac dies mid-run. The key never crosses ssh; only the decrypted stream
    does, to a host that already holds the same live data. The decrypted dump is never written to a file on the Mac or the
@@ -107,11 +108,15 @@ decrypt.
    the image, the memory) is validated, and each word is single-quoted for a POSIX shell. A remote drill refuses a host
    that runs another drill's or a rehearsal's database, or that has less than the container's memory and 256 MB more
    available (`MemAvailable`, read through the same docker), and the weekly drill (before it downloads anything, and when
-   it cannot list the containers) and a rehearsal refuse while one is there. On staging it also refuses unless
-   `bms.slice` has the whole cap free below its `MemoryHigh`, read through the same docker, and the staging puller deploys
-   no release while its container is on the host, so a deploy never joins it in the slice (issue #951); a container the
-   slice's own limit killed is reported as that, never as a cap to raise. A failed restore asks the tmpfs how full it is,
-   so a WAL that ran out of room (a server panic the client sees only as a lost connection) reads as "did not fit".
+   it cannot list the containers) and a rehearsal refuse while one is there. On staging it holds the puller's
+   `pull.lock` and `deploy.sh`'s `deploy.lock` for its whole run (a small container of the same image takes them with
+   `flock` on the host's state folder and carries the same expiry label, so the exit trap or `monitor.sh` releases them),
+   so no deploy runs beside it in the slice, and the puller, finding its lock held, says why once (issue #951). It also
+   refuses unless `bms.slice` has the whole cap free below its `MemoryHigh`, asked once the locks are held and again
+   just before the database starts, and unless the slice's own oom count is readable; a container the slice's limit
+   killed is reported as that, never as a cap to raise. A failed restore asks the tmpfs how full it is and whether the
+   server stopped by itself, so a WAL that ran out of room (a server panic the client sees only as a lost connection)
+   reads as "did not fit". Production takes no lock: it has no slice, and a production deploy is not held back for hours.
    `--local` keeps the old mode for a Mac that has an engine, with
    the same tmpfs and no log.
 
@@ -128,8 +133,8 @@ decrypt.
 - The remote drill puts the restored rows, for the length of the drill, in a container's memory on the host whose live
   database holds the same rows, and its checks are answered by that host. It adds no data the host did not hold, and none
   of it on disk. The whole restore must fit in the container's tmpfs beside about 96 MB of WAL: about 192 MB of data on
-  staging, about 832 MB on production by default (issue #951 counts the restore's own memory beside the server), raised with `BMS_DRILL_MEMORY_MB` as the data grows; a restore that
-  does not fit fails the drill plainly, it never falls back to a disk volume. A compromised host could answer the checks
+  staging, about 832 MB on production by default (issue #951 counts the restore's own memory beside the server),
+  raised with `BMS_DRILL_MEMORY_MB` as the data grows; a restore that does not fit fails the drill plainly, it never falls back to a disk volume. A compromised host could answer the checks
   falsely, as the last consequence below already allows for the records; the decryption, and so the proof of the key,
   stays on the Mac.
 - With the default prefix, sudo writes each command line to the host's auth log, so the `docker run` line with the
