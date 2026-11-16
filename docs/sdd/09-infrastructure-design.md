@@ -458,7 +458,8 @@ deletion 90 days after closing), all Africa/Kampala (ADR-024).
    (container, cluster identifier, label, network, data directory and its tmpfs mount), then streams a
    `pg_dump` of the live database (pg_dump's own read-only snapshot, as `bms_owner`, at nice 19 and the
    lowest best-effort I/O priority for pg_dump and its server process, reniced as `postgres` only after
-   the pid is checked, in the same exec, to still be a local `bms_owner` backend) straight into
+   the pid is checked, in the same exec, to still be a local `bms_owner` backend started with the
+   session) straight into
    its `pg_restore`, so the dump is never a file. The dump holds `ACCESS SHARE` on every table and a
    vacuum horizon while it runs, so it is bounded to 5 minutes and 2 seconds a MB of live data (an
    hour at most); migrations, the stack's only `ACCESS EXCLUSIVE` requests, are kept out by the deploy

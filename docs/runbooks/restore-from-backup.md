@@ -265,7 +265,8 @@ switch of section 8.4, with neither `BACKUP_ENCRYPTION_KEY` nor the R2 settings 
    (the one session named `bms-rehearsal-<pid>-dump`) is put at the same as `postgres`, its own user, since a container
    cannot renice another user's process. A process at nice 19 cannot be put back, so the change is one `sh -c` in the
    live container that first checks the pid's process title is still `postgres: bms_owner bms [local]`, as pg_dump's
-   is and a live API connection (`bms_app` over TCP) never is, and changes nothing otherwise. The log says it was
+   is and a live API connection (`bms_app` over TCP) never is, and that the process started within 2 seconds of the
+   session's `backend_start`, and changes nothing otherwise. The log says it was
    lowered, or that the process was no longer the dump's, or that it could not, and the dump goes on either way. I/O
    priorities take effect only under a scheduler that honours them (BFQ), not under `none` or `mq-deadline`; the CPU
    priority always does. A backend at nice 19 can still hold a lightweight lock that others wait on, briefly. The
@@ -281,7 +282,7 @@ switch of section 8.4, with neither `BACKUP_ENCRYPTION_KEY` nor the R2 settings 
    is bounded (step 3) so that nothing waits on it more than minutes; `--lock-wait-timeout=60s` keeps pg_dump itself
    from queueing behind a lock. The dump's session is killed at that bound, or at the deadline, like every live
    session below. An error of either is shown on the terminal only (it can quote a row): the script never writes it to
-   a file, so on production do not redirect or tee its output either.
+   a file, so do not redirect or tee its output either (section 5.2.1 runs it on the terminal only).
 5. Migrates it with the live API's own image, refuses if its Flyway version is then not the live one, and copies the
    run's staged rows from the live database in one `REPEATABLE READ READ ONLY` transaction: the run, its batches, rows,
    issues, resolutions and the mappings its batches name. The throwaway side loads them in one transaction that commits
@@ -315,8 +316,9 @@ Exit status: 0 rehearsed and stored; 1 failed (a commit that ran and failed or h
 anything earlier stores nothing, and so does an API container that exits 1 without starting: the script then says
 "without recording an outcome", or "did not say whether it recorded an outcome" when the throwaway database does not
 answer); 2 usage; 3 refused (the run, the target, the room or the size). It writes none of the drill's
-state files, so `monitor.sh` never reads a rehearsal as a drill. The output (the report, codes, counts and amounts) has
-no personal value; keep it with the cutover notes.
+state files, so `monitor.sh` never reads a rehearsal as a drill. The report, codes, counts and amounts it prints have
+no personal value; copy them into the cutover notes by hand, but never save the whole output, since a failed
+restore's error lines can quote a row.
 
 Read the stored rehearsal:
 
@@ -402,9 +404,9 @@ docker exec bms-postgres-1 psql -U bms_owner -d bms -tAc "SELECT count(*) FROM i
 #    Note the bms-rehearsal-db peak against its cap (issue #953): a cap far above the peak is a reason to lower the
 #    192/64/96 MB floor in restore-drill.sh, so staging refuses less often. A refusal for room here is the safe outcome:
 #    retry when the slice is quieter.
-#    The tee keeps the output in a file, and a failed restore's error can quote a row: kept here only because staging
-#    holds fabricated data (review of 708d02b, point 4). On production never tee a rehearsal; read it on the terminal.
-./restore-drill.sh --rehearse-import "$RUN" 2>&1 | tee "state/rehearsal-$RUN.log"; echo "exit ${PIPESTATUS[0]}"   # exit 0
+#    On the terminal only, never into a file: a failed restore's error can quote a row (review of 708d02b, point 4).
+#    Copy the report and timings it prints into the cutover notes by hand.
+./restore-drill.sh --rehearse-import "$RUN"; echo "exit $?"   # exit 0
 
 # 2. The live database is untouched: no difference at all (counts, Flyway, the run's status, version and content, its
 #    rows, issues and audit trail), and one more import_rehearsals row.
@@ -421,10 +423,10 @@ docker ps -aq --filter name=bms-rehearsal- | wc -l; docker network ls -q --filte
 docker volume ls -q --filter name=bms-rehearsal- | wc -l; ls -d backups/rehearsal.* 2> /dev/null | wc -l
 
 # 5. A refusal exits 3 and starts nothing: a run that is not there (staging has no run without the fabricated mark to
-#    try; the tests refuse one). The log has no "starting a throwaway postgres", and nothing named bms-rehearsal- exists.
-./restore-drill.sh --rehearse-import 00000000-0000-4000-8000-000000000000 2>&1 | tee state/rehearsal-refused.log
-echo "exit ${PIPESTATUS[0]}"   # exit 3
-grep -c "starting a throwaway" state/rehearsal-refused.log   # 0
+#    try; the tests refuse one). Its output has no "starting a throwaway postgres", and nothing named bms-rehearsal-
+#    exists. The output is held in a shell variable, not a file.
+refused="$(./restore-drill.sh --rehearse-import 00000000-0000-4000-8000-000000000000 2>&1)"; echo "exit $?"   # exit 3
+printf '%s\n' "$refused"; grep -c "starting a throwaway" <<< "$refused"   # 0
 docker ps -aq --filter name=bms-rehearsal- | wc -l; docker network ls -q --filter name=bms-rehearsal- | wc -l   # 0 0
 # And while a deploy holds its lock, the rehearsal is refused too:
 flock state/deploy.lock ./restore-drill.sh --rehearse-import "$RUN"; echo "exit $?"   # exit 3, "a deploy is running"

@@ -92,7 +92,8 @@ decrypt.
    does its server process once it is found (by its own session name; reniced as `postgres`, its own user, since a
    container has no `CAP_SYS_NICE`). A process at nice 19 cannot be put back, so the change is made in one `sh -c` in
    the live container that first checks the pid's process title is still a local `bms_owner` backend on `bms`, as
-   pg_dump's is and a live API connection (`bms_app` over TCP) never is, and changes nothing otherwise. Best-effort,
+   pg_dump's is and a live API connection (`bms_app` over TCP) never is, and that the process started within 2 seconds
+   of the session's `backend_start`, and changes nothing otherwise. Best-effort,
    not idle, so a page it reads is never starved behind the live load; the I/O priority takes effect only under a
    scheduler that honours it (BFQ), not under `none` or `mq-deadline`; a backend at nice 19 can still briefly hold a
    lightweight lock others wait on; and the stream's bytes also pass through dockerd and containerd-shim, which keep
