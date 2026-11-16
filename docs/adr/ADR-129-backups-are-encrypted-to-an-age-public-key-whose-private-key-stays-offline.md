@@ -104,7 +104,9 @@ decrypt.
    and so is the uploaded result line, so `monitor.sh` counts it as before; where the drill restored is noted in the
    Mac's `history.log` only. Every value that reaches the host's shell or docker's options (the prefix, the initdb path,
    the image, the memory) is validated, and each word is single-quoted for a POSIX shell. A remote drill refuses a host
-   that runs another drill's or a rehearsal's database, and the weekly drill and a rehearsal refuse while one is there.
+   that runs another drill's or a rehearsal's database, or that has less than the container's memory and 256 MB more
+   available (`MemAvailable`, read through the same docker), and the weekly drill and a rehearsal refuse while one is
+   there.
    `--local` keeps the old mode for a Mac that has an engine, with
    the same tmpfs and no log.
 

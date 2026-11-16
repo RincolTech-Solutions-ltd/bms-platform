@@ -677,8 +677,10 @@ has `--oom-score-adj 1000`, so on a host short of memory the kernel kills it bef
 memory that is not plainly a word, an absolute path with no comma, an image name or a number is a usage error (exit 2)
 before anything runs: these values reach the host's shell and docker's options.
 
-It first checks that the host answers, has the image, and holds no other drill's or rehearsal's database
-(`bms-restore-drill-*`, `bms-rehearsal-db-*`, `bms-offline-drill-*`), before anything is downloaded or decrypted. It downloads the newest
+It first checks that the host answers, has the image, holds no other drill's or rehearsal's database
+(`bms-restore-drill-*`, `bms-rehearsal-db-*`, `bms-offline-drill-*`), and has the container's memory and 256 MB more
+available (`MemAvailable`, read by running the same image with `cat /proc/meminfo`, no network), before anything is
+downloaded or decrypted. It downloads the newest
 backup into a mode-0700 temp dir on the Mac and tells its format from its first bytes. For an age file it
 compares the fingerprint of the Keychain key's public half with the `recipient=` of the host's last good check in
 `drill/last_backup_check.txt`, and fails if they differ or there is none. It starts a throwaway PostgreSQL on the host with no
@@ -719,6 +721,7 @@ usage error.
 | `COULD NOT UPLOAD the result` | Run the `rclone copyto` line it prints, or `monitor.sh` alerts after 35 days |
 | `cannot run '<prefix> image inspect <image>' on <host> over ssh` | `ssh <host> sudo -n -u bms docker image ls` by hand: fix the ssh entry or key, the sudo rule, `BMS_DRILL_REMOTE_DOCKER`, or `POSTGRES_IMAGE` (the host's value in `/opt/bms/.env`) |
 | `<host> runs or has left behind another drill or rehearsal` | Wait for the weekly drill (Sunday 03:30) or the rehearsal to end; a container left behind is removed as section 5.2 says, or by `monitor.sh` for an offline drill's |
+| `<host> has <n> MB available and the drill needs <m> MB plus 256 MB to spare` | Run it when the host is quieter (not during a deploy or a heavy job); lower `BMS_DRILL_MEMORY_MB` only if the data still fits |
 | `the restore did not fit in the container's <n> MB (<m> MB for the data)` | The data outgrew the container: set `BMS_DRILL_MEMORY_MB` higher and run it again (on staging only while the slice has the room; check `docker stats` first) |
 | `the ssh connection to <host> failed during the restore` | The network dropped. Run the drill again; the container was removed by the exit trap or is removed by `monitor.sh` within 6 hours |
 | `COULD NOT REMOVE bms-offline-drill-<n> on <host>` | Run the `ssh ... rm -f -v` line it prints, or leave it to `monitor.sh` after the time it names |
