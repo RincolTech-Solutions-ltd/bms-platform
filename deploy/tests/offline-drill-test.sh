@@ -122,6 +122,20 @@ case "$1" in
             printf 'MemTotal:        4000000 kB\nMemAvailable:    %s kB\n' "${FAKE_MEMAVAILABLE_KB:-3145728}"
             exit 0
         fi
+        # bms.slice's memory files (issue #951): MemoryHigh 1500M, FAKE_SLICE_FREE_MB free below it (default 800), and
+        # the slice's own oom count, FAKE_SLICE_OOM_AFTER from the second read on (the read after a failed restore).
+        if [[ "$*" == *"target=/slice,readonly --entrypoint grep "* ]]; then
+            [[ -z "${FAKE_SLICE_UNREADABLE:-}" ]] || exit 2
+            oom="${FAKE_SLICE_OOM:-0}"
+            [[ -e "$FAKE/slice-read" ]] && oom="${FAKE_SLICE_OOM_AFTER:-$oom}"
+            : > "$FAKE/slice-read"
+            high=1572864000
+            printf '/slice/memory.high:%s\n/slice/memory.max:1677721600\n/slice/memory.current:%s\n' \
+                "$high" $(( high - ${FAKE_SLICE_FREE_MB:-800} * 1048576 + 52428800 ))
+            printf '/slice/memory.stat:anon 1\n/slice/memory.stat:inactive_file 52428800\n'
+            printf '/slice/memory.events.local:low 0\n/slice/memory.events.local:oom %s\n' "$oom"
+            exit 0
+        fi
         echo "fake-container-id"; echo started > "$FAKE/container" ;;
     image) [[ -z "${FAKE_NO_IMAGE:-}" ]] || { echo "Error: No such image: $*" >&2; exit 1; }; echo "sha256:fake" ;;
     ps) [[ -f "$FAKE/host_containers" ]] && cat "$FAKE/host_containers" ;;
@@ -134,6 +148,10 @@ case "$1" in
         shift
         case "$*" in
             pg_isready*) exit 0 ;;
+            # The tmpfs after a failed restore (issue #951): FAKE_DF_LEFT_KB left, default plenty.
+            "df -Pk /var/lib/postgresql/data")
+                printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+                printf 'tmpfs 294912 %s %s 50%% /var/lib/postgresql/data\n' 94912 "${FAKE_DF_LEFT_KB:-200000}" ;;
             pg_restore*)
                 cat > "$FAKE/restored"
                 [[ -n "${FAKE_RESTORE_FAIL:-}" ]] && { echo "pg_restore: error: row (Fabricated Customer, 0700000000)" >&2; exit 1; }
@@ -339,13 +357,13 @@ check "remote: the throwaway postgres has no network, a memory cap, the host's r
     eval 'host_run | grep -q -- "--name bms-offline-drill-[0-9]* --network none --memory 1280m --memory-swap 1280m --mount type=bind,source=/opt/bms/postgres/initdb,target=/docker-entrypoint-initdb.d,readonly .*--label bms.offline-drill.expires=[0-9]*"'
 # Review of e7cc8e6, finding 1: nothing restored reaches the host's disk.
 check "remote: its data directory is a tmpfs inside the cap, with no swap and no container log" \
-    eval 'host_run | grep -q -- "--memory-swap 1280m .*--tmpfs /var/lib/postgresql/data:rw,size=1024m --log-driver none --oom-score-adj 1000 "'
+    eval 'host_run | grep -q -- "--memory-swap 1280m .*--tmpfs /var/lib/postgresql/data:rw,size=928m --log-driver none --oom-score-adj 1000 "'
 # Review of 7a1faf9, findings 1 to 3: the tmpfs is the image's own data directory with the image's PGDATA (no mode, no
 # subdirectory, so the entrypoint owns and chmods the mount root), the WAL is kept small, and the kernel kills this first.
 check "remote: no mode on the tmpfs and no PGDATA of its own" \
     eval '! host_run | grep -q -- "mode=0700\|PGDATA"'
-check "remote: the server keeps its WAL small, as arguments after the image" \
-    eval 'host_run | grep -q -- "postgres:fake -c max_wal_size=64MB -c min_wal_size=32MB$"'
+check "remote: the server keeps its WAL small, and its maintenance_work_mem at the budgeted 64 MB, as arguments after the image" \
+    eval 'host_run | grep -q -- "postgres:fake -c max_wal_size=64MB -c min_wal_size=32MB -c maintenance_work_mem=64MB$"'
 check "remote: readiness is the final server on TCP, never a log read" \
     eval 'grep -q "^docker exec bms-offline-drill-[0-9]* pg_isready -h 127.0.0.1 " "$FAKE/calls.log" && ! grep -q "^docker logs" "$FAKE/calls.log"'
 check "remote: production is not put in bms.slice" eval '! host_run | grep -q -- --cgroup-parent'
@@ -372,7 +390,7 @@ check "remote: monitor.sh counts the uploaded line as the month's full restore" 
 fake_remote remote-staging; age_backup
 BMS_DRILL_SSH=bms-staging drill --environment staging
 check "remote: BMS_DRILL_SSH names the host, and staging's container runs inside bms.slice with 640 MB in all" \
-    eval '[[ "$STATUS" == 0 ]] && grep -q "^ssh .* bms-staging " "$FAKE/calls.log" && host_run | grep -q -- "--memory 640m --memory-swap 640m .*--cgroup-parent bms.slice --tmpfs /var/lib/postgresql/data:rw,size=384m "'
+    eval '[[ "$STATUS" == 0 ]] && grep -q "^ssh .* bms-staging " "$FAKE/calls.log" && host_run | grep -q -- "--memory 640m --memory-swap 640m .*--cgroup-parent bms.slice --tmpfs /var/lib/postgresql/data:rw,size=288m "'
 
 fake_remote remote-prefix; age_backup
 BMS_DRILL_REMOTE_DOCKER=docker BMS_DRILL_REMOTE_INITDB=/srv/bms/initdb drill --remote deploy@bms-staging
@@ -384,7 +402,7 @@ BMS_DRILL_SSH=bms-staging drill --local
 check "--local runs the container in the Mac's docker even with BMS_DRILL_SSH set" \
     eval '[[ "$STATUS" == 0 ]] && ! grep -q "^ssh" "$FAKE/calls.log" && grep -q "^docker run " "$FAKE/calls.log"'
 check "--local keeps its data in memory too: 2 GB, a tmpfs, no container log" \
-    eval 'grep -q -- "^docker run .*--memory 2048m --memory-swap 2048m .*--tmpfs /var/lib/postgresql/data:rw,size=1792m --log-driver none " "$FAKE/calls.log"'
+    eval 'grep -q -- "^docker run .*--memory 2048m --memory-swap 2048m .*--tmpfs /var/lib/postgresql/data:rw,size=1696m --log-driver none " "$FAKE/calls.log"'
 
 # Review of e7cc8e6, finding 2: no value from the environment can inject a command or an option on the host.
 # JUSTIFICATION-A3: one case per finding of the review; they reuse the existing fakes and helpers.
@@ -401,17 +419,17 @@ check "remote: an initdb path that is not absolute is a usage error" test "$STAT
 POSTGRES_IMAGE='--privileged' drill --remote bms-production
 check "remote: an image docker could read as an option is a usage error" \
     eval '[[ "$STATUS" == 2 && ! -s "$FAKE/calls.log" ]]'
-BMS_DRILL_MEMORY_MB=511 drill --remote bms-production
-check "remote: a memory below 512 MB (PostgreSQL's 256 and at least 256 of data) is a usage error" test "$STATUS" = 2
+BMS_DRILL_MEMORY_MB=607 drill --remote bms-production
+check "remote: a memory below 608 MB (PostgreSQL's 256, the restore's 96 and at least 256 of tmpfs) is a usage error" test "$STATUS" = 2
 fake_remote remote-quotes; age_backup
 FAKE_MEMAVAILABLE_KB=4194304 BMS_DRILL_MEMORY_MB=3000 drill --remote bms-production
 check "remote: SQL with quotes reaches the host's sh word for word, and BMS_DRILL_MEMORY_MB sets the cap" \
-    eval '[[ "$STATUS" == 0 ]] && grep -qF "SELECT set_config('"'"'app.tenant_id'"'"', '"'"'0b5e7a2c-0000-4000-8000-00000000a001'"'"', false)" "$FAKE/calls.log" && host_run | grep -q -- "--memory 3000m --memory-swap 3000m .*size=2744m "'
+    eval '[[ "$STATUS" == 0 ]] && grep -qF "SELECT set_config('"'"'app.tenant_id'"'"', '"'"'0b5e7a2c-0000-4000-8000-00000000a001'"'"', false)" "$FAKE/calls.log" && host_run | grep -q -- "--memory 3000m --memory-swap 3000m .*size=2648m "'
 # Lead on the review of e7cc8e6: a dump too big for the cap fails plainly and never falls back to a disk volume.
 fake_remote remote-too-big; age_backup
 FAKE_RESTORE_NOSPACE=1 drill --remote bms-staging --environment staging
 check "remote: a restore that outgrows the tmpfs fails plainly, naming the cap and the setting" \
-    eval 'failed_with "the restore did not fit in the container.s 640 MB (384 MB of tmpfs, about 288 MB of data beside the WAL): set BMS_DRILL_MEMORY_MB higher" && [[ "$(grep -c "^docker run --detach " "$FAKE/calls.log")" == 1 ]] && ! grep -q -- "--volume\|type=volume" "$FAKE/calls.log"'
+    eval 'failed_with "the restore did not fit in the container.s 640 MB (288 MB of tmpfs, about 192 MB of data beside the WAL): set BMS_DRILL_MEMORY_MB higher" &&[[ "$(grep -c "^docker run --detach " "$FAKE/calls.log")" == 1 ]] && ! grep -q -- "--volume\|type=volume" "$FAKE/calls.log"'
 # Lead on the review of 7a1faf9, point 3: a host without the cap and 256 MB to spare fails before the key is read.
 fake_remote remote-short; age_backup
 FAKE_MEMAVAILABLE_KB=1048576 drill --remote bms-production
@@ -428,6 +446,49 @@ fake_remote remote-crash; age_backup
 FAKE_RESTORE_FAIL=1 drill --remote bms-production
 check "remote: a restore that fails otherwise is never called too big" \
     eval 'failed_with "pg_restore failed" && ! recorded "did not fit"'
+
+# Issue #951. JUSTIFICATION-A3: one case per follow-up of the PASS review of #950; they reuse the existing fakes.
+# Item 3: WAL that runs out of room is a PANIC with no "no space" for the client; the tmpfs itself says it is full.
+fake_remote remote-wal-full; age_backup
+FAKE_RESTORE_FAIL=1 FAKE_DF_LEFT_KB=8192 drill --remote bms-production
+check "remote: a failed restore with the tmpfs full (a WAL panic) fails as did not fit, asked of the tmpfs over ssh" \
+    eval 'failed_with "the restore did not fit in the container.s 1280 MB (928 MB of tmpfs" && grep -q "^sudo -n -u bms docker exec bms-offline-drill-[0-9]* df -Pk /var/lib/postgresql/data$" "$FAKE/calls.log"'
+fake_remote remote-room-left; age_backup
+FAKE_RESTORE_FAIL=1 FAKE_DF_LEFT_KB=40000 drill --remote bms-production
+check "remote: a failed restore with more than two WAL segments left on the tmpfs stays pg_restore failed" \
+    eval 'failed_with "pg_restore failed" && ! recorded "did not fit"'
+fake_mac local-wal-full; age_backup
+FAKE_RESTORE_FAIL=1 FAKE_DF_LEFT_KB=0 drill --local
+check "--local: a full tmpfs after a failed restore is did not fit too" failed_with "the restore did not fit in the container.s 2048 MB (1696 MB of tmpfs"
+
+# Item 1: on staging the slice, not only the host, must have room for the cap, and a slice that ran out is never "raise
+# the cap".
+slice_read() { grep -q "^sudo -n -u bms docker run --rm --network none --log-driver none --memory 32m --mount type=bind,source=/sys/fs/cgroup/bms.slice,target=/slice,readonly --entrypoint grep postgres:fake -H  /slice/memory.high /slice/memory.max /slice/memory.current /slice/memory.stat /slice/memory.events.local$" "$FAKE/calls.log"; }
+fake_remote remote-slice-short; age_backup
+FAKE_SLICE_FREE_MB=500 drill --remote bms-staging --environment staging
+check "remote staging: a bms.slice with less room below MemoryHigh than the cap fails before the key is read or anything starts" \
+    eval 'failed_with "bms.slice on bms-staging has 500 MB free under its MemoryHigh and the drill needs 640 MB" && ! grep -q "^security" "$FAKE/calls.log" && ! grep -q "docker run --detach" "$FAKE/calls.log"'
+check "remote staging: the slice is read through the host's docker, read only, with no network and no log" slice_read
+fake_remote remote-slice-unreadable; age_backup
+FAKE_SLICE_UNREADABLE=1 drill --remote bms-staging --environment staging
+check "remote staging: a slice whose memory cannot be read fails closed" \
+    eval 'failed_with "cannot read the memory of bms.slice on bms-staging" && ! grep -q "docker run --detach" "$FAKE/calls.log"'
+fake_remote remote-slice-room; age_backup
+FAKE_SLICE_FREE_MB=700 drill --remote bms-staging --environment staging
+check "remote staging: a slice with room for the cap runs the drill and says how much room it had" \
+    eval '[[ "$STATUS" == 0 ]] && grep -q "bms.slice on bms-staging has 700 MB free; the drill needs 640 MB of it" <<< "$OUTPUT"'
+# Item 4: pg_restore and maintenance_work_mem are counted beside the server, so the tmpfs is the cap less 352 MB.
+check "remote staging: the start states the budget, pg_restore and maintenance_work_mem counted beside the server" \
+    eval 'grep -q "640 MB in memory only, 288 MB of it the data directory (about 192 MB of data beside the WAL)" <<< "$OUTPUT"'
+check "remote production: no slice is read" eval '! grep -q "target=/slice" "$WORK/remote-ok/fake/calls.log"'
+fake_remote remote-slice-oom; age_backup
+FAKE_RESTORE_FAIL=1 FAKE_OOM=1 FAKE_SLICE_OOM=3 FAKE_SLICE_OOM_AFTER=4 drill --remote bms-staging --environment staging
+check "remote staging: a container killed because the slice ran out says so, and never advises raising the cap" \
+    eval 'failed_with "bms.slice on bms-staging ran out of memory while the drill ran" && recorded "Raising BMS_DRILL_MEMORY_MB will not help" && ! recorded "set BMS_DRILL_MEMORY_MB higher"'
+fake_remote remote-cap-oom-staging; age_backup
+FAKE_RESTORE_FAIL=1 FAKE_OOM=1 FAKE_SLICE_OOM=3 drill --remote bms-staging --environment staging
+check "remote staging: a container killed at its own cap, the slice never at its limit, is did not fit: raise the cap" \
+    eval 'failed_with "the restore did not fit in the container.s 640 MB" && recorded "set BMS_DRILL_MEMORY_MB higher"'
 
 # Review of e7cc8e6, finding 11: never beside another drill's or a rehearsal's database.
 fake_remote remote-busy; age_backup; printf '%s\n' bms-api-1 bms-restore-drill-4242 > "$FAKE/host_containers"
