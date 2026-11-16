@@ -16,7 +16,8 @@
 #      16 November 2026: no Docker engine on the Mac) the container runs on that host, which already holds the same live
 #      data: memory capped (inside bms.slice on staging), created by the host's own /opt/bms/postgres/initdb, and the Mac
 #      decrypts and pipes the plaintext over ssh into it. Only the decrypted stream crosses ssh, never the key. With
-#      --local the container runs in a Docker engine on this Mac, created by this checkout's deploy/postgres/initdb;
+#      --local the container runs in a Docker engine on this Mac, created by this checkout's deploy/postgres/initdb.
+#      Either way nothing restored reaches a disk: the data directory is a tmpfs, no swap, no container log;
 #   4. checks the Flyway version (present, and not ahead of this checkout's newest migration), the row counts, and that
 #      bms_app reads at least one of a tenant's rows under row-level security;
 #   5. records one line, OK or FAILED, with its time in seconds against the 2 hour RTO, in ~/bms-restore-drills/history.log
@@ -25,8 +26,9 @@
 #      nothing about the current key, so it is kept on the Mac only.
 # The downloaded file, the temp dir and the container are removed whatever the outcome: on a remote host by the Mac's exit
 # trap over ssh and, should the Mac die mid-run, by the host's monitor.sh once the time in the container's label
-# bms.offline-drill.expires (4 hours after the start) has passed. A pg_restore error can quote row values, so it is held
-# in memory, shown on this screen only and never written, recorded or uploaded.
+# bms.offline-drill.expires (4 hours after the start) has passed. The exit trap runs on INT and TERM too (they exit, and
+# the EXIT trap removes). A pg_restore error can quote row values, so it is held in memory, shown on this screen only and
+# never written, recorded or uploaded.
 #
 # Usage: deploy/restore-drill-offline.sh [--remote <ssh target> | --local] [--environment production|staging]
 #                                        [--folder daily|monthly] [--file <name>] [--no-upload]
@@ -37,6 +39,8 @@
 #   BMS_DRILL_SSH         the ssh target when --remote is not given, for example bms-production (an ~/.ssh/config host);
 #   BMS_DRILL_REMOTE_DOCKER  the docker command on the remote host (default: sudo -n -u bms docker);
 #   BMS_DRILL_REMOTE_INITDB  the roles script folder on the remote host (default: /opt/bms/postgres/initdb);
+#   BMS_DRILL_MEMORY_MB   the container's memory, its tmpfs data directory included (default 384 on staging, 1024 on
+#                         production, 2048 with --local);
 #   BMS_DRILL_RECORD_DIR  where the results are kept (default ~/bms-restore-drills);
 #   OPENSSL               an openssl that has -pbkdf2, for old backups (default openssl).
 # Exit status: 0 restored and checked, 1 failed (recorded), 2 usage.
@@ -89,6 +93,22 @@ INITDB="$HERE/postgres/initdb"
 MIGRATIONS="$HERE/../backend/src/main/resources/db/migration"
 REMOTE_DOCKER="${BMS_DRILL_REMOTE_DOCKER:-sudo -n -u bms docker}"
 REMOTE_INITDB="${BMS_DRILL_REMOTE_INITDB:-/opt/bms/postgres/initdb}"
+# The container's whole memory, its data directory (a tmpfs) included: 384 MB inside staging's 900 MB bms.slice, 1 GB on
+# the 4 GB production VM, 2 GB on this Mac (--local).
+MEMORY_MB="${BMS_DRILL_MEMORY_MB:-2048}"
+[[ -n "$TARGET" ]] && MEMORY_MB="${BMS_DRILL_MEMORY_MB:-1024}"
+[[ -n "$TARGET" && "$ENVIRONMENT" == staging ]] && MEMORY_MB="${BMS_DRILL_MEMORY_MB:-384}"
+# Every value that reaches the host's shell or docker's options is checked here, before anything runs (review of
+# e7cc8e6, finding 2): the prefix word by word, an absolute initdb path with no comma (a --mount option separator), an
+# image reference that docker cannot read as an option.
+read -r -a DOCKER_WORDS <<< "$REMOTE_DOCKER"
+(( ${#DOCKER_WORDS[@]} > 0 )) || usage
+for word in "${DOCKER_WORDS[@]}"; do
+    [[ "$word" =~ ^[A-Za-z0-9_./=-]+$ ]] || usage
+done
+[[ "$REMOTE_INITDB" =~ ^/[A-Za-z0-9_./-]*$ ]] || usage
+[[ -z "${POSTGRES_IMAGE:-}" || "$POSTGRES_IMAGE" =~ ^[A-Za-z0-9][A-Za-z0-9._/:@-]*$ ]] || usage
+if ! [[ "$MEMORY_MB" =~ ^[1-9][0-9]{2,4}$ ]] || (( MEMORY_MB < 256 )); then usage; fi
 DB="bms-offline-drill-$$"
 STARTED="$(date -u +%s)"
 # After this time the host's monitor.sh removes the container, should this Mac die before its exit trap runs.
@@ -107,10 +127,11 @@ fingerprint() {
     if command -v sha256sum > /dev/null; then sha256sum; else shasum -a 256; fi | cut -c1-16
 }
 
-# record <line>: kept on this Mac, and uploaded for monitor.sh unless --no-upload.
+# record <line> [note]: kept on this Mac, and uploaded for monitor.sh unless --no-upload. The note (where it restored)
+# goes into history.log only, so the uploaded line is the one monitor.sh has always read (review of e7cc8e6, finding 4).
 record() {
     mkdir -p "$RECORD_DIR" && chmod 700 "$RECORD_DIR"
-    printf '%s\n' "$1" >> "$RECORD_DIR/history.log"
+    printf '%s\n' "$1${2:+ $2}" >> "$RECORD_DIR/history.log"
     printf '%s\n' "$1" > "$RECORD_DIR/last_offline_drill.txt"
     log "recorded in ${RECORD_DIR}/history.log"
     [[ "$UPLOAD" == yes && -n "$REMOTE" ]] || return 0
@@ -128,15 +149,25 @@ fail() {
     record "$(date -u +%Y-%m-%dT%H:%M:%SZ) FAILED ${NAME} folder=${FOLDER} format=${FORMAT} seconds=$(elapsed) $*"
     exit 1
 }
+# sq <words...>: each word in single quotes, a quote inside as '\'', which every POSIX shell (dash too) reads back as the
+# same word; printf %q can emit bash-only $'...' (review of e7cc8e6, finding 2).
+sq() {
+    local word out=""
+    for word in "$@"; do
+        out="${out}'$(printf '%s' "$word" | sed "s/'/'\\\\''/g")' "
+    done
+    printf '%s' "$out"
+}
 # dk <docker args...>: docker on this Mac (--local), or on the remote host over ssh: one command string for the remote
-# shell, the configured prefix and then each argument quoted. Standard input crosses ssh only for `exec -i` (the restore).
+# shell, the checked prefix words and then each argument, all quoted. Standard input crosses ssh only for `exec -i` (the
+# restore).
 dk() {
     if [[ -z "$TARGET" ]]; then
         docker "$@"
     elif [[ "$1 ${2:-}" == "exec -i" ]]; then
-        ssh -o BatchMode=yes -o ConnectTimeout=20 "$TARGET" "${REMOTE_DOCKER} $(printf '%q ' "$@")"
+        ssh -o BatchMode=yes -o ConnectTimeout=20 "$TARGET" "$(sq "${DOCKER_WORDS[@]}" "$@")"
     else
-        ssh -n -o BatchMode=yes -o ConnectTimeout=20 "$TARGET" "${REMOTE_DOCKER} $(printf '%q ' "$@")"
+        ssh -n -o BatchMode=yes -o ConnectTimeout=20 "$TARGET" "$(sq "${DOCKER_WORDS[@]}" "$@")"
     fi
 }
 cleanup() {
@@ -191,6 +222,12 @@ if [[ -n "$TARGET" ]]; then
     # Before anything is downloaded or decrypted: the host answers, its docker runs as configured, and it has the image.
     dk image inspect --format '{{.Id}}' "$POSTGRES_IMAGE" > /dev/null 2>&1 \
         || fail "cannot run '${REMOTE_DOCKER} image inspect ${POSTGRES_IMAGE}' on ${TARGET} over ssh: check the ssh target, BMS_DRILL_REMOTE_DOCKER and POSTGRES_IMAGE (restore-from-backup.md section 8.5)"
+    # Nothing else that needs the host's room runs beside it: the weekly drill's or a rehearsal's throwaway database, or
+    # another offline drill's (review of e7cc8e6, finding 11; bms.slice on staging holds 900 MB in all).
+    others="$(dk ps --all --format '{{.Names}}' 2> /dev/null)" || fail "cannot list the containers on ${TARGET}"
+    busy="$(grep -E '^(bms-restore-drill|bms-rehearsal-db|bms-offline-drill)-' <<< "$others" | tr '\n' ' ')"
+    [[ -z "$busy" ]] \
+        || fail "${TARGET} runs or has left behind another drill or rehearsal (${busy% }): try again when it ends, or remove what is left (restore-from-backup.md section 5.2)"
     log "restoring on ${TARGET}: the backup is decrypted on this Mac and only the decrypted stream crosses ssh"
 else
     [[ -d "$INITDB" ]] || fail "no initdb folder at ${INITDB}: run this from a checkout of the repository"
@@ -256,24 +293,29 @@ decrypt_stream() {
 # script (--mount fails when the folder is missing, where --volume would mount an empty one), the memory cap of the host
 # drill, inside bms.slice on staging (restore-drill.sh), and the label monitor.sh removes a left-behind container by.
 if [[ -n "$TARGET" ]]; then
-    PLACE=(--memory 384m --memory-swap 384m
-        --mount "type=bind,source=${REMOTE_INITDB},target=/docker-entrypoint-initdb.d,readonly")
+    PLACE=(--mount "type=bind,source=${REMOTE_INITDB},target=/docker-entrypoint-initdb.d,readonly")
     [[ "$ENVIRONMENT" == staging ]] && PLACE+=(--cgroup-parent bms.slice)
     WHERE=" on ${TARGET}"
 else
-    PLACE=(--memory 2g --volume "${INITDB}:/docker-entrypoint-initdb.d:ro")
+    PLACE=(--volume "${INITDB}:/docker-entrypoint-initdb.d:ro")
     WHERE=""
 fi
-log "starting a throwaway postgres (${DB})${WHERE}"
+# Nothing restored reaches a disk (review of e7cc8e6, finding 1): the data directory is a tmpfs inside the container's
+# memory cap, no swap (--memory-swap equal to --memory), and no log driver, so a server error that quotes a row is never
+# written to the engine's log file. The tmpfs takes all but 128 MB of the cap; a dump too big for it fails the drill.
+log "starting a throwaway postgres (${DB})${WHERE}, ${MEMORY_MB} MB in memory only"
 DB_STARTED=yes
-dk run --detach --name "$DB" --network none "${PLACE[@]}" --label "bms.offline-drill.expires=${EXPIRES}" \
+dk run --detach --name "$DB" --network none --memory "${MEMORY_MB}m" --memory-swap "${MEMORY_MB}m" "${PLACE[@]}" \
+    --tmpfs "/var/lib/postgresql/data:rw,size=$(( MEMORY_MB - 128 ))m,mode=0700" --log-driver none \
+    --label "bms.offline-drill.expires=${EXPIRES}" --env PGDATA=/var/lib/postgresql/data/pgdata \
     --env POSTGRES_PASSWORD="$(random_hex)" --env POSTGRES_DB=bms \
     --env BMS_OWNER_PASSWORD="$(random_hex)" --env BMS_APP_PASSWORD="$(random_hex)" \
     "$POSTGRES_IMAGE" > /dev/null || fail "could not start the throwaway postgres${WHERE}"
 ready=0
+# With no log to read, the marker of the end of initdb is TCP: the image's init server listens on the socket only, the
+# final server on 127.0.0.1 too (inside the container's own loopback; it has no network).
 for _ in $(seq 1 90); do
-    if dk logs "$DB" 2>&1 | grep -q "init process complete" \
-        && dk exec "$DB" pg_isready -U bms_owner -d bms > /dev/null 2>&1; then
+    if dk exec "$DB" pg_isready -h 127.0.0.1 -U bms_owner -d bms > /dev/null 2>&1; then
         ready=1
         break
     fi
@@ -331,9 +373,9 @@ owner_users="$(q "SELECT count(*) FROM users WHERE tenant_id = '${first_tenant}'
 seconds="$(elapsed)"
 rto_ok=yes
 (( seconds <= 7200 )) || rto_ok=no
-# restored_on= comes last, so monitor.sh's reading of the line (offline_counts) is unchanged.
-line="$(printf '%s OK %s folder=%s format=%s seconds=%s rto_ok=%s flyway=%s repo_flyway=%s tenants=%s users=%s audit=%s app_visible_users=%s recipient=%s restored_on=%s' \
+# The line as it always was; where it restored is noted in history.log only.
+line="$(printf '%s OK %s folder=%s format=%s seconds=%s rto_ok=%s flyway=%s repo_flyway=%s tenants=%s users=%s audit=%s app_visible_users=%s recipient=%s' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$NAME" "$FOLDER" "$FORMAT" "$seconds" "$rto_ok" "$flyway" "$REPO_VER" "$tenants" \
-    "$users" "$audit" "$app_users" "$RECIPIENT" "${TARGET:-mac}")"
+    "$users" "$audit" "$app_users" "$RECIPIENT")"
 log "OK: ${line}"
-record "$line" || exit 1
+record "$line" "restored_on=${TARGET:-mac}" || exit 1
