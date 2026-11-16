@@ -432,8 +432,9 @@ deletion 90 days after closing), all Africa/Kampala (ADR-024).
    is a failure), the decryption streamed into a throwaway PostgreSQL with no network (by default on
    the host itself over ssh, since the Mac runs no Docker engine: `--remote <ssh target>`, the host's
    docker through a validated prefix, the host's own `/opt/bms/postgres/initdb`, a memory cap with
-   no swap (512 MB inside `bms.slice` on staging, 1280 MB on production, 256 MB of it PostgreSQL's
-   own; a restore that outgrows it fails, never on disk), the data directory on a tmpfs
+   no swap (640 MB inside `bms.slice` on staging, 1280 MB on production, 256 MB of it PostgreSQL's
+   own and the rest a tmpfs for the data and its WAL; a restore that outgrows it fails, never on
+   disk; `--oom-score-adj 1000`), the data directory on a tmpfs
    inside it and no log driver, so nothing restored reaches the host's disk; only the decrypted
    stream crosses ssh, never the key), the Flyway
    version checked against the checkout's newest migration, the row counts, and `bms_app` reading
@@ -589,6 +590,7 @@ Staging runs on an ARM64 host that already exists at a Rincol home site: a Raspb
   | `migrate` | 160 MB | Only while a deploy runs, next to the old API |
   | second `api`, `web` | 448 MB, 32 MB | Only during a switch, beside the old ones until they are healthy (ADR-083). The second api starts only while its own limit plus 64 MB (512 MB) is free below the slice's `MemoryHigh` and on the host, so its start-up peak can never bring the slice's OOM killer onto the old api or PostgreSQL (reclaim, a slowdown, stays possible); otherwise the api restarts in place, with the old gap. Measured 24 Oct 2026: about 790 MB in use, so about 710 MB free below the 1500 MB `MemoryHigh`: staging overlaps on every deploy. `BMS_ROLL_MIN_FREE_MB` can replace the limit with a measured start-up peak |
   | restore drill `postgres`, `rclone` | 384 MB, 64 MB | Sunday 03:30 only (section 9.10 item 6) |
+  | offline drill `postgres` (`bms-offline-drill-<pid>`) | 640 MB, no swap | Only while the operator runs `restore-drill-offline.sh --remote bms-staging` by hand (ADR-129 decision 7, issue #949): 256 MB for the server, a 384 MB tmpfs for its data and WAL (`max_wal_size=64MB`), `--oom-score-adj 1000`, no network. With the steady stack, 1376 MB by limits, under `MemoryHigh`; it refuses a host with a drill's or rehearsal's database, and the weekly drill and a rehearsal refuse while it runs |
   | rehearsal `postgres` | 256 MB, 1 CPU | Only during an import rehearsal (section 9.10 item 7, issue #138): `shared_buffers=64MB`, `max_connections=20`, `work_mem=4MB`, `maintenance_work_mem=64MB`, no network but its own internal one |
   | rehearsal `api` (and its `migrate` before it) | 448 MB, 1 CPU | The staging api's JVM with a 224 MB heap, the heap the big file test commits 2,500 rows a batch on (chapter 15 section 15.7). With the rehearsal `postgres`, 704 MB by limits; the script starts nothing unless that much is free below `MemoryHigh` (in use counted as `memory.current` less inactive page cache), holds the puller's and deploy's locks for its whole run (so never beside a deploy's `migrate` and second `api`), and starts nothing from Saturday 21:30 to Sunday 07:00 or while a drill or another rehearsal runs. `rclone` (64 MB) runs before both |
   | **Total** | 736 MB steady, 896 MB while migrations run, 1216 MB by limits during an overlap, 1440 MB by limits during a rehearsal (736 + 704) | `bms.slice`: `MemoryMax=1600M`, `MemoryHigh=1500M` (decision D37), no swap, `CPUQuota=250%` |

@@ -494,7 +494,8 @@ staging and production. Everything below is done by hand by the operator; no pul
   throwaway database runs on the host (8.5).
 - SSH to each host as the operator's own user, by key, with an `~/.ssh/config` entry per host (for example `bms-production`
   and `bms-staging`), and that user allowed to run the deploy user's docker without a password: `ssh bms-staging sudo -n
-  -u bms docker ps` must answer. The drill runs only `docker image inspect`, `run`, `logs`, `exec` and `rm` there.
+  -u bms docker ps` must answer. The drill runs only `docker image inspect`, `ps`, `run`, `exec`, `inspect` and `rm` there;
+  a sudoers rule narrower than the deploy user's docker must allow all six.
 - A checkout of this repository, kept up to date (`git pull` before each drill: the drill compares the restored Flyway
   version with the checkout's newest migration).
 - An rclone remote for the backup bucket: `rclone config`, a new remote `bms-r2` of type `s3`, provider `Cloudflare`, with an
@@ -667,10 +668,12 @@ deploy/restore-drill-offline.sh --remote bms-production --folder monthly --file 
 and mounts the host's own roles script `/opt/bms/postgres/initdb` (`BMS_DRILL_REMOTE_INITDB`); the image must already be on
 the host, which it is when `POSTGRES_IMAGE` is the host's. `--local` runs the container in a Docker engine on the Mac instead,
 from the checkout's `deploy/postgres/initdb`; it is kept for a Mac that has one, not the routine. `BMS_DRILL_MEMORY_MB` sets
-the container's memory in MB: 256 for PostgreSQL itself and the rest a tmpfs for the data (default 512 on staging inside
-`bms.slice`, so 256 MB of data; 1280 on production, 1024 MB of data; 2048 with `--local`; at least 512). A restore that
-does not fit fails with `the restore did not fit in the container's <n> MB`; it never falls back to a disk volume. Raise
-it then, within what the VM (or on staging the slice) has free. A prefix word, initdb path, image or
+the container's memory in MB: 256 for PostgreSQL itself and the rest a tmpfs for the data directory, about 96 MB of
+which is WAL (`max_wal_size=64MB`). Defaults: 640 on staging inside `bms.slice` (384 MB of tmpfs, about 288 MB of data);
+1280 on production (1024 MB of tmpfs, about 928 MB of data); 2048 with `--local`; at least 512. A restore that does not
+fit (no space on the tmpfs, or the engine's OOM kill) fails with `the restore did not fit in the container's <n> MB`; it
+never falls back to a disk volume. Raise it then, within what the VM (or on staging the slice) has free. The container
+has `--oom-score-adj 1000`, so on a host short of memory the kernel kills it before the live stack. A prefix word, initdb path, image or
 memory that is not plainly a word, an absolute path with no comma, an image name or a number is a usage error (exit 2)
 before anything runs: these values reach the host's shell and docker's options.
 
@@ -680,7 +683,7 @@ backup into a mode-0700 temp dir on the Mac and tells its format from its first 
 compares the fingerprint of the Keychain key's public half with the `recipient=` of the host's last good check in
 `drill/last_backup_check.txt`, and fails if they differ or there is none. It starts a throwaway PostgreSQL on the host with no
 network, its memory capped with no swap (inside `bms.slice` on staging, as the host drill), its data directory on a tmpfs
-inside that cap, no log driver, the host's roles script and the label `bms.offline-drill.expires=<start + 4 hours>`; readiness
+inside that cap, no log driver, the host's roles script and the label `bms.offline-drill.expires=<start + 6 hours>`; readiness
 is `pg_isready` on 127.0.0.1, which only the final server answers. It decrypts on the Mac (the Keychain key, or the old key
 for an old file) and pipes the dump over ssh straight into `pg_restore` in that container: the key never crosses ssh, only
 the decrypted stream does, and nothing restored reaches a disk on the Mac or the host (no dump file, no data volume, no
@@ -717,7 +720,7 @@ usage error.
 | `cannot run '<prefix> image inspect <image>' on <host> over ssh` | `ssh <host> sudo -n -u bms docker image ls` by hand: fix the ssh entry or key, the sudo rule, `BMS_DRILL_REMOTE_DOCKER`, or `POSTGRES_IMAGE` (the host's value in `/opt/bms/.env`) |
 | `<host> runs or has left behind another drill or rehearsal` | Wait for the weekly drill (Sunday 03:30) or the rehearsal to end; a container left behind is removed as section 5.2 says, or by `monitor.sh` for an offline drill's |
 | `the restore did not fit in the container's <n> MB (<m> MB for the data)` | The data outgrew the container: set `BMS_DRILL_MEMORY_MB` higher and run it again (on staging only while the slice has the room; check `docker stats` first) |
-| `the ssh connection to <host> failed during the restore` | The network dropped. Run the drill again; the container was removed by the exit trap or is removed by `monitor.sh` within 4 hours |
+| `the ssh connection to <host> failed during the restore` | The network dropped. Run the drill again; the container was removed by the exit trap or is removed by `monitor.sh` within 6 hours |
 | `COULD NOT REMOVE bms-offline-drill-<n> on <host>` | Run the `ssh ... rm -f -v` line it prints, or leave it to `monitor.sh` after the time it names |
 
 ### 8.6 A lost or exposed key

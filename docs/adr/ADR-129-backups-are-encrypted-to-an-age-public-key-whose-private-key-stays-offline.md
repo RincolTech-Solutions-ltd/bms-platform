@@ -91,9 +91,11 @@ decrypt.
    section 8.5, runs `age --decrypt` on the Mac with the Keychain key and pipes the plaintext dump over ssh into
    `pg_restore` in a throwaway PostgreSQL that it starts through the host's docker (a configurable command prefix, by
    default `sudo -n -u bms docker`). The container has no network, a memory cap with no swap (256 MB for PostgreSQL plus the
-   data: 512 MB inside `bms.slice` on staging, as the weekly host drill is kept in it; 1280 MB on production, which has no
-   slice; `BMS_DRILL_MEMORY_MB`), its data directory on a tmpfs inside that cap (the cap less 256 MB) and no log driver, is created by the host's own `/opt/bms/postgres/initdb` roles script, and is removed on every
-   exit path: the Mac's exit trap removes it over ssh, and its label `bms.offline-drill.expires` (4 hours after the start)
+   data: 640 MB inside `bms.slice` on staging, as the weekly host drill is kept in it; 1280 MB on production, which has no
+   slice; `BMS_DRILL_MEMORY_MB`), its data directory on a tmpfs inside that cap (the cap less 256 MB, WAL included, kept
+   small with `max_wal_size=64MB`), no log driver and `--oom-score-adj 1000` (on a host short of memory the kernel kills
+   it before the live stack), is created by the host's own `/opt/bms/postgres/initdb` roles script, and is removed on every
+   exit path: the Mac's exit trap removes it over ssh, and its label `bms.offline-drill.expires` (6 hours after the start)
    lets the host's `monitor.sh` remove it if the Mac dies mid-run. The key never crosses ssh; only the decrypted stream
    does, to a host that already holds the same live data. The decrypted dump is never written to a file on the Mac or the
    host, and a `pg_restore` error (which can quote rows) is held in the Mac's memory and shown on its screen only. The
@@ -102,7 +104,8 @@ decrypt.
    and so is the uploaded result line, so `monitor.sh` counts it as before; where the drill restored is noted in the
    Mac's `history.log` only. Every value that reaches the host's shell or docker's options (the prefix, the initdb path,
    the image, the memory) is validated, and each word is single-quoted for a POSIX shell. A remote drill refuses a host
-   that runs another drill's or a rehearsal's database. `--local` keeps the old mode for a Mac that has an engine, with
+   that runs another drill's or a rehearsal's database, and the weekly drill and a rehearsal refuse while one is there.
+   `--local` keeps the old mode for a Mac that has an engine, with
    the same tmpfs and no log.
 
 ## Consequences
@@ -117,10 +120,14 @@ decrypt.
   measures it.
 - The remote drill puts the restored rows, for the length of the drill, in a container's memory on the host whose live
   database holds the same rows, and its checks are answered by that host. It adds no data the host did not hold, and none
-  of it on disk. The whole restore must fit in the container's tmpfs: 256 MB of data on staging, 1 GB on production by
-  default, raised with `BMS_DRILL_MEMORY_MB` as the data grows; a restore that does not fit fails the drill plainly, it
-  never falls back to a disk volume. A compromised host could answer the checks falsely, as the last consequence below already allows for the records;
-  the decryption, and so the proof of the key, stays on the Mac.
+  of it on disk. The whole restore must fit in the container's tmpfs beside about 96 MB of WAL: about 288 MB of data on
+  staging, about 928 MB on production by default, raised with `BMS_DRILL_MEMORY_MB` as the data grows; a restore that
+  does not fit fails the drill plainly, it never falls back to a disk volume. A compromised host could answer the checks
+  falsely, as the last consequence below already allows for the records; the decryption, and so the proof of the key,
+  stays on the Mac.
+- With the default prefix, sudo writes each command line to the host's auth log, so the `docker run` line with the
+  throwaway container's random PostgreSQL passwords is on the host's disk. They open only that container, which has no
+  network and is gone when the drill ends; no live password or key is ever on that line.
 - Losing both the Keychain copies and the envelope loses every backup made since the switch. The envelope is kept apart from the
   Mac, and the ceremony checks the paper copy by reading it back.
 - Import rehearsals stop once the newest backup is an age file, until the owner decides decision 5.
