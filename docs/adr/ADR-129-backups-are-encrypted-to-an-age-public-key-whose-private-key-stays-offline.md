@@ -93,7 +93,8 @@ decrypt.
    default `sudo -n -u bms docker`). The container has no network, a memory cap with no swap (256 MB for the PostgreSQL
    server, 96 MB for the restore that runs in the same cgroup, `pg_restore` itself and the server's
    `maintenance_work_mem` pinned at 64 MB (issue #951), plus the data: 640 MB inside `bms.slice` on staging, as the
-   weekly host drill is kept in it; 1280 MB on production, which has no slice; `BMS_DRILL_MEMORY_MB`), its data directory on a tmpfs inside that cap
+   weekly host drill is kept in it; 1280 MB on production, which has no slice; `BMS_DRILL_MEMORY_MB`), its data
+   directory on a tmpfs inside that cap
    (the cap less 352 MB, WAL included, kept small with `max_wal_size=64MB`; autovacuum off, so no worker takes memory
    beyond that budget), no log driver and `--oom-score-adj 1000` (on a host short of memory the kernel kills it before
    the live stack), is created by the host's own `/opt/bms/postgres/initdb` roles script, and is removed on every
