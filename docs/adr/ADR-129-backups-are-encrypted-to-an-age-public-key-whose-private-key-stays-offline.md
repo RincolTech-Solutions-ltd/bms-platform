@@ -7,6 +7,10 @@ leaves its other decisions as they are. No migration. The requirements are NFR-B
 chapter 9 section 9.10; the runbooks are `docs/runbooks/restore-from-backup.md` (sections 2, 5 and 8) and
 `docs/runbooks/monitoring-and-alerts.md`. Renumbered at merge if needed.
 
+**Amended 16 November 2026** (issue #949, owner constraint of that day): **the operator's Mac needs no Docker, and no Docker
+engine runs on it.** The monthly drill (decision 4) still decrypts on the Mac with the Keychain key, and now restores on the
+host over ssh (decision 7). Decision 6 and the consequences are amended to match.
+
 ## Context
 
 `deploy/backup.sh` encrypted each nightly dump with `openssl enc -aes-256-cbc -pbkdf2` and `BACKUP_ENCRYPTION_KEY`, a passphrase in
@@ -59,7 +63,8 @@ decrypt.
      backup (or one named with `--file`) and detects its format. For an age file it compares the fingerprint of the Keychain
      key's public half with the one in the host's last good check, and fails if they differ or there is none. It then
      streams the decryption with the Keychain key straight into `pg_restore` in a throwaway PostgreSQL container with no
-     network, so the decrypted dump is never in a file, and checks the Flyway version (not ahead of the checkout's newest
+     network, so the decrypted dump is never in a file (since the amendment of 16 November 2026 that container runs on the
+     host, decision 7), and checks the Flyway version (not ahead of the checkout's newest
      migration), the row counts and that `bms_app` reads, under row-level security, at least one of a business's users and as
      many as the owner role counts. It records
      the result in `~/bms-restore-drills/history.log` and, for a drill of the newest daily backup only, uploads it to
@@ -79,7 +84,20 @@ decrypt.
    while the newest backup is still symmetric.
 6. **A restore that matters decrypts on the Mac and streams.** For a real restore, or the quarterly drill onto a fresh VM, the
    dump is decrypted on the operator's Mac and piped over SSH straight into `pg_restore` on the target host, so the private key
-   never reaches a server and the plaintext never lands on a disk (`restore-from-backup.md` section 2).
+   never reaches a server and the plaintext never lands on a disk (`restore-from-backup.md` section 2). The Mac needs no
+   Docker for this either.
+7. **The monthly drill restores on the host, not on the Mac** (amended 16 November 2026, issue #949). No Docker engine runs
+   on the operator's Mac. `restore-drill-offline.sh --remote <ssh target>`, the default in `restore-from-backup.md`
+   section 8.5, runs `age --decrypt` on the Mac with the Keychain key and pipes the plaintext dump over ssh into
+   `pg_restore` in a throwaway PostgreSQL that it starts through the host's docker (a configurable command prefix, by
+   default `sudo -n -u bms docker`). The container has no network, a 384 MB memory cap (inside `bms.slice` on staging, as
+   the weekly host drill), is created by the host's own `/opt/bms/postgres/initdb` roles script, and is removed on every
+   exit path: the Mac's exit trap removes it over ssh, and its label `bms.offline-drill.expires` (4 hours after the start)
+   lets the host's `monitor.sh` remove it if the Mac dies mid-run. The key never crosses ssh; only the decrypted stream
+   does, to a host that already holds the same live data. The decrypted dump is never written to a file on the Mac or the
+   host, and a `pg_restore` error (which can quote rows) is held in the Mac's memory and shown on its screen only; the
+   restored rows live in the container's anonymous data volume, removed with it (`docker rm -v`). Every check of decision 4 and the upload of the result line are unchanged, so `monitor.sh` counts it as before.
+   `--local` keeps the old mode for a Mac that has an engine.
 
 ## Consequences
 
@@ -88,8 +106,13 @@ decrypt.
 - The weekly host result proves the backup exists, is fresh and is well formed, not that it restores. A key that is lost or
   wrong is caught by the monthly offline drill, so up to a month of backups could be unreadable before anyone knows; the owner
   accepted that window in D121. The 35 day alert keeps a missed month from going unnoticed.
-- A restore needs the operator, or the owner with the sealed copy, and a Mac with Docker. That adds minutes to the two hour RTO,
-  not hours; the quarterly drill measures it.
+- A restore needs the operator, or the owner with the sealed copy, and a Mac with age and ssh access to the target host; the
+  Mac needs no Docker (amended 16 November 2026). That adds minutes to the two hour RTO, not hours; the quarterly drill
+  measures it.
+- The remote drill puts the plaintext dump, for the length of the drill, in a container's memory and data directory on the
+  host whose live database holds the same rows, and its checks are answered by that host. It adds no data the host did not
+  hold. A compromised host could answer the checks falsely, as the last consequence below already allows for the records;
+  the decryption, and so the proof of the key, stays on the Mac.
 - Losing both the Keychain copies and the envelope loses every backup made since the switch. The envelope is kept apart from the
   Mac, and the ceremony checks the paper copy by reading it back.
 - Import rehearsals stop once the newest backup is an age file, until the owner decides decision 5.

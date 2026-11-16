@@ -9,7 +9,9 @@
 #   - a wrong or missing key, a host that encrypts to another public key, an unknown format, a failed pg_restore or a
 #     Flyway version ahead of the checkout fails, is recorded and uploaded, and leaves nothing decrypted behind;
 #   - the key never appears in the output or the record; a pg_restore error never reaches the record;
-#   - backup_format is the host drill's.
+#   - backup_format is the host drill's;
+#   - --remote (issue #949): the Mac has no docker; ssh and the host's sudo and docker are stubs, the decrypted stream is
+#     the only thing that crosses ssh, and the same checks, record and upload hold.
 # Run: bash deploy/tests/offline-drill-test.sh
 # shellcheck disable=SC2016 # the checks are eval'd strings, expanded when they run.
 set -uo pipefail

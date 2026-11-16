@@ -429,7 +429,10 @@ deletion 90 days after closing), all Africa/Kampala (ADR-024).
    goes to `drill/last_backup_check_error.txt`, so the good check's fingerprint stays. The full
    restore is the monthly offline drill, `deploy/restore-drill-offline.sh`, run on the operator's Mac
    with the Keychain key: the key's fingerprint compared with the host's last good check (no record
-   is a failure), the decryption streamed into a throwaway PostgreSQL with no network, the Flyway
+   is a failure), the decryption streamed into a throwaway PostgreSQL with no network (by default on
+   the host itself over ssh, since the Mac runs no Docker engine: `--remote <ssh target>`, the host's
+   docker through a configurable prefix, the host's own `/opt/bms/postgres/initdb`, a 384 MB cap,
+   inside `bms.slice` on staging; only the decrypted stream crosses ssh, never the key), the Flyway
    version checked against the checkout's newest migration, the row counts, and `bms_app` reading
    under row-level security at least one and exactly the owner role's count of a business's users; its result goes to `~/bms-restore-drills/` and, for the newest daily
    backup only, to `<environment>/drill/last_offline_drill.txt`. `monitor.sh` takes the weekly result
@@ -509,6 +512,8 @@ logs JSON (ECS format) with the request id on every line in the `server` profile
   deploy.sh, backup.sh   as above
   restore-drill.sh, monitor.sh   the weekly drill or backup check and the five-minute host checks (section 9.11);
                           restore-drill-offline.sh is never copied to a host: it runs on the operator's Mac
+                          and, with --remote, drives the host's docker over ssh; monitor.sh removes a
+                          bms-offline-drill-* container left past its bms.offline-drill.expires label
   pull-staging.sh        staging only: the puller; also refreshed only after a successful deploy
   releases/<tag>/        staging only: each release's host files, staged before deploy.sh runs;
                           the previous one to two releases are kept for inspection and rollback
