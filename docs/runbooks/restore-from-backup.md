@@ -667,8 +667,10 @@ deploy/restore-drill-offline.sh --remote bms-production --folder monthly --file 
 and mounts the host's own roles script `/opt/bms/postgres/initdb` (`BMS_DRILL_REMOTE_INITDB`); the image must already be on
 the host, which it is when `POSTGRES_IMAGE` is the host's. `--local` runs the container in a Docker engine on the Mac instead,
 from the checkout's `deploy/postgres/initdb`; it is kept for a Mac that has one, not the routine. `BMS_DRILL_MEMORY_MB` sets
-the container's memory, its data included (default 384 on staging, 1024 on production, 2048 with `--local`): raise it on
-production if the drill fails for room as the data grows, within what the VM has free. A prefix word, initdb path, image or
+the container's memory in MB: 256 for PostgreSQL itself and the rest a tmpfs for the data (default 512 on staging inside
+`bms.slice`, so 256 MB of data; 1280 on production, 1024 MB of data; 2048 with `--local`; at least 512). A restore that
+does not fit fails with `the restore did not fit in the container's <n> MB`; it never falls back to a disk volume. Raise
+it then, within what the VM (or on staging the slice) has free. A prefix word, initdb path, image or
 memory that is not plainly a word, an absolute path with no comma, an image name or a number is a usage error (exit 2)
 before anything runs: these values reach the host's shell and docker's options.
 
@@ -714,7 +716,7 @@ usage error.
 | `COULD NOT UPLOAD the result` | Run the `rclone copyto` line it prints, or `monitor.sh` alerts after 35 days |
 | `cannot run '<prefix> image inspect <image>' on <host> over ssh` | `ssh <host> sudo -n -u bms docker image ls` by hand: fix the ssh entry or key, the sudo rule, `BMS_DRILL_REMOTE_DOCKER`, or `POSTGRES_IMAGE` (the host's value in `/opt/bms/.env`) |
 | `<host> runs or has left behind another drill or rehearsal` | Wait for the weekly drill (Sunday 03:30) or the rehearsal to end; a container left behind is removed as section 5.2 says, or by `monitor.sh` for an offline drill's |
-| `the throwaway postgres did not become ready`, or `pg_restore failed` with a no space or out of memory error | The data outgrew the container: set `BMS_DRILL_MEMORY_MB` higher (production) and run it again |
+| `the restore did not fit in the container's <n> MB (<m> MB for the data)` | The data outgrew the container: set `BMS_DRILL_MEMORY_MB` higher and run it again (on staging only while the slice has the room; check `docker stats` first) |
 | `the ssh connection to <host> failed during the restore` | The network dropped. Run the drill again; the container was removed by the exit trap or is removed by `monitor.sh` within 4 hours |
 | `COULD NOT REMOVE bms-offline-drill-<n> on <host>` | Run the `ssh ... rm -f -v` line it prints, or leave it to `monitor.sh` after the time it names |
 

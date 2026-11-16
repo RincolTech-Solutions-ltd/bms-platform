@@ -432,7 +432,8 @@ deletion 90 days after closing), all Africa/Kampala (ADR-024).
    is a failure), the decryption streamed into a throwaway PostgreSQL with no network (by default on
    the host itself over ssh, since the Mac runs no Docker engine: `--remote <ssh target>`, the host's
    docker through a validated prefix, the host's own `/opt/bms/postgres/initdb`, a memory cap with
-   no swap (384 MB inside `bms.slice` on staging, 1 GB on production), the data directory on a tmpfs
+   no swap (512 MB inside `bms.slice` on staging, 1280 MB on production, 256 MB of it PostgreSQL's
+   own; a restore that outgrows it fails, never on disk), the data directory on a tmpfs
    inside it and no log driver, so nothing restored reaches the host's disk; only the decrypted
    stream crosses ssh, never the key), the Flyway
    version checked against the checkout's newest migration, the row counts, and `bms_app` reading

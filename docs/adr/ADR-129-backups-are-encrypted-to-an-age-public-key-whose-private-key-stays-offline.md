@@ -90,9 +90,9 @@ decrypt.
    on the operator's Mac. `restore-drill-offline.sh --remote <ssh target>`, the default in `restore-from-backup.md`
    section 8.5, runs `age --decrypt` on the Mac with the Keychain key and pipes the plaintext dump over ssh into
    `pg_restore` in a throwaway PostgreSQL that it starts through the host's docker (a configurable command prefix, by
-   default `sudo -n -u bms docker`). The container has no network, a memory cap with no swap (384 MB inside `bms.slice` on
-   staging, as the weekly host drill; 1 GB on production, which has no slice; `BMS_DRILL_MEMORY_MB`), its data directory on a
-   tmpfs inside that cap and no log driver, is created by the host's own `/opt/bms/postgres/initdb` roles script, and is removed on every
+   default `sudo -n -u bms docker`). The container has no network, a memory cap with no swap (256 MB for PostgreSQL plus the
+   data: 512 MB inside `bms.slice` on staging, as the weekly host drill is kept in it; 1280 MB on production, which has no
+   slice; `BMS_DRILL_MEMORY_MB`), its data directory on a tmpfs inside that cap (the cap less 256 MB) and no log driver, is created by the host's own `/opt/bms/postgres/initdb` roles script, and is removed on every
    exit path: the Mac's exit trap removes it over ssh, and its label `bms.offline-drill.expires` (4 hours after the start)
    lets the host's `monitor.sh` remove it if the Mac dies mid-run. The key never crosses ssh; only the decrypted stream
    does, to a host that already holds the same live data. The decrypted dump is never written to a file on the Mac or the
@@ -117,9 +117,9 @@ decrypt.
   measures it.
 - The remote drill puts the restored rows, for the length of the drill, in a container's memory on the host whose live
   database holds the same rows, and its checks are answered by that host. It adds no data the host did not hold, and none
-  of it on disk. The whole restore must fit in the container's memory: 384 MB on staging, 1 GB on production by default,
-  raised with `BMS_DRILL_MEMORY_MB` as the data grows; a restore that does not fit fails the drill, it never spills to
-  disk. A compromised host could answer the checks falsely, as the last consequence below already allows for the records;
+  of it on disk. The whole restore must fit in the container's tmpfs: 256 MB of data on staging, 1 GB on production by
+  default, raised with `BMS_DRILL_MEMORY_MB` as the data grows; a restore that does not fit fails the drill plainly, it
+  never falls back to a disk volume. A compromised host could answer the checks falsely, as the last consequence below already allows for the records;
   the decryption, and so the proof of the key, stays on the Mac.
 - Losing both the Keychain copies and the envelope loses every backup made since the switch. The envelope is kept apart from the
   Mac, and the ceremony checks the paper copy by reading it back.
