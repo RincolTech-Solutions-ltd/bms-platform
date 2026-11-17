@@ -34,7 +34,7 @@ or a mark lifted from one token onto another, must not open yesterday to a selle
    by a caller, and fails if the hash or the minute is changed or spliced from another token.
 2. **The mark counts only within a short grace of the midnight** between the form's day and the day the save would
    otherwise take: the setting `bms.retail.savings.shown-grace`, 30 minutes by default (the Lead's decision on the review of
-   pull request #958), refused at startup outside 0 to 60 minutes. Both the minute the form was read and the time of the
+   pull request #958), refused at startup outside 1 to 60 minutes (0 would switch the rule off in effect). Both the minute the form was read and the time of the
    save (or, offline, the time made) must fall within the grace of that midnight, so a form read in the afternoon and saved
    at 00:05 proves nothing. Online, only an undated save (no `business_date` sent, so neither a date the phone chose nor one the
    owner chose with a reason is moved) is judged, at the time of the save, against a mark of yesterday. Offline, the time the

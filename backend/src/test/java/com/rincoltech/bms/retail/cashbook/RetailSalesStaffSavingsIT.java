@@ -395,6 +395,10 @@ class RetailSalesStaffSavingsIT extends IntegrationTest {
                 token,
                 Map.of("occurred_at", AT_0001.plusSeconds(120).toString(), "online_as_of", "2026-10-15T11:00:00Z"));
         assertThat(offline.getStatusCode()).as("%s", offline.getBody()).isEqualTo(HttpStatus.CONFLICT);
+        // Third review of #958: its minute rewritten to 23:59 keeps the 14:00 mark, which the keyed comparison refuses.
+        String[] parts = token.split("\\.");
+        String rewritten = parts[0] + "." + (AT_2359.getEpochSecond() / 60) + "." + parts[2];
+        assertThat(saveUndated(rewritten, null).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(TestDatabase.owner()
                         .sql("SELECT count(*) FROM retail_daily_savings WHERE tenant_id = ?")
                         .param(t.tenantId())
@@ -457,7 +461,8 @@ class RetailSalesStaffSavingsIT extends IntegrationTest {
         assertThat(parts).hasSize(3);
 
         clock.set(AT_0001);
-        String tampered = parts[0] + "." + (Long.parseLong(parts[1]) + 3) + "." + parts[2];
+        // Moved within the 15th (23:56), so the keyed comparison itself refuses it (third review of #958).
+        String tampered = parts[0] + "." + (Long.parseLong(parts[1]) - 3) + "." + parts[2];
         assertThat(saveUndated(tampered, null).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
 
         clock.set(CLOSING_TIME.plusSeconds(50 * 60));

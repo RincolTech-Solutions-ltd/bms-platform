@@ -207,6 +207,8 @@ class SavingsService {
 
     @Transactional(readOnly = true)
     SavingsSuggestion suggestion(Caller caller, UUID branchId, LocalDate date) {
+        // Issue #957: one clock reading, so the mark's minute and day can never straddle midnight.
+        Instant readAt = support.now();
         // ADR-115: with the owner's setting on, the suggestion shows without profit read; the profit, the expenses and
         // the
         // cap never do, and the day's saved amount only as amountShown allows.
@@ -227,7 +229,7 @@ class SavingsService {
                 branch,
                 on,
                 figures.day(branch, on).totalSold(),
-                support.issuedToken(branch, on, d.suggested(), on.equals(support.today()) ? support.now() : null),
+                support.issuedToken(branch, on, d.suggested(), on.equals(support.dayOf(readAt)) ? readAt : null),
                 // Issue #799 (the owner's request): once the day is saved, its suggestion is no longer sent to anyone;
                 // the
                 // screen shows only what was saved.

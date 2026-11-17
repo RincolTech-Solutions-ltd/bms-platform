@@ -73,8 +73,8 @@ class CashbookSupport implements ClosedTills {
             EntryDates entryDates,
             @Value("${bms.auth.data-key:}") String dataKey,
             @Value("${bms.retail.savings.shown-grace:PT30M}") Duration shownGrace) {
-        if (shownGrace.isNegative() || shownGrace.compareTo(Duration.ofMinutes(60)) > 0) {
-            throw new IllegalArgumentException("bms.retail.savings.shown-grace must be 0 to 60 minutes (ADR-130)");
+        if (shownGrace.compareTo(Duration.ofMinutes(1)) < 0 || shownGrace.compareTo(Duration.ofMinutes(60)) > 0) {
+            throw new IllegalArgumentException("bms.retail.savings.shown-grace must be 1 to 60 minutes (ADR-130)");
         }
         this.shownGrace = shownGrace;
         this.tenant = tenant;
@@ -422,7 +422,8 @@ class CashbookSupport implements ClosedTills {
 
     /**
      * Constant-time comparison of a presented token with the one for the current suggestion; a mark of the day the form was
-     * shown (issue #957) is not part of the suggestion and is left out.
+     * shown (issue #957) is not part of the suggestion and is left out. Anything after the first dot is unauthenticated
+     * here: a match proves the figures only, never the form's day, which only {@link #shownOn} may trust.
      */
     boolean tokenMatches(UUID branchId, LocalDate date, long suggestedMinor, String presented) {
         if (presented == null) {

@@ -97,8 +97,13 @@ class CashbookSupportTest {
                 .isNull();
         assertThat(s.shownOn(BRANCH, hash, next, justAfter, yesterday)).isNull();
         String[] parts = marked.split("\\.");
-        String later = hash + "." + (Long.parseLong(parts[1]) + 1) + "." + parts[2];
-        assertThat(s.shownOn(BRANCH, later, next, justAfter, yesterday)).isNull();
+        // A minute changed within the same day reaches the keyed comparison and fails it (third review of #958).
+        String earlier = hash + "." + (Long.parseLong(parts[1]) - 1) + "." + parts[2];
+        assertThat(s.shownOn(BRANCH, earlier, next, justAfter, yesterday)).isNull();
+        // The afternoon form's minute rewritten to 23:59 keeps its own mark, which is for 14:00: refused.
+        String rewritten = stale.split("\\.")[0] + "." + parts[1] + "." + stale.split("\\.")[2];
+        assertThat(s.shownOn(BRANCH, rewritten, next, Instant.parse("2026-10-15T21:05:00Z"), yesterday))
+                .isNull();
         String spliced = s.suggestionToken(BRANCH, shown, 0) + "." + parts[1] + "." + parts[2];
         assertThat(s.shownOn(BRANCH, spliced, next, justAfter, yesterday)).isNull();
     }
