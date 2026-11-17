@@ -65,15 +65,7 @@ public record OfflineEntry(
 
     /** When the entry counts as made; refused for a phone clock behind, or when too old for the caller. */
     public Instant judged(Instant now, Collection<UUID> branches) {
-        // A phone clock ahead of the server cannot say it was online in the future: now at the latest.
-        Instant asOf = onlineAsOf.isAfter(now) ? now : onlineAsOf;
-        if (occurredAt.isBefore(asOf.minus(CLOCK_BEHIND_SKEW))) {
-            throw refused(
-                    "offline_clock_behind",
-                    "The phone's clock was behind when this entry was made, so its day is not known. Fix it on the"
-                            + " phone to save it as an entry of today.");
-        }
-        Instant at = occurredAt.isAfter(now) ? now : occurredAt;
+        Instant at = madeAt(now);
         if (at.isBefore(now.minus(MAX_AGE))) {
             Principal principal = CurrentPrincipal.require();
             if (branches.isEmpty() || !branches.stream().allMatch(b -> principal.may(BACKDATE, b))) {
@@ -84,6 +76,22 @@ public record OfflineEntry(
             }
         }
         return at;
+    }
+
+    /**
+     * When the entry was made, a time ahead of the server being now, refused only for a phone clock behind; the age is not
+     * judged (issue #957: savings judge the age of their form's day instead, ADR-130).
+     */
+    public Instant madeAt(Instant now) {
+        // A phone clock ahead of the server cannot say it was online in the future: now at the latest.
+        Instant asOf = onlineAsOf.isAfter(now) ? now : onlineAsOf;
+        if (occurredAt.isBefore(asOf.minus(CLOCK_BEHIND_SKEW))) {
+            throw refused(
+                    "offline_clock_behind",
+                    "The phone's clock was behind when this entry was made, so its day is not known. Fix it on the"
+                            + " phone to save it as an entry of today.");
+        }
+        return occurredAt.isAfter(now) ? now : occurredAt;
     }
 
     /** The business day of an entry: the day it was made when it was kept offline, otherwise the date it asks for. */

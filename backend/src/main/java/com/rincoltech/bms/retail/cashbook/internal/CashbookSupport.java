@@ -15,6 +15,7 @@ import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -63,13 +64,19 @@ class CashbookSupport implements ClosedTills {
     private final JdbcClient jdbc;
     private final EntryDates entryDates;
     private final byte[] tokenKey;
+    private final Duration shownGrace;
 
     CashbookSupport(
             CurrentTenant tenant,
             BusinessClock clock,
             JdbcClient jdbc,
             EntryDates entryDates,
-            @Value("${bms.auth.data-key:}") String dataKey) {
+            @Value("${bms.auth.data-key:}") String dataKey,
+            @Value("${bms.retail.savings.shown-grace:PT30M}") Duration shownGrace) {
+        if (shownGrace.compareTo(Duration.ofMinutes(1)) < 0 || shownGrace.compareTo(Duration.ofMinutes(60)) > 0) {
+            throw new IllegalArgumentException("bms.retail.savings.shown-grace must be 1 to 60 minutes (ADR-130)");
+        }
+        this.shownGrace = shownGrace;
         this.tenant = tenant;
         this.clock = clock;
         this.jdbc = jdbc;
@@ -351,23 +358,81 @@ class CashbookSupport implements ClosedTills {
      * it reveals nothing about the amount, so every caller may hold it.
      */
     String suggestionToken(UUID branchId, LocalDate date, long suggestedMinor) {
+        return keyedHash(tenant.profile().id() + "|" + branchId + "|" + date + "|" + suggestedMinor);
+    }
+
+    /** A form's day proved by its token's mark, and the minute the form was read (issue #957, ADR-130). */
+    record Shown(LocalDate day, Instant readAt) {}
+
+    /**
+     * The token a form is shown (issue #957, ADR-130): the suggestion's hash and, when {@code readAt} is given (the form was
+     * read while its day was the business day, the tenant's zone), the minute it was read and a keyed mark of the hash and
+     * that minute, after dots, so a save just after midnight can be dated by the form's day and not by the clock.
+     */
+    String issuedToken(UUID branchId, LocalDate date, long suggestedMinor, Instant readAt) {
+        String token = suggestionToken(branchId, date, suggestedMinor);
+        if (readAt == null) {
+            return token;
+        }
+        long minute = readAt.getEpochSecond() / 60;
+        return token + "." + minute + "." + shownMark(branchId, date, token, minute);
+    }
+
+    /**
+     * The form's day the presented token proves, or null: its mark is valid for its hash and minute, the minute fell on one
+     * of {@code days}, and both that minute and {@code at} are within the grace ({@code bms.retail.savings.shown-grace}, 30 minutes by default,
+     * ADR-130) of the midnight between that day and {@code dated}.
+     */
+    Shown shownOn(UUID branchId, String presented, LocalDate dated, Instant at, List<LocalDate> days) {
+        String[] parts = presented == null ? new String[0] : presented.split("\\.", -1);
+        if (parts.length != 3 || !parts[1].matches("\\d{1,12}")) {
+            return null;
+        }
+        long minute = Long.parseLong(parts[1]);
+        Instant readAt = Instant.ofEpochSecond(minute * 60);
+        LocalDate day = dayOf(readAt);
+        if (!days.contains(day)
+                || !MessageDigest.isEqual(
+                        shownMark(branchId, day, parts[0], minute).getBytes(StandardCharsets.UTF_8),
+                        parts[2].getBytes(StandardCharsets.UTF_8))) {
+            return null;
+        }
+        Instant midnight =
+                (day.isAfter(dated) ? day : dated).atStartOfDay(zone()).toInstant();
+        // Both the read and the save are within the grace of that midnight: a form read in the afternoon proves
+        // nothing.
+        boolean near = Duration.between(midnight, at).abs().compareTo(shownGrace) <= 0
+                && Duration.between(readAt, midnight).abs().compareTo(shownGrace) <= 0;
+        return near ? new Shown(day, readAt) : null;
+    }
+
+    private String shownMark(UUID branchId, LocalDate date, String hash, long minute) {
+        return keyedHash(tenant.profile().id() + "|" + branchId + "|" + date + "|" + hash + "|" + minute + "|shown");
+    }
+
+    private String keyedHash(String input) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(tokenKey, "HmacSHA256"));
-            String input = tenant.profile().id() + "|" + branchId + "|" + date + "|" + suggestedMinor;
             return HexFormat.of().formatHex(mac.doFinal(input.getBytes(StandardCharsets.UTF_8)), 0, 16);
         } catch (NoSuchAlgorithmException | InvalidKeyException e) {
             throw new IllegalStateException(e);
         }
     }
 
-    /** Constant-time comparison of a presented token with the one for the current suggestion. */
+    /**
+     * Constant-time comparison of a presented token with the one for the current suggestion; a mark of the day the form was
+     * shown (issue #957) is not part of the suggestion and is left out. Anything after the first dot is unauthenticated
+     * here: a match proves the figures only, never the form's day, which only {@link #shownOn} may trust.
+     */
     boolean tokenMatches(UUID branchId, LocalDate date, long suggestedMinor, String presented) {
         if (presented == null) {
             return false;
         }
+        int dot = presented.indexOf('.');
+        String hash = dot < 0 ? presented : presented.substring(0, dot);
         return MessageDigest.isEqual(
                 suggestionToken(branchId, date, suggestedMinor).getBytes(StandardCharsets.UTF_8),
-                presented.getBytes(StandardCharsets.UTF_8));
+                hash.getBytes(StandardCharsets.UTF_8));
     }
 }
