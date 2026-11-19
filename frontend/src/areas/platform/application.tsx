@@ -5,6 +5,7 @@ import { BusyButton } from '../../app/ui/BusyButton';
 import {
   activateApplication,
   type ActivationResult,
+  type AddressSetup,
   type ApplicationDetail,
   checkHostname,
   type Decision,
@@ -13,6 +14,7 @@ import {
   type HostnameCheck,
   OnboardingError,
   type PossibleDuplicate,
+  setUpAddressAgain,
   statusLabel,
 } from '../../api/onboarding';
 import {
@@ -319,6 +321,74 @@ export function HostnameCheckPanel({ slug }: { slug: string }) {
   );
 }
 
+// JUSTIFICATION-A3: the address set up at Activate (#155, ADR-131) is new behaviour; its panel sits beside the hostname check.
+/**
+ * The business's address on Cloudflare after Activate (#155, ADR-131), shown only when this server has the Cloudflare
+ * settings: whether the DNS record and the tunnel route were set up, in plain words, a "Set up the address again" button,
+ * and then the hostname check of the address. The business is active whatever this says.
+ */
+export function AddressSetupPanel({ applicationId, slug, initial }: { applicationId: string; slug: string; initial?: AddressSetup | null }) {
+  const [setup, setSetup] = useState<AddressSetup | null>(initial ?? null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [check, setCheck] = useState<HostnameCheck | null>(null);
+  const [checking, setChecking] = useState(false);
+  useEffect(() => {
+    if (!setup) return;
+    let live = true;
+    setCheck(null);
+    setChecking(true);
+    checkHostname(slug)
+      .then((answer) => live && setCheck(answer))
+      .catch(() => live && setCheck(null))
+      .finally(() => live && setChecking(false));
+    return () => {
+      live = false;
+    };
+  }, [setup, slug]);
+  async function again() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setSetup(await setUpAddressAgain(applicationId));
+    } catch (err) {
+      setError(err instanceof OnboardingError ? err.message : 'Could not set up the address. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+  const words = check ? hostnameWords(check) : null;
+  return (
+    <section className="form-stack" aria-labelledby="address-heading">
+      <h2 id="address-heading">The business's address</h2>
+      {setup ? (
+        <p data-testid="address-setup" className={`alert ${setup.outcome === 'set_up' ? 'alert-success' : 'alert-warning'} wrap-anywhere`}>
+          {setup.message}
+        </p>
+      ) : (
+        <p className="muted">This server sets up the address on Cloudflare. Press the button to set it up, or to make sure it still is.</p>
+      )}
+      <BusyButton type="button" busy={busy} onClick={() => void again()}>
+        Set up the address again
+      </BusyButton>
+      <div aria-live="polite">
+        {checking && <p className="muted">Checking whether the address answers</p>}
+        {words && (
+          <p role="status" className={`alert ${words.ready ? 'alert-success' : 'alert-warning'} wrap-anywhere`}>
+            {words.text}
+          </p>
+        )}
+        {error && (
+          <p role="alert" className="alert alert-danger">
+            {error}
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export function ActivationDone({ result }: { result: ActivationResult }) {
   return (
     <section role="status" className="alert alert-success">
@@ -415,6 +485,14 @@ function ApplicationScreen() {
           <DuplicateWarning duplicates={query.data.possible_duplicates ?? []} />
           <ApplicationFacts detail={query.data} />
           <DecisionPanel status={query.data.application?.status ?? ''} busy={busy} note={note} onNote={setNote} onDecide={onDecide} />
+          {query.data.application?.status === 'activated' && query.data.application.activated_tenant_slug &&
+            (result?.address_setup || query.data.address_setup_available) && (
+              <AddressSetupPanel
+                applicationId={applicationId}
+                slug={query.data.application.activated_tenant_slug}
+                initial={result?.address_setup}
+              />
+            )}
           {query.data.application?.status === 'verified' && form && (
             <ActivateFormView form={form} problems={problems} busy={busy} onChange={setForm} onSubmit={onActivate} />
           )}
