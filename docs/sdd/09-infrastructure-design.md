@@ -297,6 +297,11 @@ migration) with status only, no details.
   file passes the allow-list.
   `BMS_SIGNUP_MAX_APPLICATIONS_PER_HOUR` (default 30) and
   `BMS_SIGNUP_MAX_VERIFICATION_EMAILS_PER_HOUR` (default 60) are the global sign-up caps.
+- The business's address set up at Activate (issue #155, owner decision D278, ADR-131), staging only and optional:
+  `BMS_CLOUDFLARE_API_TOKEN` (Zone DNS Edit on `rincoltech.com` and Account Cloudflare Tunnel Edit, nothing else),
+  `BMS_CLOUDFLARE_ZONE_ID`, `BMS_CLOUDFLARE_ACCOUNT_ID`, `BMS_CLOUDFLARE_TUNNEL_ID` and `BMS_CLOUDFLARE_TUNNEL_SERVICE`
+  (default `http://proxy:8080`). On only when the first four are all set; off and invisible otherwise. Outbound traffic is
+  then HTTPS to `api.cloudflare.com` only. The staging compose file passes them; the production one does not (ADR-063).
 - SMS (ADR-036, issue #212, `docs/runbooks/sms-setup.md`), optional on every host: `BMS_ENVIRONMENT` (the staging compose
   file fixes it to `staging`; production sets it in `.env`; anything but `production` is treated as not production),
   `BMS_SMS_PROVIDER` (`africastalking` or `fake`), `BMS_SMS_MODE` (`off`, `sink`, `allowlist`, `live`; unset is `sink` on staging
