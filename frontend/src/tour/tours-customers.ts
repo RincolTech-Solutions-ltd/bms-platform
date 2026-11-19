@@ -14,6 +14,10 @@ const COLLATERAL_MANAGE = 'lending.collateral.manage';
 const COLLATERAL_RELEASE = 'lending.collateral.release_request';
 const LOANS = 'lending.loans.read';
 
+/** The one plain sentence on what a member needs before the check (issue #155, FR-MEM-05), wherever members are met. */
+export const KYC_SENTENCE =
+  'A member is Waiting to be checked only once the ID number, address, next of kin and ID photo are all added.';
+
 const held = (me: Me, permission: string) => (me.permissions ?? []).includes(permission);
 
 export const membersPage: Tour = {
@@ -52,7 +56,7 @@ export const membersPage: Tour = {
 
 export const newMemberPage: Tour = {
   id: 'page-member-new',
-  // Version 2 says a member cannot be checked without a photo of the front of the ID (issue #155).
+  // Version 2 says a member is Waiting to be checked only once every detail, the ID photo too, is added (issue #155).
   version: 2,
   title: 'This page: add a member',
   audience: (me) => held(me, MEMBERS_CREATE),
@@ -78,7 +82,7 @@ export const newMemberPage: Tour = {
       target: 'member-id-photo',
       module: 'lending',
       title: 'Photo of the ID',
-      body: 'Tap Take a photo to use the camera. The photo is made smaller before it is sent, so it works on a slow connection. Without a photo of the front of the ID, the member cannot be checked.',
+      body: `Tap Take a photo to use the camera. The photo is made smaller before it is sent, so it works on a slow connection. ${KYC_SENTENCE}`,
     },
     {
       id: 'save',

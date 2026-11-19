@@ -4,7 +4,7 @@ import { showReceivePayments } from '../areas/staff/payments/state';
 import { MONEY_SCREENS, canUse, showRetail } from '../areas/staff/retail/permissions';
 import type { Tour, TourStep } from './model';
 import { APPLICATION_TOURS } from './tours-applications';
-import { CUSTOMER_TOURS } from './tours-customers';
+import { CUSTOMER_TOURS, KYC_SENTENCE } from './tours-customers';
 import { LENDING_MORE_TOURS } from './tours-lending-more';
 import { OPERATOR_TOURS } from './tours-operator';
 import { PUBLIC_TOURS } from './tours-public';
@@ -31,8 +31,7 @@ const REPAY = 'lending.repayments.create';
 const LOANS_CREATE = 'lending.loans.create';
 const MEMBERS_READ = 'lending.members.read';
 // Where the welcome tours meet members (issue #155): the check needs every detail, the ID photo too (FR-MEM-05).
-export const MEMBERS_BODY =
-  'Your members are listed here, for the branch you picked. A new member is checked only once all their details are in, a photo of the front of the ID too.';
+const MEMBERS_BODY = `Your members are listed here, for the branch you picked. ${KYC_SENTENCE}`;
 
 const held = (me: Me, permission: string) => (me.permissions ?? []).includes(permission);
 const isTenantAdmin = (me: Me) => held(me, SETTINGS);
