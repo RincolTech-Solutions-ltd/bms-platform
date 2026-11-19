@@ -3720,6 +3720,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/applications/{application_id}/address-setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set up the activated business's address on Cloudflare again; changes nothing already right (issue #155) */
+        post: operations["platformSetUpApplicationAddress"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/applications/{application_id}/needs-info": {
         parameters: {
             query?: never;
@@ -9406,6 +9423,7 @@ export interface components {
         ActivationResult: {
             /** @description False when the application was already activated: nothing was done */
             activated_now?: boolean;
+            address_setup?: components["schemas"]["AddressSetup"];
             /** Format: date-time */
             admin_invitation_expires_at?: string;
             /** @description The admin's one-time link, shown once (also emailed); null on a repeat */
@@ -9499,6 +9517,18 @@ export interface components {
              */
             monthly_minor?: number;
             reason?: string;
+        };
+        AddressSetup: {
+            /** @description created, already_there or not_done */
+            dns_record?: string;
+            /** @description The business's own host, from the slug and the tenant host pattern */
+            host?: string;
+            /** @description Plain words for the operator */
+            message?: string;
+            /** @description set_up: both steps are done; failed: one was not (message says which and why) */
+            outcome?: string;
+            /** @description added, already_there or not_done */
+            tunnel_route?: string;
         };
         /** @description The text to show before switching on, and its version */
         AdvisorAcknowledgement: {
@@ -9673,6 +9703,8 @@ export interface components {
             way_in?: string;
         };
         ApplicationDetail: {
+            /** @description True when this server sets up the address on Cloudflare at Activate (issue #155, ADR-131) */
+            address_setup_available?: boolean;
             application?: components["schemas"]["Application"];
             possible_duplicates?: components["schemas"]["PossibleDuplicate"][];
             referred_by?: components["schemas"]["ApplicationReferrer"];
@@ -30126,6 +30158,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActivationResult"];
+                };
+            };
+        };
+    };
+    platformSetUpApplicationAddress: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                application_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddressSetup"];
                 };
             };
         };
