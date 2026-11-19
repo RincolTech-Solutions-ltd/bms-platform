@@ -334,6 +334,9 @@ class CloudflareAddress {
         } catch (RuntimeException e) {
             answer = mapper.createObjectNode();
         }
+        if (answer == null) {
+            answer = mapper.createObjectNode();
+        }
         if (status >= 200 && status < 300 && answer.path("success").asBoolean(false)) {
             return answer;
         }
