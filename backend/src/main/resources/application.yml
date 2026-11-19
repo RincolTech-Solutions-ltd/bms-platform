@@ -353,6 +353,15 @@ bms:
     max-applications-per-hour: ${BMS_SIGNUP_MAX_APPLICATIONS_PER_HOUR:30}
     max-verification-emails-per-hour: ${BMS_SIGNUP_MAX_VERIFICATION_EMAILS_PER_HOUR:60}
     max-verification-emails-per-mailbox: 3
+  # Activate sets up the business's own address on Cloudflare (issue #155, ADR-131): on only when the token and the three
+  # ids are all set, off and invisible otherwise. The token: Zone DNS Edit on the zone, Account Cloudflare Tunnel Edit
+  # (docs/runbooks/onboard-tenant.md). The service is where the tunnel sends a tenant host.
+  cloudflare:
+    api-token: ${BMS_CLOUDFLARE_API_TOKEN:}
+    zone-id: ${BMS_CLOUDFLARE_ZONE_ID:}
+    account-id: ${BMS_CLOUDFLARE_ACCOUNT_ID:}
+    tunnel-id: ${BMS_CLOUDFLARE_TUNNEL_ID:}
+    tunnel-service: ${BMS_CLOUDFLARE_TUNNEL_SERVICE:http://proxy:8080}
   # The nightly arrears run (FR-ARR-01, lending.loan-arrears, every quarter hour). On by default; the integration
   # tests switch it off so that a tick never charges penalties on a test's loans, and drive the run themselves.
   lending:

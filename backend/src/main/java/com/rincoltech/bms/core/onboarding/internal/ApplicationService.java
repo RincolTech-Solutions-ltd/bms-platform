@@ -93,6 +93,7 @@ class ApplicationService {
     private final OnboardingProperties caps;
     private final Referrals referrals;
     private final ShortNames shortNames;
+    private final CloudflareAddress address;
     private final Set<String> moduleKeys;
 
     ApplicationService(
@@ -107,8 +108,10 @@ class ApplicationService {
             OnboardingProperties caps,
             Referrals referrals,
             ShortNames shortNames,
+            CloudflareAddress address,
             List<ModuleManifest> manifests) {
         this.shortNames = shortNames;
+        this.address = address;
         this.jdbc = jdbc;
         this.transactions = new TransactionTemplate(transactionManager);
         this.outbox = outbox;
@@ -421,7 +424,8 @@ class ApplicationService {
                     application,
                     duplicates,
                     slug,
-                    referrals.applicationReferrer(id).orElse(null));
+                    referrals.applicationReferrer(id).orElse(null),
+                    address.enabled());
         });
     }
 
@@ -616,8 +620,35 @@ class ApplicationService {
         }
         Created tenant = created.get();
         ApplicationResponse after = transactions.execute(status -> find(id).orElseThrow());
+        // Issue #155, ADR-131: after the commit, so a Cloudflare failure never undoes the activation; null when off.
+        CloudflareAddress.Result addressSetup = address.setUp(tenant.slug(), tenant.tenantId(), operator, "activation");
         return new ActivationResult(
-                after, true, tenant.tenantId(), tenant.slug(), tenant.invitationUrl(), tenant.invitationExpiresAt());
+                after,
+                true,
+                tenant.tenantId(),
+                tenant.slug(),
+                tenant.invitationUrl(),
+                tenant.invitationExpiresAt(),
+                addressSetup);
+    }
+
+    // JUSTIFICATION-A3: the operator's retry of #155 needs the activated slug, which only this service reads.
+    /** "Set up the address again" (issue #155, ADR-131): the same idempotent Cloudflare steps for an activated business. */
+    CloudflareAddress.Result setUpAddressAgain(UUID id) {
+        UUID operator = CurrentPrincipal.require().userId();
+        if (!address.enabled()) {
+            throw new ApiException(
+                    HttpStatus.NOT_FOUND,
+                    "address_setup_off",
+                    "Address setup is off",
+                    "This server has no Cloudflare settings; make the address reachable by hand.");
+        }
+        ApplicationResponse application = transactions.execute(status -> find(id).orElseThrow(ApiException::notFound));
+        if (!"activated".equals(application.status()) || application.activatedTenantSlug() == null) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT, "not_activated", "Not activated", "Activate the application first.");
+        }
+        return address.setUp(application.activatedTenantSlug(), application.activatedTenantId(), operator, "again");
     }
 
     // ---- Housekeeping (spec sections 4 and 12) ---------------------------------------------
@@ -643,7 +674,7 @@ class ApplicationService {
     private ActivationResult repeat(UUID id) {
         ApplicationResponse current = transactions.execute(status -> find(id).orElseThrow(ApiException::notFound));
         return new ActivationResult(
-                current, false, current.activatedTenantId(), current.activatedTenantSlug(), null, null);
+                current, false, current.activatedTenantId(), current.activatedTenantSlug(), null, null, null);
     }
 
     private void alertOperators(Link link) {
