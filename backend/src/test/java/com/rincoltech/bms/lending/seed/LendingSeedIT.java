@@ -38,7 +38,9 @@ class LendingSeedIT extends IntegrationTest {
 
         LendingSeeder.Report report = seeder.seed(t.slug());
 
-        assertThat(report.render()).contains("15 members", "4 products", "12 applications", "6 disbursed loans");
+        assertThat(report.render())
+                .contains("15 members", "4 products", "12 applications", "6 disbursed loans")
+                .contains("without a photo of the ID");
         assertThat(count(t.tenantId(), "SELECT count(*) FROM lending_members WHERE tenant_id = ?"))
                 .isEqualTo(15);
         assertThat(count(t.tenantId(), "SELECT count(*) FROM lending_loan_products WHERE tenant_id = ?"))

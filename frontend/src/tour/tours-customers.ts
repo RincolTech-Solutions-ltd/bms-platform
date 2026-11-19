@@ -91,7 +91,8 @@ export const newMemberPage: Tour = {
 
 export const memberPage: Tour = {
   id: 'page-member',
-  version: 1,
+  // Version 2 says the details reach the check only once a photo of the ID is added (issue #155).
+  version: 2,
   title: 'This page: one member',
   audience: (me) => held(me, MEMBERS_READ),
   autoStart: false,
@@ -110,7 +111,7 @@ export const memberPage: Tour = {
       target: 'member-kyc',
       module: 'lending',
       title: 'Checking the details',
-      body: 'This shows what is still missing: the ID number, an address, a next of kin and a photo of the ID. A branch manager then checks them.',
+      body: 'This shows what is still missing: the ID number, an address, a next of kin and a photo of the ID. Without a photo of the ID the member stays at Details missing. Once it is added, the member is Waiting to be checked by a branch manager.',
     },
     {
       id: 'kin',

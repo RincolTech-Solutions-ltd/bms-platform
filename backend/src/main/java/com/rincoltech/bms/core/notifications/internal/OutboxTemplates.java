@@ -97,8 +97,8 @@ class OutboxTemplates {
                     """,
                     "See my application",
                     "You got this email because you applied to use BMS."),
-            // Two-step sign-in is optional by default (issue #348, V67): the activation asks for it only
-            // when the business requires it of its first administrator, which is the variant below.
+            // Two-step sign-in is optional by default (issue #348, V67, #93): this activation only says the
+            // administrator can turn it on; the variant below asks for it when the business requires it.
             "onboarding.activation",
             new Template(
                     "Your BMS account is ready",
@@ -111,6 +111,9 @@ class OutboxTemplates {
                     {link}
 
                     After that, sign in at {sign_in_url}
+
+                    You can turn on two-step sign-in, so that someone who learns your password still \
+                    cannot get in. It is a choice, not a must.
 
                     Your shop's short link is {short_link}. Share it with your customers.
 

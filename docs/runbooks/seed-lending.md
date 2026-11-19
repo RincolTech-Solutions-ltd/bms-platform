@@ -8,7 +8,10 @@ The command gives an empty lending tenant on **staging** a small, fully fabricat
 pilot tenant's staff can try the loan screens with fake data before their own register is imported
 (increment 7):
 
-- 15 members (`Test Borrower 01` to `15`, phones `+256700000001` to `15`, KYC verified);
+- 15 members (`Test Borrower 01` to `15`, phones `+256700000001` to `15`, KYC verified). The seed
+  writes them as checked with no photo of the ID, which the screens never allow: a member added by
+  hand stays at Details missing until a photo of the ID is uploaded, and only then is it Waiting to
+  be checked (FR-MEM-05, issue #155). The command's last line says so;
 - 4 loan products (`FAB-BULLET`, `FAB-MONTHLY` with a 2% deducted fee, `FAB-DECLINE` with an upfront
   fee, `FAB-WEEKLY` with an added fee and the early settlement rebate), all rates invented;
 - 12 applications in every state before the money: draft, submitted, appraised, approved, rejected
@@ -91,7 +94,7 @@ docker compose --project-name bms -f compose.yml run --rm --no-deps \
 
 The stack is capped at 900 MB (ADR-018): run it when nothing else heavy is running. The command
 prints one line, for example
-`seed-lending: tenant <slug>: 15 members, 4 products, 12 applications, 6 disbursed loans, 11 repayments, 11 savings accounts, <n> savings movements, 3 investment products, 10 investments (all fabricated)`.
+`seed-lending: tenant <slug>: 15 members, 4 products, 12 applications, 6 disbursed loans, 11 repayments, 11 savings accounts, <n> savings movements, 3 investment products, 10 investments (all fabricated). The seeded members are marked as checked without a photo of the ID. ...`.
 
 ## Run locally
 
