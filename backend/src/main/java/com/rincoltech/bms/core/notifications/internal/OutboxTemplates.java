@@ -113,7 +113,8 @@ class OutboxTemplates {
                     After that, sign in at {sign_in_url}
 
                     You can turn on two-step sign-in, so that someone who learns your password still \
-                    cannot get in. It is a choice, not a must.
+                    cannot get in. We recommend it, but it is your choice. After you sign in, open \
+                    Business set-up, then Two-step for yourself.
 
                     Your shop's short link is {short_link}. Share it with your customers.
 

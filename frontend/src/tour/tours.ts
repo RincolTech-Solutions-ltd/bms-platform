@@ -30,6 +30,9 @@ const DISBURSE = 'lending.disbursements.request';
 const REPAY = 'lending.repayments.create';
 const LOANS_CREATE = 'lending.loans.create';
 const MEMBERS_READ = 'lending.members.read';
+// Where the welcome tours meet members (issue #155): the check needs every detail, the ID photo too (FR-MEM-05).
+export const MEMBERS_BODY =
+  'Your members are listed here, for the branch you picked. A new member is checked only once all their details are in, a photo of the front of the ID too.';
 
 const held = (me: Me, permission: string) => (me.permissions ?? []).includes(permission);
 const isTenantAdmin = (me: Me) => held(me, SETTINGS);
@@ -188,7 +191,8 @@ export const adminWelcome: Tour = {
   // Version 28 words the Help and feedback step for How do I...? (issue #598).
   // Version 29 adds the Refresh step: the button beside Search in the top bar again, taken out of the menu (issue #631).
   // Version 30 says the old app's words: Mark as paid and Delete this sale (issue #830).
-  version: 30,
+  // Version 31 says on the members step that a member is checked only once the ID photo is added too (issue #155).
+  version: 31,
   title: 'Welcome tour',
   audience: isTenantAdmin,
   autoStart: true,
@@ -416,7 +420,7 @@ export const adminWelcome: Tour = {
       module: 'lending',
       needs: ['lending.members.read'],
       title: 'Your members',
-      body: 'Your members are listed here, for the branch you picked.',
+      body: MEMBERS_BODY,
     },
     loans,
     {
@@ -646,7 +650,8 @@ export const staffWelcome: Tour = {
   // Version 13 says Tap the branch to switch only to someone with more than one branch to choose (issue #564).
   // Version 14 words the Help and feedback step for How do I...? (issue #598).
   // Version 15 adds the Refresh step: the button beside Search in the top bar again, taken out of the menu (issue #631).
-  version: 15,
+  // Version 16 says on the Members step that a member is checked only once the ID photo is added too (issue #155).
+  version: 16,
   title: 'Welcome tour',
   audience: (me) => !isTenantAdmin(me) && !isSeller(me),
   autoStart: true,
@@ -665,7 +670,7 @@ export const staffWelcome: Tour = {
       module: 'lending',
       needs: ['lending.members.read'],
       title: 'Members',
-      body: 'Your members are listed here, for the branch you picked.',
+      body: MEMBERS_BODY,
     },
     loans,
     loanSearch,

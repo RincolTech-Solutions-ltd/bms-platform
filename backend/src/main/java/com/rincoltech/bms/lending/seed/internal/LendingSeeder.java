@@ -39,8 +39,9 @@ public class LendingSeeder {
      * which the screens never allow (FR-MEM-05 needs the ID image before a check).
      */
     static final String KYC_NOTE = "The seeded members are marked as checked without a photo of the ID. A member"
-            + " you add yourself stays at Details missing until a photo of the ID is added; only then is it"
-            + " Waiting to be checked by a branch manager.";
+            + " you add yourself stays at Details missing until the ID number, where they live, a next of kin"
+            + " and a photo of the front of the ID are all added, the photo too; only then is it Waiting to be"
+            + " checked by a branch manager.";
 
     /** The audit action that marks a seeded tenant; a second run finds it and refuses. */
     static final String MARKER = "lending.seed.fabricated";

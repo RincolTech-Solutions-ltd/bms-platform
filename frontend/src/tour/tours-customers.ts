@@ -52,7 +52,8 @@ export const membersPage: Tour = {
 
 export const newMemberPage: Tour = {
   id: 'page-member-new',
-  version: 1,
+  // Version 2 says a member cannot be checked without a photo of the front of the ID (issue #155).
+  version: 2,
   title: 'This page: add a member',
   audience: (me) => held(me, MEMBERS_CREATE),
   autoStart: false,
@@ -77,7 +78,7 @@ export const newMemberPage: Tour = {
       target: 'member-id-photo',
       module: 'lending',
       title: 'Photo of the ID',
-      body: 'Tap Take a photo to use the camera. The photo is made smaller before it is sent, so it works on a slow connection.',
+      body: 'Tap Take a photo to use the camera. The photo is made smaller before it is sent, so it works on a slow connection. Without a photo of the front of the ID, the member cannot be checked.',
     },
     {
       id: 'save',
@@ -91,7 +92,7 @@ export const newMemberPage: Tour = {
 
 export const memberPage: Tour = {
   id: 'page-member',
-  // Version 2 says the details reach the check only once a photo of the ID is added (issue #155).
+  // Version 2 says the details reach the check only once all of them, the photo of the ID too, are added (issue #155).
   version: 2,
   title: 'This page: one member',
   audience: (me) => held(me, MEMBERS_READ),
@@ -111,7 +112,7 @@ export const memberPage: Tour = {
       target: 'member-kyc',
       module: 'lending',
       title: 'Checking the details',
-      body: 'This shows what is still missing: the ID number, an address, a next of kin and a photo of the ID. Without a photo of the ID the member stays at Details missing. Once it is added, the member is Waiting to be checked by a branch manager.',
+      body: 'This shows what is still missing: the ID number, an address, a next of kin or a photo of the ID front. The member stays at Details missing until all of these are added, the photo too. Then the member is Waiting to be checked by a branch manager.',
     },
     {
       id: 'kin',

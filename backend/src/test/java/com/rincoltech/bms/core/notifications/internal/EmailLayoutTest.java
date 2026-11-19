@@ -328,7 +328,8 @@ class EmailLayoutTest {
         assertThat(plain)
                 .contains("set your password")
                 .contains("You can turn on two-step sign-in")
-                .doesNotContain("requires");
+                .contains("We recommend it")
+                .doesNotContain("which your business requires");
         assertThat(twoStep).contains("turn on two-step sign-in").contains("requires");
         assertThat(OutboxTemplates.placeholders("email", OutboxTemplates.ACTIVATION_TWO_STEP))
                 .isEqualTo(OutboxTemplates.placeholders("email", "onboarding.activation"));

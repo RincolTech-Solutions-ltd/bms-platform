@@ -433,6 +433,19 @@ describe('every tour target exists on its screen', () => {
   }
 });
 
+describe('the ID photo before the member check (issue #155)', () => {
+  const body = (tourId: string, stepId: string) =>
+    TOURS.find((t) => t.id === tourId)?.steps.find((s) => s.id === stepId)?.body ?? '';
+
+  it('is said where members are met in the welcome tours and on the member pages', () => {
+    for (const [tour, step] of [['admin-welcome', 'lending'], ['staff-welcome', 'members'], ['page-member', 'kyc'], ['page-member-new', 'photo']] as const) {
+      expect(body(tour, step), `${tour} ${step}`).toMatch(/photo of the (front of the ID|ID front)/);
+    }
+    expect(body('page-member', 'kyc')).toContain('Details missing');
+    expect(body('page-member', 'kyc')).toContain('Waiting to be checked');
+  });
+});
+
 describe('steps waiting for a feature', () => {
   it('point at a page that does not exist yet, so switching the flag on needs the screen first', () => {
     const waiting = TOURS.flatMap((t) => t.steps).filter((s) => s.feature && !FEATURES[s.feature]);
