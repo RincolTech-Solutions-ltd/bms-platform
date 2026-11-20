@@ -1,6 +1,7 @@
 package com.rincoltech.bms.core.onboarding.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 import com.rincoltech.bms.IntegrationTest;
@@ -12,6 +13,7 @@ import com.rincoltech.bms.core.referrals.Referrals;
 import com.rincoltech.bms.core.tenancy.ModuleManifest;
 import com.rincoltech.bms.core.tenancy.PlatformHost;
 import com.rincoltech.bms.core.tenancy.ShortNames;
+import com.rincoltech.bms.kernel.ApiExceptionHandler;
 import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
@@ -87,7 +89,7 @@ class ActivationAddressIT extends IntegrationTest {
     CloudflareAddress address;
 
     @Autowired
-    HostnameCheck hostnameCheck;
+    ApiExceptionHandler problems;
 
     @Autowired
     JsonMapper jsonMapper;
@@ -342,7 +344,10 @@ class ActivationAddressIT extends IntegrationTest {
                     true,
                     Set.of()));
             // The real controller over HTTP (MockMvc, the application's JSON mapper) on this service.
-            MockMvc web = MockMvcBuilders.standaloneSetup(new ApplicationsController(service, hostnameCheck))
+            // The hostname check the page runs next sees the same pattern, as in production.
+            MockMvc web = MockMvcBuilders.standaloneSetup(
+                            new ApplicationsController(service, new HostnameCheck(underscore, mapper)))
+                    .setControllerAdvice(problems)
                     .setMessageConverters(new JacksonJsonHttpMessageConverter(jsonMapper))
                     .build();
             try {
@@ -380,6 +385,15 @@ class ActivationAddressIT extends IntegrationTest {
                 JsonNode retried = mapper.readTree(again.getResponse().getContentAsString());
                 assertThat(retried.path("outcome").asString()).isEqualTo("failed");
                 assertThat(retried.path("message").asString()).contains("BMS_TENANT_HOST_PATTERN");
+
+                MvcResult checked = web.perform(get("/api/v1/platform/applications/hostname-check")
+                                .param("slug", slug))
+                        .andReturn();
+
+                assertThat(checked.getResponse().getStatus()).isEqualTo(422);
+                assertThat(checked.getResponse().getContentAsString())
+                        .contains("bad_host")
+                        .contains("could not be made from the short name and BMS_TENANT_HOST_PATTERN");
                 assertThat(cloudflare.requests).isEmpty();
                 String status = TestDatabase.owner()
                         .sql("SELECT status FROM tenants WHERE id = ?")

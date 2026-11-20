@@ -102,7 +102,21 @@ class HostnameCheck {
                     "Invalid address name",
                     "Use 3 to 63 lower case letters, digits and hyphens, not starting or ending with a hyphen.");
         }
-        URI origin = URI.create(hosts.tenantOrigin(slug));
+        URI origin;
+        try {
+            origin = URI.create(hosts.tenantOrigin(slug));
+        } catch (RuntimeException e) {
+            origin = null;
+        }
+        // A host URI rejects (a _ from the pattern) is the operator's words, never a 500 (issue #965, ADR-131).
+        if (origin == null || origin.getHost() == null) {
+            throw new ApiException(
+                    HttpStatus.UNPROCESSABLE_CONTENT,
+                    "bad_host",
+                    "Address cannot be made",
+                    "The address could not be made from the short name and BMS_TENANT_HOST_PATTERN, so it was not"
+                            + " checked.");
+        }
         return probe(origin);
     }
 

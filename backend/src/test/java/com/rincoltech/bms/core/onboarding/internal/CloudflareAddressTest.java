@@ -427,6 +427,49 @@ class CloudflareAddressTest {
         assertThat(cloudflare.requests).isEmpty();
     }
 
+    // JUSTIFICATION-A3: the second review of #966 asked for a test of the lock wait cut short by the attempt limit.
+    @Test
+    void aLockWaitCutShortByTheAttemptLimitIsTooLongNotBusy() throws Exception {
+        CloudflareAddress capped = new CloudflareAddress(
+                settings(),
+                HOSTS,
+                new ObjectMapper(),
+                audit,
+                null,
+                cloudflare.base(),
+                Duration.ofSeconds(2),
+                Duration.ofSeconds(5),
+                Duration.ofMillis(500));
+        java.util.concurrent.CountDownLatch held = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        Thread holder = Thread.ofVirtual().start(() -> {
+            capped.tunnelLock.lock();
+            try {
+                held.countDown();
+                release.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                capped.tunnelLock.unlock();
+            }
+        });
+        held.await();
+        try {
+            long started = System.nanoTime();
+            CloudflareAddress.Result result = capped.setUp("shop-locked", TENANT, OPERATOR, "activation");
+
+            assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofMillis(1_500));
+            assertThat(result.dnsRecord()).isEqualTo("created");
+            assertThat(result.message()).contains("so it was stopped to keep Activate quick");
+            assertThat(audit.rows.get(0).data())
+                    .containsEntry("failed_step", "tunnel_route")
+                    .containsEntry("reason", "too_long");
+        } finally {
+            release.countDown();
+            holder.join();
+        }
+    }
+
     @Test
     void theAttemptLimitStopsTheTunnelWriteAndReleasesTheLock() {
         cloudflare.delays.put("GET tunnel", 300L);

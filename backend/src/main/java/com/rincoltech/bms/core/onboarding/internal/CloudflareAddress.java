@@ -295,9 +295,6 @@ class CloudflareAddress {
 
     private String tunnelRoute(String host, long deadline) throws Failure {
         String path = "accounts/" + settings.accountId() + "/cfd_tunnel/" + settings.tunnelId() + "/configurations";
-        if (left(deadline) <= 0) {
-            throw tooLong();
-        }
         boolean locked;
         try {
             locked = tunnelLock.tryLock(Math.min(lockWait.toNanos(), left(deadline)), TimeUnit.NANOSECONDS);
@@ -306,6 +303,10 @@ class CloudflareAddress {
             throw interrupted();
         }
         if (!locked) {
+            // A wait cut short by the attempt limit (or no time left at all) is too_long, not a busy tunnel.
+            if (left(deadline) <= 0) {
+                throw tooLong();
+            }
             throw new Failure(
                     "tunnel_busy",
                     "Another address was being added to the tunnel at the same time, and this one stopped after waiting"
