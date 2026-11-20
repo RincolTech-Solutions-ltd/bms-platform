@@ -316,20 +316,25 @@ Built in issue #963 (from #155, owner decision D278, ADR-131). When `BMS_CLOUDFL
 slug under `BMS_TENANT_HOST_PATTERN`) reachable once Activate has committed, and again when the operator presses "Set up the
 address again":
 
-1. `GET zones/{zone}/dns_records?name=<host>`; a proxied CNAME to `<tunnel id>.cfargotunnel.com` is already there, any other
+1. `GET zones/{zone}/dns_records?name.exact=<host>` (the exact match pinned, issue #965); a proxied CNAME to `<tunnel id>.cfargotunnel.com` is already there, any other
    record of the name is reported and left alone, and none is created with `POST zones/{zone}/dns_records`
    (`proxied: true`, comment `BMS tenant <slug>, set up at Activate`). A create refused because the record appeared in the
    meantime is read again.
 2. `GET accounts/{account}/cfd_tunnel/{tunnel}/configurations`; the host's rule pointing at `BMS_CLOUDFLARE_TUNNEL_SERVICE`
    is already there, a rule of the host pointing elsewhere is reported and left alone, a configuration whose last rule is
    not a catch-all is not written, and otherwise `{hostname, service, originRequest: {}}` goes directly before the catch-all
-   and the whole configuration, every other rule as read, is written back with `PUT`. One writer at a time in the process.
+   and the whole configuration, every other rule as read, is written back with `PUT`. One writer at a time in the process;
+   an attempt waits at most 3 seconds for it, then stops with `tunnel_busy`.
 
 The base address `https://api.cloudflare.com/client/v4/` is a constant, so the token never goes anywhere else; redirects are
-not followed; each call has an 8 second connect and answer deadline; no retry loop, no circuit breaker: the operator's button
-is the retry. Every outcome, a Cloudflare error or a timeout included, becomes plain words for the operator and one
+not followed; each call has an 8 second deadline for the connection and the whole answer, body included (a server that sends
+headers and stalls is a timeout); one attempt stops after 20 seconds in all (`too_long`), so Activate answers well inside the
+proxy's timeout and the one-time invitation URL is never lost (issue #965); a host that cannot be made from the slug is the
+failure `bad_host` with nothing sent; no retry loop, no circuit breaker: the operator's button is the retry. Every outcome, a Cloudflare error or a timeout included, becomes plain words for the operator and one
 `platform.tenant.address_setup` audit row; the activation is never undone. Neither the token nor Cloudflare's error text is
-logged or audited. Tests: `CloudflareAddressTest` (a fake Cloudflare HTTP server on the loopback) and `ActivationAddressIT`.
+logged or audited, and the actuator never serves the settings (only health and info are exposed,
+`CloudflareTokenNotServedTest` and `OperationsIT`). Tests: `CloudflareAddressTest` (a fake Cloudflare HTTP server on the
+loopback) and `ActivationAddressIT`.
 
 ## 12.9 Testing integrations
 

@@ -1518,8 +1518,8 @@ Accepted (this list is the ADR index):
   the private key lives in the operator's Mac Keychain and a sealed printed copy; old symmetric backups are told by their
   header and stay readable until they age out; the host's weekly drill becomes a backup check, the full restore a monthly
   drill on the Mac (`restore-drill-offline.sh`); the import rehearsal refuses an age backup until the owner decides (no migration)
-- ADR-131 Activate sets up the business's address on Cloudflare with a narrow token (proposed, #963 from #155, owner decision
-  D278): only with `BMS_CLOUDFLARE_API_TOKEN`, `_ZONE_ID`, `_ACCOUNT_ID` and `_TUNNEL_ID` all set (staging), after the
+- ADR-131 Activate sets up the business's address on Cloudflare with a narrow token (Accepted, #963 from #155, owner decision
+  D278, hardened by #965): only with `BMS_CLOUDFLARE_API_TOKEN`, `_ZONE_ID`, `_ACCOUNT_ID` and `_TUNNEL_ID` all set (staging), after the
   activation commits, the proxied CNAME of the tenant host and its tunnel route before the catch-all, each read first and
   made only when missing; the token (Zone DNS Edit, Account Cloudflare Tunnel Edit) goes only to `api.cloudflare.com` and is
   never logged; a Cloudflare failure never undoes the activation, the screen says so and offers Set up the address again,
