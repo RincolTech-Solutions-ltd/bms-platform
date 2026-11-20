@@ -324,7 +324,12 @@ class EmailLayoutTest {
         String twoStep = templates
                 .render("email", OutboxTemplates.ACTIVATION_TWO_STEP, params())
                 .text();
-        assertThat(plain).contains("set your password").doesNotContain("two-step");
+        // Recommended, not required (#93, #155): the plain activation says the administrator can turn it on.
+        assertThat(plain)
+                .contains("set your password")
+                .contains("You can turn on two-step sign-in")
+                .contains("We recommend it")
+                .doesNotContain("which your business requires");
         assertThat(twoStep).contains("turn on two-step sign-in").contains("requires");
         assertThat(OutboxTemplates.placeholders("email", OutboxTemplates.ACTIVATION_TWO_STEP))
                 .isEqualTo(OutboxTemplates.placeholders("email", "onboarding.activation"));

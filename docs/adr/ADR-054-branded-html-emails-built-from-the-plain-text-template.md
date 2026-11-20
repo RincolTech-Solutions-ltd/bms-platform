@@ -49,7 +49,8 @@ markup unescaped would let an applicant put their own links and markup into a me
    looks like a link included, is printed as escaped text. A subject is put on one line before it is set, so a line break in a
    business's name can never start a header of its own.
 5. **Wording.** A prose paragraph of a template is one line (a trailing backslash joins the source lines), so both parts wrap to the
-   reader's screen. The activation email says to set the password; the variant `onboarding.activation_two_step`, which also asks to
+   reader's screen. The activation email says to set the password, and that the administrator can turn on two-step sign-in
+   (recommended, not required: #93, issue #155); the variant `onboarding.activation_two_step`, which also asks to
    turn on two-step sign-in, is chosen only when the new administrator is required to (a role that requires it or the tenant's policy,
    carried from `TenantAdmins.Invitation.twoStepRequired`). Every email is signed "Rincol Tech".
 6. **Support contact from configuration.** `bms.notifications.support-contact` (`BMS_SUPPORT_CONTACT`) is free text shown as typed,

@@ -8,7 +8,8 @@ The command gives an empty lending tenant on **staging** a small, fully fabricat
 pilot tenant's staff can try the loan screens with fake data before their own register is imported
 (increment 7):
 
-- 15 members (`Test Borrower 01` to `15`, phones `+256700000001` to `15`, KYC verified);
+- 15 members (`Test Borrower 01` to `15`, phones `+256700000001` to `15`, KYC verified, with no
+  photo of the ID: see below);
 - 4 loan products (`FAB-BULLET`, `FAB-MONTHLY` with a 2% deducted fee, `FAB-DECLINE` with an upfront
   fee, `FAB-WEEKLY` with an added fee and the early settlement rebate), all rates invented;
 - 12 applications in every state before the money: draft, submitted, appraised, approved, rejected
@@ -35,6 +36,11 @@ payout through `InvestmentServicing`, so each posts its journal, receipt or vouc
 audit row; the trial balance balances, loans receivable equals the loans' principal outstanding,
 member savings equals the savings accounts' balances and both investment liabilities equal the
 investments' balances. The seed queues no SMS.
+
+The seeded members are written as checked with no photo of the ID, which the screens never allow
+(FR-MEM-05, issue #155). A member added by hand stays at Details missing until the ID number, where
+the member lives, a next of kin and a photo of the front of the ID are all added, the photo too; only
+then is it Waiting to be checked by a branch manager. The command's output line says so.
 
 ```
 java -jar bms-api.jar seed-lending --tenant <slug>
@@ -91,7 +97,7 @@ docker compose --project-name bms -f compose.yml run --rm --no-deps \
 
 The stack is capped at 900 MB (ADR-018): run it when nothing else heavy is running. The command
 prints one line, for example
-`seed-lending: tenant <slug>: 15 members, 4 products, 12 applications, 6 disbursed loans, 11 repayments, 11 savings accounts, <n> savings movements, 3 investment products, 10 investments (all fabricated)`.
+`seed-lending: tenant <slug>: 15 members, 4 products, 12 applications, 6 disbursed loans, 11 repayments, 11 savings accounts, <n> savings movements, 3 investment products, 10 investments (all fabricated). The seeded members are marked as checked without a photo of the ID. ...`.
 
 ## Run locally
 

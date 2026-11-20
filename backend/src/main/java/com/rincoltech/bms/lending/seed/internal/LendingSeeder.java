@@ -34,6 +34,15 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class LendingSeeder {
 
+    /**
+     * Said after every seed (issue #155): the seeded members are written as checked with no ID photo,
+     * which the screens never allow (FR-MEM-05 needs the ID image before a check).
+     */
+    static final String KYC_NOTE = "The seeded members are marked as checked without a photo of the ID. A member"
+            + " you add yourself stays at Details missing until the ID number, where they live, a next of kin"
+            + " and a photo of the front of the ID are all added, the photo too; only then is it Waiting to be"
+            + " checked by a branch manager.";
+
     /** The audit action that marks a seeded tenant; a second run finds it and refuses. */
     static final String MARKER = "lending.seed.fabricated";
 
@@ -104,7 +113,8 @@ public class LendingSeeder {
                     + " repayments, " + savingsAccounts + " savings accounts, " + savingsMovements
                     + " savings movements, " + investmentProducts + " investment products, " + investments
                     + " investments (all fabricated)"
-                    + (demo == null ? "" : "; " + demo.render());
+                    + (demo == null ? "" : "; " + demo.render())
+                    + ". " + KYC_NOTE;
         }
     }
 
