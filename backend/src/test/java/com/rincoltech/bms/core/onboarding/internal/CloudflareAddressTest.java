@@ -298,6 +298,192 @@ class CloudflareAddressTest {
         assertThat(audit.rows.get(0).data()).containsEntry("reason", "timeout");
     }
 
+    // JUSTIFICATION-A3: one new test per hardening point of issue #965, no new mechanism.
+    @Test
+    void aHostThatCannotBeMadeIsAPlainFailureNeverAnException() {
+        // Issue #965 point 1: setUp runs after the activation committed, so a bad host must not escape as a 500.
+        for (String origin : List.of("https://shop_one-bms-staging.example.test", "not a uri", "throw")) {
+            PlatformHost bad = new PlatformHost() {
+                @Override
+                public boolean servesPlatform(String host) {
+                    return false;
+                }
+
+                @Override
+                public boolean servesTenant(String host) {
+                    return false;
+                }
+
+                @Override
+                public boolean isValidSlug(String slug) {
+                    return true;
+                }
+
+                @Override
+                public String tenantOrigin(String slug) {
+                    if ("throw".equals(origin)) {
+                        throw new IllegalArgumentException("fabricated");
+                    }
+                    return origin;
+                }
+
+                @Override
+                public String platformOrigin() {
+                    return "https://platform.example.test";
+                }
+            };
+            CloudflareAddress badHost = new CloudflareAddress(
+                    settings(), bad, new ObjectMapper(), audit, null, cloudflare.base(), Duration.ofSeconds(1));
+
+            CloudflareAddress.Result result = badHost.setUp("shop_one", TENANT, OPERATOR, "activation");
+
+            assertThat(result.outcome()).as(origin).isEqualTo("failed");
+            assertThat(result.host()).as(origin).isNull();
+            assertThat(result.message())
+                    .as(origin)
+                    .startsWith("The business's address was not set up.")
+                    .contains("BMS_TENANT_HOST_PATTERN")
+                    .contains("The business is active either way");
+        }
+        assertThat(cloudflare.requests).isEmpty();
+        assertThat(audit.rows)
+                .hasSize(3)
+                .allSatisfy(row -> assertThat(row.data())
+                        .containsEntry("failed_step", "host")
+                        .containsEntry("reason", "bad_host")
+                        .doesNotContainKey("host"));
+    }
+
+    @Test
+    void theDnsLookupAsksForTheExactName() {
+        // Issue #965 point 5: name.exact, so a new meaning of the plain filter cannot give a false conflict.
+        address.setUp("shop-exact", TENANT, OPERATOR, "activation");
+
+        assertThat(cloudflare.requests)
+                .contains("GET /client/v4/zones/" + FakeCloudflare.ZONE
+                        + "/dns_records?name.exact=shop-exact-bms-staging.example.test");
+        assertThat(cloudflare.requests).noneMatch(r -> r.contains("?name="));
+    }
+
+    @Test
+    void aBodyThatStallsAfterTheHeadersIsATimeout() {
+        // Issue #965 point 3: the request timeout alone ends at the headers; the body read is bounded too.
+        cloudflare.stalls.put("GET dns", 10_000L);
+        CloudflareAddress quick = address(settings(), Duration.ofMillis(300));
+
+        long started = System.nanoTime();
+        CloudflareAddress.Result result = quick.setUp("shop-stall", TENANT, OPERATOR, "activation");
+
+        assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(2));
+        assertThat(result.outcome()).isEqualTo("failed");
+        assertThat(result.message()).contains("did not answer in time");
+        assertThat(audit.rows.get(0).data())
+                .containsEntry("failed_step", "dns_record")
+                .containsEntry("reason", "timeout");
+    }
+
+    @Test
+    void aBodyThatStallsOnTheTunnelReleasesTheLock() {
+        cloudflare.stalls.put("GET tunnel", 10_000L);
+        CloudflareAddress quick = address(settings(), Duration.ofMillis(300));
+        assertThat(quick.setUp("shop-stall-one", TENANT, OPERATOR, "activation").message())
+                .contains("did not answer in time");
+
+        cloudflare.stalls.clear();
+        assertThat(quick.setUp("shop-stall-one", TENANT, OPERATOR, "again").outcome())
+                .isEqualTo("set_up");
+    }
+
+    @Test
+    void aRefusedConnectionIsNoConnectionInPlainWords() throws IOException {
+        int closed;
+        try (java.net.ServerSocket socket = new java.net.ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            closed = socket.getLocalPort();
+        }
+        CloudflareAddress nowhere = new CloudflareAddress(
+                settings(),
+                HOSTS,
+                new ObjectMapper(),
+                audit,
+                null,
+                java.net.URI.create("http://127.0.0.1:" + closed + "/client/v4/"),
+                Duration.ofSeconds(1));
+
+        CloudflareAddress.Result result = nowhere.setUp("shop-closed", TENANT, OPERATOR, "activation");
+
+        assertThat(result.outcome()).isEqualTo("failed");
+        assertThat(result.message()).contains("Cloudflare could not be reached");
+        assertThat(audit.rows.get(0).data()).containsEntry("reason", "no_connection");
+    }
+
+    @Test
+    void anAttemptWaitsOnlyAFewSecondsForAnotherTunnelChange() throws Exception {
+        // Issue #965 point 2: a bounded tryLock, so a slow attempt cannot hold the next one up for long.
+        cloudflare.delays.put("GET tunnel", 2_000L);
+        CloudflareAddress bounded = new CloudflareAddress(
+                settings(),
+                HOSTS,
+                new ObjectMapper(),
+                audit,
+                null,
+                cloudflare.base(),
+                Duration.ofSeconds(5),
+                Duration.ofMillis(200),
+                Duration.ofSeconds(20));
+        String tunnelGet = "GET /client/v4/accounts/" + FakeCloudflare.ACCOUNT;
+        Thread first = Thread.ofVirtual().start(() -> bounded.setUp("shop-slow", TENANT, OPERATOR, "activation"));
+        long until = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (cloudflare.count(tunnelGet) == 0 && System.nanoTime() < until) {
+            Thread.sleep(10);
+        }
+        assertThat(cloudflare.count(tunnelGet)).isEqualTo(1);
+
+        long started = System.nanoTime();
+        CloudflareAddress.Result second = bounded.setUp("shop-waiting", TENANT, OPERATOR, "activation");
+
+        assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(1));
+        assertThat(second.outcome()).isEqualTo("failed");
+        assertThat(second.dnsRecord()).isEqualTo("created");
+        assertThat(second.tunnelRoute()).isEqualTo("not_done");
+        assertThat(second.message())
+                .contains("Another address was being added to the tunnel at the same time")
+                .contains("Set up the address again");
+        first.join();
+        assertThat(audit.rows)
+                .anySatisfy(row -> assertThat(row.data())
+                        .containsEntry("host", "shop-waiting-bms-staging.example.test")
+                        .containsEntry("reason", "tunnel_busy"));
+    }
+
+    @Test
+    void oneAttemptStopsAtItsTimeLimitWhateverEachCallTakes() {
+        // Issue #965 point 2: each call is under its own deadline, but together they would keep Activate waiting.
+        cloudflare.delays.put("GET dns", 400L);
+        cloudflare.delays.put("POST dns", 400L);
+        cloudflare.delays.put("GET tunnel", 400L);
+        CloudflareAddress capped = new CloudflareAddress(
+                settings(),
+                HOSTS,
+                new ObjectMapper(),
+                audit,
+                null,
+                cloudflare.base(),
+                Duration.ofSeconds(2),
+                Duration.ofSeconds(1),
+                Duration.ofMillis(700));
+
+        long started = System.nanoTime();
+        CloudflareAddress.Result result = capped.setUp("shop-capped", TENANT, OPERATOR, "activation");
+
+        assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofMillis(1500));
+        assertThat(result.outcome()).isEqualTo("failed");
+        assertThat(result.message()).contains("so it was stopped to keep Activate quick");
+        assertThat(audit.rows.get(0).data()).containsEntry("reason", "too_long");
+        assertThat(CloudflareAddress.ATTEMPT_LIMIT)
+                .isLessThanOrEqualTo(Duration.ofSeconds(20))
+                .isGreaterThan(CloudflareAddress.CALL_TIMEOUT.plus(CloudflareAddress.LOCK_WAIT));
+    }
+
     @Test
     void aRetryAfterAFailureSetsTheAddressUp() {
         cloudflare.failures.put("GET tunnel", 500);
