@@ -15,7 +15,7 @@ import org.springframework.context.annotation.Configuration;
  * days after they closed. Platform work: no tenant is bound.
  */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(OnboardingProperties.class)
+@EnableConfigurationProperties({OnboardingProperties.class, CloudflareProperties.class})
 class OnboardingJobs {
 
     static final String HOUSEKEEPING = "core.onboarding.application-housekeeping";

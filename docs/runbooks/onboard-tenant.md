@@ -267,8 +267,10 @@ setup token.
    phone or business name may be a repeat free month (spec section 4.2 item 4).
 3. Call or message the applicant. Then **Verify**, or **Needs info** with a question (the applicant
    gets an email and answers on their application page), or **Reject** with a reason (they see it).
-4. Before activating on staging, make the tenant host reachable (next section) with the slug you
-   will use. The portal suggests a free slug from the business name; edit it if needed. It cannot
+4. On a staging server with the Cloudflare settings (next section, "Automatic, at Activate"),
+   skip the manual part of this step: Activate sets the address up itself and the application page
+   then says whether it did. Otherwise, before activating on staging, make the tenant host reachable
+   (next section) with the slug you will use. The portal suggests a free slug from the business name; edit it if needed. It cannot
    change later. Then press **Check the address** on the Activate form: it asks
    `https://<slug host>/version` and says "answers" when the host reaches this app. "No DNS record
    yet" means step 1 of the next section is missing; "did not answer" or "something answered, but
@@ -287,7 +289,41 @@ setup token.
 
 ## Make the tenant host reachable
 
-**Staging (Cloudflare Tunnel, ADR-018).** Each staging tenant needs two things in Cloudflare,
+**Automatic, at Activate (staging, issue #155, owner decision D278, ADR-131).** With the four settings below on the
+staging host, Activate makes the DNS record and the tunnel entry described next by itself, once the business is created.
+The application page then says in plain words whether the address was set up ("The address ... is set up" or "... was not
+set up" with the reason), offers **Set up the address again**, and runs **Check the address** for you. The business is
+active whatever Cloudflare answers; a failure is audited as `platform.tenant.address_setup` with the reason, never the
+token. Both steps first read what is there: a repeat duplicates nothing, and a record or tunnel entry of the host that
+points somewhere else is left alone and reported, for you to fix by hand below.
+
+Create the token once (the owner or an account administrator, in the Cloudflare dashboard):
+
+1. My Profile, API Tokens, Create Token, Create Custom Token. Name it `bms-staging-address-setup`.
+2. Permissions, exactly two rows:
+   - Zone, DNS, Edit;
+   - Account, Cloudflare Tunnel, Edit.
+3. Zone Resources: Include, Specific zone, `rincoltech.com`. Account Resources: Include, the Rincol Tech account.
+4. Client IP Address Filtering: the staging host's public address if it is fixed; leave TTL empty (rotated with the other
+   staging secrets). Continue to summary, check the two permissions, Create Token, copy it once.
+
+Then on the staging host, in `/opt/bms/.env` (never in git or a ticket):
+
+```bash
+BMS_CLOUDFLARE_API_TOKEN=<the token>
+BMS_CLOUDFLARE_ZONE_ID=<Zone ID of rincoltech.com, Overview page, right column>
+BMS_CLOUDFLARE_ACCOUNT_ID=<Account ID, same page>
+BMS_CLOUDFLARE_TUNNEL_ID=<the staging tunnel's id, Zero Trust, Networks, Tunnels>
+# Optional; where the tunnel sends a tenant host. Default http://proxy:8080, as every other rule.
+# BMS_CLOUDFLARE_TUNNEL_SERVICE=http://proxy:8080
+```
+
+The next deploy (or `docker compose up -d api`) picks them up. With any one of the four missing the feature is off and the
+portal shows nothing of it. To check: activate a test application, or press **Set up the address again** on an activated
+one; the message and the address check follow. If the token leaks, roll it in the dashboard at once (API Tokens, Roll) and
+put the new one in `.env`.
+
+**Staging by hand (Cloudflare Tunnel, ADR-018),** for a server without those settings or a step Cloudflare refused. Each staging tenant needs two things in Cloudflare,
 because a tunnel's public hostnames cannot express `*-bms-staging`: a proxied DNS record and a
 public hostname entry on the tunnel. Do both with the Cloudflare API from your own machine, with a
 short-lived API token that has `Zone.DNS:Edit` on `rincoltech.com` and

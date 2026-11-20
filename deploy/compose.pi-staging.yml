@@ -179,6 +179,13 @@ services:
       # The signing secret of the Resend webhook for bounces and complaints; unset turns the route off.
       BMS_RESEND_WEBHOOK_SECRET: ${BMS_RESEND_WEBHOOK_SECRET:-}
       BMS_MAIL_ALLOWLIST: ${BMS_MAIL_ALLOWLIST:-}
+      # Activate sets up the business's DNS record and tunnel route (issue #155, ADR-131); off unless the first four are set.
+      # The token: Zone DNS Edit on rincoltech.com and Account Cloudflare Tunnel Edit only (docs/runbooks/onboard-tenant.md).
+      BMS_CLOUDFLARE_API_TOKEN: ${BMS_CLOUDFLARE_API_TOKEN:-}
+      BMS_CLOUDFLARE_ZONE_ID: ${BMS_CLOUDFLARE_ZONE_ID:-}
+      BMS_CLOUDFLARE_ACCOUNT_ID: ${BMS_CLOUDFLARE_ACCOUNT_ID:-}
+      BMS_CLOUDFLARE_TUNNEL_ID: ${BMS_CLOUDFLARE_TUNNEL_ID:-}
+      BMS_CLOUDFLARE_TUNNEL_SERVICE: ${BMS_CLOUDFLARE_TUNNEL_SERVICE:-http://proxy:8080}
       # The support line in the footer of every email (issue #396, ADR-054); empty leaves it out.
       BMS_SUPPORT_CONTACT: ${BMS_SUPPORT_CONTACT:-}
       BMS_TELEGRAM_BOT_TOKEN: ${BMS_TELEGRAM_BOT_TOKEN:-}

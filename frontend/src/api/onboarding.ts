@@ -157,6 +157,17 @@ export async function checkHostname(slug: string): Promise<HostnameCheck> {
   return data;
 }
 
+export type AddressSetup = S['AddressSetup'];
+
+/** "Set up the address again" (#155, ADR-131): the Cloudflare record and tunnel route of an activated business. */
+export async function setUpAddressAgain(id: string): Promise<AddressSetup> {
+  const { data, error } = await api.POST('/api/v1/platform/applications/{application_id}/address-setup', {
+    params: { path: { application_id: id } },
+  });
+  if (error || !data) fail(error, 'Could not set up the address');
+  return data;
+}
+
 export async function outboxStatus(): Promise<OutboxStatus> {
   const { data, error } = await api.GET('/api/v1/platform/outbox');
   if (error || !data) fail(error, 'Could not load the outbox');

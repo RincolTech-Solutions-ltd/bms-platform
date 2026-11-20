@@ -70,6 +70,9 @@
             "description" : "False when the application was already activated: nothing was done",
             "type" : "boolean"
           },
+          "address_setup" : {
+            "$ref" : "#/components/schemas/AddressSetup"
+          },
           "admin_invitation_expires_at" : {
             "format" : "date-time",
             "type" : "string"
@@ -279,6 +282,30 @@
             "type" : "integer"
           },
           "reason" : {
+            "type" : "string"
+          }
+        }
+      },
+      "AddressSetup" : {
+        "properties" : {
+          "dns_record" : {
+            "description" : "created, already_there or not_done",
+            "type" : "string"
+          },
+          "host" : {
+            "description" : "The business's own host, from the slug and the tenant host pattern",
+            "type" : "string"
+          },
+          "message" : {
+            "description" : "Plain words for the operator",
+            "type" : "string"
+          },
+          "outcome" : {
+            "description" : "set_up: both steps are done; failed: one was not (message says which and why)",
+            "type" : "string"
+          },
+          "tunnel_route" : {
+            "description" : "added, already_there or not_done",
             "type" : "string"
           }
         }
@@ -686,6 +713,10 @@
       },
       "ApplicationDetail" : {
         "properties" : {
+          "address_setup_available" : {
+            "description" : "True when this server sets up the address on Cloudflare at Activate (issue #155, ADR-131)",
+            "type" : "boolean"
+          },
           "application" : {
             "$ref" : "#/components/schemas/Application"
           },
@@ -38523,6 +38554,34 @@
           }
         },
         "summary" : "Create the tenant and send the activation link; a repeat does nothing (FR-ONB-07)",
+        "tags" : [ "platform" ]
+      }
+    },
+    "/api/v1/platform/applications/{application_id}/address-setup" : {
+      "post" : {
+        "operationId" : "platformSetUpApplicationAddress",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "application_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AddressSetup"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Set up the activated business's address on Cloudflare again; changes nothing already right (issue #155)",
         "tags" : [ "platform" ]
       }
     },

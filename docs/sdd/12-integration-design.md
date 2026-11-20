@@ -28,6 +28,7 @@
 | Payment gateway (mobile money, cards) | Outbound collection requests, inbound callbacks, status queries, settlement reports | ADR-035 (proposed): Pesapal v3 | `PaymentGateway` |
 | Object storage | Outbound | Cloudflare R2 over the S3 API (product plan) | `ObjectStorage` |
 | Transactional email | Outbound | Provider chosen with the infrastructure work; no ADR yet. Required in production: the API refuses to start there without SMTP (ADR-059) | `EmailProvider` |
+| Cloudflare API (a business's DNS record and tunnel route) | Outbound, after Activate | ADR-131: staging only, off without the four settings (section 12.8) | `CloudflareAddress` (onboarding, internal) |
 
 ## 12.3 SMS aggregator
 
@@ -308,7 +309,29 @@ expiry and tampering behave as with R2 without a local bucket. Given `bms.storag
 in a file there instead: the big file test of customer data onboarding sets it, so the heap it judges holds no quarantined
 file, as R2 holds none in the API's (issue #900, chapter 15 section 15.7).
 
-## 12.8 Testing integrations
+## 12.8 Cloudflare: the business's address at Activate
+
+Built in issue #963 (from #155, owner decision D278, ADR-131). When `BMS_CLOUDFLARE_API_TOKEN`, `BMS_CLOUDFLARE_ZONE_ID`,
+`BMS_CLOUDFLARE_ACCOUNT_ID` and `BMS_CLOUDFLARE_TUNNEL_ID` are all set, the onboarding module makes the business's host (the
+slug under `BMS_TENANT_HOST_PATTERN`) reachable once Activate has committed, and again when the operator presses "Set up the
+address again":
+
+1. `GET zones/{zone}/dns_records?name=<host>`; a proxied CNAME to `<tunnel id>.cfargotunnel.com` is already there, any other
+   record of the name is reported and left alone, and none is created with `POST zones/{zone}/dns_records`
+   (`proxied: true`, comment `BMS tenant <slug>, set up at Activate`). A create refused because the record appeared in the
+   meantime is read again.
+2. `GET accounts/{account}/cfd_tunnel/{tunnel}/configurations`; the host's rule pointing at `BMS_CLOUDFLARE_TUNNEL_SERVICE`
+   is already there, a rule of the host pointing elsewhere is reported and left alone, a configuration whose last rule is
+   not a catch-all is not written, and otherwise `{hostname, service, originRequest: {}}` goes directly before the catch-all
+   and the whole configuration, every other rule as read, is written back with `PUT`. One writer at a time in the process.
+
+The base address `https://api.cloudflare.com/client/v4/` is a constant, so the token never goes anywhere else; redirects are
+not followed; each call has an 8 second connect and answer deadline; no retry loop, no circuit breaker: the operator's button
+is the retry. Every outcome, a Cloudflare error or a timeout included, becomes plain words for the operator and one
+`platform.tenant.address_setup` audit row; the activation is never undone. Neither the token nor Cloudflare's error text is
+logged or audited. Tests: `CloudflareAddressTest` (a fake Cloudflare HTTP server on the loopback) and `ActivationAddressIT`.
+
+## 12.9 Testing integrations
 
 - Fakes implement each interface and record calls; unit and API tests use them.
 - Contract tests per real adapter run against the provider's sandbox in a separate,

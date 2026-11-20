@@ -105,7 +105,12 @@ class ApplicationsController {
             String suggestedSlug,
 
             @Schema(description = "The business whose referral code the applicant brought, or null (ADR-069)")
-            Referrals.ApplicationReferrer referredBy) {}
+            Referrals.ApplicationReferrer referredBy,
+
+            @Schema(
+                    description =
+                            "True when this server sets up the address on Cloudflare at Activate (issue #155, ADR-131)")
+            boolean addressSetupAvailable) {}
 
     @Schema(name = "ApplicationNoteRequest")
     record NoteRequest(@NotBlank @Size(max = 1000) String note) {}
@@ -145,7 +150,12 @@ class ApplicationsController {
             @Schema(description = "The admin's one-time link, shown once (also emailed); null on a repeat")
             String adminInvitationUrl,
 
-            Instant adminInvitationExpiresAt) {}
+            Instant adminInvitationExpiresAt,
+
+            @Schema(
+                    description =
+                            "What the Cloudflare address setup did (issue #155, ADR-131); null when off or on a repeat")
+            CloudflareAddress.Result addressSetup) {}
 
     @GetMapping
     @RequiresPermission("platform.tenants.read")
@@ -206,5 +216,15 @@ class ApplicationsController {
             operationId = "platformActivateApplication")
     ActivationResult activate(@PathVariable("application_id") UUID id, @Valid @RequestBody ActivateRequest request) {
         return service.activate(id, request);
+    }
+
+    @PostMapping("/{application_id}/address-setup")
+    @RequiresPermission("platform.tenants.manage")
+    @Operation(
+            summary =
+                    "Set up the activated business's address on Cloudflare again; changes nothing already right (issue #155)",
+            operationId = "platformSetUpApplicationAddress")
+    CloudflareAddress.Result setUpAddress(@PathVariable("application_id") UUID id) {
+        return service.setUpAddressAgain(id);
     }
 }

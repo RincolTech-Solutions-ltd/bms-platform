@@ -778,6 +778,14 @@ output changed.
   `app/landing.dom.test.tsx` (operator sign-in is a quiet link, not a landing button),
   `layout/signup-findings.layout.test.ts` (both at 412px), and `HostnameCheckTest` (each outcome
   against a real HTTP server on the loopback) and `HostnameCheckIT` (the endpoint, its refusals).
+  Issue #963 (ADR-131): `CloudflareAddressTest` against a fake Cloudflare HTTP server on the loopback (the record and the
+  route created, found again with no duplicate, the route before the catch-all with the rest of the configuration as read,
+  another record or route of the host left alone, a configuration without a catch-all not written, a 401 or 403, a 4xx, a
+  5xx, a redirect and a timeout in plain words and never an exception, a retry, four attempts at once making one record and
+  one route, off with any one setting missing, the token only in the Authorization header and never in the log, the audit
+  or the settings' text), `ActivationAddressIT` (without the settings Activate answers as before and nothing is offered or
+  audited; with a failing Cloudflare the business is active, the retry sets the address up, one audit row each without the
+  token) and `areas/platform/address-setup.dom.test.tsx` (the result in plain words, the retry, then the address check).
 - First run and guided tours (FR-IAM-13, FR-IAM-14): `areas/auth/first-run.test.tsx` renders each
   first-run step and error state; `tour/model.test.ts` covers step filtering by permission, module
   and feature flag, the first-run and replay rules, the skip of a missing anchor, the focus trap,
