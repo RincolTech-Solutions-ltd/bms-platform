@@ -263,6 +263,21 @@ class HostnameCheckTest {
     }
 
     @Test
+    void anAddressThePatternCannotMakeIsPlainWordsNotA500() {
+        // Issue #965: a pattern that gives a host URI rejects (a _), or no URI at all, answers 422 bad_host.
+        for (String origin : new String[] {"https://shop_one-bms-staging.example.test", "not a uri"}) {
+            hosts.origin = origin;
+            assertThatThrownBy(() -> check.check("shop-one"))
+                    .as(origin)
+                    .isInstanceOfSatisfying(ApiException.class, e -> {
+                        assertThat(e.status().value()).isEqualTo(422);
+                        assertThat(e.code()).isEqualTo("bad_host");
+                        assertThat(e.getMessage()).contains("BMS_TENANT_HOST_PATTERN");
+                    });
+        }
+    }
+
+    @Test
     void theSlugIsTrimmedAndLowerCased() throws IOException {
         serve(200, "application/json", "{\"git_sha\":\"abc1234\"}");
 

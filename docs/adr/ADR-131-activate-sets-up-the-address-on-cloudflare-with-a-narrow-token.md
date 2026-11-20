@@ -2,10 +2,11 @@
 
 ## Status
 
-Proposed (issue #963, from the public sign-up findings of #155, owner decision D278 of 20 November 2026); it becomes
-Accepted on merge of the pull request that carries it. Amends ADR-018 (staging behind a Cloudflare Tunnel: a tenant host's
+Accepted (issue #963, from the public sign-up findings of #155, owner decision D278 of 20 November 2026; accepted on the
+merge of pull request #964; hardened by issue #965: the bounded lock, the attempt limit, the bounded body read, the exact
+name lookup and the host made inside the attempt). Amends ADR-018 (staging behind a Cloudflare Tunnel: a tenant host's
 record and tunnel route were made by hand) and ADR-024 (Activate). No migration. The requirement is FR-ONB-07 (chapter 3);
-the routes are in chapter 7 section 7.11.3; the integration is chapter 12 section 12.8. Renumbered at merge if needed.
+the routes are in chapter 7 section 7.11.3; the integration is chapter 12 section 12.8.
 
 ## Context
 
@@ -45,20 +46,24 @@ The owner decided (D278) that the staging server gets a Cloudflare API token lim
    `{hostname, service, originRequest: {}}` directly before the last rule and writes the whole configuration back, every
    other rule and setting as it was read. A configuration whose last rule is not a catch-all (it has a hostname) is not
    written. One writer of the tunnel configuration at a time in the process, so two activations at once do not lose each
-   other's route; the staging API is one process.
+   other's route; the staging API is one process. An attempt waits at most 3 seconds for another attempt's tunnel change,
+   then stops with `tunnel_busy` in plain words (issue #965).
 5. **Activation never fails or rolls back on Cloudflare.** The steps run after the activation's transaction committed, never
-   inside it (chapter 12 section 12.1). Every Cloudflare answer, a 4xx, a 5xx, no connection or no answer within 8 seconds
-   per call, becomes an outcome with plain words for the operator ("Cloudflare refused the token (HTTP 403)", "Cloudflare
-   had a problem (HTTP 502)", "Cloudflare did not answer in time"), never an exception. The business stays active.
+   inside it (chapter 12 section 12.1). Every Cloudflare answer, a 4xx, a 5xx, no connection or no whole answer (headers and
+   body) within 8 seconds per call, becomes an outcome with plain words for the operator ("Cloudflare refused the token
+   (HTTP 403)", "Cloudflare had a problem (HTTP 502)", "Cloudflare did not answer in time"), never an exception. One attempt
+   stops after 20 seconds in all (`too_long`), so Activate answers well inside the proxy's timeout and the operator never
+   loses the one-time invitation URL (issue #965). A host that cannot be made from the slug and `BMS_TENANT_HOST_PATTERN`
+   is a failure of the step `host` (`bad_host`), with nothing sent to Cloudflare. The business stays active.
 6. **The operator sees it and can try again.** The Activate answer carries `address_setup` (`host`, `outcome` `set_up` or
    `failed`, `dns_record` `created`, `already_there` or `not_done`, `tunnel_route` `added`, `already_there` or `not_done`,
    `message`). The application page shows the message, a "Set up the address again" button
    (`POST /platform/applications/{application_id}/address-setup`, `platform.tenants.manage`, 409 `not_activated` before
    Activate), and then runs the existing hostname check of #787 on the address and says what it found.
 7. **Each attempt is audited.** One `platform_audit_log` row `platform.tenant.address_setup` per attempt, with the operator,
-   the tenant, the host, `trigger` (`activation` or `again`), the outcome, both step results and, on a failure, the step,
-   a short reason (`http_error`, `timeout`, `no_connection`, `record_conflict`, `route_conflict`, `no_catch_all`,
-   `unexpected`), the HTTP status and Cloudflare's numeric error codes. Never the token and never Cloudflare's error text.
+   the tenant, the host (left out when it could not be made, `bad_host`), `trigger` (`activation` or `again`), the outcome, both step results and, on a failure, the step,
+   a short reason (`http_error`, `timeout`, `too_long`, `tunnel_busy`, `no_connection`, `bad_host`, `record_conflict`,
+   `route_conflict`, `no_catch_all`, `unexpected`), the HTTP status and Cloudflare's numeric error codes. Never the token and never Cloudflare's error text.
 
 ## Consequences
 

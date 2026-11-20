@@ -17,6 +17,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.ReentrantLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,14 +40,23 @@ import tools.jackson.databind.node.ObjectNode;
  * (docs/runbooks/onboard-tenant.md). On only when {@link CloudflareProperties#enabled()}. Both steps first read what is there
  * and change nothing that is already right, so a retry never duplicates; a record or route that names the host but points
  * elsewhere is reported and left alone. The token goes only to {@link #API} (the base is not a setting), redirects are not
- * followed, every request has a short deadline, and neither the token nor Cloudflare's answer text is logged or audited.
- * A failure never reaches the caller as an exception: the business stays active and the operator reads what happened.
+ * followed, every request has a short deadline for the whole answer (headers and body), the wait for the tunnel's lock is
+ * bounded, and one attempt stops at {@link #ATTEMPT_LIMIT}, so Activate always answers well inside the proxy's timeout and
+ * the operator never loses the one-time invitation URL (issue #965). Neither the token nor Cloudflare's answer text is logged
+ * or audited. A failure never reaches the caller as an exception, a host that cannot be made from the slug included: the
+ * business stays active and the operator reads what happened.
  */
 @Component
 class CloudflareAddress {
 
     static final URI API = URI.create("https://api.cloudflare.com/client/v4/");
     static final String AUDIT_ACTION = "platform.tenant.address_setup";
+    /** The deadline of one call to Cloudflare, from the request to the last byte of the answer. */
+    static final Duration CALL_TIMEOUT = Duration.ofSeconds(8);
+    /** How long an attempt waits for another attempt's tunnel change before it stops (issue #965). */
+    static final Duration LOCK_WAIT = Duration.ofSeconds(3);
+    /** The most one attempt may take, all its calls and the lock wait together (issue #965). */
+    static final Duration ATTEMPT_LIMIT = Duration.ofSeconds(20);
 
     private static final Logger log = LoggerFactory.getLogger(CloudflareAddress.class);
 
@@ -90,9 +104,11 @@ class CloudflareAddress {
     private final TransactionTemplate transactions;
     private final URI api;
     private final Duration timeout;
+    private final Duration lockWait;
+    private final Duration attemptLimit;
     private final HttpClient http;
-    /** The tunnel's configuration is read, changed and written whole: one writer at a time in this process. */
-    private final ReentrantLock tunnelLock = new ReentrantLock();
+    /** The tunnel's configuration is read, changed and written whole: one writer at a time (visible to the tests). */
+    final ReentrantLock tunnelLock = new ReentrantLock();
 
     @Autowired
     CloudflareAddress(
@@ -101,7 +117,7 @@ class CloudflareAddress {
             ObjectMapper mapper,
             PlatformAuditLog audit,
             PlatformTransactionManager transactionManager) {
-        this(settings, hosts, mapper, audit, transactionManager, API, Duration.ofSeconds(8));
+        this(settings, hosts, mapper, audit, transactionManager, API, CALL_TIMEOUT, LOCK_WAIT, ATTEMPT_LIMIT);
     }
 
     /** For the tests only: a fake Cloudflare server on the loopback stands in for {@link #API}. */
@@ -113,6 +129,20 @@ class CloudflareAddress {
             PlatformTransactionManager transactionManager,
             URI api,
             Duration timeout) {
+        this(settings, hosts, mapper, audit, transactionManager, api, timeout, LOCK_WAIT, ATTEMPT_LIMIT);
+    }
+
+    /** For the tests only: also a shorter lock wait and attempt limit. */
+    CloudflareAddress(
+            CloudflareProperties settings,
+            PlatformHost hosts,
+            ObjectMapper mapper,
+            PlatformAuditLog audit,
+            PlatformTransactionManager transactionManager,
+            URI api,
+            Duration timeout,
+            Duration lockWait,
+            Duration attemptLimit) {
         this.settings = settings;
         this.hosts = hosts;
         this.mapper = mapper;
@@ -120,6 +150,8 @@ class CloudflareAddress {
         this.transactions = transactionManager == null ? null : new TransactionTemplate(transactionManager);
         this.api = api;
         this.timeout = timeout;
+        this.lockWait = lockWait;
+        this.attemptLimit = attemptLimit;
         this.http = HttpClient.newBuilder()
                 .connectTimeout(timeout)
                 .followRedirects(HttpClient.Redirect.NEVER)
@@ -131,9 +163,22 @@ class CloudflareAddress {
         return settings.enabled();
     }
 
-    /** The host of a slug under the tenant host pattern ({@code BMS_TENANT_HOST_PATTERN}). */
-    String hostOf(String slug) {
-        return URI.create(hosts.tenantOrigin(slug)).getHost().toLowerCase(Locale.ROOT);
+    /** The host of a slug under {@code BMS_TENANT_HOST_PATTERN}; a URI with no host (a {@code _} in it) is a {@link Failure}. */
+    String hostOf(String slug) throws Failure {
+        String host = URI.create(hosts.tenantOrigin(slug)).getHost();
+        if (host == null || host.isBlank()) {
+            throw badHost();
+        }
+        return host.toLowerCase(Locale.ROOT);
+    }
+
+    private static Failure badHost() {
+        return new Failure(
+                "bad_host",
+                "Its host could not be made from the short name and BMS_TENANT_HOST_PATTERN, so nothing was sent to"
+                        + " Cloudflare.",
+                null,
+                List.of());
     }
 
     /**
@@ -145,22 +190,27 @@ class CloudflareAddress {
         if (!enabled()) {
             return null;
         }
-        String host = hostOf(slug);
+        long deadline = System.nanoTime() + attemptLimit.toNanos();
+        String host = null;
         String dns = "not_done";
         String route = "not_done";
         Failure failure = null;
         String failedStep = null;
         try {
+            failedStep = "host";
+            host = hostOf(slug);
             failedStep = "dns_record";
-            dns = dnsRecord(host, slug);
+            dns = dnsRecord(host, slug, deadline);
             failedStep = "tunnel_route";
-            route = tunnelRoute(host);
+            route = tunnelRoute(host, deadline);
             failedStep = null;
         } catch (Failure f) {
             failure = f;
         } catch (RuntimeException e) {
             // Never the exception's text: it could carry a request detail. Its type is enough to find it.
-            failure = new Failure("unexpected", "Something went wrong while talking to Cloudflare.", null, List.of());
+            failure = "host".equals(failedStep)
+                    ? badHost()
+                    : new Failure("unexpected", "Something went wrong while talking to Cloudflare.", null, List.of());
             log.warn(
                     "cloudflare address setup: unexpected {} in step {}",
                     e.getClass().getSimpleName(),
@@ -185,11 +235,12 @@ class CloudflareAddress {
 
     // ---- Step 1: the proxied CNAME -----------------------------------------------------------------
 
-    private String dnsRecord(String host, String slug) throws Failure {
+    private String dnsRecord(String host, String slug, long deadline) throws Failure {
         String target = settings.tunnelId() + ".cfargotunnel.com";
-        String list =
-                "zones/" + settings.zoneId() + "/dns_records?name=" + URLEncoder.encode(host, StandardCharsets.UTF_8);
-        if (matchingRecord(send("GET", list, null), host, target)) {
+        // name.exact pins an exact match, whatever Cloudflare's plain name filter comes to mean (issue #965).
+        String list = "zones/" + settings.zoneId() + "/dns_records?name.exact="
+                + URLEncoder.encode(host, StandardCharsets.UTF_8);
+        if (matchingRecord(send("GET", list, null, deadline), host, target)) {
             return "already_there";
         }
         ObjectNode record = mapper.createObjectNode();
@@ -200,7 +251,7 @@ class CloudflareAddress {
         record.put("ttl", 1);
         record.put("comment", "BMS tenant " + slug + ", set up at Activate");
         try {
-            send("POST", "zones/" + settings.zoneId() + "/dns_records", record);
+            send("POST", "zones/" + settings.zoneId() + "/dns_records", record, deadline);
             return "created";
         } catch (Failure refused) {
             // Two attempts at once: Cloudflare refuses the second CNAME of a name. Read again before calling it a
@@ -208,7 +259,7 @@ class CloudflareAddress {
             if (refused.httpStatus != null
                     && refused.httpStatus >= 400
                     && refused.httpStatus < 500
-                    && matchingRecord(send("GET", list, null), host, target)) {
+                    && matchingRecord(send("GET", list, null, deadline), host, target)) {
                 return "already_there";
             }
             throw refused;
@@ -242,11 +293,29 @@ class CloudflareAddress {
 
     // ---- Step 2: the tunnel route before the catch-all -------------------------------------------
 
-    private String tunnelRoute(String host) throws Failure {
+    private String tunnelRoute(String host, long deadline) throws Failure {
         String path = "accounts/" + settings.accountId() + "/cfd_tunnel/" + settings.tunnelId() + "/configurations";
-        tunnelLock.lock();
+        boolean locked;
         try {
-            JsonNode answer = send("GET", path, null);
+            locked = tunnelLock.tryLock(Math.min(lockWait.toNanos(), left(deadline)), TimeUnit.NANOSECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw interrupted();
+        }
+        if (!locked) {
+            // A wait cut short by the attempt limit (or no time left at all) is too_long, not a busy tunnel.
+            if (left(deadline) <= 0) {
+                throw tooLong();
+            }
+            throw new Failure(
+                    "tunnel_busy",
+                    "Another address was being added to the tunnel at the same time, and this one stopped after waiting"
+                            + " a few seconds.",
+                    null,
+                    List.of());
+        }
+        try {
+            JsonNode answer = send("GET", path, null, deadline);
             JsonNode found = answer.path("result").path("config");
             if (!found.isObject()
                     || !found.path("ingress").isArray()
@@ -286,11 +355,32 @@ class CloudflareAddress {
             config.set("ingress", rules);
             ObjectNode body = mapper.createObjectNode();
             body.set("config", config);
-            send("PUT", path, body);
+            send("PUT", path, body, deadline);
             return "added";
         } finally {
             tunnelLock.unlock();
         }
+    }
+
+    private static long left(long deadline) {
+        return deadline - System.nanoTime();
+    }
+
+    private static Failure late() {
+        return new Failure("timeout", "Cloudflare did not answer in time.", null, List.of());
+    }
+
+    private Failure tooLong() {
+        return new Failure(
+                "too_long",
+                "Setting it up took more than " + attemptLimit.toSeconds()
+                        + " seconds, so it was stopped to keep Activate quick.",
+                null,
+                List.of());
+    }
+
+    private static Failure interrupted() {
+        return new Failure("interrupted", "The request to Cloudflare was stopped.", null, List.of());
     }
 
     private static Failure noCatchAll() {
@@ -305,9 +395,16 @@ class CloudflareAddress {
     // ---- HTTP ---------------------------------------------------------------------------------------
 
     /** One call to the Cloudflare API; the answer when it says success, a {@link Failure} otherwise. */
-    private JsonNode send(String method, String path, JsonNode body) throws Failure {
+    private JsonNode send(String method, String path, JsonNode body, long deadline) throws Failure {
+        long left = left(deadline);
+        if (left <= 0) {
+            throw tooLong();
+        }
+        // The last call of an attempt gets only what is left of the attempt; its timeout then means the attempt's.
+        boolean cut = left < timeout.toNanos();
+        Duration wait = cut ? Duration.ofNanos(left) : timeout;
         HttpRequest.Builder request = HttpRequest.newBuilder(api.resolve(path))
-                .timeout(timeout)
+                .timeout(wait)
                 .header("Authorization", "Bearer " + settings.apiToken())
                 .header("Accept", "application/json");
         if (body == null) {
@@ -316,16 +413,35 @@ class CloudflareAddress {
             request.header("Content-Type", "application/json")
                     .method(method, HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)));
         }
+        // The request's own timeout ends when the headers arrive; the bounded get covers the body too (issue #965).
+        CompletableFuture<HttpResponse<String>> pending =
+                http.sendAsync(request.build(), HttpResponse.BodyHandlers.ofString());
         HttpResponse<String> response;
         try {
-            response = http.send(request.build(), HttpResponse.BodyHandlers.ofString());
-        } catch (java.net.http.HttpTimeoutException e) {
-            throw new Failure("timeout", "Cloudflare did not answer in time.", null, List.of());
-        } catch (IOException e) {
-            throw new Failure("no_connection", "Cloudflare could not be reached.", null, List.of());
+            response = pending.get(wait.toNanos(), TimeUnit.NANOSECONDS);
+        } catch (TimeoutException e) {
+            pending.cancel(true);
+            throw cut ? tooLong() : late();
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            while (cause instanceof CompletionException && cause.getCause() != null) {
+                cause = cause.getCause();
+            }
+            if (cause instanceof java.net.http.HttpTimeoutException) {
+                throw cut ? tooLong() : late();
+            }
+            if (cause instanceof IOException) {
+                throw new Failure("no_connection", "Cloudflare could not be reached.", null, List.of());
+            }
+            // The cause's type only, never its text: it could carry a request detail.
+            log.warn(
+                    "cloudflare address setup: unexpected {} from the HTTP client",
+                    cause == null ? null : cause.getClass().getSimpleName());
+            throw new Failure("unexpected", "Something went wrong while talking to Cloudflare.", null, List.of());
         } catch (InterruptedException e) {
+            pending.cancel(true);
             Thread.currentThread().interrupt();
-            throw new Failure("interrupted", "The request to Cloudflare was stopped.", null, List.of());
+            throw interrupted();
         }
         int status = response.statusCode();
         JsonNode answer;
@@ -369,14 +485,17 @@ class CloudflareAddress {
     }
 
     private static String failedWords(String host, Failure failure) {
-        return "The address " + host + " was not set up. " + failure.getMessage()
+        return (host == null ? "The business's address" : "The address " + host) + " was not set up. "
+                + failure.getMessage()
                 + " The business is active either way. Press \"Set up the address again\", or see \"Make the tenant host"
                 + " reachable\" in docs/runbooks/onboard-tenant.md.";
     }
 
     private void record(UUID tenantId, UUID operator, String trigger, Result result, String step, Failure failure) {
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("host", result.host());
+        if (result.host() != null) {
+            data.put("host", result.host());
+        }
         data.put("trigger", trigger);
         data.put("outcome", result.outcome());
         data.put("dns_record", result.dnsRecord());

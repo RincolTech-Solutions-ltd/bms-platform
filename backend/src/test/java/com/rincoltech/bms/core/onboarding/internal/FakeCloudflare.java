@@ -42,6 +42,8 @@ final class FakeCloudflare implements AutoCloseable {
     final Map<String, Integer> failures = new ConcurrentHashMap<>();
     /** Steps that answer only after this many milliseconds. */
     final Map<String, Long> delays = new ConcurrentHashMap<>();
+    /** Steps that send their headers and the start of the body, then stall for this many milliseconds (issue #965). */
+    final Map<String, Long> stalls = new ConcurrentHashMap<>();
 
     volatile ObjectNode config;
     private final HttpServer server;
@@ -93,6 +95,17 @@ final class FakeCloudflare implements AutoCloseable {
             if (delay != null) {
                 Thread.sleep(delay);
             }
+            Long stall = stalls.get(step);
+            if (stall != null) {
+                exchange.sendResponseHeaders(200, 0);
+                OutputStream out = exchange.getResponseBody();
+                out.write("{\"success\":true,".getBytes(StandardCharsets.UTF_8));
+                out.flush();
+                // One virtual thread per exchange, so a stall never queues the next request; close() interrupts the
+                // sleep and the try-with-resources closes the exchange.
+                Thread.sleep(stall);
+                return;
+            }
             Integer failure = failures.get(step);
             if (failure != null) {
                 answer(
@@ -103,8 +116,15 @@ final class FakeCloudflare implements AutoCloseable {
             }
             switch (step) {
                 case "GET dns" -> {
-                    String name =
-                            URLDecoder.decode(query.substring(query.indexOf("name=") + 5), StandardCharsets.UTF_8);
+                    // Only the exact match filter (issue #965): a bare name= is refused, so the tests prove it.
+                    if (query == null || !query.startsWith("name.exact=")) {
+                        answer(
+                                exchange,
+                                400,
+                                "{\"success\":false,\"errors\":[{\"code\":9999,\"message\":\"filter\"}]}");
+                        return;
+                    }
+                    String name = URLDecoder.decode(query.substring("name.exact=".length()), StandardCharsets.UTF_8);
                     ArrayNode result = mapper.createArrayNode();
                     synchronized (records) {
                         records.stream()

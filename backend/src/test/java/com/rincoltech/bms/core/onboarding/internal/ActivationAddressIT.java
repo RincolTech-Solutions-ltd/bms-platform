@@ -1,6 +1,8 @@
 package com.rincoltech.bms.core.onboarding.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
@@ -11,6 +13,7 @@ import com.rincoltech.bms.core.referrals.Referrals;
 import com.rincoltech.bms.core.tenancy.ModuleManifest;
 import com.rincoltech.bms.core.tenancy.PlatformHost;
 import com.rincoltech.bms.core.tenancy.ShortNames;
+import com.rincoltech.bms.kernel.ApiExceptionHandler;
 import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
@@ -28,11 +31,17 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.PlatformTransactionManager;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Activate and the business's address on Cloudflare (issue #155, ADR-131). Without the Cloudflare settings, as in every test
@@ -78,6 +87,12 @@ class ActivationAddressIT extends IntegrationTest {
 
     @Autowired
     CloudflareAddress address;
+
+    @Autowired
+    ApiExceptionHandler problems;
+
+    @Autowired
+    JsonMapper jsonMapper;
 
     Api platform;
     Session operator;
@@ -255,6 +270,144 @@ class ActivationAddressIT extends IntegrationTest {
                         .query(String.class)
                         .single();
                 assertThat(audited).contains("\"again\"").doesNotContain(FakeCloudflare.TOKEN);
+            } finally {
+                CurrentPrincipal.clear();
+            }
+        }
+    }
+
+    // JUSTIFICATION-A3: the review of #966 asked for point 1 proven through activate and the retry, not only setUp.
+    @Test
+    void aHostThatCannotBeMadeNeverFailsActivateOrTheRetry() throws Exception {
+        UUID id = verified(Api.email("address-bad-host"));
+        String slug = OnboardingIT.slug();
+        // Only the address setup gets a host URI rejects (a _); the rest of Activate is real.
+        PlatformHost underscore = new PlatformHost() {
+            @Override
+            public boolean servesPlatform(String host) {
+                return hosts.servesPlatform(host);
+            }
+
+            @Override
+            public boolean servesTenant(String host) {
+                return hosts.servesTenant(host);
+            }
+
+            @Override
+            public boolean isValidSlug(String s) {
+                return hosts.isValidSlug(s);
+            }
+
+            @Override
+            public String tenantOrigin(String s) {
+                return "https://" + s + "_bms-staging.rincoltech.test";
+            }
+
+            @Override
+            public String platformOrigin() {
+                return hosts.platformOrigin();
+            }
+        };
+        try (FakeCloudflare cloudflare = new FakeCloudflare()) {
+            CloudflareAddress on = new CloudflareAddress(
+                    new CloudflareProperties(
+                            FakeCloudflare.TOKEN,
+                            FakeCloudflare.ZONE,
+                            FakeCloudflare.ACCOUNT,
+                            FakeCloudflare.TUNNEL,
+                            null),
+                    underscore,
+                    mapper,
+                    platformAudit,
+                    transactionManager,
+                    cloudflare.base(),
+                    Duration.ofSeconds(3));
+            BusinessClock clock = new BusinessClock(Clock.systemUTC());
+            ApplicationService service = new ApplicationService(
+                    jdbc,
+                    transactionManager,
+                    outbox,
+                    platformAudit,
+                    hosts,
+                    provisioning,
+                    clock,
+                    new SignUpRateLimiter(clock),
+                    new OnboardingProperties(null, null, null),
+                    referrals,
+                    shortNames,
+                    on,
+                    manifests);
+            CurrentPrincipal.set(Principal.uniform(
+                    operatorId,
+                    "platform",
+                    Set.of("platform.tenants.manage", "platform.tenants.read"),
+                    true,
+                    Set.of()));
+            // The real controller over HTTP (MockMvc, the application's JSON mapper) on this service.
+            // The hostname check the page runs next sees the same pattern, as in production.
+            MockMvc web = MockMvcBuilders.standaloneSetup(
+                            new ApplicationsController(service, new HostnameCheck(underscore, mapper)))
+                    .setControllerAdvice(problems)
+                    .setMessageConverters(new JacksonJsonHttpMessageConverter(jsonMapper))
+                    .build();
+            try {
+                MvcResult activated = web.perform(post("/api/v1/platform/applications/" + id + "/activate")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(mapper.writeValueAsString(Map.of(
+                                        "modules",
+                                        List.of("retail"),
+                                        "term",
+                                        "monthly",
+                                        "way_in",
+                                        "trial",
+                                        "slug",
+                                        slug))))
+                        .andReturn();
+
+                assertThat(activated.getResponse().getStatus()).isEqualTo(200);
+                JsonNode done = mapper.readTree(activated.getResponse().getContentAsString());
+                assertThat(done.path("activated_now").asBoolean()).isTrue();
+                assertThat(done.path("admin_invitation_url").asString("")).isNotBlank();
+                assertThat(done.path("address_setup").path("outcome").asString())
+                        .isEqualTo("failed");
+                assertThat(done.path("address_setup").path("host").isNull()
+                                || done.path("address_setup").path("host").isMissingNode())
+                        .isTrue();
+                assertThat(done.path("address_setup").path("message").asString())
+                        .contains("BMS_TENANT_HOST_PATTERN")
+                        .contains("The business is active either way");
+                UUID tenantId = UUID.fromString(done.path("tenant_id").asString());
+
+                MvcResult again = web.perform(post("/api/v1/platform/applications/" + id + "/address-setup"))
+                        .andReturn();
+
+                assertThat(again.getResponse().getStatus()).isEqualTo(200);
+                JsonNode retried = mapper.readTree(again.getResponse().getContentAsString());
+                assertThat(retried.path("outcome").asString()).isEqualTo("failed");
+                assertThat(retried.path("message").asString()).contains("BMS_TENANT_HOST_PATTERN");
+
+                MvcResult checked = web.perform(get("/api/v1/platform/applications/hostname-check")
+                                .param("slug", slug))
+                        .andReturn();
+
+                assertThat(checked.getResponse().getStatus()).isEqualTo(422);
+                assertThat(checked.getResponse().getContentAsString())
+                        .contains("bad_host")
+                        .contains("could not be made from the short name and BMS_TENANT_HOST_PATTERN");
+                assertThat(cloudflare.requests).isEmpty();
+                String status = TestDatabase.owner()
+                        .sql("SELECT status FROM tenants WHERE id = ?")
+                        .param(tenantId)
+                        .query(String.class)
+                        .single();
+                assertThat(status).isEqualTo("active");
+                List<String> reasons = TestDatabase.owner()
+                        .sql("SELECT data->>'reason' FROM platform_audit_log"
+                                + " WHERE action = 'platform.tenant.address_setup' AND tenant_id = ?")
+                        .param(tenantId)
+                        .query(String.class)
+                        .list();
+                assertThat(reasons).containsExactly("bad_host", "bad_host");
             } finally {
                 CurrentPrincipal.clear();
             }
