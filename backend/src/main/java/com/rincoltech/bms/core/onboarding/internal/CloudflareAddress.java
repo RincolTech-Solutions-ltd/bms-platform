@@ -107,8 +107,8 @@ class CloudflareAddress {
     private final Duration lockWait;
     private final Duration attemptLimit;
     private final HttpClient http;
-    /** The tunnel's configuration is read, changed and written whole: one writer at a time in this process. */
-    private final ReentrantLock tunnelLock = new ReentrantLock();
+    /** The tunnel's configuration is read, changed and written whole: one writer at a time (visible to the tests). */
+    final ReentrantLock tunnelLock = new ReentrantLock();
 
     @Autowired
     CloudflareAddress(
@@ -295,6 +295,9 @@ class CloudflareAddress {
 
     private String tunnelRoute(String host, long deadline) throws Failure {
         String path = "accounts/" + settings.accountId() + "/cfd_tunnel/" + settings.tunnelId() + "/configurations";
+        if (left(deadline) <= 0) {
+            throw tooLong();
+        }
         boolean locked;
         try {
             locked = tunnelLock.tryLock(Math.min(lockWait.toNanos(), left(deadline)), TimeUnit.NANOSECONDS);
@@ -429,9 +432,11 @@ class CloudflareAddress {
             if (cause instanceof IOException) {
                 throw new Failure("no_connection", "Cloudflare could not be reached.", null, List.of());
             }
-            // Only the type, never the text: setUp turns it into "unexpected".
-            throw new IllegalStateException(
-                    String.valueOf(cause == null ? null : cause.getClass().getSimpleName()));
+            // The cause's type only, never its text: it could carry a request detail.
+            log.warn(
+                    "cloudflare address setup: unexpected {} from the HTTP client",
+                    cause == null ? null : cause.getClass().getSimpleName());
+            throw new Failure("unexpected", "Something went wrong while talking to Cloudflare.", null, List.of());
         } catch (InterruptedException e) {
             pending.cancel(true);
             Thread.currentThread().interrupt();

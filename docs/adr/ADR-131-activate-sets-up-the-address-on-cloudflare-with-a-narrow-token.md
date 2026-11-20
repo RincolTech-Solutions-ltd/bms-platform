@@ -6,7 +6,7 @@ Accepted (issue #963, from the public sign-up findings of #155, owner decision D
 merge of pull request #964; hardened by issue #965: the bounded lock, the attempt limit, the bounded body read, the exact
 name lookup and the host made inside the attempt). Amends ADR-018 (staging behind a Cloudflare Tunnel: a tenant host's
 record and tunnel route were made by hand) and ADR-024 (Activate). No migration. The requirement is FR-ONB-07 (chapter 3);
-the routes are in chapter 7 section 7.11.3; the integration is chapter 12 section 12.8. Renumbered at merge if needed.
+the routes are in chapter 7 section 7.11.3; the integration is chapter 12 section 12.8.
 
 ## Context
 
@@ -61,7 +61,7 @@ The owner decided (D278) that the staging server gets a Cloudflare API token lim
    (`POST /platform/applications/{application_id}/address-setup`, `platform.tenants.manage`, 409 `not_activated` before
    Activate), and then runs the existing hostname check of #787 on the address and says what it found.
 7. **Each attempt is audited.** One `platform_audit_log` row `platform.tenant.address_setup` per attempt, with the operator,
-   the tenant, the host, `trigger` (`activation` or `again`), the outcome, both step results and, on a failure, the step,
+   the tenant, the host (left out when it could not be made, `bad_host`), `trigger` (`activation` or `again`), the outcome, both step results and, on a failure, the step,
    a short reason (`http_error`, `timeout`, `too_long`, `tunnel_busy`, `no_connection`, `bad_host`, `record_conflict`,
    `route_conflict`, `no_catch_all`, `unexpected`), the HTTP status and Cloudflare's numeric error codes. Never the token and never Cloudflare's error text.
 

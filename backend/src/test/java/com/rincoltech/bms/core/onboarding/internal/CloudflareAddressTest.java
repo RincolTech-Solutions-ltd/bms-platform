@@ -8,6 +8,8 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -382,16 +384,93 @@ class CloudflareAddressTest {
                 .containsEntry("reason", "timeout");
     }
 
+    // JUSTIFICATION-A3: the review of #966 asked for these exact tests (leaked lock, too_long paths, proxy timeout).
     @Test
-    void aBodyThatStallsOnTheTunnelReleasesTheLock() {
+    void aBodyThatStallsOnTheTunnelReleasesTheLock() throws Exception {
         cloudflare.stalls.put("GET tunnel", 10_000L);
         CloudflareAddress quick = address(settings(), Duration.ofMillis(300));
         assertThat(quick.setUp("shop-stall-one", TENANT, OPERATOR, "activation").message())
                 .contains("did not answer in time");
+        // Not held by anyone: the reentrant lock would let this thread in again, so ask the lock itself.
+        assertThat(quick.tunnelLock.isLocked()).isFalse();
 
+        // And the next attempt comes from another thread, as the next request would.
         cloudflare.stalls.clear();
-        assertThat(quick.setUp("shop-stall-one", TENANT, OPERATOR, "again").outcome())
-                .isEqualTo("set_up");
+        List<CloudflareAddress.Result> next = Collections.synchronizedList(new ArrayList<>());
+        Thread.ofVirtual()
+                .start(() -> next.add(quick.setUp("shop-stall-one", TENANT, OPERATOR, "again")))
+                .join();
+        assertThat(next).extracting(CloudflareAddress.Result::outcome).containsExactly("set_up");
+    }
+
+    @Test
+    void anAttemptWithNoTimeLeftSendsNothing() {
+        // The check before a call: no time left is too_long, and no request is made.
+        CloudflareAddress spent = new CloudflareAddress(
+                settings(),
+                HOSTS,
+                new ObjectMapper(),
+                audit,
+                null,
+                cloudflare.base(),
+                Duration.ofSeconds(1),
+                Duration.ofSeconds(1),
+                Duration.ZERO);
+
+        CloudflareAddress.Result result = spent.setUp("shop-spent", TENANT, OPERATOR, "activation");
+
+        assertThat(result.outcome()).isEqualTo("failed");
+        assertThat(result.message()).contains("so it was stopped to keep Activate quick");
+        assertThat(audit.rows.get(0).data())
+                .containsEntry("failed_step", "dns_record")
+                .containsEntry("reason", "too_long");
+        assertThat(cloudflare.requests).isEmpty();
+    }
+
+    @Test
+    void theAttemptLimitStopsTheTunnelWriteAndReleasesTheLock() {
+        cloudflare.delays.put("GET tunnel", 300L);
+        cloudflare.delays.put("PUT tunnel", 3_000L);
+        CloudflareAddress capped = new CloudflareAddress(
+                settings(),
+                HOSTS,
+                new ObjectMapper(),
+                audit,
+                null,
+                cloudflare.base(),
+                Duration.ofSeconds(2),
+                Duration.ofSeconds(1),
+                Duration.ofMillis(1_000));
+
+        long started = System.nanoTime();
+        CloudflareAddress.Result result = capped.setUp("shop-put", TENANT, OPERATOR, "activation");
+
+        assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofMillis(1_800));
+        assertThat(result.outcome()).isEqualTo("failed");
+        assertThat(result.dnsRecord()).isEqualTo("created");
+        assertThat(result.tunnelRoute()).isEqualTo("not_done");
+        assertThat(cloudflare.count("PUT ")).isEqualTo(1);
+        assertThat(audit.rows.get(0).data())
+                .containsEntry("failed_step", "tunnel_route")
+                .containsEntry("reason", "too_long");
+        assertThat(capped.tunnelLock.isLocked()).isFalse();
+    }
+
+    @Test
+    void theAttemptLimitIsWellInsideTheProxyTimeouts() throws IOException {
+        // Cloudflare's edge waits 100 s for a proxied answer; Caddy sets no read, write or response timeout of its own.
+        Path caddy = CloudflareTokenNotServedTest.repository().resolve("deploy/caddy");
+        try (var files = Files.walk(caddy)) {
+            for (Path file : files.filter(Files::isRegularFile).toList()) {
+                assertThat(Files.readString(file))
+                        .as(file.toString())
+                        .doesNotContain("read_timeout")
+                        .doesNotContain("write_timeout")
+                        .doesNotContain("response_header_timeout");
+            }
+        }
+        assertThat(CloudflareAddress.ATTEMPT_LIMIT.plus(CloudflareAddress.CALL_TIMEOUT))
+                .isLessThan(Duration.ofSeconds(100).dividedBy(2));
     }
 
     @Test

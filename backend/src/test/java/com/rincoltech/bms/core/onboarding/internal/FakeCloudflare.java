@@ -101,6 +101,8 @@ final class FakeCloudflare implements AutoCloseable {
                 OutputStream out = exchange.getResponseBody();
                 out.write("{\"success\":true,".getBytes(StandardCharsets.UTF_8));
                 out.flush();
+                // One virtual thread per exchange, so a stall never queues the next request; close() interrupts the
+                // sleep and the try-with-resources closes the exchange.
                 Thread.sleep(stall);
                 return;
             }

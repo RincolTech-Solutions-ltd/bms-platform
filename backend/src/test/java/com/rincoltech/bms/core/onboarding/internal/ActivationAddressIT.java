@@ -260,4 +260,106 @@ class ActivationAddressIT extends IntegrationTest {
             }
         }
     }
+
+    // JUSTIFICATION-A3: the review of #966 asked for point 1 proven through activate and the retry, not only setUp.
+    @Test
+    void aHostThatCannotBeMadeNeverFailsActivateOrTheRetry() throws Exception {
+        UUID id = verified(Api.email("address-bad-host"));
+        String slug = OnboardingIT.slug();
+        // Only the address setup gets a host URI rejects (a _); the rest of Activate is real.
+        PlatformHost underscore = new PlatformHost() {
+            @Override
+            public boolean servesPlatform(String host) {
+                return hosts.servesPlatform(host);
+            }
+
+            @Override
+            public boolean servesTenant(String host) {
+                return hosts.servesTenant(host);
+            }
+
+            @Override
+            public boolean isValidSlug(String s) {
+                return hosts.isValidSlug(s);
+            }
+
+            @Override
+            public String tenantOrigin(String s) {
+                return "https://" + s + "_bms-staging.rincoltech.test";
+            }
+
+            @Override
+            public String platformOrigin() {
+                return hosts.platformOrigin();
+            }
+        };
+        try (FakeCloudflare cloudflare = new FakeCloudflare()) {
+            CloudflareAddress on = new CloudflareAddress(
+                    new CloudflareProperties(
+                            FakeCloudflare.TOKEN,
+                            FakeCloudflare.ZONE,
+                            FakeCloudflare.ACCOUNT,
+                            FakeCloudflare.TUNNEL,
+                            null),
+                    underscore,
+                    mapper,
+                    platformAudit,
+                    transactionManager,
+                    cloudflare.base(),
+                    Duration.ofSeconds(3));
+            BusinessClock clock = new BusinessClock(Clock.systemUTC());
+            ApplicationService service = new ApplicationService(
+                    jdbc,
+                    transactionManager,
+                    outbox,
+                    platformAudit,
+                    hosts,
+                    provisioning,
+                    clock,
+                    new SignUpRateLimiter(clock),
+                    new OnboardingProperties(null, null, null),
+                    referrals,
+                    shortNames,
+                    on,
+                    manifests);
+            CurrentPrincipal.set(Principal.uniform(
+                    operatorId,
+                    "platform",
+                    Set.of("platform.tenants.manage", "platform.tenants.read"),
+                    true,
+                    Set.of()));
+            try {
+                ApplicationsController.ActivationResult done = service.activate(id, request(slug));
+
+                assertThat(done.activatedNow()).isTrue();
+                assertThat(done.adminInvitationUrl()).isNotBlank();
+                assertThat(done.addressSetup().outcome()).isEqualTo("failed");
+                assertThat(done.addressSetup().host()).isNull();
+                assertThat(done.addressSetup().message())
+                        .contains("BMS_TENANT_HOST_PATTERN")
+                        .contains("The business is active either way");
+
+                CloudflareAddress.Result again = service.setUpAddressAgain(id);
+
+                assertThat(again.outcome()).isEqualTo("failed");
+                assertThat(again.message()).contains("BMS_TENANT_HOST_PATTERN");
+                assertThat(cloudflare.requests).isEmpty();
+                String status = TestDatabase.owner()
+                        .sql("SELECT status FROM tenants WHERE id = ?")
+                        .param(done.tenantId())
+                        .query(String.class)
+                        .single();
+                assertThat(status).isEqualTo("active");
+                List<String> reasons = TestDatabase.owner()
+                        .sql("SELECT data->>'reason' FROM platform_audit_log"
+                                + " WHERE action = 'platform.tenant.address_setup' AND tenant_id = ?")
+                        .param(done.tenantId())
+                        .query(String.class)
+                        .list();
+                assertThat(reasons).containsExactly("bad_host", "bad_host");
+            } finally {
+                CurrentPrincipal.clear();
+            }
+        }
+    }
 }
