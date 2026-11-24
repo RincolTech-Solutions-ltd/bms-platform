@@ -768,7 +768,15 @@ class CatalogueService {
                 .toList();
         BigDecimal total =
                 held.stream().map(CatalogueRepository.BranchBalance::qty).reduce(BigDecimal.ZERO, BigDecimal::add);
-        return p.withStock(total.setScale(3, java.math.RoundingMode.UNNECESSARY).toPlainString(), held.size());
+        // Issue #967: each of those branches on its own, so Buy stock says what each holds now and after the purchase.
+        List<CatalogueApi.BranchStock> byBranch = held.stream()
+                .filter(b -> b.qty().signum() != 0)
+                .map(b -> new CatalogueApi.BranchStock(
+                        b.branchId(),
+                        b.qty().setScale(3, java.math.RoundingMode.UNNECESSARY).toPlainString()))
+                .toList();
+        return p.withStock(total.setScale(3, java.math.RoundingMode.UNNECESSARY).toPlainString(), held.size())
+                .withStockByBranch(byBranch);
     }
 
     /** Non-price fields; omitted fields are unchanged. Prices change only through {@link #editPrices}. */
