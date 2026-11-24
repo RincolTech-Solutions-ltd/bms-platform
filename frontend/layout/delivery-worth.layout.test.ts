@@ -26,14 +26,17 @@ describe('delivery worth at 412px (#821)', () => {
     const blocks = page.getByTestId('delivery-worth');
     await settle(blocks.first());
     expect(await blocks.count()).toBe(2);
-    const expected = [
+    const three = [
       ['Total cost', 'UGX 795,457,500'],
       ['Should sell for', 'UGX 997,755,000'],
       ['Expected profit', 'UGX 202,297,500'],
     ];
-    for (const block of await blocks.all()) {
+    // Issue #967: the form also says the profit as a share of the cost; a past purchase keeps its three.
+    const share = ['Expected profit on cost', '25.4%'];
+    for (const [n, block] of (await blocks.all()).entries()) {
       const rows = await block.locator(':scope > div').all();
-      expect(rows).toHaveLength(3);
+      const expected = n === 0 ? [...three, share] : three;
+      expect(rows).toHaveLength(expected.length);
       for (const [i, row] of rows.entries()) {
         const term = row.locator('dt');
         const amount = row.locator('dd .num');

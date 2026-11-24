@@ -984,6 +984,13 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   cost, Should sell for and Expected profit (or loss) in the total's box, live (`restockWorth`, `DeliveryWorth`), and each
   Past purchases row the three the server sent; anyone else sees Total cost as before. Past purchases is a kept read
   (ADR-116). Tests: `RetailDeliveryWorthIT`, `delivery-worth.dom.test.tsx`, `layout/delivery-worth.layout.test.ts`.
+- **Built (stock now and after on Buy stock, issue #967, FR-RET-94, AppSheet parity for HATS):** no migration and no permission.
+  `GET /retail/products/{product_id}` also carries `stock_by_branch` (`{branch_id, qty}` for each branch the caller may read
+  whose balance is not zero). Buy stock reads it per line (`useQueries` on the `['retail', 'product', id]` key the other
+  screens use) and says under each branch quantity In stock now and after this (`branchStockAfter`), only where the person
+  holds `retail.stock.read`; a profit reader at that branch also sees the Amount for it (`branchAmount`), and the total's box
+  gives the expected profit on cost (`profitPercent`, `DeliveryWorth percent`). Each branch quantity is the kit's `Stepper`.
+  Tests: `RetailProductInactiveIT`, `delivery-worth.dom.test.tsx`, `layout/delivery-worth.layout.test.ts`.
 - **Built (Past usage and damage, issue #145, AppSheet "Damaged or used stock not sold"):** no migration and no permission.
   `GET /retail/stock/movements` takes a repeatable `kind` filter (422 for an unknown or blank kind) and each row carries the
   item's `code`, `description` and `unit`, and for a profit reader `line_cost_minor`, the value the screen shows as is. The page `/staff/retail/usage-history` (`usage-history.tsx`, `retail.stock.read`), linked

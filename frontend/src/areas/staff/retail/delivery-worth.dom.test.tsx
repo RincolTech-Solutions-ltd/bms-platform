@@ -23,6 +23,8 @@ vi.mock('@tanstack/react-router', async (original) => {
 const reads = vi.hoisted(() => ({
   list: vi.fn(() => Promise.resolve({ items: [], next_cursor: '' })),
   one: vi.fn((id: string) => Promise.resolve({ id, purchase_no: 'RP-TEST-1', status: 'posted', lines: [], total_minor: 0, currency: 'UGX' })),
+  /** Issue #967: the one-product read, with the stock per branch the person may read (fabricated). */
+  product: vi.fn((id: string): Promise<Record<string, unknown>> => Promise.resolve({ id, stock_by_branch: [] })),
 }));
 
 vi.mock('../../../api/retail', async (original) => {
@@ -33,6 +35,7 @@ vi.mock('../../../api/retail', async (original) => {
       ...real.retail,
       listPurchases: reads.list,
       getPurchase: reads.one,
+      getProduct: reads.product,
       listProducts: () => Promise.resolve([]),
       listSuppliers: () => Promise.resolve([]),
       priceHistory: () => Promise.resolve([]),
@@ -41,7 +44,8 @@ vi.mock('../../../api/retail', async (original) => {
   };
 });
 
-const { RestockForm, restockWorth } = await import('./restock');
+const { RestockForm, restockWorth, branchStockAfter, profitPercent } = await import('./restock');
+const { branchLabel } = await import('../../../auth/branch');
 const { PriceForm } = await import('./catalogue-products');
 const { RestockCard, PurchasePage, Route: RestocksRoute } = await import('./restocks');
 const { PROFIT } = await import('./permissions');
@@ -107,22 +111,23 @@ describe('Buy stock (issue #821)', () => {
     screenOf(owner, <RestockForm initial={draft()} />);
     const total = screen.getByTestId('restock-total');
     // Cost 5 x 1,000 + 10 x 300 = 8,000; worth 13,000.
-    expect(figures(total)).toEqual(['Total cost: UGX 8,000', 'Should sell for: UGX 13,000', 'Expected profit: UGX 5,000']);
-    expect(total.querySelectorAll('dd .num')).toHaveLength(3);
+    // Issue #967: and the profit as a share of the cost, 5,000 of 8,000.
+    expect(figures(total)).toEqual(['Total cost: UGX 8,000', 'Should sell for: UGX 13,000', 'Expected profit: UGX 5,000', 'Expected profit on cost: 62.5%']);
+    expect(total.querySelectorAll('dd .num')).toHaveLength(4);
     expect(within(total).getByLabelText('This delivery')).toBeTruthy();
   });
 
   it('updates the figures as the lines change', () => {
     screenOf(owner, <RestockForm initial={draft()} />);
     fireEvent.change(document.getElementById(`q-0-${branch}`) as HTMLInputElement, { target: { value: '6' } });
-    expect(figures(screen.getByTestId('restock-total'))).toEqual(['Total cost: UGX 9,000', 'Should sell for: UGX 14,600', 'Expected profit: UGX 5,600']);
+    expect(figures(screen.getByTestId('restock-total'))).toEqual(['Total cost: UGX 9,000', 'Should sell for: UGX 14,600', 'Expected profit: UGX 5,600', 'Expected profit on cost: 62.2%']);
     fireEvent.change(document.getElementById('sell-1') as HTMLInputElement, { target: { value: '200' } });
     // The soap now sells below its cost: 6 x 1,600 + 10 x 200 = 11,600 against 9,000.
-    expect(figures(screen.getByTestId('restock-total'))).toEqual(['Total cost: UGX 9,000', 'Should sell for: UGX 11,600', 'Expected profit: UGX 2,600']);
+    expect(figures(screen.getByTestId('restock-total'))).toEqual(['Total cost: UGX 9,000', 'Should sell for: UGX 11,600', 'Expected profit: UGX 2,600', 'Expected profit on cost: 28.9%']);
     fireEvent.change(document.getElementById('cost-0') as HTMLInputElement, { target: { value: '2000' } });
-    expect(figures(screen.getByTestId('restock-total'))).toEqual(['Total cost: UGX 15,000', 'Should sell for: UGX 11,600', 'Expected loss: UGX 3,400']);
+    expect(figures(screen.getByTestId('restock-total'))).toEqual(['Total cost: UGX 15,000', 'Should sell for: UGX 11,600', 'Expected loss: UGX 3,400', 'Expected loss on cost: 22.7%']);
     fireEvent.click(screen.getByRole('button', { name: 'Remove Test rice' }));
-    expect(figures(screen.getByTestId('restock-total'))).toEqual(['Total cost: UGX 3,000', 'Should sell for: UGX 2,000', 'Expected loss: UGX 1,000']);
+    expect(figures(screen.getByTestId('restock-total'))).toEqual(['Total cost: UGX 3,000', 'Should sell for: UGX 2,000', 'Expected loss: UGX 1,000', 'Expected loss on cost: 33.3%']);
   });
 
   it('says so instead of the two figures while an item has no selling price yet', () => {
@@ -133,7 +138,7 @@ describe('Buy stock (issue #821)', () => {
     expect(within(total).getByTestId('unpriced-note').textContent).toBe('Some items have no selling price yet.');
     // A price typed for the soap brings the figures back: 5 x 1,600 + 10 x 450.
     fireEvent.change(document.getElementById('sell-1') as HTMLInputElement, { target: { value: '450' } });
-    expect(figures(total)).toEqual(['Total cost: UGX 8,000', 'Should sell for: UGX 12,500', 'Expected profit: UGX 4,500']);
+    expect(figures(total)).toEqual(['Total cost: UGX 8,000', 'Should sell for: UGX 12,500', 'Expected profit: UGX 4,500', 'Expected profit on cost: 56.3%']);
     expect(screen.queryByTestId('unpriced-note')).toBeNull();
   });
 
@@ -148,7 +153,7 @@ describe('Buy stock (issue #821)', () => {
   it('hides the two figures again when the last line is removed (issue #852)', () => {
     const lines = draft().lines;
     screenOf(owner, <RestockForm initial={{ ...draft(), lines: [lines[1]!] }} />);
-    expect(figures(screen.getByTestId('restock-total'))).toHaveLength(3);
+    expect(figures(screen.getByTestId('restock-total'))).toHaveLength(4);
     fireEvent.click(screen.getByRole('button', { name: 'Remove Test soap' }));
     expect(figures(screen.getByTestId('restock-total'))).toEqual(['Total cost: UGX 0']);
     expect(screen.queryByText(/Should sell for|Expected profit|Expected loss/)).toBeNull();
@@ -169,6 +174,74 @@ describe('Buy stock (issue #821)', () => {
     expect(total.textContent).toBe('Total cost UGX 8,000');
     expect(screen.queryByTestId('delivery-worth')).toBeNull();
     expect(screen.queryByText(/Should sell for|Expected profit|Expected loss/)).toBeNull();
+  });
+});
+
+// JUSTIFICATION-A3: issue #967 asks for its tests in the existing Buy stock dom tests, beside the figures of #821 it extends.
+describe('Buy stock, the stock at each branch (issue #967)', () => {
+  const other = owner.branches?.find((b) => b.id !== branch);
+  const hereLabel = branchLabel(owner.branches?.find((b) => b.id === branch));
+  /** The rice holds 12 bags here and 3 at the other branch. */
+  const stocked = () => reads.product.mockImplementation((id: string) => Promise.resolve({ id, stock_by_branch: [{ branch_id: branch, qty: '12.000' }, { branch_id: other?.id, qty: '3.000' }] }));
+  const hint = (i: number, b: string) => screen.queryByTestId(`branch-stock-${i}-${b}`)?.textContent;
+
+  it('says under each quantity the stock there now and after this purchase, and the amount for that branch, live', async () => {
+    stocked();
+    screenOf(owner, <RestockForm initial={{ ...draft(), lines: [draft().lines[0]!] }} />);
+    await waitFor(() => expect(hint(0, branch)).toBe('In stock now 12 · after this 17 bags · Amount UGX 5,000'));
+    // Nothing typed at the other branch yet: its stock now, the same after, and no amount.
+    expect(hint(0, other?.id ?? '')).toBe('In stock now 3 · after this 3 bags');
+    fireEvent.change(document.getElementById(`q-0-${branch}`) as HTMLInputElement, { target: { value: '8' } });
+    expect(hint(0, branch)).toBe('In stock now 12 · after this 20 bags · Amount UGX 8,000');
+    // A quantity that cannot be read says the stock now alone.
+    fireEvent.change(document.getElementById(`q-0-${branch}`) as HTMLInputElement, { target: { value: 'abc' } });
+    expect(hint(0, branch)).toBe('In stock now 12 bags');
+    // The numbers are tabular.
+    expect(screen.getByTestId(`branch-stock-0-${branch}`).querySelectorAll('.num')).toHaveLength(1);
+  });
+
+  it('moves a branch quantity with one less and one more', async () => {
+    stocked();
+    screenOf(owner, <RestockForm initial={{ ...draft(), lines: [draft().lines[0]!] }} />);
+    await waitFor(() => expect(hint(0, branch)).toContain('after this 17'));
+    fireEvent.click(screen.getByRole('button', { name: `One more Test rice, ${hereLabel}` }));
+    expect((document.getElementById(`q-0-${branch}`) as HTMLInputElement).value).toBe('6');
+    expect(hint(0, branch)).toBe('In stock now 12 · after this 18 bags · Amount UGX 6,000');
+    fireEvent.click(screen.getByRole('button', { name: `One less Test rice, ${hereLabel}` }));
+    fireEvent.click(screen.getByRole('button', { name: `One less Test rice, ${hereLabel}` }));
+    expect((document.getElementById(`q-0-${branch}`) as HTMLInputElement).value).toBe('4');
+    expect(figures(screen.getByTestId('restock-total'))[0]).toBe('Total cost: UGX 4,000');
+  });
+
+  it('shows a buyer without the profit permission the stock but no amount and no profit share', async () => {
+    stocked();
+    screenOf(buyer, <RestockForm initial={{ ...draft(), lines: [draft().lines[0]!] }} />);
+    await waitFor(() => expect(hint(0, branch)).toBe('In stock now 12 · after this 17 bags'));
+    expect(screen.queryByText(/Amount|on cost/)).toBeNull();
+  });
+
+  it('says no stock for a branch whose stock the person may not read', async () => {
+    stocked();
+    const one = { ...owner, permission_scopes: { ...(owner.permission_scopes ?? {}), 'retail.stock.read': { all_branches: false, branch_ids: [branch] } } };
+    screenOf(one, <RestockForm initial={{ ...draft(), lines: [draft().lines[0]!] }} />);
+    await waitFor(() => expect(hint(0, branch)).toContain('In stock now 12'));
+    // The other branch's amount is still said to the owner, who reads profit there; its stock is not.
+    expect(hint(0, other?.id ?? '') ?? '').not.toContain('In stock');
+  });
+
+  it('counts a line bought in packs in the item\'s own unit', () => {
+    const packed = { ...soap, packs: [{ unit_id: 'u-box', unit: 'box', factor: '12', active: true, purpose: 'both' }] } as Product;
+    const line = { product: packed, cost: '3000', sell: '500', unitId: 'u-box', qtyByBranch: { [branch]: '2' } };
+    // 2 boxes of 12 bars onto 5 bars.
+    expect(branchStockAfter(line, { stock_by_branch: [{ branch_id: branch, qty: '5.000' }] }, branch)).toEqual({ now: 5_000, after: 29_000 });
+    expect(branchStockAfter(line, { stock_by_branch: [] }, branch)).toEqual({ now: 0, after: 24_000 });
+    expect(branchStockAfter(line, {}, branch)).toBeNull();
+  });
+
+  it('says the profit share to one decimal, and nothing without a cost', () => {
+    expect(profitPercent(8_000, 13_000)).toBe('62.5%');
+    expect(profitPercent(3_000, 2_000)).toBe('33.3%');
+    expect(profitPercent(0, 2_000)).toBeNull();
   });
 });
 
