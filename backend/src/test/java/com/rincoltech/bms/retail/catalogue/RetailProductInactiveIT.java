@@ -163,4 +163,32 @@ class RetailProductInactiveIT extends IntegrationTest {
         assertThat(one.get("stock_branches").asInt()).isEqualTo(1);
         assertThat(one.get("stock_on_hand").asString()).isEqualTo("5.000");
     }
+
+    /** Issue #967: Buy stock reads each branch's stock from the product, only the branches the caller may read. */
+    @Test
+    void theProductSaysItsStockPerBranchWithinTheCallersScope() {
+        api.importedBalance(t.secondBranch(), product, "-2");
+        JsonNode all = api.get("/products/" + product, ADMIN).getBody();
+        Map<String, String> byBranch = new LinkedHashMap<>();
+        all.get("stock_by_branch")
+                .valueStream()
+                .forEach(b ->
+                        byBranch.put(b.get("branch_id").asString(), b.get("qty").asString()));
+        assertThat(byBranch)
+                .containsOnly(
+                        Map.entry(t.headOffice().toString(), "5.000"),
+                        Map.entry(t.secondBranch().toString(), "-2.000"));
+
+        JsonNode one = api.call(
+                        HttpMethod.GET,
+                        "/products/" + product,
+                        null,
+                        ADMIN,
+                        t.headOffice().toString(),
+                        Map.of())
+                .getBody();
+        assertThat(one.get("stock_by_branch").size()).isEqualTo(1);
+        assertThat(one.get("stock_by_branch").get(0).get("branch_id").asString())
+                .isEqualTo(t.headOffice().toString());
+    }
 }

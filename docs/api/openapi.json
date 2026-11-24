@@ -19278,6 +19278,13 @@
             "format" : "int32",
             "type" : "integer"
           },
+          "stock_by_branch" : {
+            "description" : "Issue #967: the stock per branch the caller may read, where it is not zero; sent only by GET /retail/products/{id}, so Buy stock can say what each branch holds now and after",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailBranchStock"
+            },
+            "type" : "array"
+          },
           "stock_on_hand" : {
             "description" : "Issue #342: the stock of this product summed over the branches the caller may read; sent only by GET /retail/products/{id}, so the edit screen can warn before an item with stock is switched off",
             "type" : "string"

@@ -226,13 +226,15 @@ describe('Buy stock: add an item that is not in the list', () => {
     await fill(/^Quantity bought/, '3');
     save();
     const use = within(await within(form()).findByTestId('name-exists')).getByRole('button', { name: 'Use this item' });
+    // Issue #967: the line on the purchase already read its stock per branch; only the reads of Use this item are counted.
+    const before = getProduct.mock.calls.length;
     fireEvent.click(use);
     fireEvent.click(use);
-    await waitFor(() => expect(getProduct).toHaveBeenCalled());
+    await waitFor(() => expect(getProduct).toHaveBeenCalledTimes(before + 1));
     answer({ ...made, id: 'p1', code: 'BLB-0001', sell_minor: 8500 });
     await waitFor(() => expect(screen.queryByRole('group', { name: 'Add a new item' })).toBeNull());
     const branch = mockMe('admin').branches?.[0]?.id ?? '';
-    expect(getProduct).toHaveBeenCalledTimes(1);
+    expect(getProduct).toHaveBeenCalledTimes(before + 1);
     expect(document.getElementById('cost-1')).toBeNull();
     expect((document.getElementById(`q-0-${branch}`) as HTMLInputElement).value).toBe('13');
     expect(document.activeElement?.textContent).toBe('Not in the list? Add it here');

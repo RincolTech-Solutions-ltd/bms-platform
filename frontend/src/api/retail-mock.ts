@@ -631,11 +631,16 @@ export function createMockRetail(): RetailApi {
       return delay({ items: wanted.slice(start, start + 50).map(row), ...(start + 50 < wanted.length ? { next_cursor: String(start + 50) } : {}) });
     },
 
-    // Issue #342: the one-product read also reports the stock on hand and in how many branches it is not zero.
+    // Issue #342: the one-product read also reports the stock on hand and in how many branches it is not zero; issue #967, each of them.
     getProduct: (id) =>
       run(() => {
-        const held = MOCK_BRANCHES.map((b) => bal(b.id, id)).filter((m) => m !== 0);
-        return { ...asProduct(find(id)), stock_on_hand: fromMilli(held.reduce((x, y) => x + y, 0)), stock_branches: held.length };
+        const held = MOCK_BRANCHES.map((b) => ({ branch_id: b.id, milli: bal(b.id, id) })).filter((b) => b.milli !== 0);
+        return {
+          ...asProduct(find(id)),
+          stock_on_hand: fromMilli(held.reduce((x, b) => x + b.milli, 0)),
+          stock_branches: held.length,
+          stock_by_branch: held.map((b) => ({ branch_id: b.branch_id, qty: fromMilli(b.milli) })),
+        };
       }),
 
     similarProducts: ({ description, unitId, excludeId }) =>
