@@ -44,7 +44,7 @@ vi.mock('../../../api/retail', async (original) => {
   };
 });
 
-const { RestockForm, restockWorth, branchStockAfter, profitPercent } = await import('./restock');
+const { RestockForm, restockWorth, branchStockAfter, profitPercent, deliveredInto } = await import('./restock');
 const { branchLabel } = await import('../../../auth/branch');
 const { PriceForm } = await import('./catalogue-products');
 const { RestockCard, PurchasePage, Route: RestocksRoute } = await import('./restocks');
@@ -159,12 +159,15 @@ describe('Buy stock (issue #821)', () => {
     expect(screen.queryByText(/Should sell for|Expected profit|Expected loss/)).toBeNull();
   });
 
-  it('works nothing out for someone who reads profit only at a branch the delivery does not go to', () => {
+  it('works nothing out for someone who reads profit only at a branch the delivery does not go to', async () => {
     const other = owner.branches?.find((b) => b.id !== branch)?.id ?? 'b-other';
     const elsewhere = { ...owner, permission_scopes: { ...(owner.permission_scopes ?? {}), [PROFIT]: { all_branches: false, branch_ids: [other] } } };
     screenOf(elsewhere, <RestockForm initial={draft()} />);
     expect(screen.queryByTestId('delivery-worth')).toBeNull();
     expect(screen.getByTestId('restock-total').textContent).toBe('Total cost UGX 8,000');
+    // Issue #967: nor the amount per branch, which follows the same gate (review of #968).
+    await waitFor(() => expect(screen.getByTestId(`branch-stock-0-${branch}`).textContent).toBe('In stock now 0 · after this 5 bags'));
+    expect(screen.queryByText(/Amount/)).toBeNull();
   });
 
   it('shows a buyer without the profit permission the total cost only, as before', () => {
@@ -238,10 +241,45 @@ describe('Buy stock, the stock at each branch (issue #967)', () => {
     expect(branchStockAfter(line, {}, branch)).toBeNull();
   });
 
-  it('says the profit share to one decimal, and nothing without a cost', () => {
+  it('says the profit share always to one decimal, a loss and a profit of one size alike, and nothing without a cost', () => {
     expect(profitPercent(8_000, 13_000)).toBe('62.5%');
     expect(profitPercent(3_000, 2_000)).toBe('33.3%');
+    expect(profitPercent(4_000, 5_000)).toBe('25.0%');
+    // A half of a tenth rounds up in size either way (review of #968).
+    expect(profitPercent(2_000, 2_001)).toBe('0.1%');
+    expect(profitPercent(2_000, 1_999)).toBe('0.1%');
     expect(profitPercent(0, 2_000)).toBeNull();
+  });
+
+  it('says one of the unit when one is left', async () => {
+    reads.product.mockImplementation((id: string) => Promise.resolve({ id, stock_by_branch: [] }));
+    screenOf(owner, <RestockForm initial={{ ...draft(), lines: [{ ...draft().lines[0]!, qtyByBranch: { [branch]: '1' } }] }} />);
+    await waitFor(() => expect(hint(0, branch)).toBe('In stock now 0 · after this 1 bag · Amount UGX 1,000'));
+  });
+
+  // Review of #968, must-fix 1: the delivery being edited is in the stock now already, and goes back out when the edit is saved.
+  it('does not count the delivery being edited twice', async () => {
+    stocked();
+    const posted: Purchase = {
+      id: 'pu-edit', purchase_no: 'RP00000967', status: 'posted', currency: 'UGX', total_minor: 5_000,
+      lines: [{ id: 'l1', product_id: 'p1', description: 'Test rice', qty_total: '5.000', qty_by_branch: [{ branch_id: branch, qty: '5.000' }] }],
+    };
+    expect(deliveredInto(posted, 'p1', branch)).toBe(5_000);
+    expect(deliveredInto(posted, 'p2', branch)).toBe(0);
+    expect(deliveredInto({ ...posted, status: 'voided' }, 'p1', branch)).toBe(0);
+    screenOf(owner, <RestockForm initial={{ ...draft(), lines: [draft().lines[0]!] }} draftName="restock-edit-test" again replaces={posted} />);
+    // 12 now holds the 5 of this delivery: saved unchanged it stays 12, and 7 instead of 5 makes it 14.
+    await waitFor(() => expect(hint(0, branch)).toBe('In stock now 12 · after this 12 bags · Amount UGX 5,000'));
+    fireEvent.change(document.getElementById(`q-0-${branch}`) as HTMLInputElement, { target: { value: '7' } });
+    expect(hint(0, branch)).toBe('In stock now 12 · after this 14 bags · Amount UGX 7,000');
+    expect(hint(0, other?.id ?? '')).toBe('In stock now 3 · after this 3 bags');
+  });
+
+  it('does not mark a quantity wrong while it is being typed', async () => {
+    stocked();
+    screenOf(owner, <RestockForm initial={{ ...draft(), lines: [draft().lines[0]!] }} />);
+    fireEvent.change(document.getElementById(`q-0-${branch}`) as HTMLInputElement, { target: { value: '1.' } });
+    expect(document.getElementById(`q-0-${branch}`)?.getAttribute('aria-invalid')).toBe('false');
   });
 });
 

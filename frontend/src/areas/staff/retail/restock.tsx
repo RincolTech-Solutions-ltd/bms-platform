@@ -102,16 +102,17 @@ export function restockTotal(lines: RestockLine[]): number {
 /**
  * Issue #967: what one branch holds of the line's item now and after this purchase, in thousandths of the item's own unit, as
  * AppSheet showed under each quantity. Null while the item's stock is not read; `after` is null while the quantity typed there
- * cannot be read (or does not convert from the pack), so only the stock now is said.
+ * cannot be read (or does not convert from the pack), so only the stock now is said. `replaced` is what the delivery being edited
+ * put into the branch (base thousandths): it is in the stock now already and goes back out when the edit is saved (review of #968).
  */
-export function branchStockAfter(l: RestockLine, stock: Product | undefined, branchId: string): { now: number; after: number | null } | null {
+export function branchStockAfter(l: RestockLine, stock: Product | undefined, branchId: string, replaced = 0): { now: number; after: number | null } | null {
   if (!stock?.stock_by_branch) return null;
   const held = stock.stock_by_branch.find((b) => b.branch_id === branchId);
   const now = held?.qty ? milliOf(held.qty) : 0;
   const entered = branchQty(l.qtyByBranch[branchId]);
   const factor = lineFactor(l);
   const base = entered === null || factor === null ? null : factor === undefined ? entered : baseQtyMilli(entered, factor);
-  return { now, after: base === null ? null : now + base };
+  return { now, after: base === null ? null : now - replaced + base };
 }
 
 /** Issue #967: what was paid for the goods into one branch (quantity times the buying price on the line); null when either is not right. */
@@ -121,11 +122,22 @@ export function branchAmount(l: RestockLine, branchId: string): number | null {
   return cost === null || qty === null || qty === 0 ? null : lineTotalMinor(cost, qty);
 }
 
-/** Issue #967: the expected profit as a share of the cost, to one decimal ("62.5%"); null with no cost. */
+/** Issue #967: the expected profit (or loss) as a share of the cost, always to one decimal ("62.5%", "25.0%"); null with no cost. */
 export function profitPercent(paid: number, worth: number): string | null {
   if (paid <= 0) return null;
-  const share = Math.round(((worth - paid) / paid) * 1000) / 10;
-  return `${Math.abs(share).toLocaleString('en-US', { maximumFractionDigits: 1 })}%`;
+  // Rounded on the size, so a loss and a profit of the same size round alike.
+  const share = Math.round((Math.abs(worth - paid) * 1000) / paid) / 10;
+  return `${share.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+}
+
+/** Issue #967: what a delivery put into a branch of an item, in base thousandths; none for a delivery voided already. */
+export function deliveredInto(purchase: Purchase | undefined, productId: string | undefined, branchId: string): number {
+  if (!purchase || purchase.status === 'voided') return 0;
+  return (purchase.lines ?? [])
+    .filter((l) => l.product_id === productId)
+    .flatMap((l) => l.qty_by_branch ?? [])
+    .filter((b) => b.branch_id === branchId)
+    .reduce((sum, b) => sum + milliOf(b.qty ?? '0'), 0);
 }
 
 // JUSTIFICATION-A3: issue #821 adds the delivery's worth and the block that shows it on Buy stock and Past purchases.
@@ -374,11 +386,15 @@ export function RestockForm({ onSaved, draftName, fixSearch, fromEdit = false, i
   // Issue #967: each item's stock per branch the person may read, from the one-product read, so each quantity says what the
   // branch holds now and after this purchase. Offline or refused, the hints are left out and the form works as before.
   const stockOf = useQueries({
-    queries: lines.map((l) => ({ queryKey: ['retail', 'product', l.product.id ?? ''], queryFn: () => retail.getProduct(l.product.id ?? ''), enabled: Boolean(l.product.id), retry: false })),
+    // Its own key (review of #968), still under ['retail'] so a save reads it again; a minute fresh, so a long delivery is not
+    // read again line by line on every return to the window.
+    queries: lines.map((l) => ({ queryKey: ['retail', 'product-stock', l.product.id ?? ''], queryFn: () => retail.getProduct(l.product.id ?? ''), enabled: Boolean(l.product.id), retry: false, staleTime: 60_000 })),
   });
   const patch = (i: number, change: Partial<RestockLine>) => setLines((ls) => ls.map((l, n) => (n === i ? { ...l, ...change } : l)));
   const patchWhole = (i: number, line: RestockLine) => setLines((ls) => ls.map((l, n) => (n === i ? line : l)));
 
+  // Issue #821: who reads profit at every branch on the form sees what it is worth; issue #967, the amount per branch the same.
+  const worthShown = canProfit && into.every((b) => holdsAt(me, PROFIT, b));
   const problems = lines.map(restockLineProblem);
   const supplierProblem = creditNeedsSupplier(method, supplierId);
   const blocked = lines.length === 0 || problems.some((p) => p !== null) || supplierProblem !== null || dated.reasonMissing;
@@ -518,17 +534,18 @@ export function RestockForm({ onSaved, draftName, fixSearch, fromEdit = false, i
                 const id = b.id ?? '';
                 // Issue #967: the stock there now and after this purchase, only where the person reads stock; the amount for the
                 // branch only for who reads profit there (the gate of #821).
-                const stock = holdsAt(me, 'retail.stock.read', id) ? branchStockAfter(l, stockOf[i]?.data, id) : null;
-                const amount = canProfit && holdsAt(me, PROFIT, id) ? branchAmount(l, id) : null;
+                const stock = holdsAt(me, 'retail.stock.read', id) ? branchStockAfter(l, stockOf[i]?.data, id, deliveredInto(replaces, l.product.id, id)) : null;
+                const amount = worthShown ? branchAmount(l, id) : null;
+                const last = stock ? (stock.after ?? stock.now) : 0;
                 const hintId = `q-${i}-${id}-hint`;
                 return (
                   <div key={id}>
                     <Stepper id={`q-${i}-${id}`} label={branchLabel(b)} name={`${l.product.description ?? ''}, ${branchLabel(b)}`} inputMode="decimal"
-                      value={l.qtyByBranch[id] ?? ''} invalid={branchQty(l.qtyByBranch[id]) === null} describedBy={stock || amount !== null ? hintId : undefined}
+                      value={l.qtyByBranch[id] ?? ''} describedBy={stock || amount !== null ? hintId : undefined}
                       onChange={(v) => patch(i, { qtyByBranch: { ...l.qtyByBranch, [id]: v } })} />
                     {(stock || amount !== null) && (
                       <p className="hint" id={hintId} data-testid={`branch-stock-${i}-${id}`} aria-live="polite">
-                        {stock && <>In stock now <span className="num">{showQty(qtyString(stock.now))}</span>{stock.after !== null && <> · after this <span className="num">{showQty(qtyString(stock.after))}</span></>} {unitWords(l.product.unit)}</>}
+                        {stock && <>In stock now <span className="num">{showQty(qtyString(stock.now))}</span>{stock.after !== null && <> · after this <span className="num">{showQty(qtyString(stock.after))}</span></>} {Math.abs(last) === 1000 ? unitWord(l.product.unit) : unitWords(l.product.unit)}</>}
                         {stock && amount !== null && ' · '}
                         {amount !== null && <>Amount <Money minor={amount} /></>}
                       </p>
@@ -561,7 +578,7 @@ export function RestockForm({ onSaved, draftName, fixSearch, fromEdit = false, i
       {supplierProblem && <p role="alert" className="rt-flag" data-testid="credit-needs-supplier">{supplierProblem}</p>}
 
       {/* Issue #821: who reads profit at every branch on the form sees what the delivery should sell for; anyone else, the total cost as before. */}
-      {canProfit && into.every((b) => holdsAt(me, PROFIT, b)) ? (
+      {worthShown ? (
         <div className="rt-total rt-total-figures" aria-live="polite" data-testid="restock-total"><DeliveryWorth paid={restockTotal(lines)} worth={lines.length ? restockWorth(lines) : undefined} label="This delivery" percent /></div>
       ) : (
         <p className="rt-total" aria-live="polite" data-testid="restock-total">Total cost <Money minor={restockTotal(lines)} /></p>
