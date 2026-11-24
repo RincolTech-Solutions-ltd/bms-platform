@@ -99,20 +99,28 @@ export function restockTotal(lines: RestockLine[]): number {
   }, 0);
 }
 
+/** The quantity typed for a branch on the line in thousandths of the item's own unit; null when it cannot be read or converted. */
+function lineBaseQty(l: RestockLine, branchId: string): number | null {
+  const entered = branchQty(l.qtyByBranch[branchId]);
+  const factor = lineFactor(l);
+  return entered === null || factor === null ? null : factor === undefined ? entered : baseQtyMilli(entered, factor);
+}
+
 /**
- * Issue #967: what one branch holds of the line's item now and after this purchase, in thousandths of the item's own unit, as
- * AppSheet showed under each quantity. Null while the item's stock is not read; `after` is null while the quantity typed there
- * cannot be read (or does not convert from the pack), so only the stock now is said. `replaced` is what the delivery being edited
- * put into the branch (base thousandths): it is in the stock now already and goes back out when the edit is saved (review of #968).
+ * Issue #967: what one branch holds of an item now and after this purchase, in thousandths of the item's own unit, as AppSheet
+ * showed under each quantity. The after counts every line of the item on the form (an item bought in boxes and loose is on two
+ * lines), so each of its lines says the same figure (second review of #968). The server lists every branch the person may read
+ * whose balance is not zero, so a branch it leaves out holds none. Null while the item's stock is not read; `after` is null while
+ * a quantity typed for the item there cannot be read (or does not convert from the pack), so only the stock now is said.
+ * `replaced` is what the delivery being edited put into the branch (base thousandths): it is in the stock now already and goes
+ * back out when the edit is saved (review of #968).
  */
-export function branchStockAfter(l: RestockLine, stock: Product | undefined, branchId: string, replaced = 0): { now: number; after: number | null } | null {
+export function branchStockAfter(lines: RestockLine[], productId: string | undefined, stock: Product | undefined, branchId: string, replaced = 0): { now: number; after: number | null } | null {
   if (!stock?.stock_by_branch) return null;
   const held = stock.stock_by_branch.find((b) => b.branch_id === branchId);
   const now = held?.qty ? milliOf(held.qty) : 0;
-  const entered = branchQty(l.qtyByBranch[branchId]);
-  const factor = lineFactor(l);
-  const base = entered === null || factor === null ? null : factor === undefined ? entered : baseQtyMilli(entered, factor);
-  return { now, after: base === null ? null : now - replaced + base };
+  const typed = lines.filter((l) => l.product.id === productId).map((l) => lineBaseQty(l, branchId));
+  return { now, after: typed.some((q) => q === null) ? null : now - replaced + typed.reduce<number>((sum, q) => sum + (q ?? 0), 0) };
 }
 
 /** Issue #967: what was paid for the goods into one branch (quantity times the buying price on the line); null when either is not right. */
@@ -125,14 +133,14 @@ export function branchAmount(l: RestockLine, branchId: string): number | null {
 /** Issue #967: the expected profit (or loss) as a share of the cost, always to one decimal ("62.5%", "25.0%"); null with no cost. */
 export function profitPercent(paid: number, worth: number): string | null {
   if (paid <= 0) return null;
-  // Rounded on the size, so a loss and a profit of the same size round alike.
-  const share = Math.round((Math.abs(worth - paid) * 1000) / paid) / 10;
-  return `${share.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+  // In whole tenths of a percent, half up, on the size, so a loss and a profit of one size round alike; whole numbers, no float.
+  const tenths = Math.floor((2_000 * Math.abs(worth - paid) + paid) / (2 * paid));
+  return `${Math.floor(tenths / 10).toLocaleString('en-US')}.${tenths % 10}%`;
 }
 
-/** Issue #967: what a delivery put into a branch of an item, in base thousandths; none for a delivery voided already. */
+/** Issue #967: what a recorded (posted) delivery put into a branch of an item, in base thousandths; none for any other. */
 export function deliveredInto(purchase: Purchase | undefined, productId: string | undefined, branchId: string): number {
-  if (!purchase || purchase.status === 'voided') return 0;
+  if (purchase?.status !== 'posted') return 0;
   return (purchase.lines ?? [])
     .filter((l) => l.product_id === productId)
     .flatMap((l) => l.qty_by_branch ?? [])
@@ -534,7 +542,7 @@ export function RestockForm({ onSaved, draftName, fixSearch, fromEdit = false, i
                 const id = b.id ?? '';
                 // Issue #967: the stock there now and after this purchase, only where the person reads stock; the amount for the
                 // branch only for who reads profit there (the gate of #821).
-                const stock = holdsAt(me, 'retail.stock.read', id) ? branchStockAfter(l, stockOf[i]?.data, id, deliveredInto(replaces, l.product.id, id)) : null;
+                const stock = holdsAt(me, 'retail.stock.read', id) ? branchStockAfter(lines, l.product.id, stockOf[i]?.data, id, deliveredInto(replaces, l.product.id, id)) : null;
                 const amount = worthShown ? branchAmount(l, id) : null;
                 const last = stock ? (stock.after ?? stock.now) : 0;
                 const hintId = `q-${i}-${id}-hint`;

@@ -228,26 +228,33 @@ describe('Buy stock, the stock at each branch (issue #967)', () => {
     const one = { ...owner, permission_scopes: { ...(owner.permission_scopes ?? {}), 'retail.stock.read': { all_branches: false, branch_ids: [branch] } } };
     screenOf(one, <RestockForm initial={{ ...draft(), lines: [draft().lines[0]!] }} />);
     await waitFor(() => expect(hint(0, branch)).toContain('In stock now 12'));
-    // The other branch's amount is still said to the owner, who reads profit there; its stock is not.
-    expect(hint(0, other?.id ?? '') ?? '').not.toContain('In stock');
+    // Nothing typed at the other branch, whose stock the person may not read: no hint at all there.
+    expect(screen.queryByTestId(`branch-stock-0-${other?.id ?? ''}`)).toBeNull();
   });
 
   it('counts a line bought in packs in the item\'s own unit', () => {
     const packed = { ...soap, packs: [{ unit_id: 'u-box', unit: 'box', factor: '12', active: true, purpose: 'both' }] } as Product;
     const line = { product: packed, cost: '3000', sell: '500', unitId: 'u-box', qtyByBranch: { [branch]: '2' } };
     // 2 boxes of 12 bars onto 5 bars.
-    expect(branchStockAfter(line, { stock_by_branch: [{ branch_id: branch, qty: '5.000' }] }, branch)).toEqual({ now: 5_000, after: 29_000 });
-    expect(branchStockAfter(line, { stock_by_branch: [] }, branch)).toEqual({ now: 0, after: 24_000 });
-    expect(branchStockAfter(line, {}, branch)).toBeNull();
+    expect(branchStockAfter([line], 'p2', { stock_by_branch: [{ branch_id: branch, qty: '5.000' }] }, branch)).toEqual({ now: 5_000, after: 29_000 });
+    expect(branchStockAfter([line], 'p2', { stock_by_branch: [] }, branch)).toEqual({ now: 0, after: 24_000 });
+    expect(branchStockAfter([line], 'p2', {}, branch)).toBeNull();
+    // Second review of #968: the item in boxes and loose on two lines counts both, on each line; one unreadable says now alone.
+    const loose = { product: soap, cost: '300', sell: '500', qtyByBranch: { [branch]: '6' } };
+    expect(branchStockAfter([line, loose], 'p2', { stock_by_branch: [{ branch_id: branch, qty: '5.000' }] }, branch)).toEqual({ now: 5_000, after: 35_000 });
+    expect(branchStockAfter([line, { ...loose, qtyByBranch: { [branch]: 'x' } }], 'p2', { stock_by_branch: [] }, branch)).toEqual({ now: 0, after: null });
   });
 
   it('says the profit share always to one decimal, a loss and a profit of one size alike, and nothing without a cost', () => {
     expect(profitPercent(8_000, 13_000)).toBe('62.5%');
     expect(profitPercent(3_000, 2_000)).toBe('33.3%');
     expect(profitPercent(4_000, 5_000)).toBe('25.0%');
-    // A half of a tenth rounds up in size either way (review of #968).
+    // A half of a tenth rounds up in size either way (review of #968), in whole numbers: 0.15% is 0.2%, never 0.1%.
     expect(profitPercent(2_000, 2_001)).toBe('0.1%');
     expect(profitPercent(2_000, 1_999)).toBe('0.1%');
+    expect(profitPercent(2_000, 2_003)).toBe('0.2%');
+    expect(profitPercent(2_000, 1_997)).toBe('0.2%');
+    expect(profitPercent(100, 2_000)).toBe('1,900.0%');
     expect(profitPercent(0, 2_000)).toBeNull();
   });
 
@@ -267,12 +274,72 @@ describe('Buy stock, the stock at each branch (issue #967)', () => {
     expect(deliveredInto(posted, 'p1', branch)).toBe(5_000);
     expect(deliveredInto(posted, 'p2', branch)).toBe(0);
     expect(deliveredInto({ ...posted, status: 'voided' }, 'p1', branch)).toBe(0);
+    // Only a recorded delivery is in the stock: any other status adds nothing back (second review of #968).
+    expect(deliveredInto({ ...posted, status: 'replaced' }, 'p1', branch)).toBe(0);
     screenOf(owner, <RestockForm initial={{ ...draft(), lines: [draft().lines[0]!] }} draftName="restock-edit-test" again replaces={posted} />);
     // 12 now holds the 5 of this delivery: saved unchanged it stays 12, and 7 instead of 5 makes it 14.
     await waitFor(() => expect(hint(0, branch)).toBe('In stock now 12 · after this 12 bags · Amount UGX 5,000'));
     fireEvent.change(document.getElementById(`q-0-${branch}`) as HTMLInputElement, { target: { value: '7' } });
     expect(hint(0, branch)).toBe('In stock now 12 · after this 14 bags · Amount UGX 7,000');
     expect(hint(0, other?.id ?? '')).toBe('In stock now 3 · after this 3 bags');
+  });
+
+  // Second review of #968, must-fix 1: the item on two lines (boxes and loose), in an edit of the delivery that had both.
+  it('counts every line of the item in the after, the same on each line, in an edit of a delivery with the item twice', async () => {
+    reads.product.mockImplementation((id: string) => Promise.resolve({ id, stock_by_branch: [{ branch_id: branch, qty: '40.000' }] }));
+    const boxed: Product = { ...rice, packs: [{ unit_id: 'u-box', unit: 'box', factor: '12', active: true, purpose: 'both' }] } as Product;
+    const unitsOn = { ...owner, module_capabilities: { retail: ['units'] } } as unknown as typeof owner;
+    const posted: Purchase = {
+      id: 'pu-two', purchase_no: 'RP00000968', status: 'posted', currency: 'UGX', total_minor: 30_000,
+      lines: [
+        { id: 'l1', product_id: 'p1', description: 'Test rice', qty_total: '24.000', unit_id: 'u-box', qty_by_branch: [{ branch_id: branch, qty: '24.000', unit_qty: '2.000' }] },
+        { id: 'l2', product_id: 'p1', description: 'Test rice', qty_total: '6.000', qty_by_branch: [{ branch_id: branch, qty: '6.000' }] },
+      ],
+    };
+    const lines = [
+      { product: boxed, cost: '12000', sell: '1500', unitId: 'u-box', packSize: '12', qtyByBranch: { [branch]: '2' } },
+      { product: boxed, cost: '1000', sell: '1500', qtyByBranch: { [branch]: '6' } },
+    ];
+    screenOf(unitsOn, <RestockForm initial={{ ...draft(), lines }} draftName="restock-edit-two" again replaces={posted} />);
+    // 40 now holds the 30 of this delivery: saved unchanged it stays 40, on both lines.
+    await waitFor(() => expect(hint(0, branch)).toBe('In stock now 40 · after this 40 bags · Amount UGX 24,000'));
+    expect(hint(1, branch)).toBe('In stock now 40 · after this 40 bags · Amount UGX 6,000');
+    fireEvent.change(document.getElementById(`q-1-${branch}`) as HTMLInputElement, { target: { value: '10' } });
+    expect(hint(0, branch)).toBe('In stock now 40 · after this 44 bags · Amount UGX 24,000');
+    expect(hint(1, branch)).toBe('In stock now 40 · after this 44 bags · Amount UGX 10,000');
+  });
+
+  it('counts both lines of an item on a new delivery too', async () => {
+    stocked();
+    const twice = [draft().lines[0]!, { ...draft().lines[0]!, qtyByBranch: { [branch]: '3' } }];
+    screenOf(owner, <RestockForm initial={{ ...draft(), lines: twice }} />);
+    await waitFor(() => expect(hint(0, branch)).toBe('In stock now 12 · after this 20 bags · Amount UGX 5,000'));
+    expect(hint(1, branch)).toBe('In stock now 12 · after this 20 bags · Amount UGX 3,000');
+  });
+
+  // Second review of #968, must-fix 2: the hint reads its own key, never another screen's entry of the product.
+  it('reads the stock under its own key, not the product entry another screen keeps', async () => {
+    stocked();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(['retail', 'product', 'p1'], { ...rice, stock_by_branch: [{ branch_id: branch, qty: '99.000' }] });
+    render(
+      <QueryClientProvider client={client}>
+        <StaffContext.Provider value={{ me: owner, branch }}><RestockForm initial={{ ...draft(), lines: [draft().lines[0]!] }} /></StaffContext.Provider>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(hint(0, branch)).toBe('In stock now 12 · after this 17 bags · Amount UGX 5,000'));
+    expect((client.getQueryData(['retail', 'product-stock', 'p1']) as Product).stock_by_branch?.[0]).toEqual({ branch_id: branch, qty: '12.000' });
+  });
+
+  // Second review of #968, must-fix 3: the server lists every branch the person may read whose balance is not zero, so a branch the
+  // person reads that the answer leaves out holds none, and the read sends no branch of its own.
+  it('says none in stock at a branch the person reads that the answer leaves out, and asks for every branch', async () => {
+    reads.product.mockClear();
+    reads.product.mockImplementation((id: string) => Promise.resolve({ id, stock_by_branch: [{ branch_id: other?.id, qty: '40.000' }] }));
+    screenOf(owner, <RestockForm initial={{ ...draft(), lines: [draft().lines[0]!] }} />);
+    await waitFor(() => expect(hint(0, branch)).toBe('In stock now 0 · after this 5 bags · Amount UGX 5,000'));
+    expect(hint(0, other?.id ?? '')).toBe('In stock now 40 · after this 40 bags');
+    expect(reads.product.mock.calls.every((call) => call.length === 1)).toBe(true);
   });
 
   it('does not mark a quantity wrong while it is being typed', async () => {
