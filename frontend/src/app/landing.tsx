@@ -123,20 +123,30 @@ export function TenantLanding({ modules }: { modules: readonly string[] }) {
 }
 
 /**
- * The business's main address (issue #969, ADR-132): someone signed in on this device, or a phone with no network that may hold
+ * The business's main address (issue #969, ADR-132): someone signed in on this device, or a phone with no network that holds
  * the last person's profile, goes straight into the staff area, which opens the layout that fits the screen and the job. Anyone
  * else sees the welcome page with Staff sign-in.
  */
-function TenantLandingLoader() {
+export function TenantLandingLoader() {
   const navigate = useNavigate();
   const [checking, setChecking] = useState(true);
   useEffect(() => {
     let live = true;
-    void (getAccessToken() !== null ? Promise.resolve(true) : refreshSession()).then((ok) => {
-      if (!live) return;
-      if (ok || refreshFailedOffline()) void openMainAddress(navigate);
-      else setChecking(false);
-    });
+    // The token and the refresh cookie of this module are a staff session on a business host (members and operators keep their
+    // own). With no network only a phone that kept the last person's profile (ADR-067) goes in; it is read only then.
+    const signedIn = async (): Promise<boolean> => {
+      if (getAccessToken() !== null || (await refreshSession())) return true;
+      if (!refreshFailedOffline()) return false;
+      const { lastProfile } = await import('../offline/offline-context');
+      return (await lastProfile()) !== null;
+    };
+    signedIn()
+      .catch(() => false)
+      .then((inside) => {
+        if (!live) return;
+        if (inside) void openMainAddress(navigate);
+        else setChecking(false);
+      });
     return () => {
       live = false;
     };

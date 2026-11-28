@@ -22,8 +22,11 @@ person's role) to be written in the ADR for the shell.
    password reset) and the installed app's start. Each of them opens the staff area as the main address
    (`openMainAddress`, `frontend/src/auth/session.ts`), and the staff shell, once it knows who is signed in, opens the layout of
    the rule (`useMainEntry`, `frontend/src/areas/staff/layout-choice.ts`), drawing its loader rather than a page it is about to
-   leave. On the landing page someone signed in on the device, or a phone with no network that may hold the last person's
-   profile (ADR-067), goes straight in; anyone else sees the welcome page with Staff sign-in as before.
+   leave. On the landing page someone signed in on the device as staff (the access token or refresh cookie of the staff session;
+   members and operators keep their own), or a phone with no network that kept the last person's profile (ADR-067), goes
+   straight in; anyone else, and a refresh that fails in any way, sees the welcome page with Staff sign-in as before. The staff
+   shell without a session goes to sign-in, never back to the main address, so the two cannot loop. A profile that cannot load,
+   or leaving the shell, ends the main entry, so a later link in the same page load is not routed.
 2. **The two layouts.** The phone layout starts at the shop's pages, `/staff/retail`; the office layout starts at Home, `/staff`.
    Both are the one staff shell of ADR-086 with the same sign-in and the same data; the shell still draws the drawer and the
    bottom tabs below 720px and the sidebar from 720px, whatever the layout.
@@ -40,15 +43,21 @@ person's role) to be written in the ADR for the shell.
    a menu row, a notification) is never redirected by this rule: `/staff` opens Home and `/staff/retail` and every page under it
    open as named. Only the entries of decision 1 are routed.
 5. **Switch to office view or phone view.** The foot of the staff menu, above Help and feedback, holds a row "Switch to office
-   view" while the device's layout is the phone layout, else "Switch to phone view", only for a business with the shop. It opens
-   the other layout's start and keeps the choice on the device (`localStorage` `bms.layout`), so the main address opens that
-   layout from then on, for whoever signs in on the device. Blocked storage keeps nothing; the switch still opens the layout.
+   view" while the page on screen is one of the shop's pages (`/staff/retail` and under it), else "Switch to phone view", only for
+   a business with the shop. It opens the other layout's start and keeps the choice on the device for the person who made it
+   (`localStorage` `bms.layout.<user id>`), so the main address opens that layout for them from then on; an owner who switches a
+   shared shop laptop to the office view does not move the sellers who sign in on it. Blocked storage keeps nothing; the switch
+   still opens the layout.
 6. **The installed app starts at the main address.** The manifest's `start_url` becomes `/staff?start=main`, inside the app's
    scope and served by the service worker offline; the shell reads `start=main` on that load as the main address and leaves it
    out of the address it opens. The manifest's `id` stays `/staff`, so an installed app keeps its identity and is not offered
-   as a second app.
+   as a second app. iOS keeps the `start_url` of the day an app was added to the home screen, and Chrome may too, so an app
+   installed before this decision still starts at bare `/staff`: the shell also takes bare `/staff` as the main address when it is
+   the first page of an app running on its own (display mode `standalone`, nothing before it in the history). In a browser tab
+   bare `/staff` stays a link to Home, so nobody has to install the app again.
 7. **The Business set-up checklist**, which an administrator who has not dismissed it is taken to once per page load from Home,
-   is now also reached from the start of the phone layout, so an owner whose main address opens on a phone still sees it.
+   is also reached from the start of the phone layout when the main address has just opened it, so an owner whose main address
+   opens on a phone still sees it. A link to `/staff/retail` opens the shop's pages, never the checklist.
 
 ## Consequences
 
@@ -57,8 +66,8 @@ no choice to make; a seller on a shop laptop still opens the shop's pages; nothi
 
 **Worse:** the landing page now asks the server once whether the device is signed in (the refresh call the staff shell already
 makes), so a visitor who is not sees the welcome page a moment later. The rule reads the width once, so turning a tablet does
-not move the person to the other layout; the switch does. A device shared by an owner and a seller keeps one choice for both
-once someone switches.
+not move the person to the other layout; the switch does. A device signed in as staff never shows the public welcome page at the
+main address: to show it to a customer, sign out first.
 
 **Watch for:** a new role for shop work must join the list of decision 3.3; a new entry into the staff area that stands for the
 main address (a new sign-in path) must call `openMainAddress`, and one that names a page must not.

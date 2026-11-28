@@ -4,8 +4,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../api/client';
 import { mockMe } from '../../api/retail-mock';
-import { endMainEntry, openMainAddress } from '../../auth/session';
-import { LAYOUT_KEY, chooseLayout, isShopStaff, useMainEntry } from './layout-choice';
+import { endMainEntry, mainEntryPending, openMainAddress } from '../../auth/session';
+import { LAYOUT_KEY, chooseLayout, isShopStaff, layoutOfPath, useMainEntry } from './layout-choice';
 import { LayoutSwitch } from './route';
 
 // One address per shop (issue #969, ADR-132): the main address opens the phone layout (/staff/retail) on a phone-width screen
@@ -17,9 +17,15 @@ const admin: Me = mockMe('owner');
 const seller: Me = mockMe('sales');
 const role = (me: Me, ...keys: string[]): Me => ({ ...me, is_owner: false, roles: keys.map((k) => ({ role_key: k, role_name: k })) });
 const lendingOnly: Me = { ...admin, modules: ['lending'] };
+const choiceOf = (me: Me) => `${LAYOUT_KEY}.${me.user_id ?? ''}`;
 
-function phoneWidth(phone: boolean) {
-  vi.stubGlobal('matchMedia', (media: string) => ({ matches: phone && media === '(max-width: 719px)', media, addEventListener: () => undefined, removeEventListener: () => undefined }));
+function phoneWidth(phone: boolean, standalone = false) {
+  vi.stubGlobal('matchMedia', (media: string) => ({
+    matches: (phone && media === '(max-width: 719px)') || (standalone && media === '(display-mode: standalone)'),
+    media,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  }));
 }
 
 beforeEach(() => {
@@ -64,11 +70,14 @@ describe('the rule (ADR-132)', () => {
   });
 });
 
-/** A staff shell that only opens the layout, with a main address button standing in for the landing page and sign-in. */
-function show(me: Me, start: string) {
+/**
+ * A staff shell that only opens the layout, with a main address button calling the openMainAddress of the landing page and
+ * sign-in. The landing page and sign-in themselves are tested in landing-main.dom.test.tsx and the sign-in tests.
+ */
+function show(me: Me | undefined, start: string, failed = false) {
   function Shell() {
-    const opening = useMainEntry(me);
-    return opening ? <p>Opening</p> : <Outlet />;
+    const { opening, routed } = useMainEntry(me, failed);
+    return opening ? <p>Opening</p> : <div data-routed={String(routed)}><Outlet /></div>;
   }
   function Main() {
     const navigate = useNavigate();
@@ -80,7 +89,8 @@ function show(me: Me, start: string) {
   const office = createRoute({ getParentRoute: () => staff, path: '/', component: () => <h1>Home</h1> });
   const shop = createRoute({ getParentRoute: () => staff, path: '/retail', component: () => <h1>Shop</h1> });
   const sell = createRoute({ getParentRoute: () => staff, path: '/retail/sale', component: () => <h1>Sell</h1> });
-  const router = createRouter({ routeTree: root.addChildren([landing, staff.addChildren([office, shop, sell])]), history: createMemoryHistory({ initialEntries: [start] }) });
+  const approvals = createRoute({ getParentRoute: () => staff, path: '/approvals', component: () => <h1>Approvals</h1> });
+  const router = createRouter({ routeTree: root.addChildren([landing, staff.addChildren([office, shop, sell, approvals])]), history: createMemoryHistory({ initialEntries: [start] }) });
   render(<RouterProvider router={router} />);
   return router;
 }
@@ -118,10 +128,53 @@ describe('the main address by role', () => {
     expect(await fromMainAddress(lendingOnly)).toBe('/staff');
   });
 
-  it('follows the choice kept on the device', async () => {
+  it('follows the choice this person kept on the device', async () => {
     phoneWidth(true);
-    localStorage.setItem(LAYOUT_KEY, 'office');
+    localStorage.setItem(choiceOf(seller), 'office');
     expect(await fromMainAddress(seller)).toBe('/staff');
+  });
+
+  it("keeps one person's choice from moving another who signs in on the same device", async () => {
+    phoneWidth(false);
+    localStorage.setItem(choiceOf(owner), 'office');
+    const other = { ...role(seller, 'retail_sales'), user_id: '00000000-0000-4000-8000-0000000000f2' };
+    expect(await fromMainAddress(other)).toBe('/staff/retail');
+  });
+
+  it('marks the layout as opened by the main address, which a link never does', async () => {
+    phoneWidth(true);
+    await fromMainAddress(owner);
+    expect(document.querySelector('[data-routed]')?.getAttribute('data-routed')).toBe('true');
+    cleanup();
+    show(owner, '/staff/retail');
+    await screen.findByRole('heading');
+    expect(document.querySelector('[data-routed]')?.getAttribute('data-routed')).toBe('false');
+  });
+
+  it('ends the main entry when the profile cannot load, so a later link is not routed', async () => {
+    phoneWidth(true);
+    const router = show(undefined, '/');
+    fireEvent.click(await screen.findByRole('button', { name: 'Main address' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/staff'));
+    cleanup();
+    endMainEntry();
+    const failedRouter = show(undefined, '/');
+    fireEvent.click(await screen.findByRole('button', { name: 'Main address' }));
+    expect(mainEntryPending()).toBe(true);
+    cleanup();
+    show(undefined, '/staff', true);
+    await screen.findByRole('heading');
+    expect(mainEntryPending()).toBe(false);
+    expect(failedRouter.state.location.pathname).toBe('/staff');
+  });
+
+  it('ends the main entry when the shell is left', async () => {
+    const router = show(undefined, '/');
+    fireEvent.click(await screen.findByRole('button', { name: 'Main address' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/staff'));
+    expect(mainEntryPending()).toBe(true);
+    cleanup();
+    expect(mainEntryPending()).toBe(false);
   });
 });
 
@@ -144,10 +197,47 @@ describe('a /staff link opens the layout it names', () => {
     expect(router.state.location.pathname).toBe('/staff/retail/sale');
   });
 
-  it('opens the layout of the rule from the installed app start, /staff?start=main', async () => {
+  it('leaves an office page such as /staff/approvals for a seller on a phone', async () => {
     phoneWidth(true);
+    const router = show(seller, '/staff/approvals');
+    expect((await screen.findByRole('heading')).textContent).toBe('Approvals');
+    expect(router.state.location.pathname).toBe('/staff/approvals');
+  });
+
+  it('lets an owner on a phone reach Approvals by its link', async () => {
+    phoneWidth(true);
+    const router = show(owner, '/staff/approvals');
+    expect((await screen.findByRole('heading')).textContent).toBe('Approvals');
+    expect(router.state.location.pathname).toBe('/staff/approvals');
+  });
+
+  it('leaves bare /staff in a browser tab, even as its first page', async () => {
+    phoneWidth(true);
+    window.history.replaceState(null, '', '/staff');
+    const router = show(owner, '/staff');
+    expect((await screen.findByRole('heading')).textContent).toBe('Home');
+    expect(router.state.location.pathname).toBe('/staff');
+  });
+});
+
+describe('the installed app starts at the main address', () => {
+  it.each([
+    ['a phone', true, owner, '/staff/retail'],
+    ['a laptop', false, owner, '/staff'],
+    ['a laptop, for a seller', false, seller, '/staff/retail'],
+  ])('opens the layout of the rule from /staff?start=main on %s', async (_name, phone, me, expected) => {
+    phoneWidth(phone);
     window.history.replaceState(null, '', '/staff?start=main');
-    const router = show(owner, '/staff?start=main');
+    const router = show(me, '/staff?start=main');
+    await screen.findByRole('heading');
+    await waitFor(() => expect(router.state.location.pathname).toBe(expected));
+    expect(router.state.location.searchStr).toBe('');
+  });
+
+  it('opens it from bare /staff when an app installed before the change starts on its own', async () => {
+    phoneWidth(true, true);
+    window.history.replaceState(null, '', '/staff');
+    const router = show(owner, '/staff');
     expect((await screen.findByRole('heading')).textContent).toBe('Shop');
     expect(router.state.location.pathname).toBe('/staff/retail');
   });
@@ -170,8 +260,8 @@ describe('Switch to office view or phone view', () => {
     const button = await screen.findByRole('button', { name: 'Switch to office view' });
     await act(async () => fireEvent.click(button));
     await waitFor(() => expect(router.state.location.pathname).toBe('/staff'));
-    expect(localStorage.getItem(LAYOUT_KEY)).toBe('office');
-    expect(screen.getByRole('button', { name: 'Switch to phone view' })).toBeTruthy();
+    expect(localStorage.getItem(choiceOf(owner))).toBe('office');
+    expect(await screen.findByRole('button', { name: 'Switch to phone view' })).toBeTruthy();
   });
 
   it('offers the phone view to the owner on a laptop', async () => {
@@ -179,7 +269,16 @@ describe('Switch to office view or phone view', () => {
     const router = showSwitch(owner, '/staff');
     fireEvent.click(await screen.findByRole('button', { name: 'Switch to phone view' }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/staff/retail'));
-    expect(localStorage.getItem(LAYOUT_KEY)).toBe('phone');
+    expect(localStorage.getItem(choiceOf(owner))).toBe('phone');
+  });
+
+  it('is named from the page on screen: the office view on the shop pages a laptop link opened', async () => {
+    phoneWidth(false);
+    showSwitch(owner, '/staff/retail');
+    expect(await screen.findByRole('button', { name: 'Switch to office view' })).toBeTruthy();
+    expect(layoutOfPath('/staff/retail/sale')).toBe('phone');
+    expect(layoutOfPath('/staff/retailers')).toBe('office');
+    expect(layoutOfPath('/staff/approvals')).toBe('office');
   });
 
   it('is not offered to a business without the shop', async () => {

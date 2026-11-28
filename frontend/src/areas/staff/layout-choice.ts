@@ -16,8 +16,10 @@ export type Layout = 'phone' | 'office';
 /** Where each layout starts. */
 export const LAYOUT_HOME: Record<Layout, '/staff/retail' | '/staff'> = { phone: '/staff/retail', office: '/staff' };
 
-/** The device's own choice of layout, from the menu's switch link. */
+/** The device's own choice of layout, from the menu's switch link, kept per person: `bms.layout.<user id>`. */
 export const LAYOUT_KEY = 'bms.layout';
+
+const keyOf = (userId: string | undefined) => `${LAYOUT_KEY}.${userId ?? ''}`;
 
 /** The installed app's start (the manifest's start_url): the main address inside the app's scope. */
 export const APP_START = 'start=main';
@@ -48,10 +50,13 @@ export function chooseLayout(me: Me, { phone, saved }: { phone: boolean; saved: 
   return phone ? 'phone' : 'office';
 }
 
-/** The device's own choice, or null when none is kept or storage is blocked. */
-export function savedLayout(): Layout | null {
+/**
+ * The choice this person made on this device, or null when none is kept or storage is blocked. Kept per person, so an owner who
+ * switches a shared shop laptop to the office view does not move the sellers who sign in on it.
+ */
+export function savedLayout(userId: string | undefined): Layout | null {
   try {
-    const value = window.localStorage.getItem(LAYOUT_KEY);
+    const value = window.localStorage.getItem(keyOf(userId));
     return value === 'phone' || value === 'office' ? value : null;
   } catch {
     return null;
@@ -59,9 +64,9 @@ export function savedLayout(): Layout | null {
 }
 
 /** Keeps the device's choice; with storage blocked the switch still opens the layout, only for this visit. */
-export function saveLayout(layout: Layout): void {
+export function saveLayout(userId: string | undefined, layout: Layout): void {
   try {
-    window.localStorage.setItem(LAYOUT_KEY, layout);
+    window.localStorage.setItem(keyOf(userId), layout);
   } catch {
     // Blocked storage: nothing kept, the rule decides next time.
   }
@@ -70,34 +75,63 @@ export function saveLayout(layout: Layout): void {
 /** The layout the main address opens for this person on this device now. */
 export function currentLayout(me: Me): Layout {
   const phone = typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia(PHONE).matches;
-  return chooseLayout(me, { phone, saved: savedLayout() });
+  return chooseLayout(me, { phone, saved: savedLayout(me.user_id) });
 }
 
-/** True when this load is the installed app's start (`/staff?start=main`), which is the main address inside the app. */
-function startedFromApp(): boolean {
-  if (typeof window === 'undefined') return false;
-  const { pathname, search } = window.location;
-  return (pathname === '/staff' || pathname === '/staff/') && search.slice(1).split('&').includes(APP_START);
+/** The layout the page on screen belongs to: the shop's pages are the phone layout, every other staff page the office layout. */
+export function layoutOfPath(pathname: string): Layout {
+  return pathname === LAYOUT_HOME.phone || pathname.startsWith(`${LAYOUT_HOME.phone}/`) ? 'phone' : 'office';
 }
 
 /**
- * For the staff shell: while the area was opened by the main address, opens the person's layout as soon as `me` is known, and
- * returns true until it has, so the shell draws its loader rather than a page it is about to leave. Otherwise false and nothing
- * moves: a /staff/... link opens the layout it names.
+ * True when this load is the installed app's start, which is the main address inside the app: `/staff?start=main`, the manifest's
+ * start_url since ADR-132, or bare `/staff` as the first page of an app running on its own (display mode standalone), which is how
+ * an app installed before ADR-132 starts, since iOS and Chrome keep the start_url of the day it was installed.
  */
-export function useMainEntry(me: Me | undefined): boolean {
+export function startedFromApp(): boolean {
+  if (typeof window === 'undefined') return false;
+  const { pathname, search } = window.location;
+  if (pathname !== '/staff' && pathname !== '/staff/') return false;
+  if (search.slice(1).split('&').includes(APP_START)) return true;
+  const standalone = !!window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+  return standalone && search === '' && window.history.length <= 1;
+}
+
+export interface MainEntry {
+  /** True until the layout is open: the shell draws its loader rather than a page it is about to leave. */
+  opening: boolean;
+  /** True once the main address opened the layout in this shell, so the shell may treat its start as home. */
+  routed: boolean;
+}
+
+/**
+ * For the staff shell: while the area was opened by the main address, opens the person's layout as soon as `me` is known.
+ * Otherwise nothing moves: a /staff/... link opens the layout it names. Leaving the shell, or a profile that cannot load
+ * (`failed`), ends the main entry, so a later link in the same page load is never routed by the rule.
+ */
+export function useMainEntry(me: Me | undefined, failed = false): MainEntry {
   const navigate = useNavigate();
   const [opening, setOpening] = useState(() => mainEntryPending() || startedFromApp());
+  const [routed, setRouted] = useState(false);
+  useEffect(() => endMainEntry, []);
+  useEffect(() => {
+    if (opening && failed) {
+      endMainEntry();
+      setOpening(false);
+    }
+  }, [opening, failed]);
   useEffect(() => {
     if (!opening || !me) return;
     let live = true;
     void navigate({ to: LAYOUT_HOME[currentLayout(me)], replace: true }).then(() => {
       endMainEntry();
-      if (live) setOpening(false);
+      if (!live) return;
+      setRouted(true);
+      setOpening(false);
     });
     return () => {
       live = false;
     };
   }, [opening, me, navigate]);
-  return opening;
+  return { opening, routed };
 }

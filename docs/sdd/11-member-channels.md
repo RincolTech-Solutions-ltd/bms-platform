@@ -151,7 +151,7 @@ One address per shop (issue #969, FR-UXN-14, ADR-132): the business's main addre
 installed app's start open the phone layout (the shop's pages, `/staff/retail`) on a screen below 720px or for shop staff
 (sellers, storekeepers, purchasing), and the office layout (Home, `/staff`) on a laptop for the owner, administrators and
 accountants. A `/staff/...` link always opens the page it names. Switch to office view or phone view in the menu's foot
-opens the other layout and keeps the choice on the device, where it wins over the rule.
+opens the other layout and keeps the choice on the device for that person, where it wins over the rule.
 
 ## 11.3 SMS
 

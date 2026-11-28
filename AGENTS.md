@@ -1538,7 +1538,8 @@ Accepted (this list is the ADR index):
   (`start_url` `/staff?start=main`, `id` still `/staff`) open the phone layout (`/staff/retail`) below 720px or for shop staff
   (only `retail_sales`, `retail_storekeeper`, `retail_purchasing`, with `retail_till`) and the office layout (`/staff`)
   from 720px; a `/staff/...` link opens the page it names; Switch to office view or phone view in the menu's foot keeps the
-  choice on the device (`bms.layout`), which wins (frontend `areas/staff/layout-choice.ts`, no migration)
+  choice on the device per person (`bms.layout.<user id>`), which wins; an app installed earlier starting at bare `/staff`
+  standalone is the main address too (frontend `areas/staff/layout-choice.ts`, no migration)
 
 Pending (cite only as "pending ADR-NNN"):
 
