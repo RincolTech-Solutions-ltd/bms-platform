@@ -337,7 +337,7 @@ export function salesParams({ branchId, from, to, buyer, paymentMethod, productI
 }
 
 /** The levels a sales summary can group by (issue #341). */
-export type SummaryLevel = 'branch' | 'year' | 'month' | 'seller' | 'day' | 'category' | 'item' | 'variant';
+export type SummaryLevel = 'branch' | 'year' | 'month' | 'seller' | 'day' | 'method' | 'category' | 'item' | 'variant';
 
 export interface SalesSummaryQuery extends Omit<SalesQuery, 'cursor' | 'status'> {
   /** The level whose groups are asked for. */

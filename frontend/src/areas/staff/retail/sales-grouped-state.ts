@@ -25,6 +25,11 @@ export function periodTitle(level: Level, period: string): string {
 
 export const salesWord = (n: number) => (n === 1 ? '1 sale' : `${n} sales`);
 
+/** A group's share of the total beside it, as a whole percent ("35%"); "0%" when there is nothing to share (issue #970). */
+export function shareOf(part: number, total: number): string {
+  return total > 0 ? `${Math.round((part / total) * 100)}%` : '0%';
+}
+
 export type MethodName = 'cash' | 'mobile_money' | 'bank' | 'credit';
 export interface MethodLine {
   method: MethodName;

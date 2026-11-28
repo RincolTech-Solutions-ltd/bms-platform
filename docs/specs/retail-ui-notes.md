@@ -1070,6 +1070,23 @@ salesperson, day, product category, item, with a summary on every line. The user
 - **Tours.** `retail-sales` (version 5) and `admin-welcome` (version 7) get a Group by step on the retail home; the Help pages
   `page-sales` and `page-credit-sales` (version 2) get a Group by step and a line about the breadcrumb.
 
+## Sales grouped by how they were paid (issue #970)
+
+All sales adds Paid by to the levels of Group by (`method`), between Day and Product category, so a chain such as Month, then Paid by
+works as well as Paid by alone. It is not in the usual order: a person adds it from Not used, and Use the usual order takes it out
+again. Credit sales do not offer it (every sale there is Credit), and a stored chain that holds it reads without it there.
+
+- **A line** is Cash, Mobile money, Bank or Credit, in that order, with the amount, the number of sales and the share of the total
+  of the lines beside it ("60% of the total"), which add up to the line above. The ways of paying under it are not repeated.
+- **Credit** also says what is still unpaid ("UGX 600 still unpaid"), so the amount sold is not read as money received.
+- **Credit payments received.** Cash, Mobile money and Bank add a second line "Credit payments received 1, UGX 400" when payments on
+  credit sales came in that way in the period. It is never part of the line's amount, so the lines still add up to the period.
+- **Opening** a line passes its way of paying to the next level and to the sales listed under it (`payment_method`), as the Paid by
+  filter does.
+- **Files.** `sales-chain-state.ts` (the level, `usualLevels`), `sales-chain.tsx` (the figures), `sales-grouped-state.ts` (`shareOf`),
+  `sales-group-by.tsx` (`usual`), tests `sales-paid-by.dom.test.tsx`, `sales-chain-state.test.ts`, `sales-grouped-state.test.ts`.
+- **Tours.** `page-sales` version 4 names how it was paid in its Group by step.
+
 ## Stock and past restocks grouped by a chain (issue #350)
 
 The Group by chain of the sales lists (issue #341) is offered on the Stock page and on Past restocks. Both stay as they were until

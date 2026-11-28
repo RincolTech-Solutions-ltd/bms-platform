@@ -20,7 +20,7 @@ import { SaleDocuments } from './documents-ui';
 import { ShareReceipt } from './receipt-share';
 import { useRootFigures } from './sales-grouped';
 import { SalesChain, useChainView } from './sales-chain';
-import { chainUser, effectiveChain, readChain, usableChain, usableLevels, type OpenGroups, type Selection } from './sales-chain-state';
+import { chainUser, effectiveChain, readChain, usableChain, usableLevels, usualLevels, type OpenGroups, type Selection } from './sales-chain-state';
 import { GroupBy } from './sales-group-by';
 import { useSalesVariantLevel } from './catalogue-variants';
 import { PaySaleAction, VoidSaleAction, WriteOffSaleAction } from './sale-actions';
@@ -271,7 +271,7 @@ function DaySales({ day, range, filter, today, credit, onOpen, branchOf, term, a
 
 /** The sales list's filters for the group a person opened: the screen's own, narrowed by what was chosen above it (issue #341). */
 function salesFor<F extends Omit<SalesQuery, 'cursor' | 'signal' | 'from' | 'to'>>(filter: F, sel: Selection): F {
-  return { ...filter, branchId: sel.branchId ?? filter.branchId, sellerId: sel.sellerId, categoryId: sel.categoryId, productId: sel.itemId ?? filter.productId };
+  return { ...filter, branchId: sel.branchId ?? filter.branchId, ...(sel.paymentMethod ? { paymentMethod: sel.paymentMethod } : {}), sellerId: sel.sellerId, categoryId: sel.categoryId, productId: sel.itemId ?? filter.productId };
 }
 
 /** The sale shown open, if it was opened under this branch choice: a change of branch closes it. */
@@ -439,8 +439,9 @@ export function AllSales() {
   };
   // Issue #384: the Size and colour level is offered once the business has an item with sizes and colours.
   const variants = useSalesVariantLevel();
-  const levels = usableLevels(canRankSellers(me, all ? null : branchId), variants);
-  const shown = usableChain(view.chain, canRankSellers(me, all ? null : branchId), variants);
+  // Issue #970: Paid by is a level of All sales; Credit sales are all paid one way.
+  const levels = usableLevels(canRankSellers(me, all ? null : branchId), variants, true);
+  const shown = usableChain(view.chain, canRankSellers(me, all ? null : branchId), variants, true);
   const chain = effectiveChain(shown, !all);
   const filter = { branchId: all ? undefined : (branchId ?? undefined), buyer: search.term, paymentMethod: method || undefined, productId };
   const figures = useRootFigures(filter, { from, to }, (all || branchId !== null) && from <= to);
@@ -468,7 +469,7 @@ export function AllSales() {
               </select>
             </>
           )}
-          <GroupBy chain={shown} levels={levels} onChange={view.setChain} />
+          <GroupBy chain={shown} levels={levels} usual={usualLevels(levels)} onChange={view.setChain} />
           <SalesChain
             rootLabel="All sales" filter={filter} range={{ from: from || undefined, to }} credit={false} chain={chain} view={view} enabled={(all || branchId !== null) && from <= to}
             empty={search.term ? <NoResults term={search.term} onClear={search.clear} noun="sales" /> : undefined}

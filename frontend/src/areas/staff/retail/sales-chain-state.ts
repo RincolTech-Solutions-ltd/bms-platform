@@ -1,26 +1,29 @@
 // The sales lists grouped by a chain of levels (issue #341): the pure rules behind the screen. The chain is an ordered
-// list of levels the user chooses (shop, year, month, salesperson, day, product category, item); what is open is a set
+// list of levels the user chooses (shop, year, month, salesperson, day, paid by, product category, item); what is open is a set
 // of path keys like "branch:b1/year:2026/month:2026-10", so the same day under two salespeople is two groups.
 
-export type ChainLevel = 'branch' | 'year' | 'month' | 'seller' | 'day' | 'category' | 'item' | 'variant';
+import type { MethodName } from './sales-grouped-state';
+
+export type ChainLevel = 'branch' | 'year' | 'month' | 'seller' | 'day' | 'method' | 'category' | 'item' | 'variant';
 
 /** The order the old spreadsheet app used, and the order a new user starts with. */
 export const DEFAULT_CHAIN: readonly ChainLevel[] = ['branch', 'year', 'month', 'seller', 'day', 'category', 'item'];
 
 /**
- * Every level, the size and colour of an item last (issue #384): offered only to a business that has an item with sizes and
- * colours, so the Group by of a shop without them is what it always was.
+ * Every level in its usual place. Two are not in the usual order and are added by choice: Paid by (issue #970), on All
+ * sales only, and the size and colour of an item last (issue #384), offered only to a business that has an item with sizes
+ * and colours, so the Group by of a shop without them is what it always was.
  */
-export const ALL_LEVELS: readonly ChainLevel[] = [...DEFAULT_CHAIN, 'variant'];
+export const ALL_LEVELS: readonly ChainLevel[] = ['branch', 'year', 'month', 'seller', 'day', 'method', 'category', 'item', 'variant'];
 
 /** The words a person reads for each level. */
 export const LEVEL_NAMES: Record<ChainLevel, string> = {
-  branch: 'Shop', year: 'Year', month: 'Month', seller: 'Salesperson', day: 'Day', category: 'Product category', item: 'Item', variant: 'Size and colour',
+  branch: 'Shop', year: 'Year', month: 'Month', seller: 'Salesperson', day: 'Day', method: 'Paid by', category: 'Product category', item: 'Item', variant: 'Size and colour',
 };
 
 /** What a "show more" button calls the groups of a level. */
 export const LEVEL_PLURALS: Record<ChainLevel, string> = {
-  branch: 'shops', year: 'years', month: 'months', seller: 'salespeople', day: 'days', category: 'categories', item: 'items', variant: 'sizes and colours',
+  branch: 'shops', year: 'years', month: 'months', seller: 'salespeople', day: 'days', method: 'ways of paying', category: 'categories', item: 'items', variant: 'sizes and colours',
 };
 
 export const isTimeLevel = (level: ChainLevel) => level === 'year' || level === 'month' || level === 'day';
@@ -49,14 +52,21 @@ export function addLevel<L extends string = ChainLevel>(chain: readonly L[], lev
   return at < 0 ? [...chain, level] : [...chain.slice(0, at), level, ...chain.slice(at)];
 }
 
-/** The levels a person may use: the salesperson level is for those who may read profit (a cashier sees no ranking of colleagues). */
-export const usableLevels = (sellerAllowed: boolean, variants = false): ChainLevel[] =>
-  ALL_LEVELS.filter((l) => (sellerAllowed || l !== 'seller') && (variants || l !== 'variant'));
+/**
+ * The levels a person may use: the salesperson level is for those who may read profit (a cashier sees no ranking of
+ * colleagues); Paid by only where the list holds more than one way of paying (All sales, not Credit sales; issue #970).
+ */
+export const usableLevels = (sellerAllowed: boolean, variants = false, paidBy = false): ChainLevel[] =>
+  ALL_LEVELS.filter((l) => (sellerAllowed || l !== 'seller') && (variants || l !== 'variant') && (paidBy || l !== 'method'));
+
+/** The levels of the usual order among those a person may use: what "Use the usual order" puts back. */
+export const usualLevels = (usable: readonly ChainLevel[]): ChainLevel[] => usable.filter((l) => l !== 'method');
 
 /** The chain with the levels the person may not use taken out; the usual order if nothing is left. */
-export function usableChain(chain: readonly ChainLevel[], sellerAllowed: boolean, variants = false): ChainLevel[] {
-  const kept = chain.filter((l) => (sellerAllowed || l !== 'seller') && (variants || l !== 'variant'));
-  return kept.length > 0 ? kept : usableLevels(sellerAllowed, variants).filter((l) => l !== 'variant');
+export function usableChain(chain: readonly ChainLevel[], sellerAllowed: boolean, variants = false, paidBy = false): ChainLevel[] {
+  const usable = usableLevels(sellerAllowed, variants, paidBy);
+  const kept = chain.filter((l) => usable.includes(l));
+  return kept.length > 0 ? kept : usable.filter((l) => l !== 'variant' && l !== 'method');
 }
 
 /** The levels not in the chain, in the usual order. */
@@ -118,6 +128,8 @@ export interface Selection {
   from?: string;
   to?: string;
   sellerId?: string;
+  /** How the sales were paid (issue #970): the Paid by group chosen above. */
+  paymentMethod?: MethodName;
   categoryId?: string;
   itemId?: string;
 }
@@ -141,6 +153,7 @@ export function selectGroup(sel: Selection, level: ChainLevel, group: Picked): S
   switch (level) {
     case 'branch': return { ...sel, branchId: group.key };
     case 'seller': return { ...sel, sellerId: group.key };
+    case 'method': return { ...sel, paymentMethod: group.key as MethodName };
     case 'category': return { ...sel, categoryId: group.key };
     // A size and colour narrows the item chosen above to that one variant: an item id or a product id, the server takes both.
     case 'item': case 'variant': return { ...sel, itemId: group.key };

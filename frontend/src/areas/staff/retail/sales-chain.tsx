@@ -7,11 +7,11 @@ import {
 } from './sales-chain-state';
 import { StaffContext } from '../context';
 import { capabilityOn } from './permissions';
-import { methodLines, periodTitle, salesWord } from './sales-grouped-state';
+import { methodLines, periodTitle, salesWord, shareOf } from './sales-grouped-state';
 import { Problem, money } from './ui';
 
 // The All sales and Credit sales lists grouped by a chain of levels the user chose (issue #341): shop, year, month,
-// salesperson, day, product category, item, with a summary at every level. Every header is a figure the server summed
+// salesperson, day, paid by (issue #970), product category, item, with a summary at every level. Every header is a figure the server summed
 // for that group, and each level is one request that carries what was opened above it as filters. What is open lives
 // in the screen (useChainView), so coming back from an opened sale finds the same groups open.
 
@@ -119,6 +119,8 @@ function LevelList({ index, sel, parent, root, empty, ...shared }: Shared & { in
       </>
     );
   }
+  // Issue #970: a Paid by group says its share of the sales of the groups beside it, which add up to the group above.
+  const levelTotal = level === 'method' ? items.reduce((sum, g) => sum + (g.total_minor ?? 0), 0) : undefined;
   if (query.data && items.length === 0) {
     return empty ?? <p className="empty-state">{root ? (credit ? 'No credit sales found. A sale paid by Credit shows here.' : 'No sales found. A sale shows here once it is recorded with Record a sale.') : emptyChainWords(credit)}</p>;
   }
@@ -126,7 +128,7 @@ function LevelList({ index, sel, parent, root, empty, ...shared }: Shared & { in
     <>
       <ul className="rt-group-list">
         {items.map((g) => (
-          <GroupRow key={g.key} index={index} level={level} group={g} sel={sel} parent={parent} {...shared} />
+          <GroupRow key={g.key} index={index} level={level} group={g} sel={sel} parent={parent} levelTotal={levelTotal} {...shared} />
         ))}
       </ul>
       {query.hasNextPage && (
@@ -138,9 +140,15 @@ function LevelList({ index, sel, parent, root, empty, ...shared }: Shared & { in
   );
 }
 
-/** `lines`: the figures are summed over sale lines, so the number of sales is "in N sales" (those that hold the category or the item). */
-function Figures({ group, credit, lines: overLines }: { group: SalesSummaryGroup; credit: boolean; lines: boolean }) {
-  const lines = credit ? [] : methodLines(group.by_method);
+/**
+ * `lines`: the figures are summed over sale lines, so the number of sales is "in N sales" (those that hold the category or the item).
+ * `levelTotal`: a Paid by group (issue #970), which shows its share of it, what Credit still owes, and the credit payments a way of
+ * paying took in, instead of the ways of paying under it.
+ */
+function Figures({ group, credit, lines: overLines, levelTotal }: { group: SalesSummaryGroup; credit: boolean; lines: boolean; levelTotal?: number }) {
+  const paidBy = levelTotal !== undefined;
+  const lines = credit || paidBy ? [] : methodLines(group.by_method);
+  const received = group.credit_payments_received;
   // With credit sales counted when the buyer pays (ADR-043) this profit is the profit of what was sold, not of the money received.
   const staff = useContext(StaffContext);
   const profitWord = staff && capabilityOn(staff.me, 'retail', 'credit_on_payment') ? 'profit of sales made' : 'profit';
@@ -150,10 +158,13 @@ function Figures({ group, credit, lines: overLines }: { group: SalesSummaryGroup
       <span className="rt-group-meta">
         {group.quantity !== undefined && <>{group.quantity} sold, </>}
         {overLines ? 'in ' : ''}{salesWord(group.sales_count ?? 0)}
+        {paidBy && <>, {shareOf(group.total_minor ?? 0, levelTotal)} of the total</>}
+        {group.unpaid_minor !== undefined && <>, {money(group.unpaid_minor)} still unpaid</>}
         {group.profit_minor !== undefined && <>, {profitWord} {money(group.profit_minor)}</>}
         {!credit && (group.voided_count ?? 0) > 0 && <>, {group.voided_count} voided (not counted)</>}
       </span>{' '}
       {lines.length > 0 && <span className="rt-group-methods">{lines.map((m) => `${m.label} ${m.count}, ${money(m.totalMinor)}`).join('. ')}</span>}
+      {received && (received.count ?? 0) > 0 && <span className="rt-group-methods">Credit payments received {received.count}, {money(received.total_minor ?? 0)}</span>}
     </>
   );
 }
@@ -161,7 +172,7 @@ function Figures({ group, credit, lines: overLines }: { group: SalesSummaryGroup
 const titleOf = (level: ChainLevel, group: SalesSummaryGroup) =>
   level === 'year' || level === 'month' || level === 'day' ? periodTitle(level, group.key ?? '') : (group.label ?? group.key ?? '');
 
-function GroupRow({ index, level, group, sel, parent, ...shared }: Shared & { index: number; level: ChainLevel; group: SalesSummaryGroup; sel: Selection; parent: string }) {
+function GroupRow({ index, level, group, sel, parent, levelTotal, ...shared }: Shared & { index: number; level: ChainLevel; group: SalesSummaryGroup; sel: Selection; parent: string; levelTotal?: number }) {
   const { credit, chain, view, renderSales } = shared;
   const key = group.key ?? '';
   const path = pathKey(parent, level, key);
@@ -175,7 +186,7 @@ function GroupRow({ index, level, group, sel, parent, ...shared }: Shared & { in
       {/* No aria-label: the visible words are the name, so the profit, the voided note and the methods are read too. */}
       <button type="button" className="rt-group-head" aria-expanded={isOpen} aria-controls={isOpen ? bodyId : undefined} onClick={() => view.toggle(path, title)}>
         <span className="rt-group-title">{title}</span>{' '}
-        <Figures group={group} credit={credit} lines={overLines(level, sel)} />
+        <Figures group={group} credit={credit} lines={overLines(level, sel)} levelTotal={levelTotal} />
       </button>
       {isOpen && (
         <div className="rt-group-body" id={bodyId}>

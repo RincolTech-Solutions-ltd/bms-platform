@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  DEFAULT_CHAIN, addLevel, chainUser, dropLevel, droppedLevels, effectiveChain, moveLevel, offersSales, overLines, parseChain, pathKey, readChain, selectGroup, shutGroup, toggleGroup, trailOf, usableChain, usableLevels, wholeSalesNote, writeChain,
+  DEFAULT_CHAIN, addLevel, chainUser, dropLevel, droppedLevels, effectiveChain, moveLevel, offersSales, overLines, parseChain, pathKey, readChain, selectGroup, shutGroup, toggleGroup, trailOf, usableChain, usableLevels, usualLevels, wholeSalesNote, writeChain,
   type ChainLevel,
 } from './sales-chain-state';
 
@@ -53,6 +53,18 @@ describe('who may use which level', () => {
     expect(usableChain(chain('seller'), false)).toEqual(usableLevels(false));
     expect(usableChain(chain('seller', 'day'), true)).toEqual(['seller', 'day']);
     expect(droppedLevels(chain('year'), usableLevels(false))).not.toContain('seller');
+  });
+
+  it('offers Paid by only where asked, outside the usual order (issue #970)', () => {
+    expect(usableLevels(true)).not.toContain('method');
+    expect(usableLevels(true, false, true)).toEqual(['branch', 'year', 'month', 'seller', 'day', 'method', 'category', 'item']);
+    expect(usualLevels(usableLevels(true, false, true))).toEqual([...DEFAULT_CHAIN]);
+    expect(usableChain(chain('month', 'method'), true, false, true)).toEqual(['month', 'method']);
+    expect(usableChain(chain('month', 'method'), true)).toEqual(['month']);
+    expect(usableChain(chain('method'), true)).toEqual([...DEFAULT_CHAIN]);
+    expect(addLevel(chain('month', 'day', 'item'), 'method', usableLevels(true, false, true))).toEqual(['month', 'day', 'method', 'item']);
+    expect(selectGroup({ from: '2026-10-01' }, 'method', { key: 'credit' })).toEqual({ from: '2026-10-01', paymentMethod: 'credit' });
+    expect(overLines('method', {})).toBe(false);
   });
 
   it('keys the remembered chain by the user id, with a neutral fallback', () => {

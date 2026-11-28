@@ -259,7 +259,7 @@ No backend change: every record already had its id endpoint (`GET /retail/sales/
 | `/staff/retail/returns/$returnId` | Credit note | `page-credit-note` v1 | meets: one record | meets: buyer, sale and each line's item open (this change) | meets |
 | `/staff/retail/returns/new/$saleId` | Take goods back | `page-return-new` v1 | meets: one form | meets: buyer opens the account | meets |
 | `/staff/retail/sale` | Record a sale | `page-sale` v4 | meets: one form | meets: the buyer named on the saved sale opens the account (#936) | meets |
-| `/staff/retail/sales` | All sales | `page-sales` v3 | meets: grouped by year, month, day (#328, #341) | meets: each row's buyer opens the account (#936); a sale opens at its own address `/sales/$saleId`, and `?sale=` is taken there (#933) | meets |
+| `/staff/retail/sales` | All sales | `page-sales` v4 | meets: grouped by year, month, day (#328, #341) and by how it was paid (#970) | meets: each row's buyer opens the account (#936); a sale opens at its own address `/sales/$saleId`, and `?sale=` is taken there (#933) | meets |
 | `/staff/retail/sales-analysis` | Sales analysis | `page-sales-analysis` v1 | meets: top lists | meets: totals open All sales; items and branches open their page | meets |
 | `/staff/retail/sales/$saleId` | Sale (new) | `page-sale-record` v1 | meets: one record | meets: the buyer opens the account (#936), the branch and each line's item | meets: an unknown sale, or one at a branch the person does not work at, reads as not found |
 | `/staff/retail/savings` | Savings | `page-savings` v1 | meets: grouped | meets: the saved summary's branch opens the branch page (this change) | meets |

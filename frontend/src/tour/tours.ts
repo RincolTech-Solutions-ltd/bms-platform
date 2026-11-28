@@ -786,14 +786,15 @@ const groupByStep: TourStep = {
 export const salesPage: Tour = {
   id: 'page-sales',
   // Version 2 adds the Group by step (issue #341); version 3 says a sale number elsewhere opens the sale here (issue #336).
-  version: 3,
+  // Version 4 says the sales can be grouped by how they were paid (issue #970).
+  version: 4,
   title: 'This page: all sales',
   audience: (me) => held(me, 'retail.sale.read'),
   autoStart: false,
   page: '/staff/retail/sales',
   steps: [
     { id: 'range', target: 'sales-range', module: 'retail', title: 'Pick the days', body: 'Choose the first and the last day to look at. The sales under it are grouped the way you choose below.' },
-    groupByStep,
+    { ...groupByStep, body: 'Choose how the sales are grouped: shop, year, month, salesperson, day, how it was paid, category and item. Move a line up or down, or take it out. We remember your choice.' },
     salesGroupsStep,
   ],
 };
@@ -808,7 +809,7 @@ export const creditSalesPage: Tour = {
   page: '/staff/retail/credit-sales',
   steps: [
     { id: 'owing', target: 'credit-owing', module: 'retail', title: 'Who still owes', body: 'Choose Still owing, Overdue or Paid to narrow the list.' },
-    groupByStep,
+    { ...groupByStep, body: 'Choose how the sales are grouped: shop, year, month, salesperson, day, how it was paid, category and item. Move a line up or down, or take it out. We remember your choice.' },
     salesGroupsStep,
   ],
 };
