@@ -28,7 +28,8 @@ import { PlanNotice } from './plan';
 import { FOOT_LINKS, roleOf, staffMenu, useMenuCounts } from './menu';
 import { useSells } from './retail/nav';
 import { StaffTabBar } from './tabs';
-import { canSeeProfit } from './retail/permissions';
+import { canSeeProfit, showRetail } from './retail/permissions';
+import { LAYOUT_HOME, layoutOfPath, saveLayout, useMainEntry, type Layout } from './layout-choice';
 import { rememberPage } from './feedback/feedback-state';
 import { useAskEnabled } from './help/ask';
 import { AskButton, HowDoILink } from './help/how-do-i';
@@ -103,6 +104,9 @@ function StaffLayout() {
   const active = useActiveBranch(profileNow);
   const { branch, ready } = active;
   const { choose, toast: switchToast } = useBranchSwitch(profileNow, branch, active.choose);
+  // One address per shop (issue #969, ADR-132): opened by the main address, the shell first opens the person's layout.
+  const entry = useMainEntry(profileNow, me.isError);
+  const opening = entry.opening;
   const signedIn = me.data !== undefined;
   const offline = useOfflineSupport(mock ? undefined : profileNow, signedIn, undefined, queryClient);
   useEffect(() => {
@@ -126,13 +130,14 @@ function StaffLayout() {
   const settings = useQuery({ queryKey: ['settings'], queryFn: fetchSettings, enabled: managesSettings && !mock });
 
   useEffect(() => {
-    const home = pathname === '/staff' || pathname === '/staff/';
+    // The phone layout's start counts only when the main address just opened it (ADR-132 decision 7): a link to it opens it.
+    const home = pathname === '/staff' || pathname === '/staff/' || (entry.routed && (pathname === LAYOUT_HOME.phone || pathname === `${LAYOUT_HOME.phone}/`));
     if (setupShown || !home || !settings.data || settings.data.setup_dismissed) return;
     setupShown = true;
     void navigate({ to: '/staff/setup', replace: true });
-  }, [pathname, settings.data, navigate]);
+  }, [pathname, settings.data, navigate, entry.routed]);
 
-  if (restoring || !profileNow || !ready) {
+  if (restoring || !profileNow || !ready || opening) {
     return me.isError ? <p role="alert" className="alert alert-danger">Could not load your profile.</p> : <BrandLoader />;
   }
 
@@ -258,6 +263,7 @@ function StaffMenuFoot({ me, busy, onSignOut, onHelp }: { me: Me; busy: boolean;
         <li>
           <MenuItemLink to={NOTIFICATIONS?.to ?? '/staff/notifications'} label="Notifications" icon={icons.bell} tour="nav-notifications" />
         </li>
+        <LayoutSwitch me={me} />
         <li>
           <button
             type="button"
@@ -288,6 +294,36 @@ function StaffMenuFoot({ me, busy, onSignOut, onHelp }: { me: Me; busy: boolean;
         </BusyButton>
       </div>
     </>
+  );
+}
+
+/**
+ * Switch to office view or phone view (issue #969, ADR-132): opens the other layout and keeps the choice on this device, so the
+ * main address opens it from now on. Only with the shop, the one module with a phone layout.
+ */
+export function LayoutSwitch({ me }: { me: Me }) {
+  const navigate = useNavigate();
+  const close = useCloseMenu();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  if (!showRetail(me)) return null;
+  // Named from the page on screen, so it always offers the layout the person is not in.
+  const other: Layout = layoutOfPath(pathname) === 'phone' ? 'office' : 'phone';
+  return (
+    <li>
+      <button
+        type="button"
+        className="side-menu-help"
+        data-testid="layout-switch"
+        onClick={() => {
+          saveLayout(me.user_id, other);
+          close();
+          void navigate({ to: LAYOUT_HOME[other] });
+        }}
+      >
+        {other === 'office' ? icons.building : icons.phone}
+        <span className="side-menu-label">{other === 'office' ? 'Switch to office view' : 'Switch to phone view'}</span>
+      </button>
+    </li>
   );
 }
 

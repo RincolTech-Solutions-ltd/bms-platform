@@ -3,7 +3,7 @@ import { type FormEvent, useRef, useState } from 'react';
 import { api, type MfaEnrolment, problemOf, type SignInResponse } from '../../api/client';
 import { BusyButton } from '../../app/ui/BusyButton';
 import { invitationToken, plainProblem } from '../../auth/codes';
-import { setAccessToken } from '../../auth/session';
+import { openMainAddress, setAccessToken } from '../../auth/session';
 import { illustrations } from '../../components/illustrations';
 import { InstallPrompt } from '../../install/InstallPrompt';
 import { StatusPanel } from '../../components/states';
@@ -64,7 +64,7 @@ export function AcceptInvitation({ token, initial = { kind: 'password' } }: { to
 
   const home = () => {
     chosen.current = '';
-    void navigate({ to: '/staff' });
+    void openMainAddress(navigate);
   };
 
   async function afterPassword(body: SignInResponse) {

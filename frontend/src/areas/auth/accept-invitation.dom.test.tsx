@@ -110,3 +110,20 @@ describe('an invitation that fails (#122)', () => {
     expect(container.querySelector('.toast')?.className).toBe('toast toast-error');
   });
 });
+
+// Issue #969 (ADR-132): Skip for now after the password opens the staff area as the main address, so the shell opens the
+// layout that fits the screen and the job; the invitation token is spent before, by the password step.
+describe('the end of an invitation (#969)', () => {
+  it('opens the staff area as the main address', async () => {
+    const { endMainEntry, mainEntryPending } = await import('../../auth/session');
+    endMainEntry();
+    fetchImpl.seen = [];
+    fetchImpl.next = () =>
+      Promise.resolve(new Response(JSON.stringify({ status: 'signed_in', access_token: 'fabricated-access-token' }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    page();
+    choose(PASSWORD, PASSWORD);
+    fireEvent.click(await screen.findByRole('button', { name: 'Skip for now' }));
+    await waitFor(() => expect(mainEntryPending()).toBe(true));
+    endMainEntry();
+  });
+});

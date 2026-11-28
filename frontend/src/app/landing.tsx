@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link } from '@tanstack/react-router';
-import type { ReactNode } from 'react';
+import { Link, useNavigate } from '@tanstack/react-router';
+import { type ReactNode, useEffect, useState } from 'react';
+import { getAccessToken, openMainAddress, refreshFailedOffline, refreshSession } from '../auth/session';
 import { icons } from '../components/icons';
 import { illustrations } from '../components/illustrations';
 import { BrandLoader } from '../components/states';
@@ -121,9 +122,37 @@ export function TenantLanding({ modules }: { modules: readonly string[] }) {
   );
 }
 
-function TenantLandingLoader() {
+/**
+ * The business's main address (issue #969, ADR-132): someone signed in on this device, or a phone with no network that holds
+ * the last person's profile, goes straight into the staff area, which opens the layout that fits the screen and the job. Anyone
+ * else sees the welcome page with Staff sign-in.
+ */
+export function TenantLandingLoader() {
+  const navigate = useNavigate();
+  const [checking, setChecking] = useState(true);
+  useEffect(() => {
+    let live = true;
+    // The token and the refresh cookie of this module are a staff session on a business host (members and operators keep their
+    // own). With no network only a phone that kept the last person's profile (ADR-067) goes in; it is read only then.
+    const signedIn = async (): Promise<boolean> => {
+      if (getAccessToken() !== null || (await refreshSession())) return true;
+      if (!refreshFailedOffline()) return false;
+      const { lastProfile } = await import('../offline/offline-context');
+      return (await lastProfile()) !== null;
+    };
+    signedIn()
+      .catch(() => false)
+      .then((inside) => {
+        if (!live) return;
+        if (inside) void openMainAddress(navigate);
+        else setChecking(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [navigate]);
   const branding = useQuery(BRANDING_QUERY);
-  if (branding.isPending) {
+  if (checking || branding.isPending) {
     return (
       <main className="landing">
         <Hero>

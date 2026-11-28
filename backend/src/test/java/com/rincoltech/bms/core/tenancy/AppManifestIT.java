@@ -142,7 +142,7 @@ class AppManifestIT extends IntegrationTest {
         assertThat(r.getHeaders().getFirst(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-cache");
         JsonNode m = r.getBody();
         assertThat(m.get("id").asString()).isEqualTo("/staff");
-        assertThat(m.get("start_url").asString()).isEqualTo("/staff");
+        assertThat(m.get("start_url").asString()).isEqualTo("/staff?start=main");
         assertThat(m.get("scope").asString()).isEqualTo("/");
         assertThat(m.get("display").asString()).isEqualTo("standalone");
         assertThat(m.get("name").asString()).isEqualTo("Fabricated Trading Company");

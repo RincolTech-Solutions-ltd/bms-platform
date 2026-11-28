@@ -75,7 +75,7 @@ export function mockMe(role: string | undefined): Me & { modules: string[] } {
     // VITE_RETAIL_MOCK_CAPS lists switched-on capabilities for a dev run, so the menus and tiles of a wholesaler can be seen.
     ...(import.meta.env.VITE_RETAIL_MOCK_CAPS ? { module_capabilities: { retail: import.meta.env.VITE_RETAIL_MOCK_CAPS.split(',') } } : {}),
     // The role the staff menu shows under the person's name (issue #564).
-    roles: [{ role_key: role === 'sales' ? 'sales' : role === 'cashier' ? 'cashier' : 'tenant_admin', role_name: role === 'sales' ? 'Seller' : role === 'cashier' ? 'Cashier' : 'Administrator' }],
+    roles: [{ role_key: role === 'sales' ? 'retail_sales' : role === 'cashier' ? 'cashier' : 'tenant_admin', role_name: role === 'sales' ? 'Seller' : role === 'cashier' ? 'Cashier' : 'Administrator' }],
   };
 }
 

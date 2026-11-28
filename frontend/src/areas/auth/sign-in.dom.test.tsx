@@ -203,3 +203,40 @@ describe('a sign-in that fails (#122)', () => {
     expect(toasts[0]?.querySelectorAll('button, a, input, [tabindex]')).toHaveLength(0);
   });
 });
+
+// Issue #969 (ADR-132): a sign-in ends at the main address, so the staff shell opens the layout that fits the screen and the
+// job, after the recovery codes too; it never names a layout itself.
+describe('the end of a sign-in (#969)', () => {
+  const signIn = () => {
+    fireEvent.change(screen.getByLabelText('Email or phone'), { target: { value: 'staff01@example.test' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'test-password-01' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+  };
+  const answer = (body: object) => () => Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+  it('opens the staff area as the main address', async () => {
+    const { endMainEntry, mainEntryPending } = await import('../../auth/session');
+    endMainEntry();
+    fetchImpl.seen = [];
+    fetchImpl.next = answer({ status: 'signed_in', access_token: 'fabricated-access-token' });
+    shell();
+    signIn();
+    await waitFor(() => expect(mainEntryPending()).toBe(true));
+    endMainEntry();
+  });
+
+  it('opens it as the main address after the recovery codes', async () => {
+    const { endMainEntry, mainEntryPending } = await import('../../auth/session');
+    endMainEntry();
+    fetchImpl.seen = [];
+    fetchImpl.next = answer({ status: 'signed_in', access_token: 'fabricated-access-token', recovery_codes: ['fab01-code1', 'fab02-code2'] });
+    shell();
+    signIn();
+    await screen.findByText('fab01-code1');
+    expect(mainEntryPending()).toBe(false);
+    fireEvent.click(screen.getByLabelText('I have saved these codes'));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(mainEntryPending()).toBe(true));
+    endMainEntry();
+  });
+});

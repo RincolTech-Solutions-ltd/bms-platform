@@ -6,7 +6,8 @@ Proposed (owner decisions D38 and D44 of 25 Oct 2026, issue #564; the owner appr
 `docs/ui/grouped-menu-564/menu.html`), accepted on merge. Amends the menu decisions of issue #455 (the side menu: the sidebar that
 folds to its icons and the retail shortcuts as a group of at most five under Retail) and issue #471 (the headed, foldable Shop and
 Lending sections, FR-UXN-04). Keeps the bottom tabs of issue #539 (FR-UXN-08) as they are, and the Home cards and More page of
-ADR-072, which still head their parts by module. Frontend only: no migration, no API change, no permission added.
+ADR-072, which still head their parts by module. Frontend only: no migration, no API change, no permission added. Amended by ADR-132
+(issue #969): which layout the business's main address opens.
 
 ## Context
 

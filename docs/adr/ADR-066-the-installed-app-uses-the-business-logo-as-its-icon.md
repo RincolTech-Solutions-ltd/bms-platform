@@ -19,7 +19,8 @@ resolves the business from the host on every request and already serves the logo
 ## Decision
 
 1. **The manifest comes from the API, per host.** `GET /api/v1/branding/app/manifest.webmanifest` (public, `application/manifest+json`)
-   keeps the identity of ADR-050 (`id` and `start_url` `/staff`, `scope` `/`, `display` `standalone`), takes `name` from the business's
+   keeps the identity of ADR-050 (`id` and `start_url` `/staff`, `scope` `/`, `display` `standalone`; since ADR-132 the
+   `start_url` is `/staff?start=main`, the main address inside the app), takes `name` from the business's
    display name and `short_name` from its first 12 characters as a reader counts them (grapheme clusters, so an emoji or an accented
    letter is never split), cut at the last word boundary when that keeps at least 6, and `theme_color` from its readable theme colour (else `#0077B6`, the
    colour of the old static manifest). It is `Cache-Control: no-cache` with an ETag, so a phone revalidates it cheaply on every load.
