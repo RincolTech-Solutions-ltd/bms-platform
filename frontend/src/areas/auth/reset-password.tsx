@@ -3,7 +3,7 @@ import { type FormEvent, useState } from 'react';
 import { api, type MfaEnrolment, problemOf } from '../../api/client';
 import { BusyButton } from '../../app/ui/BusyButton';
 import { invitationToken, normaliseSecondFactor, plainProblem } from '../../auth/codes';
-import { setAccessToken } from '../../auth/session';
+import { openMainAddress, setAccessToken } from '../../auth/session';
 import { illustrations } from '../../components/illustrations';
 import { StatusPanel } from '../../components/states';
 import { InstallPrompt } from '../../install/InstallPrompt';
@@ -85,7 +85,7 @@ export function ResetPassword({ token, initial = { kind: 'password' } }: { token
     }
   }
 
-  const home = () => void navigate({ to: '/staff' });
+  const home = () => void openMainAddress(navigate);
 
   function submitPassword(e: FormEvent) {
     e.preventDefault();

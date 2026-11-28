@@ -14,7 +14,8 @@ import { icons } from './icons';
 // in groups, each under a small muted heading (Today, Stock, Money, Business), never folded, and the sidebar no longer folds to
 // its icons: the menu is the same list on a phone and a laptop. `head` is drawn above the list and `foot` below it.
 
-const PHONE = '(max-width: 719px)';
+/** The design system's phone width, below 720px. */
+export const PHONE = '(max-width: 719px)';
 
 /** True while `media` matches; false when rendered without a window. */
 export function useMedia(media: string): boolean {

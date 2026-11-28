@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link } from '@tanstack/react-router';
-import type { ReactNode } from 'react';
+import { Link, useNavigate } from '@tanstack/react-router';
+import { type ReactNode, useEffect, useState } from 'react';
+import { getAccessToken, openMainAddress, refreshFailedOffline, refreshSession } from '../auth/session';
 import { icons } from '../components/icons';
 import { illustrations } from '../components/illustrations';
 import { BrandLoader } from '../components/states';
@@ -121,9 +122,27 @@ export function TenantLanding({ modules }: { modules: readonly string[] }) {
   );
 }
 
+/**
+ * The business's main address (issue #969, ADR-132): someone signed in on this device, or a phone with no network that may hold
+ * the last person's profile, goes straight into the staff area, which opens the layout that fits the screen and the job. Anyone
+ * else sees the welcome page with Staff sign-in.
+ */
 function TenantLandingLoader() {
+  const navigate = useNavigate();
+  const [checking, setChecking] = useState(true);
+  useEffect(() => {
+    let live = true;
+    void (getAccessToken() !== null ? Promise.resolve(true) : refreshSession()).then((ok) => {
+      if (!live) return;
+      if (ok || refreshFailedOffline()) void openMainAddress(navigate);
+      else setChecking(false);
+    });
+    return () => {
+      live = false;
+    };
+  }, [navigate]);
   const branding = useQuery(BRANDING_QUERY);
-  if (branding.isPending) {
+  if (checking || branding.isPending) {
     return (
       <main className="landing">
         <Hero>

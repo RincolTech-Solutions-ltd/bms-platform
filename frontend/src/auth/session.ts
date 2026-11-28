@@ -26,6 +26,29 @@ export function signedInUser(): string | null {
   }
 }
 
+// One address per shop (issue #969, ADR-132): set by openMainAddress until the staff shell knows the person and opens their layout.
+let mainEntry = false;
+
+/**
+ * Opens the staff area as the business's main address does: the shell then opens the layout that fits the screen and the job
+ * (areas/staff/layout-choice.ts) once it knows who is signed in. For the landing page and the end of a sign-in, never for a link.
+ * Kept here, beside the session, so the landing page and sign-in load none of the staff area to call it.
+ */
+export function openMainAddress(navigate: (options: { to: '/staff' }) => Promise<void>): Promise<void> {
+  mainEntry = true;
+  return navigate({ to: '/staff' });
+}
+
+/** True while the staff area was opened by openMainAddress and has not yet opened the layout. */
+export function mainEntryPending(): boolean {
+  return mainEntry;
+}
+
+/** The layout is open: later visits to /staff are links again. */
+export function endMainEntry(): void {
+  mainEntry = false;
+}
+
 export function setAccessToken(token: string | null): void {
   // A new sign-in replaced the refresh cookie: the session left behind by an offline sign-out is no longer this device's.
   if (token !== null) {

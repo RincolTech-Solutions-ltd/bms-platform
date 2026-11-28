@@ -205,7 +205,9 @@ class AppManifestController {
                 shortName(name),
                 "Business management for lenders, retailers and their members",
                 "en",
-                "/staff",
+                // The main address inside the app's scope (issue #969, ADR-132): the staff shell opens the layout that
+                // fits the screen and the job. The id stays /staff, so an installed app keeps its identity.
+                "/staff?start=main",
                 "/",
                 "standalone",
                 "#ffffff",

@@ -4,7 +4,7 @@ import { api, type MfaEnrolment, problemOf, type SignInResponse } from '../../ap
 import { signInLogin } from '../../api/sign-in-reset';
 import { BusyButton } from '../../app/ui/BusyButton';
 import { normaliseSecondFactor, plainProblem } from '../../auth/codes';
-import { cancelPendingLogout, endPendingLogout, logoutPending, setAccessToken } from '../../auth/session';
+import { cancelPendingLogout, endPendingLogout, logoutPending, openMainAddress, setAccessToken } from '../../auth/session';
 import { illustrations } from '../../components/illustrations';
 import { InstallPrompt } from '../../install/InstallPrompt';
 import { TOAST_MS, useToast } from '../staff/retail/toast';
@@ -62,7 +62,7 @@ export function SignIn() {
       if (body.recovery_codes && body.recovery_codes.length > 0) {
         setStep({ kind: 'codes', codes: body.recovery_codes });
       } else {
-        await navigate({ to: '/staff' });
+        await openMainAddress(navigate);
       }
       return;
     }
@@ -200,7 +200,7 @@ export function SignIn() {
       {step.kind === 'codes' && (
         <>
           <StepHeader step={2} of={2} title="Save your recovery codes" />
-          <RecoveryCodes codes={step.codes} onDone={() => void navigate({ to: '/staff' })} />
+          <RecoveryCodes codes={step.codes} onDone={() => void openMainAddress(navigate)} />
         </>
       )}
       {message && toast}
