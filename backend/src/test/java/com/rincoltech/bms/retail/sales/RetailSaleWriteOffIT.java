@@ -430,6 +430,68 @@ class RetailSaleWriteOffIT extends IntegrationTest {
         assertThat(sale(s).get("balance_minor").asLong()).isZero();
     }
 
+    /**
+     * Issue #970: what Credit still owes on the Paid by level is each sale's balance, the figure the account shows: a
+     * reversed receipt on account owes again, a return credited to the account and a write-off owe no more. The reversed
+     * receipt is not counted as a credit payment received.
+     */
+    @Test
+    void paidByUnpaidIsTheBalanceAfterAReversedReceiptAReturnAndAWriteOff() {
+        // A credit sale needs a customer from the list once customer accounts are on: these two come first.
+        UUID returned = creditSale(2, 1);
+        returnToAccount(returned, "1");
+        UUID writtenOff = creditSale(1, 1);
+        writeOffOk(writtenOff);
+        setting(Map.of("customer_accounts", true));
+        UUID buyer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Buyer 0801"), ADMIN));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("sale_date", today().minusDays(1).toString());
+        body.put("payment_method", "credit");
+        body.put("customer_id", buyer);
+        body.put("lines", List.of(Map.of("product_id", product, "qty", "3")));
+        UUID reversed = RetailTestSupport.id(
+                api.postKeyed("/sales", body, ADMIN, "*", UUID.randomUUID().toString()));
+        UUID receipt = RetailTestSupport.id(api.postKeyed(
+                "/customers/" + buyer + "/payments",
+                Map.of("branch_id", hq, "amount_minor", 1_000, "method", "cash"),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString()));
+        ResponseEntity<JsonNode> undo = api.postKeyed(
+                "/customers/" + buyer + "/payments/" + receipt + "/reverse",
+                Map.of("reason", "Entered by mistake"),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(undo.getStatusCode().is2xxSuccessful())
+                .as("%s", undo.getBody())
+                .isTrue();
+
+        long balances = 0;
+        for (UUID s : List.of(reversed, returned, writtenOff)) {
+            balances += sale(s).get("balance_minor").asLong();
+        }
+        assertThat(balances)
+                .as("3,000 owed again, 1,000 left after the return, nothing after the write-off")
+                .isEqualTo(4_000);
+        ResponseEntity<JsonNode> r =
+                api.call(HttpMethod.GET, "/sales/summary?group_by=method", null, ADMIN, "*", Map.of());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+        JsonNode credit = null;
+        for (JsonNode g : r.getBody().get("items")) {
+            if (g.get("key").asString().equals("credit")) {
+                credit = g;
+            } else {
+                assertThat(g.get("credit_payments_received").get("total_minor").asLong())
+                        .as("a reversed receipt is not money received: %s", g)
+                        .isZero();
+            }
+        }
+        assertThat(credit).isNotNull();
+        assertThat(credit.get("unpaid_minor").asLong()).isEqualTo(balances);
+    }
+
     // ---- rules and permissions ----------------------------------------------------------------------
 
     @Test

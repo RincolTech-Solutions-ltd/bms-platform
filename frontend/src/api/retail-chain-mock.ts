@@ -7,9 +7,10 @@ import { summariseSales } from './retail-summary-mock';
 // apart, profit exists only for a session holding retail.profit.read, groups are bounded and the rest is reached by
 // next_to (year, month, day) or next_offset.
 
-const LEVELS: SummaryLevel[] = ['branch', 'year', 'month', 'seller', 'day', 'category', 'item', 'variant'];
+const LEVELS: SummaryLevel[] = ['branch', 'year', 'month', 'seller', 'day', 'method', 'category', 'item', 'variant'];
 const METHODS = ['cash', 'mobile_money', 'bank', 'credit'] as const;
-const BOUND: Record<SummaryLevel, number> = { year: 20, month: 12, day: 31, branch: 100, seller: 50, category: 50, item: 50, variant: 50 };
+const METHOD_LABELS: Record<string, string> = { cash: 'Cash', mobile_money: 'Mobile money', bank: 'Bank', credit: 'Credit' };
+const BOUND: Record<SummaryLevel, number> = { year: 20, month: 12, day: 31, branch: 100, seller: 50, method: 50, category: 50, item: 50, variant: 50 };
 
 /** What the mock knows of the world around a sale. */
 export interface ChainContext {
@@ -52,6 +53,8 @@ export function summariseChain(sales: Sale[], q: SalesSummaryQuery, ctx: ChainCo
     switch (q.level) {
       case 'branch': return { key: e.sale.branch_id ?? '', label: ctx.branchName(e.sale.branch_id) };
       case 'seller': return { key: e.sale.created_by ?? 'unknown', label: ctx.sellerName(e.sale.created_by) };
+      // Issue #970: how the sale was paid. The mock does not add the credit payments received; the server does.
+      case 'method': return { key: e.sale.payment_method ?? '', label: METHOD_LABELS[e.sale.payment_method ?? ''] ?? 'Unknown' };
       case 'category': { const p = ctx.product(e.line?.product_id); return { key: p?.categoryId ?? 'unknown', label: p?.categoryName ?? 'Unknown' }; }
       case 'item': { const p = ctx.product(e.line?.product_id); return p?.familyId ? { key: p.familyId, label: p.familyName ?? p.name } : { key: e.line?.product_id ?? '', label: e.line?.description ?? p?.name ?? 'Unknown' }; }
       case 'variant': return { key: e.line?.product_id ?? '', label: ctx.product(e.line?.product_id)?.name ?? e.line?.description ?? 'Unknown' };
@@ -60,11 +63,12 @@ export function summariseChain(sales: Sale[], q: SalesSummaryQuery, ctx: ChainCo
       default: return { key: date, label: date, from: date, to: date };
     }
   };
-  const groups = new Map<string, SalesSummaryGroup & { sold?: number; sales: Set<string>; voided: Set<string> }>();
+  type Acc = SalesSummaryGroup & { sold?: number; sales: Set<string>; voided: Set<string> };
+  const groups = new Map<string, Acc>();
   const counted = new Map<string, Record<(typeof METHODS)[number], Set<string>>>();
   for (const e of entries) {
     const k = keyOf(e);
-    const g = groups.get(k.key) ?? {
+    const g: Acc = groups.get(k.key) ?? {
       key: k.key, label: k.label, ...(k.from ? { period: k.key, from: k.from, to: k.to } : {}),
       sales_count: 0, total_minor: 0, voided_count: 0, ...(ctx.profit ? { profit_minor: 0 } : {}),
       by_method: Object.fromEntries(METHODS.map((m) => [m, { count: 0, total_minor: 0 }])),
@@ -81,6 +85,7 @@ export function summariseChain(sales: Sale[], q: SalesSummaryQuery, ctx: ChainCo
     g.sales.add(id);
     g.total_minor = (g.total_minor ?? 0) + amount;
     if (ctx.profit) g.profit_minor = (g.profit_minor ?? 0) + amount - cost;
+    if (q.level === 'method' && !overLines && e.sale.payment_method === 'credit') g.unpaid_minor = (g.unpaid_minor ?? 0) + Math.max((e.sale.total_minor ?? 0) - (e.sale.paid_minor ?? 0), 0);
     g.sold = (g.sold ?? 0) + milli(e.line?.qty);
     const m = g.by_method?.[e.sale.payment_method as (typeof METHODS)[number]];
     if (m) {
@@ -92,7 +97,8 @@ export function summariseChain(sales: Sale[], q: SalesSummaryQuery, ctx: ChainCo
     }
   }
   const time = q.level === 'year' || q.level === 'month' || q.level === 'day';
-  const all = [...groups.values()].sort((a, b) => (time ? (b.key ?? '').localeCompare(a.key ?? '') : (b.total_minor ?? 0) - (a.total_minor ?? 0) || (a.key ?? '').localeCompare(b.key ?? '')));
+  const order = (k: string | undefined) => METHODS.indexOf((k ?? '') as (typeof METHODS)[number]);
+  const all = [...groups.values()].sort((a, b) => (q.level === 'method' ? order(a.key) - order(b.key) : time ? (b.key ?? '').localeCompare(a.key ?? '') : (b.total_minor ?? 0) - (a.total_minor ?? 0) || (a.key ?? '').localeCompare(b.key ?? '')));
   const offset = time ? 0 : (q.offset ?? 0);
   const size = BOUND[q.level];
   const page = all.slice(offset, offset + size).map(({ sold, sales: s, voided, ...g }) => ({

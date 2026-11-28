@@ -322,6 +322,175 @@ class RetailSalesSummaryIT extends IntegrationTest {
         agree("buyer=Test+Buyer&owing=owing&payment_method=credit&from=2026-10-17&to=2026-10-31", 1);
     }
 
+    void pay(UUID sale, long amount, String method, String paidOn) {
+        ResponseEntity<JsonNode> r = api.postKeyed(
+                "/sales/" + sale + "/payments",
+                Map.of("amount_minor", amount, "method", method, "paid_on", paidOn),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+    }
+
+    static long sum(JsonNode groups, String field) {
+        long sum = 0;
+        for (JsonNode g : groups) {
+            sum += g.get(field).asLong();
+        }
+        return sum;
+    }
+
+    static JsonNode group(JsonNode groups, String key) {
+        for (JsonNode g : groups) {
+            if (g.get("key").asString().equals(key)) {
+                return g;
+            }
+        }
+        throw new AssertionError("no group " + key + " in " + groups);
+    }
+
+    /**
+     * Issue #970: Paid by groups the sales by how they were paid. The groups add up to the period's total; Credit says
+     * what is still unpaid; a later payment on a credit sale is counted under the method it came in by, on the day it
+     * came in, and never in that method's sales.
+     */
+    @Test
+    void paidByGroupsAddUpToThePeriodAndCountCreditPaymentsApart() {
+        arrange();
+        // The October credit sale (2,000) is paid 500 by mobile money in October; a September credit sale is paid 1,000
+        // by bank in October, so October has a Bank group with no sales of its own.
+        UUID october = RetailTestSupport.id(summaryCreditSale("2026-10-18"));
+        pay(october, 500, "mobile_money", "2026-10-19");
+        UUID september = RetailTestSupport.id(summaryCreditSale("2026-09-20"));
+        pay(september, 1_000, "bank", "2026-10-05");
+
+        String month = "from=2026-10-01&to=2026-10-31";
+        JsonNode octMonth = items("group_by=month&" + month, ADMIN).get(0);
+        JsonNode paidBy = items("group_by=method&" + month, ADMIN);
+        List<String> keys = new java.util.ArrayList<>();
+        paidBy.forEach(g -> keys.add(g.get("key").asString()));
+        assertThat(keys).containsExactly("cash", "mobile_money", "bank", "credit");
+        assertThat(sum(paidBy, "total_minor"))
+                .isEqualTo(octMonth.get("total_minor").asLong())
+                .isEqualTo(12_000);
+        assertThat(sum(paidBy, "sales_count"))
+                .isEqualTo(octMonth.get("sales_count").asLong())
+                .isEqualTo(5);
+        assertThat(sum(paidBy, "profit_minor"))
+                .isEqualTo(octMonth.get("profit_minor").asLong());
+
+        JsonNode cash = group(paidBy, "cash");
+        assertThat(cash.get("label").asString()).isEqualTo("Cash");
+        assertThat(cash.get("total_minor").asLong()).isEqualTo(4_000);
+        assertThat(cash.get("credit_payments_received").get("count").asLong()).isZero();
+        assertThat(cash.has("unpaid_minor")).isFalse();
+        JsonNode mobile = group(paidBy, "mobile_money");
+        assertThat(mobile.get("label").asString()).isEqualTo("Mobile money");
+        assertThat(mobile.get("total_minor").asLong())
+                .as("the payment is not a sale")
+                .isEqualTo(4_000);
+        assertThat(mobile.get("credit_payments_received").get("count").asLong()).isEqualTo(1);
+        assertThat(mobile.get("credit_payments_received").get("total_minor").asLong())
+                .isEqualTo(500);
+        JsonNode bank = group(paidBy, "bank");
+        assertThat(bank.get("sales_count").asLong()).isZero();
+        assertThat(bank.get("total_minor").asLong()).isZero();
+        assertThat(bank.get("credit_payments_received").get("total_minor").asLong())
+                .isEqualTo(1_000);
+        JsonNode credit = group(paidBy, "credit");
+        assertThat(credit.get("sales_count").asLong()).isEqualTo(2);
+        assertThat(credit.get("total_minor").asLong()).isEqualTo(4_000);
+        assertThat(credit.get("unpaid_minor").asLong())
+                .as("4,000 sold, 500 paid")
+                .isEqualTo(3_500);
+        assertThat(credit.has("credit_payments_received")).isFalse();
+
+        // Every sale ever, by how it was paid, adds up to the years.
+        JsonNode years = items("group_by=year", ADMIN);
+        JsonNode all = items("group_by=method", ADMIN);
+        assertThat(sum(all, "total_minor")).isEqualTo(sum(years, "total_minor")).isEqualTo(22_000);
+        assertThat(sum(all, "sales_count")).isEqualTo(sum(years, "sales_count"));
+        assertThat(group(all, "credit").get("unpaid_minor").asLong()).isEqualTo(4_500);
+
+        // In a chain: Month, then Paid by, under October, gives the same groups; Paid by, then Day, under Credit, gives
+        // only the credit days.
+        JsonNode chained = summary(api, "group_by=month,method&level=method&" + month, ADMIN, "*")
+                .getBody();
+        assertThat(chained.get("items")).isEqualTo(paidBy);
+        JsonNode first = summary(api, "group_by=method,day", ADMIN, "*").getBody();
+        assertThat(first.get("next_level").asString()).isEqualTo("day");
+        JsonNode creditDays = items("group_by=method,day&level=day&payment_method=credit&" + month, ADMIN);
+        assertThat(sum(creditDays, "total_minor"))
+                .isEqualTo(credit.get("total_minor").asLong());
+
+        // A shop chosen above narrows the sales and the payments: the second branch sold one cash sale and took none.
+        JsonNode second = items("group_by=method&branch_id=" + t.secondBranch() + "&" + month, ADMIN);
+        assertThat(second).hasSize(1);
+        assertThat(second.get(0).get("total_minor").asLong()).isEqualTo(2_000);
+    }
+
+    /** Issue #970: a voided sale is counted apart in its Paid by group and nowhere else, like every other level. */
+    @Test
+    void paidByCountsAVoidedSaleApartOnly() {
+        arrange();
+        JsonNode cash = group(items("group_by=method&from=2026-10-19&to=2026-10-19", ADMIN), "cash");
+        assertThat(cash.get("voided_count").asLong()).isEqualTo(1);
+        assertThat(cash.get("sales_count").asLong()).isEqualTo(2);
+        assertThat(cash.get("total_minor").asLong())
+                .as("the voided five units are not in cash")
+                .isEqualTo(4_000);
+    }
+
+    /**
+     * Issue #970 and ADR-055: a seller who may not see every seller's sales gets only their own at the Paid by level, the
+     * credit still unpaid and the credit payments received included, with or without the owing filter; a colleague's id
+     * is refused.
+     */
+    @Test
+    void paidByKeepsASellerToTheirOwnSalesAndPayments() {
+        RetailTestSupport colleague = new RetailTestSupport(http, t);
+        UUID theirs = RetailTestSupport.id(sale(colleague, t.headOffice(), "credit", "2026-10-18", "3", product));
+        ResponseEntity<JsonNode> theirPayment = colleague.postKeyed(
+                "/sales/" + theirs + "/payments",
+                Map.of("amount_minor", 1_000, "method", "cash", "paid_on", "2026-10-19"),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(theirPayment.getStatusCode())
+                .as("%s", theirPayment.getBody())
+                .isEqualTo(HttpStatus.CREATED);
+        UUID mine = RetailTestSupport.id(summaryCreditSale("2026-10-18"));
+        pay(mine, 500, "cash", "2026-10-19");
+        sale(api, t.headOffice(), "cash", "2026-10-19", "1", product);
+
+        String month = "from=2026-10-01&to=2026-10-31";
+        for (String query : List.of("group_by=method&" + month, "group_by=method&owing=owing&" + month)) {
+            JsonNode groups = items(query, SALES);
+            JsonNode credit = group(groups, "credit");
+            assertThat(credit.get("sales_count").asLong()).as(query).isEqualTo(1);
+            assertThat(credit.get("unpaid_minor").asLong()).as(query).isEqualTo(1_500);
+            if (!query.contains("owing")) {
+                JsonNode cash = group(groups, "cash");
+                assertThat(cash.get("total_minor").asLong()).isEqualTo(2_000);
+                assertThat(cash.get("credit_payments_received")
+                                .get("total_minor")
+                                .asLong())
+                        .as("the colleague's 1,000 is theirs")
+                        .isEqualTo(500);
+            }
+        }
+        JsonNode everyone = group(items("group_by=method&" + month, ADMIN), "cash");
+        assertThat(everyone.get("credit_payments_received").get("total_minor").asLong())
+                .isEqualTo(1_500);
+        ResponseEntity<JsonNode> other =
+                summary(api, "group_by=method&seller_id=" + colleague.userId() + "&" + month, SALES, "*");
+        assertThat(other.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    ResponseEntity<JsonNode> summaryCreditSale(String date) {
+        return creditSale(date, "Test Buyer 0800", null, null);
+    }
+
     ResponseEntity<JsonNode> creditSale(String date, String buyerName, UUID customerId, String due) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("branch_id", t.headOffice());

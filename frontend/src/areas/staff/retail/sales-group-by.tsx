@@ -4,17 +4,19 @@ import { LEVEL_NAMES, addLevel, dropLevel, droppedLevels, moveLevel, type ChainL
 // person moves a level up or down, takes it out, or puts it back; the choice is kept for them by the screen. Buttons
 // rather than dragging, so it works with a thumb on a phone and with a keyboard.
 
-export function GroupBy<L extends string = ChainLevel>({ chain, levels, onChange, names = LEVEL_NAMES as Record<string, string>, tour = 'sales-group-by' }: {
+export function GroupBy<L extends string = ChainLevel>({ chain, levels, usual: usualOrder = levels, onChange, names = LEVEL_NAMES as Record<string, string>, tour = 'sales-group-by' }: {
   chain: L[];
   /** The levels this person may use, in the usual order. */
   levels: readonly L[];
+  /** The usual order, when some levels are only added by choice (Paid by, issue #970); every level otherwise. */
+  usual?: readonly L[];
   onChange: (next: L[]) => void;
   /** The words for each level; the sales levels unless the screen has its own (the Controls page). */
   names?: Record<string, string>;
   tour?: string;
 }) {
   const out = droppedLevels(chain, levels);
-  const usual = chain.length === levels.length && chain.every((l, i) => l === levels[i]);
+  const usual = chain.length === usualOrder.length && chain.every((l, i) => l === usualOrder[i]);
   return (
     <details className="rt-groupby" data-tour={tour}>
       <summary>
@@ -39,7 +41,7 @@ export function GroupBy<L extends string = ChainLevel>({ chain, levels, onChange
           ))}
         </p>
       )}
-      {!usual && <button type="button" onClick={() => onChange([...levels])}>Use the usual order</button>}
+      {!usual && <button type="button" onClick={() => onChange([...usualOrder])}>Use the usual order</button>}
     </details>
   );
 }

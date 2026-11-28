@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { methodLines, periodTitle, salesWord } from './sales-grouped-state';
+import { methodLines, periodTitle, salesWord, shareOf } from './sales-grouped-state';
 
 // The words of a group header (issue #328). Dates and amounts are fabricated. What is open, the chain and the days a
 // group asks for are tested in sales-chain-state.test.ts (issue #341).
@@ -28,5 +28,13 @@ describe('the payment methods of a group', () => {
   it('is empty when nothing was sold or the server sent no breakdown', () => {
     expect(methodLines(undefined)).toEqual([]);
     expect(methodLines({ cash: { count: 0, total_minor: 0 } })).toEqual([]);
+  });
+});
+
+describe('the share of a Paid by group (issue #970)', () => {
+  it('is a whole percent of the total beside it, and nothing to share is 0%', () => {
+    expect(shareOf(6_000, 10_000)).toBe('60%');
+    expect(shareOf(1, 3)).toBe('33%');
+    expect(shareOf(0, 0)).toBe('0%');
   });
 });

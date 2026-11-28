@@ -30,7 +30,7 @@ describe('summariseChain', () => {
   it('names the chain, the next level and the available levels', () => {
     const r = ask('seller');
     expect([r.group_by, r.next_level, r.levels]).toEqual(['seller', 'category', ['branch', 'year', 'seller', 'category', 'item']]);
-    expect(r.available_levels).toHaveLength(7);
+    expect(r.available_levels).toHaveLength(8); // the seven of the chain and Paid by (issue #970)
     expect(ask('item').next_level).toBeUndefined();
   });
 

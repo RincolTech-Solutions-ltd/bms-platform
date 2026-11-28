@@ -26,11 +26,13 @@ final class SalesSummaryApi {
     record Group(
             @Schema(
                     description =
-                            "What the group is: a branch id, a user id, a category id, a product id, or the"
-                                    + " period (2026, 2026-10 or 2026-10-19); pass it back as the matching filter of the next level")
+                            "What the group is: a branch id, a user id, a category id, a product id, a payment"
+                                    + " method (cash, mobile_money, bank, credit), or the period (2026, 2026-10 or 2026-10-19); pass it back as the matching filter of the next level")
             String key,
 
-            @Schema(description = "What to show: the branch, person, category or item name, or the period key")
+            @Schema(
+                    description =
+                            "What to show: the branch, person, category or item name, the payment method in words, or the period key")
             String label,
 
             @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -67,7 +69,40 @@ final class SalesSummaryApi {
             @Schema(description = "Units sold, in base units; item level only")
             String quantity,
 
-            Methods byMethod) {}
+            Methods byMethod,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description = "Method level, Credit only (issue #970): what these credit sales still owe today, so"
+                            + " the amount sold is not read as money received")
+            Long unpaidMinor,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Method level, Cash, Mobile money and Bank only (issue #970): payments received in the"
+                                    + " period on credit sales with this method, by the day received; not in sales_count or"
+                                    + " total_minor, so the groups still add up to the period's sales")
+            MethodFigures creditPaymentsReceived) {
+
+        /** The same group with the credit payments it received (issue #970). */
+        Group withCreditPayments(MethodFigures received) {
+            return new Group(
+                    key,
+                    label,
+                    period,
+                    from,
+                    to,
+                    salesCount,
+                    totalMinor,
+                    profitMinor,
+                    voidedCount,
+                    quantity,
+                    byMethod,
+                    unpaidMinor,
+                    received);
+        }
+    }
 
     @Schema(name = "RetailSalesSummary")
     record Summary(
