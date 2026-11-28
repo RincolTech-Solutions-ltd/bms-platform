@@ -767,7 +767,9 @@ button.list-row:focus-visible {
 
 /* PeriodPicker (issue #526): the Segmented of Today, This week, This month and Custom, and the days in force under it in words.
    On Custom the days are a quiet button that opens the sheet again. */
+/* Its width comes from its host, never its content (it is a size container), so it takes the full line even as a flex item. */
 .period-picker {
+  width: 100%;
   margin: 0 0 var(--space-4);
   container: period-picker / inline-size;
 }
@@ -813,16 +815,19 @@ button.list-row:focus-visible {
   margin-top: 6px;
 }
 
-/* iOS Safari draws a date field at its own width unless its native look is dropped; the field keeps our border and fill. */
+/* iOS Safari draws a date field at its own width unless its native look is dropped; the field keeps our border and fill, the
+   full width and the 48px height (an empty field without its native look would otherwise shrink), its date at the start. */
 @supports (-webkit-touch-callout: none) {
   .period-sheet-days input[type='date'] {
     -webkit-appearance: none;
     appearance: none;
+    width: 100%;
+    min-height: var(--tap);
   }
-}
 
-.period-sheet-days input[type='date']::-webkit-date-and-time-value {
-  text-align: start;
+  .period-sheet-days input[type='date']::-webkit-date-and-time-value {
+    text-align: start;
+  }
 }
 
 @media (min-width: 720px) {
