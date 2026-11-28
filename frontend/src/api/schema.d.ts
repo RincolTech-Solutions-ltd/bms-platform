@@ -20178,14 +20178,15 @@ export interface components {
         };
         RetailSalesSummaryGroup: {
             by_method?: components["schemas"]["RetailSalesSummaryMethods"];
+            credit_payments_received?: components["schemas"]["RetailSalesSummaryMethod"];
             /**
              * Format: date
              * @description First calendar day of the period; year, month and day only; not narrowed by the from filter
              */
             from?: string;
-            /** @description What the group is: a branch id, a user id, a category id, a product id, or the period (2026, 2026-10 or 2026-10-19); pass it back as the matching filter of the next level */
+            /** @description What the group is: a branch id, a user id, a category id, a product id, a payment method (cash, mobile_money, bank, credit), or the period (2026, 2026-10 or 2026-10-19); pass it back as the matching filter of the next level */
             key?: string;
-            /** @description What to show: the branch, person, category or item name, or the period key */
+            /** @description What to show: the branch, person, category or item name, the payment method in words, or the period key */
             label?: string;
             /** @description 2026, 2026-10 or 2026-10-19; year, month and day only */
             period?: string;
@@ -20213,10 +20214,16 @@ export interface components {
             total_minor?: number;
             /**
              * Format: int64
+             * @description Method level, Credit only (issue #970): what these credit sales still owe today, so the amount sold is not read as money received
+             */
+            unpaid_minor?: number;
+            /**
+             * Format: int64
              * @description Voided sales in the group, kept out of every other figure
              */
             voided_count?: number;
         };
+        /** @description Method level, Cash, Mobile money and Bank only (issue #970): payments received in the period on credit sales with this method, by the day received; not in sales_count or total_minor, so the groups still add up to the period's sales */
         RetailSalesSummaryMethod: {
             /** Format: int64 */
             count?: number;
