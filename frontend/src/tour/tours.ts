@@ -809,7 +809,7 @@ export const creditSalesPage: Tour = {
   page: '/staff/retail/credit-sales',
   steps: [
     { id: 'owing', target: 'credit-owing', module: 'retail', title: 'Who still owes', body: 'Choose Still owing, Overdue or Paid to narrow the list.' },
-    { ...groupByStep, body: 'Choose how the sales are grouped: shop, year, month, salesperson, day, how it was paid, category and item. Move a line up or down, or take it out. We remember your choice.' },
+    groupByStep,
     salesGroupsStep,
   ],
 };

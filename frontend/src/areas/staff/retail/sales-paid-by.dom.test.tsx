@@ -40,6 +40,7 @@ const LEVELS: Record<string, SalesSummaryGroup[]> = {
   method: [
     paid('cash', 'Cash', 3, 6_000, { credit_payments_received: none }),
     paid('mobile_money', 'Mobile money', 2, 3_000, { credit_payments_received: { count: 1, total_minor: 400 } }),
+    paid('bank', 'Bank', 0, 0, { credit_payments_received: { count: 1, total_minor: 200 } }),
     paid('credit', 'Credit', 1, 1_000, { unpaid_minor: 600 }),
   ],
 };
@@ -106,6 +107,16 @@ describe('Paid by on All sales (issue #970)', () => {
     fireEvent.click(cash);
     expect(await screen.findByText('Test Buyer Cash One')).toBeTruthy();
     expect(listSales).toHaveBeenLastCalledWith(expect.objectContaining({ paymentMethod: 'cash', from: '2026-10-01', to: '2026-10-31' }));
+  });
+
+  it('says a way of paying with only credit payments has no sales to open', async () => {
+    writeChain(chainUser(me), 'all', ['method']);
+    show(<AllSales />);
+    const bank = await head(/^Bank /);
+    expect(bank.textContent).toContain('Credit payments received 1');
+    fireEvent.click(bank);
+    expect(await screen.findByText('No sales were paid this way here. This line only counts the credit payments received.')).toBeTruthy();
+    expect(listSales).not.toHaveBeenCalled();
   });
 
   it('first in the chain passes the way of paying to the level under it', async () => {

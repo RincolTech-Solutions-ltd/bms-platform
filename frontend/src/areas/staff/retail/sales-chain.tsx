@@ -190,7 +190,10 @@ function GroupRow({ index, level, group, sel, parent, levelTotal, ...shared }: S
       </button>
       {isOpen && (
         <div className="rt-group-body" id={bodyId}>
-          {last ? (
+          {/* Issue #970: a way of paying that sold nothing here and only took in credit payments opens onto no sales. */}
+          {level === 'method' && (group.sales_count ?? 0) === 0 ? (
+            <p className="empty-state">No sales were paid this way here. This line only counts the credit payments received.</p>
+          ) : last ? (
             <SalesUnder sel={here} renderSales={renderSales} />
           ) : (
             <>

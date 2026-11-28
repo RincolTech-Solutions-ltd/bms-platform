@@ -210,7 +210,8 @@ class SalesSummaryRepository {
                 .params(params)
                 .query((rs, n) -> group(rs, level, spec.withProfit()))
                 .list();
-        return level.equals("method") && !lines ? withCreditPayments(groups, spec) : groups;
+        // The four groups always fit one page; a later page (an offset) adds nothing again.
+        return level.equals("method") && !lines && spec.offset() == 0 ? withCreditPayments(groups, spec) : groups;
     }
 
     /**
