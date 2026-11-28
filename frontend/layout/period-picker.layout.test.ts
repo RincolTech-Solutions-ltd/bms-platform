@@ -5,8 +5,9 @@ import { openLayout, settle } from './open';
 // The one PeriodPicker on a phone (issue #971), in Chromium at 360, 390 and 412 wide: the four periods (Today, This week, This
 // month, Custom) are 48 by 48px targets 8px apart inside the page, and the Choose the days sheet stacks From and To one under the
 // other, each the full width of the sheet, 8px or more apart, with nothing past the sheet's edge or the screen's. Every screen
-// with a date range draws this one component, so this holds for all of them; the periods are measured alone and in real hosts
-// (Cash summary and Expenses, Sales analysis, a flex row). From 720px the sheet is a dialog with From and To side by side, each
+// with a date range draws this one component, so this holds for all of them; the periods are measured alone, on the real Cash
+// summary and Expenses report screens, in the Sales analysis wrapper, and as an item of a nowrap flex row and an auto grid track,
+// with no period's words cut off. From 720px the sheet is a dialog with From and To side by side, each
 // inside it. The page is layout/period-picker.html.
 
 let browser: Browser;
@@ -46,6 +47,9 @@ async function checkPeriods(page: Page, width: number, what: string) {
     expect(b.x + b.width, `${what}: period ${i} right`).toBeLessThanOrEqual(width);
     for (const other of periods.slice(i + 1)) expect(apart(b, other), `${what}: period ${i} gap`).toBeGreaterThanOrEqual(GAP);
   }
+  // No period's words are cut off or spill out of it.
+  const clipped = await page.locator('.period-picker .segmented > button').evaluateAll((els) => els.filter((el) => el.scrollWidth > el.clientWidth).map((el) => el.textContent));
+  expect(clipped, `${what}: cut off`).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth), `${what}: page width`).toBeLessThanOrEqual(width);
 }
 
@@ -97,15 +101,19 @@ describe.each([360, 390, 412])('the period picker at %ipx (#971)', (width) => {
     await page.close();
   });
 
-  it.each(['cash', 'analytics', 'row'])('keeps the periods 48px and 8px apart in the %s host', async (host) => {
+  it.each(['cash', 'expenses', 'analytics', 'nowrap', 'grid'])('keeps the periods 48px and 8px apart in the %s host', async (host) => {
     const page = await browser.newPage({ viewport: { width, height: 800 }, hasTouch: true, isMobile: true });
     await openLayout(page, `layout/period-picker.html?host=${host}`, page.locator('.period-picker'));
     await settle(page.locator('main'));
     await checkPeriods(page, width, host);
-    // The picker takes its host's full line, never shrinks to its content.
+    // In a block host the picker takes the full line inside main's padding; in a shared row or track it keeps its 12rem.
     const [picker] = await boxes(page, '.period-picker');
-    const [main] = await boxes(page, 'main');
-    expect(Math.abs(picker!.width - main!.width), `${host}: picker width`).toBeLessThanOrEqual(1);
+    const room = await page.locator('main').evaluate((el) => {
+      const s = getComputedStyle(el);
+      return el.clientWidth - parseFloat(s.paddingLeft) - parseFloat(s.paddingRight);
+    });
+    if (host === 'nowrap' || host === 'grid') expect(picker!.width, `${host}: picker width`).toBeGreaterThanOrEqual(192);
+    else expect(Math.abs(picker!.width - room), `${host}: picker width`).toBeLessThanOrEqual(1);
     await page.close();
   });
 });

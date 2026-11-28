@@ -767,9 +767,13 @@ button.list-row:focus-visible {
 
 /* PeriodPicker (issue #526): the Segmented of Today, This week, This month and Custom, and the days in force under it in words.
    On Custom the days are a quiet button that opens the sheet again. */
-/* Its width comes from its host, never its content (it is a size container), so it takes the full line even as a flex item. */
+/* As a size container its own content gives it no width, so it takes its host's full line, also as a flex item, and never
+   less than 12rem, where the two by two periods still hold This month at 48px or more, in a nowrap row or an auto grid track.
+   Every host today is a plain block (the list is in layout/period-picker.tsx). */
 .period-picker {
+  flex: 1 1 100%;
   width: 100%;
+  min-width: 12rem;
   margin: 0 0 var(--space-4);
   container: period-picker / inline-size;
 }
