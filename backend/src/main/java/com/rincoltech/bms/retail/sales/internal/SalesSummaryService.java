@@ -163,10 +163,12 @@ class SalesSummaryService {
             ok &= SalesSummaryRepository.LEVELS.contains(level) && seen.add(level);
         }
         if (!ok) {
-            throw ApiException.validation(List.of(new FieldProblem(
-                    "group_by",
-                    "invalid",
-                    "group_by is a list of branch, year, month, seller, day, category, item or variant, each once.")));
+            throw ApiException.validation(
+                    List.of(
+                            new FieldProblem(
+                                    "group_by",
+                                    "invalid",
+                                    "group_by is a list of branch, year, month, seller, day, method, category, item or variant, each once.")));
         }
         return chain;
     }

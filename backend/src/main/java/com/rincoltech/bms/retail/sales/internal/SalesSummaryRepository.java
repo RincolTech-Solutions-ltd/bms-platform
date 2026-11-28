@@ -5,9 +5,11 @@ import com.rincoltech.bms.retail.sales.internal.SalesSummaryApi.Group;
 import com.rincoltech.bms.retail.sales.internal.SalesSummaryApi.MethodFigures;
 import com.rincoltech.bms.retail.sales.internal.SalesSummaryApi.Methods;
 import java.math.BigDecimal;
+import java.sql.Date;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,7 +33,11 @@ class SalesSummaryRepository {
 
     /** Every level, in the default order of the grouping chain. */
     static final List<String> LEVELS =
-            List.of("branch", "year", "month", "seller", "day", "category", "item", "variant");
+            List.of("branch", "year", "month", "seller", "day", "method", "category", "item", "variant");
+
+    /** Issue #970: the groups of the method level, in the order they are shown, and the words for each. */
+    static final Map<String, String> METHOD_LABELS =
+            Map.of("cash", "Cash", "mobile_money", "Mobile money", "bank", "Bank", "credit", "Credit");
 
     /**
      * Issue #384: a product id or the id of an item with sizes and colours, which stands for all its variants. Ids are
@@ -102,6 +108,8 @@ class SalesSummaryRepository {
             case "item" -> "coalesce(pr.family_id, sl.product_id)";
             case "variant" -> "sl.product_id";
             case "day" -> "retail_sales.sale_date";
+            // Issue #970: how the sale was paid; a credit sale stays Credit whatever was paid on it later.
+            case "method" -> "retail_sales.payment_method";
             default -> "date_trunc('" + level + "', retail_sales.sale_date::timestamp)::date";
         };
         String done = "retail_sales.status = 'completed'";
@@ -126,8 +134,14 @@ class SalesSummaryRepository {
                         : " 0 AS profit_minor,");
         sql.append(
                 level.equals("item") || level.equals("variant")
-                        ? " coalesce(sum(sl.qty) FILTER (WHERE " + done + "), 0) AS quantity"
-                        : " NULL::numeric AS quantity");
+                        ? " coalesce(sum(sl.qty) FILTER (WHERE " + done + "), 0) AS quantity,"
+                        : " NULL::numeric AS quantity,");
+        // Issue #970: what the credit sales of a method group still owe today, so Credit is never read as money in.
+        sql.append(
+                level.equals("method") && !lines
+                        ? " coalesce(sum(greatest(retail_sales.total_minor - retail_sales.paid_minor, 0)) FILTER (WHERE "
+                                + done + " AND retail_sales.payment_method = 'credit'), 0) AS unpaid_minor"
+                        : " NULL::bigint AS unpaid_minor");
         sql.append(
                 lines
                         ? " FROM retail_sale_lines sl JOIN retail_sales ON retail_sales.tenant_id = sl.tenant_id"
@@ -183,15 +197,108 @@ class SalesSummaryRepository {
             case "branch", "category" -> "x.name";
             default -> "NULL";
         };
-        String order = time ? "g.grp DESC" : "g.total_minor DESC, g.grp";
+        String order = time
+                ? "g.grp DESC"
+                : level.equals("method")
+                        ? "array_position(ARRAY['cash', 'mobile_money', 'bank', 'credit'], g.grp::text)"
+                        : "g.total_minor DESC, g.grp";
         String outer = "WITH g AS (" + sql + ") SELECT g.*, " + label + " AS label FROM g" + names + " ORDER BY "
                 + order + " OFFSET :offset LIMIT :limit";
         params.put("offset", spec.offset());
         params.put("limit", spec.limit());
-        return jdbc.sql(outer)
+        List<Group> groups = jdbc.sql(outer)
                 .params(params)
                 .query((rs, n) -> group(rs, level, spec.withProfit()))
                 .list();
+        return level.equals("method") && !lines ? withCreditPayments(groups, spec) : groups;
+    }
+
+    /**
+     * Issue #970: the method level adds to Cash, Mobile money and Bank the payments received in the period on credit
+     * sales, by the method they were paid with, as their own figure: never in the group's sales or total, so the groups
+     * still add up to the period's sales. A method with such payments and no sales of its own gets a group with no
+     * sales. The payments are counted by the day they were received and the branch that received them (a payment on
+     * account in the receipt's branch, the rule of the cash book), on completed sales that the other filters keep; the
+     * allocations of a reversed receipt are left out.
+     */
+    private List<Group> withCreditPayments(List<Group> groups, Spec spec) {
+        StringBuilder sql = new StringBuilder("SELECT p.method AS grp, count(*) AS n, sum(p.amount_minor) AS amount"
+                + " FROM retail_sale_payments p JOIN retail_sales ON retail_sales.tenant_id = p.tenant_id"
+                + " AND retail_sales.id = p.sale_id"
+                + " LEFT JOIN retail_account_payment_allocations al ON al.tenant_id = p.tenant_id"
+                + " AND al.sale_payment_id = p.id"
+                + " LEFT JOIN retail_account_payments ap ON ap.tenant_id = al.tenant_id AND ap.id = al.receipt_id"
+                + " WHERE retail_sales.status = 'completed' AND retail_sales.payment_method = 'credit'"
+                + " AND (ap.id IS NULL OR ap.status <> 'reversed')");
+        Map<String, Object> params = new LinkedHashMap<>();
+        if (spec.branchIds() != null) {
+            sql.append(" AND coalesce(ap.branch_id, retail_sales.branch_id) IN (:branchIds)");
+            params.put("branchIds", spec.branchIds());
+        }
+        if (spec.from() != null) {
+            sql.append(" AND p.paid_on >= :from");
+            params.put("from", Date.valueOf(spec.from()));
+        }
+        if (spec.to() != null) {
+            sql.append(" AND p.paid_on <= :to");
+            params.put("to", Date.valueOf(spec.to()));
+        }
+        if (spec.paymentMethod() != null) {
+            sql.append(" AND p.method = :paymentMethod");
+            params.put("paymentMethod", spec.paymentMethod());
+        }
+        SalesRepository.appendFilters(
+                sql,
+                params,
+                null,
+                null,
+                null,
+                spec.customerId(),
+                null,
+                spec.productId(),
+                spec.buyer(),
+                null,
+                spec.owing(),
+                spec.today(),
+                spec.sellerId(),
+                null);
+        sql.append(" GROUP BY p.method");
+        Map<String, MethodFigures> received = new LinkedHashMap<>();
+        jdbc.sql(sql.toString())
+                .params(params)
+                .query((rs, n) ->
+                        Map.entry(rs.getString("grp"), new MethodFigures(rs.getLong("n"), rs.getLong("amount"))))
+                .list()
+                .forEach(e -> received.put(e.getKey(), e.getValue()));
+        Map<String, Group> byKey = new LinkedHashMap<>();
+        groups.forEach(g -> byKey.put(g.key(), g));
+        List<Group> out = new ArrayList<>();
+        for (String method : METHODS) {
+            Group g = byKey.get(method);
+            MethodFigures in = received.get(method);
+            if (g == null && in == null) {
+                continue;
+            }
+            if (g == null) {
+                MethodFigures none = new MethodFigures(0, 0);
+                g = new Group(
+                        method,
+                        METHOD_LABELS.get(method),
+                        null,
+                        null,
+                        null,
+                        0,
+                        0,
+                        spec.withProfit() ? 0L : null,
+                        0,
+                        null,
+                        new Methods(none, none, none, none),
+                        null,
+                        null);
+            }
+            out.add(method.equals("credit") ? g : g.withCreditPayments(in == null ? new MethodFigures(0, 0) : in));
+        }
+        return out;
     }
 
     private static Group group(ResultSet rs, String level, boolean withProfit) throws SQLException {
@@ -219,6 +326,9 @@ class SalesSummaryRepository {
             from = start;
             period = key;
             label = key;
+        } else if (level.equals("method")) {
+            key = rs.getString("grp");
+            label = METHOD_LABELS.getOrDefault(key, key);
         } else {
             key = rs.getString("grp");
             label = rs.getString("label");
@@ -238,7 +348,9 @@ class SalesSummaryRepository {
                 withProfit ? rs.getLong("profit_minor") : null,
                 rs.getLong("voided_count"),
                 quantity == null ? null : quantity.stripTrailingZeros().toPlainString(),
-                new Methods(method(rs, "cash"), method(rs, "mobile_money"), method(rs, "bank"), method(rs, "credit")));
+                new Methods(method(rs, "cash"), method(rs, "mobile_money"), method(rs, "bank"), method(rs, "credit")),
+                rs.getObject("unpaid_minor") == null || !"credit".equals(key) ? null : rs.getLong("unpaid_minor"),
+                null);
     }
 
     private static MethodFigures method(ResultSet rs, String method) throws SQLException {

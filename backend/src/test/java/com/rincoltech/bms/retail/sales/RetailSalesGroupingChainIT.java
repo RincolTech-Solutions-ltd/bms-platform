@@ -139,7 +139,8 @@ class RetailSalesGroupingChainIT extends IntegrationTest {
         assertThat(shops.get("group_by").asString()).isEqualTo("branch");
         assertThat(shops.get("next_level").asString()).isEqualTo("year");
         assertThat(shops.get("levels")).hasSize(7);
-        assertThat(shops.get("available_levels")).hasSize(7);
+        // The seven of the chain and Paid by (issue #970); the size and colour level only with variants.
+        assertThat(shops.get("available_levels")).hasSize(8);
         assertThat(shops.get("items")).hasSize(2);
         JsonNode head = shops.get("items").get(0);
         assertThat(head.get("key").asString()).isEqualTo(t.headOffice().toString());

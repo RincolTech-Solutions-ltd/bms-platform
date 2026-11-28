@@ -322,6 +322,117 @@ class RetailSalesSummaryIT extends IntegrationTest {
         agree("buyer=Test+Buyer&owing=owing&payment_method=credit&from=2026-10-17&to=2026-10-31", 1);
     }
 
+    void pay(UUID sale, long amount, String method, String paidOn) {
+        ResponseEntity<JsonNode> r = api.postKeyed(
+                "/sales/" + sale + "/payments",
+                Map.of("amount_minor", amount, "method", method, "paid_on", paidOn),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+    }
+
+    static long sum(JsonNode groups, String field) {
+        long sum = 0;
+        for (JsonNode g : groups) {
+            sum += g.get(field).asLong();
+        }
+        return sum;
+    }
+
+    static JsonNode group(JsonNode groups, String key) {
+        for (JsonNode g : groups) {
+            if (g.get("key").asString().equals(key)) {
+                return g;
+            }
+        }
+        throw new AssertionError("no group " + key + " in " + groups);
+    }
+
+    /**
+     * Issue #970: Paid by groups the sales by how they were paid. The groups add up to the period's total; Credit says
+     * what is still unpaid; a later payment on a credit sale is counted under the method it came in by, on the day it
+     * came in, and never in that method's sales.
+     */
+    @Test
+    void paidByGroupsAddUpToThePeriodAndCountCreditPaymentsApart() {
+        arrange();
+        // The October credit sale (2,000) is paid 500 by mobile money in October; a September credit sale is paid 1,000
+        // by bank in October, so October has a Bank group with no sales of its own.
+        UUID october = RetailTestSupport.id(summaryCreditSale("2026-10-18"));
+        pay(october, 500, "mobile_money", "2026-10-19");
+        UUID september = RetailTestSupport.id(summaryCreditSale("2026-09-20"));
+        pay(september, 1_000, "bank", "2026-10-05");
+
+        String month = "from=2026-10-01&to=2026-10-31";
+        JsonNode octMonth = items("group_by=month&" + month, ADMIN).get(0);
+        JsonNode paidBy = items("group_by=method&" + month, ADMIN);
+        List<String> keys = new java.util.ArrayList<>();
+        paidBy.forEach(g -> keys.add(g.get("key").asString()));
+        assertThat(keys).containsExactly("cash", "mobile_money", "bank", "credit");
+        assertThat(sum(paidBy, "total_minor"))
+                .isEqualTo(octMonth.get("total_minor").asLong())
+                .isEqualTo(12_000);
+        assertThat(sum(paidBy, "sales_count"))
+                .isEqualTo(octMonth.get("sales_count").asLong())
+                .isEqualTo(5);
+        assertThat(sum(paidBy, "profit_minor"))
+                .isEqualTo(octMonth.get("profit_minor").asLong());
+
+        JsonNode cash = group(paidBy, "cash");
+        assertThat(cash.get("label").asString()).isEqualTo("Cash");
+        assertThat(cash.get("total_minor").asLong()).isEqualTo(4_000);
+        assertThat(cash.get("credit_payments_received").get("count").asLong()).isZero();
+        assertThat(cash.has("unpaid_minor")).isFalse();
+        JsonNode mobile = group(paidBy, "mobile_money");
+        assertThat(mobile.get("label").asString()).isEqualTo("Mobile money");
+        assertThat(mobile.get("total_minor").asLong())
+                .as("the payment is not a sale")
+                .isEqualTo(4_000);
+        assertThat(mobile.get("credit_payments_received").get("count").asLong()).isEqualTo(1);
+        assertThat(mobile.get("credit_payments_received").get("total_minor").asLong())
+                .isEqualTo(500);
+        JsonNode bank = group(paidBy, "bank");
+        assertThat(bank.get("sales_count").asLong()).isZero();
+        assertThat(bank.get("total_minor").asLong()).isZero();
+        assertThat(bank.get("credit_payments_received").get("total_minor").asLong())
+                .isEqualTo(1_000);
+        JsonNode credit = group(paidBy, "credit");
+        assertThat(credit.get("sales_count").asLong()).isEqualTo(2);
+        assertThat(credit.get("total_minor").asLong()).isEqualTo(4_000);
+        assertThat(credit.get("unpaid_minor").asLong())
+                .as("4,000 sold, 500 paid")
+                .isEqualTo(3_500);
+        assertThat(credit.has("credit_payments_received")).isFalse();
+
+        // Every sale ever, by how it was paid, adds up to the years.
+        JsonNode years = items("group_by=year", ADMIN);
+        JsonNode all = items("group_by=method", ADMIN);
+        assertThat(sum(all, "total_minor")).isEqualTo(sum(years, "total_minor")).isEqualTo(22_000);
+        assertThat(sum(all, "sales_count")).isEqualTo(sum(years, "sales_count"));
+        assertThat(group(all, "credit").get("unpaid_minor").asLong()).isEqualTo(4_500);
+
+        // In a chain: Month, then Paid by, under October, gives the same groups; Paid by, then Day, under Credit, gives
+        // only the credit days.
+        JsonNode chained = summary(api, "group_by=month,method&level=method&" + month, ADMIN, "*")
+                .getBody();
+        assertThat(chained.get("items")).isEqualTo(paidBy);
+        JsonNode first = summary(api, "group_by=method,day", ADMIN, "*").getBody();
+        assertThat(first.get("next_level").asString()).isEqualTo("day");
+        JsonNode creditDays = items("group_by=method,day&level=day&payment_method=credit&" + month, ADMIN);
+        assertThat(sum(creditDays, "total_minor"))
+                .isEqualTo(credit.get("total_minor").asLong());
+
+        // A shop chosen above narrows the sales and the payments: the second branch sold one cash sale and took none.
+        JsonNode second = items("group_by=method&branch_id=" + t.secondBranch() + "&" + month, ADMIN);
+        assertThat(second).hasSize(1);
+        assertThat(second.get(0).get("total_minor").asLong()).isEqualTo(2_000);
+    }
+
+    ResponseEntity<JsonNode> summaryCreditSale(String date) {
+        return creditSale(date, "Test Buyer 0800", null, null);
+    }
+
     ResponseEntity<JsonNode> creditSale(String date, String buyerName, UUID customerId, String due) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("branch_id", t.headOffice());
