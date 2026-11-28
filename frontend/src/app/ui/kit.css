@@ -767,24 +767,77 @@ button.list-row:focus-visible {
 
 /* PeriodPicker (issue #526): the Segmented of Today, This week, This month and Custom, and the days in force under it in words.
    On Custom the days are a quiet button that opens the sheet again. */
+/* As a size container its own content gives it no width, so it takes its host's full line, also as a flex item, and never
+   less than 12rem, where the two by two periods still hold This month at 48px or more, in a nowrap row or an auto grid track.
+   Every host today is a plain block (the list is in layout/period-picker.tsx). */
 .period-picker {
+  flex: 1 1 100%;
+  width: 100%;
+  min-width: 12rem;
   margin: 0 0 var(--space-4);
+  container: period-picker / inline-size;
 }
 
+/* The four choices are 48px targets 8px apart (--tap-gap, rule 12; issue #971). Where four in a row would squeeze This month
+   (a phone up to 412px and more) they stand two by two in equal halves; from 28rem of room they share one row. */
 .period-picker .segmented {
-  display: flex;
-  flex-wrap: nowrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--tap-gap);
   margin: 0 0 var(--space-2);
 }
 
-/* The four choices stay on one row at 360px: equal widths, never under the 48px target (#825), the small text size, no wrap
-   inside a choice. */
+@container period-picker (min-width: 28rem) {
+  .period-picker .segmented {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* Never under the 48px target (#825), the small text size, no wrap inside a choice. */
 .period-picker .segmented > button {
-  flex: 1 1 0;
   min-width: var(--tap);
-  padding: 8px var(--space-1);
+  padding: 8px var(--space-2);
   font-size: var(--text-sm);
   white-space: nowrap;
+}
+
+/* The two days of the Choose the days sheet (issue #971): on a phone From above To, each the full width of the sheet, 12px
+   apart; in the wider dialog side by side with the same gap. A date field never grows past its column, so To stays inside. */
+.period-sheet-days {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.period-sheet-days > div {
+  min-width: 0;
+}
+
+.period-sheet-days input[type='date'] {
+  min-width: 0;
+  max-width: 100%;
+  margin-top: 6px;
+}
+
+/* iOS Safari draws a date field at its own width unless its native look is dropped; the field keeps our border and fill, the
+   full width and the 48px height (an empty field without its native look would otherwise shrink), its date at the start. */
+@supports (-webkit-touch-callout: none) {
+  .period-sheet-days input[type='date'] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    min-height: var(--tap);
+  }
+
+  .period-sheet-days input[type='date']::-webkit-date-and-time-value {
+    text-align: start;
+  }
+}
+
+@media (min-width: 720px) {
+  .period-sheet-days {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .period-days {

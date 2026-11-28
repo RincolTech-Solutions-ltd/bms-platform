@@ -60,6 +60,9 @@ back to what opened it.
     width; below 412px it takes two lines in the order of the page (the menu and the names, then the icon buttons at the
     right), so the business and branch names keep the minimum of #605. A bar the page scrolls under (the top bar, the bottom
     tabs, a stuck ActionBar) keeps its targets 8px inside every edge that faces the page.
+    The one `PeriodPicker` of every date range keeps its four periods 8px apart and 48px, two by two until the picker has 28rem of
+    room, and its Choose the days sheet stacks From above To, each the full width of the sheet, on a phone (issue
+    #971); `layout/period-picker.layout.test.ts` measures it at 360, 390 and 412px.
     `layout/buttons.layout.test.ts` measures the daily screens at 412 by 900 and 1366 by 800, and the design guard lists every
     class named as a tap target (`.btn-*`, `.chip`, `.pill`, `*-btn`, `*-button`, `*-chip`, `*-pill`, `*-clear`, `*-close`,
     `*-toggle`). A name that opens its record (`.figure-link`, issue #336) is 48px tall where it stands alone: the first thing in
