@@ -1533,6 +1533,12 @@ Accepted (this list is the ADR index):
   made only when missing; the token (Zone DNS Edit, Account Cloudflare Tunnel Edit) goes only to `api.cloudflare.com` and is
   never logged; a Cloudflare failure never undoes the activation, the screen says so and offers Set up the address again,
   then the hostname check; each attempt audited (no migration)
+- ADR-132 One address per shop, the main address opens the layout that fits the screen and the job (proposed, #969, Dev
+  Lead decision of 27 Nov 2026): the landing page of a signed-in device, the end of a sign-in and the installed app's start
+  (`start_url` `/staff?start=main`, `id` still `/staff`) open the phone layout (`/staff/retail`) below 720px or for shop staff
+  (only `retail_sales`, `retail_storekeeper`, `retail_purchasing`, with `retail_till`) and the office layout (`/staff`)
+  from 720px; a `/staff/...` link opens the page it names; Switch to office view or phone view in the menu's foot keeps the
+  choice on the device (`bms.layout`), which wins (frontend `areas/staff/layout-choice.ts`, no migration)
 
 Pending (cite only as "pending ADR-NNN"):
 

@@ -147,6 +147,12 @@ cannot drift apart, and all of it follows the theme and reduced motion. A guided
 at a menu row finds it in the sidebar, or on a phone opens the drawer for it. The member area has no
 area list and keeps its layout. Details in `docs/ui/design-system.md`, "Navigation".
 
+One address per shop (issue #969, FR-UXN-14, ADR-132): the business's main address, the end of a sign-in and the
+installed app's start open the phone layout (the shop's pages, `/staff/retail`) on a screen below 720px or for shop staff
+(sellers, storekeepers, purchasing), and the office layout (Home, `/staff`) on a laptop for the owner, administrators and
+accountants. A `/staff/...` link always opens the page it names. Switch to office view or phone view in the menu's foot
+opens the other layout and keeps the choice on the device, where it wins over the rule.
+
 ## 11.3 SMS
 
 ### 11.3.1 Events and default templates
