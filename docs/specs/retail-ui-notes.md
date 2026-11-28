@@ -1080,7 +1080,8 @@ again. Credit sales do not offer it (every sale there is Credit), and a stored c
   of the lines beside it ("60% of the total"), which add up to the line above. The ways of paying under it are not repeated.
 - **Credit** also says what is still unpaid ("UGX 600 still unpaid"), so the amount sold is not read as money received.
 - **Credit payments received.** Cash, Mobile money and Bank add a second line "Credit payments received 1, UGX 400" when payments on
-  credit sales came in that way in the period. It is never part of the line's amount, so the lines still add up to the period.
+  credit sales came in that way in the period, for a person who may read the cash book in every shop shown. It is never part of the
+  line's amount, so the lines still add up to the period.
 - **Opening** a line passes its way of paying to the next level and to the sales listed under it (`payment_method`), as the Paid by
   filter does.
 - **Files.** `sales-chain-state.ts` (the level, `usualLevels`), `sales-chain.tsx` (the figures), `sales-grouped-state.ts` (`shareOf`),

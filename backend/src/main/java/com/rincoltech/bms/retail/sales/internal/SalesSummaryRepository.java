@@ -60,6 +60,7 @@ class SalesSummaryRepository {
     record Spec(
             String level,
             boolean withProfit,
+            boolean withReceipts,
             List<UUID> branchIds,
             LocalDate from,
             LocalDate to,
@@ -211,7 +212,12 @@ class SalesSummaryRepository {
                 .query((rs, n) -> group(rs, level, spec.withProfit()))
                 .list();
         // The four groups always fit one page; a later page (an offset) adds nothing again.
-        return level.equals("method") && !lines && spec.offset() == 0 ? withCreditPayments(groups, spec) : groups;
+        // Only for a reader of the cash book in every branch covered: without it neither the figure nor a group that
+        // only
+        // payments would make is shown.
+        return level.equals("method") && !lines && spec.offset() == 0 && spec.withReceipts()
+                ? withCreditPayments(groups, spec)
+                : groups;
     }
 
     /**

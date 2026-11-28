@@ -475,8 +475,8 @@ class RetailSaleWriteOffIT extends IntegrationTest {
         assertThat(balances)
                 .as("3,000 owed again, 1,000 left after the return, nothing after the write-off")
                 .isEqualTo(4_000);
-        ResponseEntity<JsonNode> r =
-                api.call(HttpMethod.GET, "/sales/summary?group_by=method", null, ADMIN, "*", Map.of());
+        ResponseEntity<JsonNode> r = api.call(
+                HttpMethod.GET, "/sales/summary?group_by=method", null, ADMIN + ",retail.cashbook.read", "*", Map.of());
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
         JsonNode credit = null;
         for (JsonNode g : r.getBody().get("items")) {

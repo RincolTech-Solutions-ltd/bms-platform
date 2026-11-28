@@ -131,6 +131,9 @@ class SalesSummaryService {
         List<Group> rows = repo.groups(new Spec(
                 level,
                 profitVisible(principal, filter),
+                // Issue #970: the credit payments received are cash book figures, for whoever may read the cash book in
+                // every branch they cover.
+                heldEverywhere(principal, filter, CASHBOOK_READ),
                 filter,
                 q.from(),
                 q.to(),
@@ -220,12 +223,17 @@ class SalesSummaryService {
      * in every branch the figures cover (ADR-017); a partly covered sum would read as the whole.
      */
     static boolean profitVisible(Principal principal, List<UUID> filter) {
+        return heldEverywhere(principal, filter, "retail.profit.read");
+    }
+
+    /** Issue #970: reading the cash book, which the credit payments received of the Paid by level are part of. */
+    static final String CASHBOOK_READ = "retail.cashbook.read";
+
+    /** Whether the caller holds {@code permission} in every branch the figures cover (all of them when the filter is null). */
+    static boolean heldEverywhere(Principal principal, List<UUID> filter, String permission) {
         if (filter == null) {
-            return principal
-                    .scopeOf("retail.profit.read")
-                    .map(Principal.BranchScope::all)
-                    .orElse(false);
+            return principal.scopeOf(permission).map(Principal.BranchScope::all).orElse(false);
         }
-        return filter.stream().allMatch(b -> principal.may("retail.profit.read", b));
+        return filter.stream().allMatch(b -> principal.may(permission, b));
     }
 }

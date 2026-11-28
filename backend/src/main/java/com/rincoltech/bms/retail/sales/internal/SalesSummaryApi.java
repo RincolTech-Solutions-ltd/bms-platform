@@ -80,7 +80,8 @@ final class SalesSummaryApi {
             @JsonInclude(JsonInclude.Include.NON_NULL)
             @Schema(
                     description =
-                            "Method level, Cash, Mobile money and Bank only (issue #970): payments received in the"
+                            "Method level, Cash, Mobile money and Bank only, for a caller with retail.cashbook.read in every"
+                                    + " branch the figures cover (issue #970): payments received in the"
                                     + " period on credit sales with this method, by the day received; not in sales_count or"
                                     + " total_minor, so the groups still add up to the period's sales")
             MethodFigures creditPaymentsReceived) {

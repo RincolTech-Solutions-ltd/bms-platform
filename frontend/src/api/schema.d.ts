@@ -20223,7 +20223,7 @@ export interface components {
              */
             voided_count?: number;
         };
-        /** @description Method level, Cash, Mobile money and Bank only (issue #970): payments received in the period on credit sales with this method, by the day received; not in sales_count or total_minor, so the groups still add up to the period's sales */
+        /** @description Method level, Cash, Mobile money and Bank only, for a caller with retail.cashbook.read in every branch the figures cover (issue #970): payments received in the period on credit sales with this method, by the day received; not in sales_count or total_minor, so the groups still add up to the period's sales */
         RetailSalesSummaryMethod: {
             /** Format: int64 */
             count?: number;

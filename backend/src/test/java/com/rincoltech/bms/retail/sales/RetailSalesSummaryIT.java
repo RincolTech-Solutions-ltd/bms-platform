@@ -27,6 +27,9 @@ import tools.jackson.databind.JsonNode;
  */
 class RetailSalesSummaryIT extends IntegrationTest {
 
+    /** The admin column with the cash book: the credit payments received are cash book figures (issue #970). */
+    static final String OWNER = ADMIN + ",retail.cashbook.read";
+
     @Autowired
     TestRestTemplate http;
 
@@ -365,8 +368,8 @@ class RetailSalesSummaryIT extends IntegrationTest {
         pay(september, 1_000, "bank", "2026-10-05");
 
         String month = "from=2026-10-01&to=2026-10-31";
-        JsonNode octMonth = items("group_by=month&" + month, ADMIN).get(0);
-        JsonNode paidBy = items("group_by=method&" + month, ADMIN);
+        JsonNode octMonth = items("group_by=month&" + month, OWNER).get(0);
+        JsonNode paidBy = items("group_by=method&" + month, OWNER);
         List<String> keys = new java.util.ArrayList<>();
         paidBy.forEach(g -> keys.add(g.get("key").asString()));
         assertThat(keys).containsExactly("cash", "mobile_money", "bank", "credit");
@@ -406,25 +409,25 @@ class RetailSalesSummaryIT extends IntegrationTest {
         assertThat(credit.has("credit_payments_received")).isFalse();
 
         // Every sale ever, by how it was paid, adds up to the years.
-        JsonNode years = items("group_by=year", ADMIN);
-        JsonNode all = items("group_by=method", ADMIN);
+        JsonNode years = items("group_by=year", OWNER);
+        JsonNode all = items("group_by=method", OWNER);
         assertThat(sum(all, "total_minor")).isEqualTo(sum(years, "total_minor")).isEqualTo(22_000);
         assertThat(sum(all, "sales_count")).isEqualTo(sum(years, "sales_count"));
         assertThat(group(all, "credit").get("unpaid_minor").asLong()).isEqualTo(4_500);
 
         // In a chain: Month, then Paid by, under October, gives the same groups; Paid by, then Day, under Credit, gives
         // only the credit days.
-        JsonNode chained = summary(api, "group_by=month,method&level=method&" + month, ADMIN, "*")
+        JsonNode chained = summary(api, "group_by=month,method&level=method&" + month, OWNER, "*")
                 .getBody();
         assertThat(chained.get("items")).isEqualTo(paidBy);
-        JsonNode first = summary(api, "group_by=method,day", ADMIN, "*").getBody();
+        JsonNode first = summary(api, "group_by=method,day", OWNER, "*").getBody();
         assertThat(first.get("next_level").asString()).isEqualTo("day");
-        JsonNode creditDays = items("group_by=method,day&level=day&payment_method=credit&" + month, ADMIN);
+        JsonNode creditDays = items("group_by=method,day&level=day&payment_method=credit&" + month, OWNER);
         assertThat(sum(creditDays, "total_minor"))
                 .isEqualTo(credit.get("total_minor").asLong());
 
         // A shop chosen above narrows the sales and the payments: the second branch sold one cash sale and took none.
-        JsonNode second = items("group_by=method&branch_id=" + t.secondBranch() + "&" + month, ADMIN);
+        JsonNode second = items("group_by=method&branch_id=" + t.secondBranch() + "&" + month, OWNER);
         assertThat(second).hasSize(1);
         assertThat(second.get(0).get("total_minor").asLong()).isEqualTo(2_000);
     }
@@ -465,7 +468,7 @@ class RetailSalesSummaryIT extends IntegrationTest {
 
         String month = "from=2026-10-01&to=2026-10-31";
         for (String query : List.of("group_by=method&" + month, "group_by=method&owing=owing&" + month)) {
-            JsonNode groups = items(query, SALES);
+            JsonNode groups = items(query, SALES + ",retail.cashbook.read");
             JsonNode credit = group(groups, "credit");
             assertThat(credit.get("sales_count").asLong()).as(query).isEqualTo(1);
             assertThat(credit.get("unpaid_minor").asLong()).as(query).isEqualTo(1_500);
@@ -479,12 +482,70 @@ class RetailSalesSummaryIT extends IntegrationTest {
                         .isEqualTo(500);
             }
         }
-        JsonNode everyone = group(items("group_by=method&" + month, ADMIN), "cash");
+        JsonNode everyone = group(items("group_by=method&" + month, OWNER), "cash");
         assertThat(everyone.get("credit_payments_received").get("total_minor").asLong())
                 .isEqualTo(1_500);
         ResponseEntity<JsonNode> other =
                 summary(api, "group_by=method&seller_id=" + colleague.userId() + "&" + month, SALES, "*");
         assertThat(other.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    /**
+     * Issue #970: the credit payments received are cash book figures. A caller who may not read the cash book in every
+     * branch the figures cover gets no such figure and no group that only payments would make; a reader of the cash book
+     * at one branch gets that branch's payments only.
+     */
+    @Test
+    void creditPaymentsReceivedNeedTheCashBookInEveryBranchCovered() {
+        arrange();
+        UUID september = RetailTestSupport.id(summaryCreditSale("2026-09-20"));
+        pay(september, 1_000, "bank", "2026-10-05");
+        String month = "group_by=method&from=2026-10-01&to=2026-10-31";
+
+        JsonNode cashier = items(month, SALES);
+        JsonNode admin = items(month, ADMIN);
+        for (JsonNode groups : List.of(cashier, admin)) {
+            for (JsonNode g : groups) {
+                assertThat(g.has("credit_payments_received")).as("%s", g).isFalse();
+                assertThat(g.get("key").asString())
+                        .as("no group made by payments alone")
+                        .isNotEqualTo("bank");
+            }
+        }
+
+        Map<String, String> oneBranch = Map.of("X-Dev-Scopes", "retail.cashbook.read=" + t.headOffice());
+        ResponseEntity<JsonNode> both =
+                api.call(HttpMethod.GET, "/sales/summary?" + month, null, OWNER, "*", oneBranch);
+        assertThat(both.getStatusCode()).as("%s", both.getBody()).isEqualTo(HttpStatus.OK);
+        for (JsonNode g : both.getBody().get("items")) {
+            assertThat(g.has("credit_payments_received"))
+                    .as("the figures cover both branches: %s", g)
+                    .isFalse();
+        }
+        ResponseEntity<JsonNode> hq = api.call(
+                HttpMethod.GET,
+                "/sales/summary?" + month + "&branch_id=" + t.headOffice(),
+                null,
+                OWNER,
+                "*",
+                oneBranch);
+        assertThat(group(hq.getBody().get("items"), "bank")
+                        .get("credit_payments_received")
+                        .get("total_minor")
+                        .asLong())
+                .isEqualTo(1_000);
+
+        // A caller scoped to the second branch, asking with no branch_id, sees that branch only: none of the head
+        // office's payments.
+        JsonNode second = summary(api, month, OWNER, t.secondBranch().toString())
+                .getBody()
+                .get("items");
+        assertThat(second).hasSize(1);
+        assertThat(second.get(0)
+                        .get("credit_payments_received")
+                        .get("total_minor")
+                        .asLong())
+                .isZero();
     }
 
     ResponseEntity<JsonNode> summaryCreditSale(String date) {
