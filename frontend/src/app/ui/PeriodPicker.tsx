@@ -7,6 +7,7 @@ import { Sheet } from './Sheet';
 // and Custom, and under it the days in force in words ("17 Oct to 24 Oct 2026"). Custom opens the kit's Sheet with the two
 // dates; the days apply once Show these days is pressed. A screen keeps its own default window (the last 30 days, say): it shows
 // as Custom, and a tap on its days opens the sheet to change them. Dates are always shown by showDate, the one date formatter.
+// On a phone the sheet stacks From and To, each the full width, and the periods stand 8px apart (issue #971, kit.css).
 
 export type Period = 'today' | 'week' | 'month' | 'custom';
 
@@ -149,7 +150,7 @@ export function PeriodPicker({ from, to, onChange, label = 'Days to show', maxDa
           </>
         }
       >
-        <div className="rt-row">
+        <div className="period-sheet-days">
           <div>
             <label htmlFor={`${id}-from`}>From</label>
             <input id={`${id}-from`} type="date" value={draft.from} max={draft.to || today} onChange={(e) => setDraft((d) => ({ ...d, from: e.target.value }))} />
